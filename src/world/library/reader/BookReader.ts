@@ -23,6 +23,7 @@ import { PALETTE } from '../../../core/palette';
 import { gameStore, type GameState } from '../../../state';
 import { isFacePaintDesign } from '../../../entities/kidDressing';
 import { minTextPx, uiUnitPx } from '../../../core/uiScale';
+import { tapCandidate, tapDriftedTooFar, type TapCandidate } from '../../../core/input/tapGesture';
 import { disposeTree, isShared, markShared, toonMaterial } from '../../../art/style/materials';
 import {
   createReaderCover,
@@ -53,9 +54,25 @@ import { pictureWarmSteps, pinPrograms, type ReaderLook } from './pagePictures';
  * (`gameStore.setPaused`, and only if nothing else already had — the
  * Cute-o-dex's `pausedByUs` rule), and `Game` hides the HUD's menu while it is
  * up, exactly as it does while a ride has her (`Hud.setMenuAvailable`). The
- * screen then belongs to the book: tap a page (or press → / ←) to turn it, and
- * one big ✕ closes it. Escape closes it too — `Game.tick` routes it here the
- * way it routes it to the Cute-o-dex, so it never pauses the park underneath.
+ * screen then belongs to the book: tap a page, swipe it, push a stick or a
+ * d-pad, or press → / ← to turn it, and one big ✕ closes it. Escape closes it
+ * too — `Game.tick` routes it here the way it routes it to the Cute-o-dex, so
+ * it never pauses the park underneath.
+ *
+ * ## Every way to turn a page, and only one road each
+ *
+ * - **Tap** a page: its `<button>`'s click.
+ * - **Swipe** across the book: a drag past the tap slop (`tapGesture.ts`, the
+ *   one owner of where a tap ends and a drag begins), leftwards forward — and
+ *   the click a mouse fires at the end of a drag is swallowed, so a swipe
+ *   turns one page, never two.
+ * - **Stick, d-pad, arrow keys, A/D**: one left–right value, merged by
+ *   `InputSystem`; `Game.tick` hands it to {@link BookReader.steer} every
+ *   frame. One push, one page; holding does not riffle.
+ * - **A, Space, Enter**: {@link BookReader.pressFocused} — the button the
+ *   controller last pointed at, the next page unless she moved it; it wears
+ *   the HIGHLIGHT RULE's rainbow (`data-pad-focus`) so she can see which.
+ * - **Page Up / Page Down**: here, because no game action is bound to them.
  *
  * ## What you can press — the HIGHLIGHT RULE
  *
@@ -95,6 +112,9 @@ const BOOK_WIDTH = (READER_PAGE_WIDTH + READER_BOARD_OVERHANG) * 2;
 const BOOK_HEIGHT = READER_PAGE_HEIGHT + READER_BOARD_OVERHANG * 2;
 /** Room kept clear for the close button, in UI units (rem): its size plus a gap either side. */
 const CLOSE_BAND_UNITS = 4.6;
+/** How far the stick must be pushed to turn a page, and how far it must come back before another push counts. */
+const STEER_FIRE = 0.5;
+const STEER_REARM = 0.3;
 
 let paper: Texture | null = null;
 
@@ -238,6 +258,12 @@ export class BookReader {
   private pausedByUs = false;
   /** Read to the end this opening — `onFinished` fires once per opening. */
   private finishedThisOpening = false;
+  /** False after a steer has turned a page, until the stick comes back towards the middle. */
+  private steerArmed = true;
+  /** A pointer pressed on the book, which may yet become a swipe. */
+  private press: (TapCandidate & { readonly pointerId: number }) | null = null;
+  /** Set by a swipe, so the click the same gesture ends in does not turn a second page. */
+  private swiped = false;
 
   constructor(options: BookReaderOptions) {
     this.onFinished = options.onFinished;
@@ -289,6 +315,12 @@ export class BookReader {
 
     this.root.append(this.prevButton, this.nextButton, this.closeButton);
     options.container.append(this.root);
+
+    // Swipes, and dropping the controller's rainbow the moment a finger or a
+    // mouse takes over.
+    this.root.addEventListener('pointerdown', this.onPointerDown);
+    this.root.addEventListener('pointerup', this.onPointerUp);
+    this.root.addEventListener('pointercancel', this.onPointerCancel);
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('resize', this.onResize);
@@ -392,6 +424,9 @@ export class BookReader {
     if (!this.open) return;
     this.open = false;
     this.root.dataset.open = 'false';
+    this.padFocus(null);
+    this.press = null;
+    this.swiped = false;
     this.teardown();
     // A closed book keeps nothing: its pictures are a book's worth of
     // canvases, and a child walking about the park has no use for them.
@@ -432,6 +467,45 @@ export class BookReader {
     this.ensurePainted(leaf * 2 + 1);
     this.turn = { leaf, t: 1, direction: -1 };
     this.refreshButtons();
+  }
+
+  /**
+   * The movement input's left–right value, every frame the book is open
+   * (`Game.tick`): a stick, a d-pad, the arrow keys or A/D, merged by
+   * `InputSystem` so each reaches here by one road and none twice. A push past
+   * {@link STEER_FIRE} turns one page; it must come back inside
+   * {@link STEER_REARM} before another push counts.
+   */
+  steer(moveX: number): void {
+    if (!this.open) return;
+    if (Math.abs(moveX) < STEER_REARM) {
+      this.steerArmed = true;
+      return;
+    }
+    if (!this.steerArmed || Math.abs(moveX) < STEER_FIRE) return;
+    this.steerArmed = false;
+    if (moveX > 0) {
+      this.padFocus(this.nextButton);
+      this.next();
+    } else {
+      this.padFocus(this.prevButton);
+      this.previous();
+    }
+  }
+
+  /**
+   * A, Space or Enter (`Game.tick` and the interact router): presses the
+   * button the controller last pointed at — the next page, unless she has
+   * moved it — by a real click, so the tap flash comes with it.
+   */
+  pressFocused(): void {
+    if (!this.open) return;
+    const focused = document.activeElement;
+    const target =
+      focused === this.prevButton || focused === this.closeButton ? (focused as HTMLButtonElement) : this.nextButton;
+    if (target.disabled) return;
+    this.padFocus(target);
+    target.click();
   }
 
   // ---------------------------------------------------------------- frame
@@ -521,6 +595,9 @@ export class BookReader {
 
   dispose(): void {
     this.close();
+    this.root.removeEventListener('pointerdown', this.onPointerDown);
+    this.root.removeEventListener('pointerup', this.onPointerUp);
+    this.root.removeEventListener('pointercancel', this.onPointerCancel);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('resize', this.onResize);
     this.root.remove();
@@ -539,20 +616,78 @@ export class BookReader {
     glyph.className = 'book-turn-arrow';
     glyph.setAttribute('aria-hidden', 'true');
     button.append(glyph);
-    button.addEventListener('click', action);
+    button.addEventListener('click', () => {
+      // The click a mouse fires at the end of a swipe: the swipe has already
+      // turned the page.
+      if (this.swiped) {
+        this.swiped = false;
+        return;
+      }
+      action();
+    });
     return button;
   }
 
-  /** → and ← turn pages while the book is open. Escape is `Game.tick`'s, see the class doc. */
+  /**
+   * The controller's rainbow: `data-pad-focus` is a term of the HIGHLIGHT
+   * RULE's shared selector (`style.css`), so the button a stick or d-pad last
+   * pointed at — the one A will press — is ringed whatever `:focus-visible`
+   * thinks of the last input. `null` takes it off everything.
+   */
+  private padFocus(button: HTMLButtonElement | null): void {
+    for (const each of [this.prevButton, this.nextButton, this.closeButton]) {
+      if (each === button) each.dataset.padFocus = 'true';
+      else delete each.dataset.padFocus;
+    }
+    button?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Page Up and Page Down. The arrow keys and A/D are not here: they are
+   * movement keys, which reach {@link steer} through `InputSystem` — reading
+   * them here as well would turn two pages a press. Escape is `Game.tick`'s.
+   */
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (!this.open || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.code === 'ArrowRight' || event.code === 'KeyD' || event.code === 'PageDown') {
+    if (event.code === 'PageDown') {
       event.preventDefault();
       this.next();
-    } else if (event.code === 'ArrowLeft' || event.code === 'KeyA' || event.code === 'PageUp') {
+    } else if (event.code === 'PageUp') {
       event.preventDefault();
       this.previous();
     }
+  };
+
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    if (!this.open) return;
+    // A finger or a mouse has taken over: the controller's ring goes.
+    this.padFocus(null);
+    this.swiped = false;
+    this.press = (event.target as Element | null)?.closest('.book-close')
+      ? null
+      : { ...tapCandidate(event.clientX, event.clientY, event.timeStamp), pointerId: event.pointerId };
+  };
+
+  /** A drag past the tap slop that is more across than up or down: a swipe, leftwards forward. */
+  private readonly onPointerUp = (event: PointerEvent): void => {
+    const press = this.press;
+    this.press = null;
+    if (!this.open || !press || press.pointerId !== event.pointerId) return;
+    const dx = event.clientX - press.startX;
+    const dy = event.clientY - press.startY;
+    if (!tapDriftedTooFar(press, event.clientX, event.clientY) || Math.abs(dx) <= Math.abs(dy)) return;
+    this.swiped = true;
+    // Whatever click this gesture still fires is dispatched straight after
+    // this event; after that, a stale flag must not eat a real tap.
+    setTimeout(() => {
+      this.swiped = false;
+    }, 0);
+    if (dx < 0) this.next();
+    else this.previous();
+  };
+
+  private readonly onPointerCancel = (): void => {
+    this.press = null;
   };
 
   private readonly onResize = (): void => {
@@ -842,9 +977,16 @@ export class BookReader {
     // A button about to be disabled under keyboard focus would drop the focus
     // on the floor; hand it to whatever is still useful — the other page, or
     // at the very end, the ✕ that is the only thing left to press.
+    // The controller's ring goes with it.
     const focused = document.activeElement;
-    if (atEnd && focused === this.nextButton) this.closeButton.focus({ preventScroll: true });
-    if (atStart && focused === this.prevButton) this.nextButton.focus({ preventScroll: true });
+    if (atEnd && focused === this.nextButton) {
+      if (this.nextButton.dataset.padFocus) this.padFocus(this.closeButton);
+      else this.closeButton.focus({ preventScroll: true });
+    }
+    if (atStart && focused === this.prevButton) {
+      if (this.prevButton.dataset.padFocus) this.padFocus(this.nextButton);
+      else this.nextButton.focus({ preventScroll: true });
+    }
     this.prevButton.disabled = atStart;
     this.nextButton.disabled = atEnd;
     this.settleIfIdle();

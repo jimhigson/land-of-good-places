@@ -206,13 +206,18 @@ body {
    is mostly played on have no hover to show "you can press this" with, and a
    jump-scare's reflex window is exactly the moment that needs saying loudest.
    Added to this shared selector rather than a one-off rule of its own, same
-   as everything else in the HIGHLIGHT RULE block. */
+   as everything else in the HIGHLIGHT RULE block.
+
+   `[data-pad-focus='true']` is the same promise to a controller: the library
+   book reader (`BookReader.padFocus`) puts it on the page button a stick or
+   d-pad last pointed at — the one A will press — because `:focus-visible`
+   follows the browser's idea of the last input, and a gamepad is not one. */
 @supports (mask-composite: exclude) or (-webkit-mask-composite: xor) {
   :is(button, summary, a[href], [role='button']):not(
       :disabled,
       [aria-disabled='true'],
       [data-show='false']
-    ):is(:hover, :focus-visible, [data-jumpscare-active='true'])::after {
+    ):is(:hover, :focus-visible, [data-jumpscare-active='true'], [data-pad-focus='true'])::after {
     content: '';
     position: absolute;
     /* Just outside the button, so it reads as an outline around the thing
@@ -247,7 +252,7 @@ body {
       :disabled,
       [aria-disabled='true'],
       [data-show='false']
-    ):is(:hover, :focus-visible, [data-jumpscare-active='true']) {
+    ):is(:hover, :focus-visible, [data-jumpscare-active='true'], [data-pad-focus='true']) {
     outline: var(--lgp-highlight-width) solid var(--lgp-pink-deep);
     outline-offset: calc(var(--lgp-highlight-width) * 0.7);
   }

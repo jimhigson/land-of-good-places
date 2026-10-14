@@ -758,6 +758,13 @@ export class Game {
             run: () => this.whatsNew.close(),
           },
           {
+            // An open library book has the screen: E, Enter or X presses the
+            // page the controller points at, as A and Space do in `tick`.
+            name: 'bookReader',
+            active: () => this.bookReader.isOpen,
+            run: () => this.bookReader.pressFocused(),
+          },
+          {
             name: 'ferrisEndCard',
             active: () => this.world.ferrisWheel.cardDismissable,
             run: () => this.world.ferrisWheel.dismissCard(),
@@ -1670,9 +1677,16 @@ export class Game {
       }
     } else if (this.bookReader.isOpen) {
       // A library book has the screen, the same way: Escape and B close it,
-      // and never pause the park underneath (it already did that itself).
+      // and never pause the park underneath (it already did that itself). The
+      // movement input turns its pages — stick, d-pad, arrow keys and A/D, all
+      // one value, so each reaches the book by one road — and A or Space
+      // presses the page the controller points at (E/Enter arrive through
+      // `InteractRouter`'s claim). See `BookReader`'s "every way to turn a page".
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.bookReader.close();
+      } else {
+        this.bookReader.steer(this.input.moveX);
+        if (this.input.justPressed('jump')) this.bookReader.pressFocused();
       }
     } else if (this.parkMap.isOpen) {
       // The map has the screen: Escape and B close it, same as every other

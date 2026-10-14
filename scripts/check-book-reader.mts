@@ -18,7 +18,13 @@
  *    mechanism `check:hud-during-rides` measures for rides).
  * 2. **A tap turns the page.** A real click on the page button over the
  *    right-hand page, and the spread index must advance by exactly one when
- *    the turn finishes.
+ *    the turn finishes — and back by one from the left-hand page. Then every
+ *    other road, each exactly one page a press: the outer half of each round
+ *    arrow; → held for many frames (the input system's left–right value, the
+ *    same road a stick and a d-pad take), A (the hop), ← and Space, with the
+ *    page the controller points at wearing the rainbow; and a mouse swipe
+ *    each way across the right-hand page, whose closing click must not turn a
+ *    second page.
  * 3. **The words meet the TEXT RULE as rendered.** For every painted face, the
  *    page's height on screen is measured by projecting the face's own mesh
  *    vertices through the reader's camera; the face's font size in canvas
@@ -411,6 +417,64 @@ try {
     );
   }
   await turnAndWait(page, 'next');
+
+  // 2b. Keys and a controller's buttons, through the input system.
+  const spreadNow = async (): Promise<number> => (await readerState(page)).spread;
+  const settle = async (): Promise<void> => {
+    await page.waitForTimeout(150);
+    await waitTurned(page);
+  };
+  const beforeHold = await spreadNow();
+  await page.keyboard.down('ArrowRight');
+  await page.waitForTimeout(700);
+  await page.keyboard.up('ArrowRight');
+  await settle();
+  const afterHold = await spreadNow();
+  assert(afterHold === beforeHold + 1, 'holding → turns exactly one page', `spread ${beforeHold} → ${afterHold}, → held for 700 ms`);
+  const ringed = await page.evaluate(() => {
+    const button = document.querySelector('.book-turn--next') as HTMLElement;
+    return { pad: button.dataset.padFocus ?? '', ring: getComputedStyle(button, '::after').content };
+  });
+  assert(
+    ringed.pad === 'true' && ringed.ring !== 'none' && ringed.ring !== '',
+    'the page the controller points at wears the rainbow',
+    `data-pad-focus="${ringed.pad}"; the rainbow ring (its ::after) is ${ringed.ring === 'none' ? 'not drawn' : 'drawn'} (content ${ringed.ring})`,
+  );
+  await page.evaluate(() => (window as unknown as { game: any }).game.input.pressVirtual('jump'));
+  await settle();
+  const afterA = await spreadNow();
+  assert(afterA === afterHold + 1, 'A (the hop) presses the page the controller points at', `spread ${afterHold} → ${afterA}`);
+  await page.keyboard.press('ArrowLeft');
+  await settle();
+  const afterLeft = await spreadNow();
+  assert(afterLeft === afterA - 1, 'a tap of ← turns back exactly one page', `spread ${afterA} → ${afterLeft}`);
+  await page.keyboard.press('Space');
+  await settle();
+  const afterSpace = await spreadNow();
+  assert(
+    afterSpace === afterLeft - 1,
+    'Space presses the page the controller points at, once',
+    `spread ${afterLeft} → ${afterSpace} — after ←, the previous page is the one pointed at`,
+  );
+
+  // 2c. A mouse swipe across the right-hand page, each way.
+  const swipe = async (dx: number): Promise<{ before: number; after: number }> => {
+    const box = await page.evaluate(() => (document.querySelector('.book-turn--next') as HTMLElement).getBoundingClientRect().toJSON());
+    const y = box.top + box.height * 0.45;
+    const x = box.left + box.width * 0.5;
+    const before = await spreadNow();
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 4 });
+    await page.mouse.move(x + dx, y, { steps: 4 });
+    await page.mouse.up();
+    await settle();
+    return { before, after: await spreadNow() };
+  };
+  const leftwards = await swipe(-120);
+  assert(leftwards.after === leftwards.before + 1, 'a swipe leftwards turns exactly one page', `spread ${leftwards.before} → ${leftwards.after}`);
+  const rightwards = await swipe(120);
+  assert(rightwards.after === rightwards.before - 1, 'a swipe rightwards turns back exactly one page', `spread ${rightwards.before} → ${rightwards.after}`);
 
   // 3 + 4. The words and the buttons, at three window sizes.
   for (const viewport of VIEWPORTS) {
