@@ -4,7 +4,15 @@
  * ```
  * pnpm run check:served-book-reader                 # serves the game itself (the gate's form)
  * CHECK_BOOK_READER_URL=http://127.0.0.1:5471 pnpm run check:book-reader   # against your own server
+ * CHECK_BOOK_READER_PARK=shown …                     # keep the paused park drawn under the book (QA shots)
  * ```
+ *
+ * **Frame-rate independent.** Every read after an input waits for the game's
+ * own frames to pass (`settleTurn`, `nextFrames`), never only for
+ * milliseconds, so a slow renderer cannot make it read a page before its turn
+ * began — and after the first screenshot the paused park under the book is not
+ * drawn ({@link PARK_SHOWN}), which is most of a frame's cost on CI's software
+ * renderer.
  *
  * The reader is three.js — a book of curling paper meshes whose pictures are
  * the park's own models rendered to textures — so nothing short of a running
@@ -92,6 +100,21 @@ const MIN_COVERAGE = 0.02;
 const FIRST = BOOKS[0]?.id ?? '';
 const READ_THROUGH = BOOKS[3]?.id ?? FIRST;
 const LAST = BOOKS[BOOKS.length - 1]?.id ?? FIRST;
+
+/**
+ * **The paused park under the book is drawn only until the first screenshot**
+ * (`CHECK_BOOK_READER_PARK=shown` keeps it drawn throughout). No assertion
+ * here reads the composed frame — every one asks the reader's state, the DOM,
+ * a projection through the reader's own camera or a picture's own render
+ * target — but the park is most of every frame's cost: on a software renderer
+ * it is the difference between this check fitting a CI shard and not.
+ * Measured (14 Oct, the Library PR, run 38580957653): on the hosted runner the
+ * check was killed by its shard's watchdog after 19 min, still in section 6;
+ * locally under SwiftShader it took 380 s with the park drawn and 70 s
+ * without, every assertion the same. The first screenshot (`<id>-open.png`) is
+ * taken with the park drawn, so the composition is still on record for QA.
+ */
+const PARK_SHOWN = process.env.CHECK_BOOK_READER_PARK === 'shown';
 
 const VIEWPORTS = [
   { name: 'laptop', width: 1280, height: 800 },
@@ -282,9 +305,47 @@ async function waitTurned(page: Page): Promise<void> {
   });
 }
 
+/**
+ * **`count` of the game's own frames, whatever they cost.** An input — a key,
+ * a virtual button, a click — is taken by the game's next frame, and a page
+ * turn it starts shows on `bookReader.turning` from then on. A wait in
+ * milliseconds is a guess at the frame rate: on a software renderer a frame
+ * outlasts it, and the check then reads the reader before the turn has begun.
+ * Measured (14 Oct, the Library PR): under SwiftShader with the park drawn,
+ * seven assertions went red, every one a page read before its turn started
+ * ("spread 2 → 2") or after a late one landed ("a swipe … spread 2 → 0").
+ * Two animation frames after an input, the game has run a whole frame since.
+ */
+async function nextFrames(page: Page, count = 2): Promise<void> {
+  await page.evaluate(
+    (n) =>
+      new Promise<void>((resolve) => {
+        const step = (left: number): void => {
+          if (left <= 0) resolve();
+          else requestAnimationFrame(() => step(left - 1));
+        };
+        step(n);
+      }),
+    count,
+  );
+}
+
+/**
+ * After an input: let the game take it and finish any turn it started — then
+ * look again a frame later, so a second turn that starts late (a swipe's
+ * closing click, a key read twice) is still caught as a second turn.
+ */
+async function settleTurn(page: Page): Promise<void> {
+  await page.waitForTimeout(150);
+  await nextFrames(page);
+  await waitTurned(page);
+  await nextFrames(page);
+  await waitTurned(page);
+}
+
 async function turnAndWait(page: Page, button: 'next' | 'prev'): Promise<void> {
   await page.click(`.book-turn--${button}`);
-  await waitTurned(page);
+  await settleTurn(page);
 }
 
 /** A page button's box and its round arrow's, as the browser laid them out. */
@@ -314,8 +375,7 @@ async function tapArrowOuterHalf(page: Page, which: 'next' | 'prev'): Promise<{ 
   const outside = which === 'next' ? x > button.right : x < button.left;
   const before = (await readerState(page)).spread;
   await page.mouse.click(x, y);
-  await page.waitForTimeout(100);
-  await waitTurned(page);
+  await settleTurn(page);
   const after = (await readerState(page)).spread;
   return { before, after, outside, at: `(${x.toFixed(0)}, ${y.toFixed(0)}); button [${button.left.toFixed(0)}–${button.right.toFixed(0)}], arrow [${arrow.left.toFixed(0)}–${arrow.right.toFixed(0)}]` };
 }
@@ -412,8 +472,14 @@ try {
   assert(mode.dt === 0, 'the park is paused under it', `frameContext.dt = ${mode.dt}`);
   assert(mode.menu === 'none', 'the HUD menu is off the screen', `.hud-menu display is "${mode.menu}"`);
   await page.screenshot({ path: `${SHOTS}/${FIRST}-open.png` });
+  if (!PARK_SHOWN) {
+    await page.evaluate(() => {
+      (window as unknown as { game: any }).game.engine.scene.visible = false;
+    });
+  }
   await page.keyboard.press('KeyC');
   await page.waitForTimeout(250);
+  await nextFrames(page);
   const dexOverBook = await page.evaluate(() => {
     const g = (window as unknown as { game: any }).game;
     return { dex: g.cuteODex.isOpen as boolean, book: g.bookReader.isOpen as boolean };
@@ -461,10 +527,7 @@ try {
 
   // 2b. Keys and a controller's buttons, through the input system.
   const spreadNow = async (): Promise<number> => (await readerState(page)).spread;
-  const settle = async (): Promise<void> => {
-    await page.waitForTimeout(150);
-    await waitTurned(page);
-  };
+  const settle = (): Promise<void> => settleTurn(page);
   const beforeHold = await spreadNow();
   await page.keyboard.down('ArrowRight');
   await page.waitForTimeout(700);
@@ -521,6 +584,7 @@ try {
   for (const viewport of VIEWPORTS) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.waitForTimeout(400);
+    await nextFrames(page);
     await waitPainted(page);
     const smallest = textFloor(viewport.name, await measureFaces(page));
     said.push(`  (${viewport.name}: the smallest page text is ${smallest.toFixed(1)} CSS px on screen)`);
@@ -546,8 +610,7 @@ try {
       const start = await framedState(page);
       const tapTo = async (which: 'next' | 'prev'): Promise<{ face: number | null; spread: number }> => {
         await page.click(`.book-turn--${which}`);
-        await page.waitForTimeout(150);
-        await waitTurned(page);
+        await settleTurn(page);
         return framedState(page);
       };
       const across = await tapTo('next');
@@ -631,8 +694,7 @@ try {
       for (let guard = 0; guard < 12; guard += 1) {
         if (!(await arrowBoxes(page, 'next')).shown) break;
         await page.click('.book-turn--next');
-        await page.waitForTimeout(150);
-        await waitTurned(page);
+        await settleTurn(page);
       }
       const filed = await page.evaluate(async (collectionId) => {
         const { gameStore } = await import('/src/state/index.ts');
@@ -646,6 +708,7 @@ try {
   }
   await page.setViewportSize({ width: first.width, height: first.height });
   await page.waitForTimeout(400);
+  await nextFrames(page);
 
   // 5. All twelve books.
   said.push('\nall twelve books:');
@@ -731,6 +794,7 @@ try {
     .catch(() => false);
   assert(closed, 'Escape closes the book', closed ? 'closed' : 'still open');
   await page.waitForTimeout(500);
+  await nextFrames(page);
   const back = await page.evaluate(() => {
     const g = (window as unknown as { game: any }).game;
     return {
@@ -795,6 +859,7 @@ try {
     await turnAndWait(page, 'next');
   }
   await page.waitForTimeout(300);
+  await nextFrames(page);
   const overLastPage = await openPrizes(page);
   const lastState = await readerState(page);
   assert(
@@ -805,6 +870,7 @@ try {
   await page.screenshot({ path: `${SHOTS}/${LAST}-last-page-before-the-prize.png` });
   await page.click('.book-close');
   await page.waitForTimeout(400);
+  await nextFrames(page);
   const afterClose = await openPrizes(page);
   assert(
     afterClose.length === 1 && afterClose[0] === 'You found every cute thing!',
@@ -814,6 +880,7 @@ try {
   await page.screenshot({ path: `${SHOTS}/prize-dex.png` });
   if (afterClose.length > 0) await page.click('.dexprize[data-open="true"] .dexprize-ok');
   await page.waitForTimeout(400);
+  await nextFrames(page);
   const afterDexPrize = await openPrizes(page);
   assert(
     afterDexPrize.length === 1 && afterDexPrize[0] === 'You read every book!',
@@ -823,6 +890,7 @@ try {
   await page.screenshot({ path: `${SHOTS}/prize-books.png` });
   if (afterDexPrize.length > 0) await page.click('.dexprize[data-open="true"] .dexprize-ok');
   await page.waitForTimeout(400);
+  await nextFrames(page);
   const afterBoth = await openPrizes(page);
   assert(afterBoth.length === 0, 'and then the park is back', `showing ${JSON.stringify(afterBoth)}`);
 } catch (error) {
@@ -833,6 +901,12 @@ try {
 
 for (const error of pageErrors) fouls.push(`page error — ${error.split('\n')[0]}`);
 for (const line of said) console.log(line);
+process.stderr.write(
+  PARK_SHOWN
+    ? 'check:book-reader: the park was drawn under the book throughout (CHECK_BOOK_READER_PARK=shown).\n'
+    : `check:book-reader: the park under the book was drawn for the first screenshot (${FIRST}-open.png) and hidden\n` +
+        'after it — no assertion reads the composed frame; CHECK_BOOK_READER_PARK=shown keeps it drawn.\n',
+);
 process.stderr.write(
   'check:book-reader coverage note: this measures that every picture DREW (pixel coverage) and that\n' +
     'every word is big enough on screen; it does NOT judge whether a picture looks right — wrong model,\n' +
