@@ -48,6 +48,23 @@ changes while it runs. For local runs the proven seed-5 park was copied into the
   (`main.ts`); `openBook` runs what is left. One material per program is pinned for good.
 - Outline clones no longer inherit `lgpShared` (`materials.ts ownedClone`) — a game-wide leak of
   six outline hulls per `createKid`, found by the new GPU-count clause.
+- **Portrait = one page at a time** (`framing: 'page'` when the canvas is taller than wide): the
+  page fills 94% of a 375x667 screen, words 32 px (were 20), pictures full size. A tap pans to the
+  facing page; on the right-hand page it turns the leaf and pans with it. The page is the forward
+  button; the back button is a round arrow under the page's other corner. Landscape unchanged.
+  A design call made for the six-year-old — flag it for Jim with the before/after screenshots.
+
+## Found, not fixed (needs its own ticket)
+
+- **Trilla (the puff pet) shows no face from the front.** `art/models/pets.ts`: the face patch is
+  built at `radius * 1.012` (`sharedFace.ts`) but the ball is scaled `[1, 0.92, 1.04]`, so the
+  ball's front bulges 4% past the patch and buries it — only the patch's upper corners poke out
+  (a 'surprised' brow shows; 'happy'/'blink' eyes never do). Rendered at 10°, 24°, 45° and 63°
+  above: faceless at all four (scratchpad `books/compose/steep-sheet.png`). The books draw the
+  real model, so six pictures show a faceless Trilla; the park's own Trilla is very likely the
+  same. `pets.ts` is in the park-source closure and the fix changes the park's look, so it is
+  not done here. The puff's face is also a second mesh positioned by a formula — the exact
+  disease `src/art/models/CLAUDE.md` warns about; the cure there is a baked face in the ball's UVs.
 
 ## Proof (red runs, laptop 1280x800, seed 5, ripikaBalloon unless named)
 
@@ -71,8 +88,11 @@ changes while it runs. For local runs the proven seed-5 park was copied into the
 - [x] review findings: flat-ok, placeButton, arrows, prize order, C guard, hill + outline leak,
       cache clear + manifest row, bookmark CSS, stale comments, endpaper order, page texts, duck
       pose, reader look dressing, warm-up/pins, controller + swipe, textFloor, prev turn.
-- [ ] portrait one-page framing (design call — see PR notes)
-- [ ] screenshots in scratchpad `books/` (three books x cover/mid-turn/spread x landscape/portrait)
+- [x] portrait one-page framing (red runs: pan broken → `the camera follows her` FAIL, page at
+      [360–724] in a 375 px window; framing forced to spread → `frames one page at a time` FAIL)
+- [x] screenshots: scratchpad `books/final/` (four books, landscape cover/mid-turn/spreads and
+      portrait sequences with mid-move frames), `books/sheets/` (every face of all twelve books),
+      Cute-o-dex Books section, both prizes. All looked at; fixes made for what looked wrong.
 - [ ] full `pnpm run check`, `test:procgen`, `build`
 
 ## PR notes for whoever raises it
