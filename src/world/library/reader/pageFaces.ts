@@ -90,8 +90,12 @@ export interface PaintedFace {
   readonly coverage: number | null;
 }
 
-/** How many rendered pictures to keep. A book is at most seven; this holds two. */
-const PICTURE_CACHE_SIZE = 14;
+/**
+ * How many rendered pictures to keep: one book's worth — a title and at most
+ * six pages. Enough to repaint the open book for a new screen size without
+ * rendering again; the reader drops them all when the book closes.
+ */
+const PICTURE_CACHE_SIZE = 7;
 
 /** Line height, as a multiple of the font size. */
 const LINE_HEIGHT = 1.2;
@@ -159,7 +163,7 @@ export class PageArtist {
     return { face, texture, fontPx, canvasHeight: PAGE_CANVAS_HEIGHT, lines, coverage };
   }
 
-  /** Drops every cached picture — when her look changes, the girl in them is out of date. */
+  /** Drops every cached picture — the reader does, when a book closes. */
   clear(): void {
     this.pictures.clear();
   }

@@ -70,8 +70,9 @@ import type { PagePicture, PictureActor } from '../books';
  * ## Cost
  *
  * Built and rendered once per page and look, then cached by the reader as a
- * small canvas (`pageFaces.ts`). The models are disposed straight after the
- * render.
+ * small canvas (`pageFaces.ts`) for as long as the book is open. Everything
+ * built for a picture — the models and the hill under them — is disposed
+ * straight after the render.
  */
 
 /** Width and height of a rendered picture, in pixels. 7:6 — the shape of the picture box on a page. */
@@ -415,7 +416,10 @@ export function renderPicture(renderer: WebGLRenderer, picture: PagePicture, loo
     renderer.setRenderTarget(previousTarget);
     renderer.setClearColor(previousClear, previousAlpha);
     target.dispose();
-    for (const root of cast) disposeTree(root);
+    // Everything in the scene — the cast *and* the hill, which is scenery and
+    // so never in `cast` — goes with it. `disposeTree` skips what a cache owns
+    // (the toon ramp, the hazard tape), so only this picture's own is freed.
+    disposeTree(scene);
     for (const handle of handles) handle.dispose?.();
   }
 

@@ -328,6 +328,9 @@ export class BookReader {
     this.open = false;
     this.root.dataset.open = 'false';
     this.teardown();
+    // A closed book keeps nothing: its pictures are a book's worth of
+    // canvases, and a child walking about the park has no use for them.
+    this.artist.clear();
     if (this.pausedByUs) {
       this.pausedByUs = false;
       gameStore.setPaused(false);
@@ -745,7 +748,7 @@ export class BookReader {
     if (!this.turn) this.settleLeaves();
   }
 
-  /** Throws away everything built for the open book. The picture cache stays. */
+  /** Throws away everything built for the open book. The picture cache is `close`'s to drop. */
   private teardown(): void {
     for (const face of this.painted) face?.texture.dispose();
     this.painted = [];

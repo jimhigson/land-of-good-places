@@ -37,7 +37,11 @@
  * 6. **Reading to the end files a bookmark, and the bookmark reopens it.** One
  *    book is turned to its last page, the Cute-o-dex is opened, its bookmark
  *    must be there and pressable, and pressing it must open that book again.
- * 7. **Escape closes it** and gives the park and the menu back.
+ * 7. **Escape closes it** and gives the park and the menu back. Then a book is
+ *    opened, painted and closed again, and the renderer's own count of live
+ *    geometries and textures must come back to exactly what it was: nothing
+ *    built for a book — its paper, its cover, a picture's models or the hill
+ *    under them — may outlive it on the GPU.
  * 8. **The celebrations wait for the book.** With every Cute-o-dex entry but
  *    one book found (driven through the game's own store and the dex's own
  *    list of entries), that book is read to its end: no celebration may show
@@ -304,12 +308,11 @@ console.log(`check:book-reader — the library's picture books, in Chromium, aga
 mkdirSync(SHOTS, { recursive: true });
 
 try {
-  const probe = await chromium.launch({ channel: 'chromium', headless: true });
-  try {
-    await (await probe.newPage()).goto(BASE, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-  } finally {
-    await probe.close().catch(() => {});
-  }
+  // A plain request, not a page: a page would boot the game, and the game with
+  // no seed asks the dev server for a random seed's park, which it then solves
+  // for minutes in the background of the run that follows.
+  const response = await fetch(`${BASE}/`, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
 } catch (error) {
   console.error(
     `check:book-reader: nothing is serving ${BASE}, so no book was opened at all.\n` +
@@ -525,6 +528,31 @@ try {
   });
   assert(back.dt > 0, 'the park runs again', `frameContext.dt = ${back.dt}`);
   assert(back.menu === '', 'the HUD menu is back', `.hud-menu display is "${back.menu}"`);
+
+  // 7a. A book leaves nothing behind on the GPU. Read and opened in one
+  // evaluate, and closed and read in another, so no unpaused park frame runs
+  // in between to muddy the count.
+  const LEAK_PROBE = BOOKS[5]?.id ?? FIRST;
+  const memoryBefore = await page.evaluate((id) => {
+    const g = (window as unknown as { game: any }).game;
+    const memory = g.engine.renderer.info.memory;
+    const before = { geometries: memory.geometries as number, textures: memory.textures as number };
+    g.bookReader.openBook(id);
+    return before;
+  }, LEAK_PROBE);
+  await waitPainted(page);
+  await page.waitForTimeout(300);
+  const memoryAfter = await page.evaluate(() => {
+    const g = (window as unknown as { game: any }).game;
+    g.bookReader.close();
+    const memory = g.engine.renderer.info.memory;
+    return { geometries: memory.geometries as number, textures: memory.textures as number };
+  });
+  assert(
+    memoryAfter.geometries === memoryBefore.geometries && memoryAfter.textures === memoryBefore.textures,
+    `opening and closing ${LEAK_PROBE} leaves nothing on the GPU`,
+    `geometries ${memoryBefore.geometries} → ${memoryAfter.geometries}, textures ${memoryBefore.textures} → ${memoryAfter.textures}`,
+  );
 
   // 8. The celebrations wait for the book, and take turns.
   said.push(`\nthe celebrations wait for the book (${LAST} completes the dex):`);

@@ -66,6 +66,15 @@ export function createThing(options?: ThingOptions): AssetHandle;
 512² max, sign boards 512×288. Target: under 40 distinct canvas textures in the
 whole game. Anything that is a flat colour must be a material colour, not a map.
 
+**One stated exception: the library's picture-book reader**
+(`src/world/library/reader/`, #717). Each face of an open book is one
+**768×1024** canvas texture — the picture and its sentence painted together,
+because a page is one surface (`pageFaces.ts`) — sized so the TEXT RULE's
+minimum still holds at the page's real height on screen. At most **eight** are
+live, and only while a book is open: closing it disposes every one, along with
+the rendered pictures behind them (672×576 canvases, one book's worth at most).
+They are not cached by key, and none exists while a child is walking about.
+
 **Animation hooks every creature exposes** (so the parade, the rides and Mayhem
 can drive any of them with one bit of code):
 
