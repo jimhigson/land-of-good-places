@@ -26,10 +26,15 @@ the integration branch later without conflicts.
 - [x] item 1 (Step 1: 1 speechTiming, 2 isRunning, 3 listening pose, 4 restoreWall/grace, 6 SpritePuffs,
       7 visibleReachXZ) — commits adaf22a7, 51b0f209, 2d7648c0, 79e146a0, 9add470b, 03864ff6
 - [x] item 2 (Step 2 state slice) — 6913a4b0 (types+store), a90b50af (libraryCard + vitest + shard)
-- [ ] item 3 seatedPose.mts
-- [ ] item 4 NPC seams
-- [ ] item 5 chime
-- [ ] verify: baselines identical after, full check / test:procgen / build (or CI dispatch)
+- [x] item 3 seatedPose.mts — 3422aed0
+- [x] item 4 NPC seams — c6aa1c3d (residentLooks + HotelGuests), aa6d3a1f (NpcSystem + NpcCharacter)
+- [x] item 5 chime — fad0e9f6
+- [x] tsc --noEmit 0, typecheck:test 0, vitest library-card 4/4, check:seed-coverage 0
+      ("45 suite files over 6 shards (5/5/5/8/8/14 files), each exactly once"), build 0 (no parks
+      shipped locally: .parks was being rebuilt)
+- [ ] CI run **38550516901** dispatched on fad0e9f6 (`gh workflow run ci.yml --ref feat/library-714-shared`)
+- [ ] local `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` (for the after-baselines), then
+      the 12 baselines again; compare logs line by line with the before set
 
 ## Decisions (made here, with reasons)
 - **isRunning guard placement.** The plan says spawnRunningDust "starts with
@@ -51,6 +56,20 @@ the integration branch later without conflicts.
   Without that, deleting 'card' from INVENTORY_KINDS could not turn case 1 red (the grant never
   consults the list at runtime). With it, exactly cases 1 and 2 go red and 3, 4 stay green.
 - **LISTEN_ARM_X stays −0.95** — measured in the window (below).
+- **"The whole capped push" = the whole correction.** `circleSeparation` returns half the
+  overlap per side; when one side is furniture (riding player, seated child) the other moves by
+  both halves (`2 × push`), capped at the same `MAX_DEPENETRATION_SPEED·dt`. Same idea as
+  `NpcCharacter.pushAway` for scripted children ("the free one takes the *whole* correction").
+- **`animate` passes `elapsed + seatedPhase` for every posture** (as the plan says). For a
+  carried child ('seated') it changes nothing: the seated pose reads `elapsed` only under
+  `climbWave > 0`, which NPCs never pass.
+- **seatedErrors' blind spot, measured and documented in its doc comment:** it takes the lowest
+  vertex of the whole child, so ONE leg lifted reads the same. On a CharacterModel posed
+  'listening' at y 3.0, seat 3.36: as built floor 3.5 mm / seat 0.0 mm; left leg −0.7 → floor
+  3.5 mm (PASSES); both legs −0.7 → floor 44.5 mm (fails); fairground 'seated' → floor 0.9 mm,
+  seat 16.1 mm (fails on the hip, its 0.3 rad lean lowers the pivot). **For the integration
+  engineer: the plan's SIT red ("set a leg to −0.7") must rotate BOTH legs**, or it will come
+  out green and look like a dead check.
 
 ## Measurements
 - LISTEN_ARM_X −0.95 on a real CharacterModel (scratch `measure-listen.mts`, not committed),
