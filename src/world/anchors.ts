@@ -140,7 +140,7 @@ function anchorsNow(): readonly AnchorDefinition[] {
   }),
     placed('library', {
     signTitle: 'The Library',
-    signSubtitle: 'shh! stories inside!',
+    signSubtitle: 'shh, stories inside!',
     glyph: '\u{1F4DA}',
     accent: PALETTE.markerSky,
     notes:

@@ -121,7 +121,7 @@ export function kitTreads(name: string): { readonly y: number; readonly minZ: nu
     tread.maxZ = Math.max(tread.maxZ, a.z, b.z, c.z);
     byHeight.set(key, tread);
   }
-  return [...byHeight.values()].sort((p, q) => p.y - q.y);
+  return [...byHeight.values()].sort((p, q) => p.y - q.y); // flat-ok: tread heights in the glb's own asset frame, unplaced
 }
 
 /** The first hit of a ray against the named nodes, or `null` — for clear openings, measured the Artist's way. */

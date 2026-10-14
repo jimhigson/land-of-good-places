@@ -510,7 +510,7 @@ export function libraryBookcaseSize(kind: BookcaseKind): BookcaseSize {
   // Probe a book's own depth in from the boards' front edge.
   const probeZ = boards.maxZ - 0.1;
   const shelfClear = shelfTops.map((top) => {
-    const up = rayTo(face, new Vector3(0, top + 0.005, probeZ), new Vector3(0, 1, 0));
+    const up = rayTo(face, new Vector3(0, top + 0.005, probeZ), new Vector3(0, 1, 0)); // flat-ok: up the bookcase's own unplaced model frame, object-local
     return up === null ? plan.maxY - top : up + 0.005;
   });
   const lowest = shelfTops[0];
@@ -766,7 +766,7 @@ export function createLibrarySconce(): LampHandle {
   root.name = 'library.sconce';
   root.add(boxAt('sconce-plate', OWN.sconceMetal, 0.26, 0.4, 0.06, 0, -0.2, 0.03, 0.02));
   const arm = ownPart('sconce-arm', new CylinderGeometry(0.04, 0.04, 0.3, 8), OWN.sconceMetal);
-  arm.rotation.x = Math.PI / 2;
+  arm.rotation.x = Math.PI / 2; // flat-ok: the sconce's arm laid along its own +Z, object-local in the unplaced model
   arm.position.set(0, 0, 0.2);
   const cup = ownPart('sconce-shade', new CylinderGeometry(0.16, 0.1, 0.22, 14), OWN.sconceShade);
   cup.position.set(0, 0.06, 0.36);

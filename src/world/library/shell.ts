@@ -107,6 +107,7 @@ export class LibraryFrame {
    * on world `y`, then `covers` asked at the converged point.
    */
   surfaceY(x: number, z: number, heightAt: number, covers: (localX: number, localZ: number) => boolean): number | null {
+    // flat-ok: WalkSurfaces asks a world y over a world (x, z), so the Newton step runs along the world column by the sampler's own contract (castleSurfaceY's)
     const upY = this.toWorld(0, 1, 0, new Vector3()).y - this.toWorld(0, 0, 0, this.scratch).y;
     let y = this.toWorld(0, heightAt, 0, this.scratch).y;
     for (let i = 0; i < 8; i += 1) {
