@@ -52,8 +52,13 @@ import { KID_REST_GAZE_PITCH } from '../art/models/kid';
  * `'dining'` is **sitting at a table, eating**, and nothing is carrying her at
  * all: it is here rather than in the great hall's own file for the reason this
  * file exists — see {@link applyDiningPose}.
+ *
+ * `'listening'` is **sitting on a cushion at story time, hands in her lap,
+ * looking up at whoever is reading** — the library's rug (#718), worn by the
+ * player on a cushion and by the library's children alike. The dining pose's
+ * skeleton with the eating taken out; see {@link applyListeningPose}.
  */
-export type RidePosture = 'seated' | 'reclined' | 'walking' | 'sleeping' | 'dining';
+export type RidePosture = 'seated' | 'reclined' | 'walking' | 'sleeping' | 'dining' | 'listening';
 
 /**
  * How far back a reclining rider lies, in radians about her own left-right axis.
@@ -276,6 +281,10 @@ export function applyRidePose(
   }
   if (posture === 'dining') {
     applyDiningPose(model, elapsed);
+    return;
+  }
+  if (posture === 'listening') {
+    applyListeningPose(model, elapsed);
     return;
   }
   // Upright again, in case the last ride laid her down. The recline turns
@@ -562,5 +571,77 @@ export function applyDiningPose(model: RidePoseTarget, elapsed: number): void {
 
   // Chin down towards the plate, with a chew on top of it while the hand is up.
   model.head.rotation.x = 0.16 + Math.sin(elapsed * 5.3) * 0.035 * bite;
+  model.head.rotation.z = 0;
+}
+
+/**
+ * How far forward a listener's arms reach, so her hands rest in her lap.
+ *
+ * **Measured on the real rig**, the way {@link DINING_ARM_DOWN} was: a
+ * `CharacterModel` built at the origin, posed by {@link applyListeningPose}
+ * through 25 phases of its sway, and both hands' lowest drawn (non-outline)
+ * vertices read back. At −0.95 they sit at **y = 0.398–0.418 m**, just over a
+ * `KID_HIP_HEIGHT` cushion top of 0.36 m, and **z = 0.239–0.265 m** forward of
+ * the hip pivot (which is at y 0.360, z 0.000): in her lap, in front of her,
+ * rather than hanging by her sides. The control — the same pose with the arms
+ * left hanging at 0 — puts the hand at y 0.280, z 0.000, beside her hips and
+ * below the cushion top, so the measurement can tell the two apart. Her lowest
+ * drawn vertex is the shoe sole at 0.0035 m: legs vertical, feet on the floor.
+ */
+const LISTEN_ARM_X = -0.95;
+
+/**
+ * Her chin, tipped **up** at whoever is reading. Negative is chin up — the
+ * opposite sign to the dining pose's `+0.16`, which is chin down at the plate.
+ */
+const LISTEN_CHIN = -0.08;
+
+/**
+ * **Sitting on a story cushion, listening** — the library's story time (#718).
+ *
+ * The dining pose's skeleton with the eating taken out, and here rather than in
+ * the library's own files for the reason this whole file exists: a second
+ * private definition of "a child sitting down" is how the cat bus shipped
+ * twelve children standing through their seats. One posture serves the player
+ * on her cushion and the library's three children on theirs.
+ *
+ * **The load-bearing line is the same one the dining pose has:** both legs at
+ * `rotation.x = 0`. The rig has no knee, so a rotated leg is a foot in the air;
+ * the cushion is cut to `KID_HIP_HEIGHT` precisely so that a *vertical* leg
+ * lands a foot on the floor from it. The root sits at the floor, never on the
+ * cushion top — the dining rule.
+ *
+ * She sits upright ({@link DINING_LEAN}, zero, for the reason given there —
+ * any lean swings her toes through the floor), her hands meet in her lap (arms
+ * forward by {@link LISTEN_ARM_X} and tucked inward by 0.3), and her chin tips
+ * up at the reader by {@link LISTEN_CHIN}. Two small, unrelated sways — the
+ * arms at 1.3 and 1.1 rad/s, the chin at 1.3 — so she is not a statue.
+ *
+ * `elapsed` is expected to carry the sitter's **own phase** already added in,
+ * exactly as {@link applyDiningPose} expects, so a row of listeners on the rug
+ * does not breathe in lockstep.
+ */
+export function applyListeningPose(model: RidePoseTarget, elapsed: number): void {
+  // Upright, in case the last thing that posed this rig laid it down.
+  model.root.rotation.x = 0;
+
+  // **The line the whole posture is for** — see the header and
+  // `applyDiningPose`'s: a rotated leg on a knee-less rig is a foot in the air.
+  model.leftLeg.rotation.x = 0;
+  model.rightLeg.rotation.x = 0;
+
+  model.body.rotation.x = DINING_LEAN;
+  // Flushed for the reason every posture in this file flushes it: whatever
+  // wrote a walk cycle a moment ago left the gait's roll in here.
+  model.body.rotation.z = 0;
+
+  // Hands in her lap: forward, and tucked in towards each other.
+  model.leftArm.rotation.x = LISTEN_ARM_X + Math.sin(elapsed * 1.3) * 0.04;
+  model.rightArm.rotation.x = LISTEN_ARM_X + Math.sin(elapsed * 1.1 + 1) * 0.04;
+  model.leftArm.rotation.z = 0.3;
+  model.rightArm.rotation.z = -0.3;
+
+  // Chin up, at the reader.
+  model.head.rotation.x = LISTEN_CHIN + Math.sin(elapsed * 1.3) * 0.03;
   model.head.rotation.z = 0;
 }
