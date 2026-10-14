@@ -127,8 +127,8 @@ it shows one big page at a time.*
 
 **Flag for Jim (his yes/no):**
 - Portrait shows one page at a time: words 20 px → 32 px, pictures ~140x115 → full width
-  (before: scratchpad `books/check/ripikaBalloon-phone-portrait.png` from the first run of this
-  session; after: `books/final/ripikaBalloon-375x667-*.png`).
+  (before: scratchpad `books/qa1/ripikaBalloon-portrait-spread1.png`, the whole spread as a strip;
+  after: `books/final/ripikaBalloon-375x667-*.png`).
 - Every book opens on [endpaper | title] and ends on [page 5 | The End], like a printed book.
 - The twelve bookmarks count towards the Cute-o-dex 100% from this PR; only `/book` opens a book
   until the shelves PR (#714 part 4).
