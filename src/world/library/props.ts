@@ -34,6 +34,14 @@ export interface KeepOut {
   readonly x: number;
   readonly z: number;
   readonly radius: number;
+  /**
+   * **A spot inside the secret den** (#719), copied from its `layout.ts`
+   * `StandSpot`'s own tag. Its floor is kept clear like any other, but
+   * she reaches it only through the swung-open secret shelf: while the shelf
+   * is shut it must be *unreachable* (the den is the one intended pocket),
+   * and while it is open, reachable and leavable. Omitted everywhere else.
+   */
+  readonly den?: true;
 }
 
 /**
@@ -46,7 +54,11 @@ export { LIBRARY_STAND_KEEP_OUT };
 export const LIBRARY_ARRIVAL_KEEP_OUT = 1.4;
 export const LIBRARY_DOORWAY_KEEP_OUT = 1.5;
 
-/** Every spot she must be able to stand on, room-local, with the clear floor it keeps. */
+/**
+ * Every spot she must be able to stand on, room-local, with the clear floor it
+ * keeps — and, for a spot in the secret den, its `den` tag, so a check can
+ * hold the den's floor to the shelf's state without a second list of it.
+ */
 export function libraryKeepOuts(): KeepOut[] {
   return libraryStandSpots().map((spot) => ({
     what: spot.what,
@@ -54,6 +66,7 @@ export function libraryKeepOuts(): KeepOut[] {
     z: spot.z,
     radius:
       spot === LIBRARY_ARRIVAL ? LIBRARY_ARRIVAL_KEEP_OUT : spot.what === 'the doorway' ? LIBRARY_DOORWAY_KEEP_OUT : LIBRARY_STAND_KEEP_OUT,
+    ...(spot.den ? { den: true as const } : {}),
   }));
 }
 
@@ -96,6 +109,15 @@ export interface BoxFootprint {
   readonly halfLength: number;
   readonly halfDepth: number;
 }
+
+/**
+ * **A box's three colliders**, in the order {@link LibraryProps.box}
+ * registers them: the capsule down its length, then the thin capsules across
+ * its left and right ends. Handed back so a box that must come and go — the
+ * secret shelf's closed and open sets (#719) — can be taken out and put back
+ * whole with {@link LibraryProps.detach} and {@link LibraryProps.attach}.
+ */
+export type BoxWalls = readonly [body: WallCollider, leftEnd: WallCollider, rightEnd: WallCollider];
 
 /**
  * The thin capsules across a box's two ends. 0.1, not thinner:
@@ -149,7 +171,20 @@ export class LibraryProps {
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
-  /** A filled capsule between two room-local points, `half` its half-thickness. */
+  /**
+   * A filled capsule between two room-local points, `half` its half-thickness.
+   *
+   * **With `a` and `b` the same point it is a zero-length capsule: a filled
+   * disc of radius `half`** — how a round solid that must come and go is
+   * registered (the owl at her desk, #718: taken out while she flies, put
+   * back as she lands). A disc from {@link disc} cannot be put back, because
+   * `CollisionWorld` restores only walls; a wall comes back as the same
+   * object ({@link attach}). Every query reads a zero-length wall as the disc
+   * it is — the mover, the planner and the route lattice alike
+   * (`WallCollider`'s doc in `Collision.ts`) — and so does the keep-out test
+   * here (`segmentDistance` of a zero-length segment is the distance to its
+   * one point).
+   */
   wall(what: string, a: LocalPoint, b: LocalPoint, half: number, top: PropTop): WallCollider {
     this.checkKeepOuts(what, [a, b], half);
     const handle =
@@ -170,8 +205,11 @@ export class LibraryProps {
    * got a 10 cm plate that way, and a child who jumped onto it fell through
    * her own seat), while one built from all four is a square of air round it
    * she could stand on beside the chair. The turned plate is the drawn seat.
+   *
+   * Returns the box's three colliders ({@link BoxWalls}), so a box that must
+   * come and go can be {@link detach}ed and {@link attach}ed whole.
    */
-  box(what: string, footprint: BoxFootprint, top: PropTop, options: PropOptions = {}): void {
+  box(what: string, footprint: BoxFootprint, top: PropTop, options: PropOptions = {}): BoxWalls {
     const yaw = (footprint.facing * Math.PI) / 180;
     // The box's length runs across its facing: `(cos, -sin)` is local +X.
     const ax = Math.cos(yaw);
@@ -181,18 +219,45 @@ export class LibraryProps {
     const at = (along: number, out: number): LocalPoint => ({ x: footprint.x + ax * along + fx * out, z: footprint.z + az * along + fz * out });
     const { halfLength, halfDepth } = footprint;
     const spine = Math.max(0, halfLength - halfDepth);
-    this.wall(`${what} (body)`, at(-spine, 0), at(spine, 0), halfDepth, top);
+    const body = this.wall(`${what} (body)`, at(-spine, 0), at(spine, 0), halfDepth, top);
     const endAt = halfLength - END_HALF;
     const endAcross = Math.max(0, halfDepth - END_HALF);
-    for (const side of [-1, 1]) {
+    const end = (side: -1 | 1): WallCollider =>
       this.wall(`${what} (${side < 0 ? 'left' : 'right'} end)`, at(side * endAt, -endAcross), at(side * endAt, endAcross), END_HALF, top);
-    }
+    const leftEnd = end(-1);
+    const rightEnd = end(1);
     if (top !== 'wall' && options.stand !== false && top <= JUMP_APEX_HEIGHT) {
       this.surfaces.addPlatform(
         new OrientedPlate(top, this.originX + footprint.x, this.originZ + footprint.z, footprint.facing, halfLength, halfDepth),
       );
       this.standables.push({ what, top, footprint });
     }
+    return [body, leftEnd, rightEnd];
+  }
+
+  /**
+   * **Takes these colliders out of the collision world** (`removeWall` on
+   * each) — the owl's capsule as she takes off (#718), the secret shelf's open
+   * set at construction and its closed set as it lands open (#719). They stay
+   * in {@link solids} under their names, and their keep-out test was passed
+   * when they were placed, so {@link attach} can put them back without
+   * re-asking either.
+   *
+   * Colliders only: a walkable plate a box laid stays where it is. Nothing
+   * that is toggled has one (a wall case's top and the owl are out of a
+   * jump's reach), and a box that does must not be toggled this way.
+   */
+  detach(walls: readonly WallCollider[]): void {
+    for (const wall of walls) this.collision.removeWall(wall);
+  }
+
+  /**
+   * **Puts colliders {@link detach} took out back** (`restoreWall` on each):
+   * the same objects, owner tag and all, so a check that names a solid still
+   * holds the live collider. Idempotent — one already present is left alone.
+   */
+  attach(walls: readonly WallCollider[]): void {
+    for (const wall of walls) this.collision.restoreWall(wall);
   }
 
   /**

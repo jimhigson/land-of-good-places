@@ -56,6 +56,13 @@ export interface StandSpot extends LocalPoint {
   readonly what: string;
   /** `Player.facing`, degrees. */
   readonly facing: number;
+  /**
+   * **In the secret den** (#719), behind the swung-open secret shelf: reached
+   * only while the shelf is open, so it must be unreachable while it is shut.
+   * `props.ts`'s `libraryKeepOuts` copies the tag onto the spot's keep-out.
+   * Omitted for every spot in the reading room.
+   */
+  readonly den?: true;
 }
 
 // ===========================================================================
