@@ -57,41 +57,74 @@ it. Do not raise a part-PR from here.
 ## State
 - [x] glb merged (30472958); kit + measured plan; assets dressed from STYLES (all 65 nodes).
 - [x] layout/paths/manifest read the measured plan; colliders/plates rebuilt (5f6f1b77).
-- [x] check-library rebuilt: models' own boxes, LANDING, facade per corner, plinth sides/back,
-      portico + recess marches, base-height plan reads, LIGHT lights-only + DARK, READABLE.
+- [x] check-library rebuilt (models' own boxes, LANDING, facade per corner, plinth sides/back,
+      portico + recess marches, base-height plan reads, LIGHT, READABLE) — green on seed 5
+      restart 1 (the accepted park at f33fe483's hash), every mutation proved red (below).
 - [x] invariant: lean-aware coverage, plan-derived climbs, side/back walks, measured riser;
-      noDrawnPavingUnderASolid asks the plinth+steps body (31b2d8fd).
+      noDrawnPavingUnderASolid asks the plinth+steps body (red-proved below).
 - [x] `/library?at=` DeepLink kind + check:deep-links case; LampPosts owns LIGHT_DECAY.
-- [x] coplanar: door / pediment book / reading-lamp stem outlines dropped (their hulls lay on
-      the Artist's faces; the book's rejected seed 5 r0), book rows 5 cm clear of panels.
-      Standalone sweep: exterior 0 pairs, room 0 (f33fe483).
-- [x] fill 1.05 / key 0.675 so the dark aisles are above ink from the lights alone.
-- [ ] parks: CI run 38558411242 dispatched on f33fe483 (parks + every consumer); local
-      `build:parks` seed 5 running (4 restart lanes) for screenshots.
-- [ ] mutation red runs recorded below; screenshots; delete library-preview.* scratch.
+- [x] coplanar: door / pediment book / reading-lamp stem outlines dropped, book rows 5 cm
+      clear of panels — standalone sweep exterior 0, room 0.
+- [x] look, judged on real-game headless frames (seed 5): dim room under the nap night sky,
+      5.5 m pools, lilac fill 0.4, key 0.25, room lift 0.04, glowing doormat at the way out,
+      warm-wood bin backs (0cc342b8).
+- [ ] CI: run 38558411242 on f33fe483 (parks for that hash; checks follow). Re-dispatch on
+      the final commit — 0cc342b8 changed the closure (lighting/shell/furnish/World), so
+      parks rebuild.
+- [ ] delete library-preview.* scratch: it no longer loads (parkManifest's deterministic-
+      math guard and the no-client-solver rule) and bypasses the real lighting/terrain, so
+      its frames are not evidence; the real deep links are.
 - [ ] DO NOT edit src/, procgen/, test/procgen/ while an acceptance/build:parks run is live:
       its child attempts load whatever is on disk.
+
+## Red runs (each with the geometry it was proved against)
+All on seed 5 restart 0 unless said (`LGP_SEED=5 LGP_PARK_RESTART=0`, no acceptance), library
+at (50.1, -2.3), lean tan 0.234, base set -0.236 m, plan: plinth +-9 x [-7, 7], cella +-8.38 x
+[-6.4, 2.78], door half 1.6, door leaves' front 1.987, columns +-2.25/+-4.95/+-7.65 at z 4.85 r 0.78.
+- `LIBRARY_CHECK_OPEN_SHELL=8` (recess back wall): facade 5.198 m into the cella; portico/
+  recess marches 5.195 m (straight at the door); sprinter stops at -4.98 (door front 1.99).
+- `LIBRARY_CHECK_OPEN_SHELL=4` (front wall west of the door): portico marches 2.532 m into
+  the masonry (the doorway's west corner).
+- `LIBRARY_CHECK_OPEN_EDGE=1` (plinth's east edge): square marches 3.108 m over its stone
+  (east side, 3.8 along).
+- `LIBRARY_CHECK_DARK=1` (fill and key to 1e-4): darkest floor 0.0000 from the lights
+  (run against the pre-0cc342b8 lights-only clause; the lift-counting clause is red too:
+  lift 0.016 < ink 0.0509, so lights + lift < ink with no fill and key).
+- Landing (props.ts reverted to the two-corner plate, not committed): 252 of 2940 landings
+  fell through (nook-armchair, east-armchair at 45 degrees) and 4 controls found a top in
+  the air.
+- Paving (scratch script: a 1.2 m paving square drawn on the plinth's back-west corner,
+  local (-8.5..-7.3, -6.5..-5.3)): control [] as built; mutated: "1.37 m² of drawn paving
+  near 40.5, -1.6 lies under a library — 1.62 m inside the Library's plinth and steps".
+- OPEN_SHELL=6/7 (jambs) cannot go red, by measurement: see Findings.
 
 ## Findings worth keeping
 - **Jambs are redundant with the glb's shallow recess**: with either jamb removed the
   recess-back end cap and the front wall's end cap leave 0.19 m (measured, flat frame) —
-  nothing passes. OPEN_SHELL=6/7 cannot go red; OPEN_SHELL=8 (recess back) lets a body
-  5.19 m into the cella. Kept for a deeper recess in a future glb.
-- **Cella side/back walls are behind the plinth's edge walls**, so from the lawn they are
-  unreachable; OPEN_EDGE=n is the red-proof for the sides/back, OPEN_SHELL=4/5/8 from the
-  portico.
-- **A y-0 world read slides across a leaning building**: at (50,-2) the base is ~5.7 m
-  below world y 0, tan(lean) 0.234 -> 1.3 m. Every plan read in the check is at the base.
-- check:library seed 5 restart 0 (LGP_PARK_RESTART=0, no acceptance): all structural
-  clauses green — facade deepest 0.004, plinth back-east corner head-on 0.041 (= the
-  0.1(sqrt2-1) residual), recess -0.003, sprinter stops at 2.62 (door front 1.99), steps
-  0.000, landing 2940/2940 + 752 controls, 64/64 keep-outs, 0 pockets.
-- park-attempt seed 5 r0 (old outlines): new invariant green (in, 0.000 everywhere, lean
-  tan 0.234); rejected only by check:coplanar — the pediment-book outline (fixed) and two
-  layout-dependent garden seams (path-kerb/stone-walls, boundary-blocks/rail-fence) that
-  the loop restarts around.
+  nothing passes. OPEN_SHELL=8 (recess back) lets a body 5.19 m into the cella. Kept for a
+  deeper recess in a future glb.
+- **Cella side/back walls are behind the plinth's edge walls**, unreachable from the lawn;
+  OPEN_EDGE=n is the red-proof there, OPEN_SHELL=4/5/8 from the portico.
+- **A y-0 world read slides across a leaning building** (1.3 m at tan 0.234, 5.7 m below
+  y 0): every plan read in the check is at the base.
+- **The interior lift lights a room by itself**: 0.16 of the colour (parts.ts) renders a
+  floor at 0.064 luminance with no lamps — above ink. The library uses 0.04 so its lights
+  decide; the toon ramp makes direct light >= the cosine model, so the check's Lambert
+  model is conservative.
+- **Pools of 11 m overlap into one flat wash**; 5.5 m reads as pools (6.9x contrast).
+- park-attempt seed 5 r0 (f33fe483 minus outline fixes): invariant green; rejected by
+  check:coplanar (book outline, fixed) + two layout seams the loop restarts around.
+  build:parks seed 5 at 55ce5f5b (= f33fe483): accepted restart 1, 2 attempts, 526 s.
 
 ## Checks run
-- `pnpm exec tsc --noEmit -p .` exit 0; `pnpm run typecheck:test` exit 0 (f33fe483).
-- check-library.mts / check-deep-links.mts typechecked ad hoc (only the known
-  `process.exit` noise from test/node-env.d.ts).
+- `pnpm exec tsc --noEmit -p .` exit 0; `pnpm run typecheck:test` exit 0.
+- check:library seed 5 restart 1 (`LGP_PARK_RESTART=1`, at 0cc342b8): **All clauses passed**,
+  exit 0 — 64/64 keep-outs, 0 pockets, boxes 0.041, landing 2940/2940 + 752 controls,
+  facade -0.000, plinth corner 0.040, portico -0.012, sprinter 2.64, steps 0.000, LIGHT
+  0.0580 vs ink 0.0509 (lift 0.016), pools 6.9x.
+- Screenshots (headless Chromium, seed 5, served from the seed-5 park accepted at
+  f33fe483's hash; later commits changed only the room's look and the nap-sky line):
+  scratchpad/building/final-*.png and v2/v3-*.png.
+
+## Dev server
+- vite on 5671 (`--strictPort`), PID recorded in the session; kill by PID when done.
