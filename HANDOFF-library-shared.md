@@ -64,11 +64,13 @@ the integration branch later without conflicts.
       from library-art): same line, exit 1. So not this branch. Root cause (diagnosed on the
       control with a scratch read before and 3 s after): the check read her while the link's change
       of space was still running (`changing: true`, on the restored save's arrival spot); 3 s later
-      `changing: false` and she stood on (587, −600). **Already fixed on feat/library-building-716
-      as 69dfa5df**; brought in here byte-for-byte as **4a39b06c**, so the integration sees the
-      same hunk on both sides (trial merge: clean). check-deep-links.mts is outside the park
-      source closure, so the park hash and CI's parks are unchanged. Rerun after the fix:
-      check:served-deep-links exit 0, all 12 lines OK.
+      `changing: false` and she stood on (587, −600). **Already fixed on art/library-715 as
+      69dfa5df** (feat/library-building-716 carries it through its merge of art, 30472958);
+      brought in here byte-for-byte as **4a39b06c** (same patch-id, 0c7b450e), so art and
+      building see the same hunk on both sides (trial merges: clean). **Books fixed the same race
+      differently afterwards (9083ecd4, 13:35), which conflicts — see "Merge forecast".**
+      check-deep-links.mts is outside the park source closure, so the park hash and CI's parks
+      are unchanged. Rerun after the fix: check:served-deep-links exit 0, all 12 lines OK.
 - [x] second local `pnpm run check` (with 4a39b06c): **exit 0 after 1734 s**, all 8 shards.
 - [x] `pnpm run build` with CI's 16 parks in `.parks`: exit 0, 16 files in dist/parks.
 - [x] `pnpm run test:procgen` locally with CI's 16 parks: **exit 0 after 343 s — Test Files 45
@@ -98,8 +100,9 @@ Library PR). The worktree is removed at handback; recreate it with
   `attach`/`detach`, `den?` on KeepOut/StandSpot — the building branch owns those files), Step 2's
   `libraryLines.ts` and the brevity loop (they need `BOOKS` from the books branch), and everything
   in Steps 3-14 that lives in `src/world/library/` or the checks.
-- **One merge conflict to expect:** `src/state/types.ts`, tail of `CUTE_CATEGORIES` (see "Merge
-  forecast"). Everything else merges clean against art, building and books.
+- **Merge conflicts to expect:** `src/state/types.ts` always; `scripts/check-deep-links.mts` too
+  if this branch is merged after books with books' fix kept. Merge this branch **before** books
+  and its own merge is clean. Measured table and both resolutions under "Merge forecast".
 - **The SIT red must rotate both legs** (see Decisions: seatedErrors' one-foot blind spot).
 - Scratch instruments (not committed), in the orchestrator scratchpad `library-shared/`:
   `measure-listen.mts`, `exercise-seated.mts`, `exercise-seams.mts`, `exercise-separation.mts`,
@@ -111,15 +114,45 @@ Library PR). The worktree is removed at handback; recreate it with
 (a51ca115…): `gh run download 38550516901 --name parks-a51ca115291f87d7505e1563f745a7410e4551c4fcfeb3867325ec1aba0febfc --dir .parks`
 — any closure edit changes the hash and needs `LGP_SEEDS=5 pnpm run build:parks` (≈15 min) or CI.
 
-## Merge forecast (trial merges with `git merge-tree`, no refs touched)
-- with origin/art/library-715: clean. With origin/feat/library-building-716: clean (incl.
-  check-deep-links.mts). Building + books simulated together (clean), then this branch:
-  **one conflict, src/state/types.ts, the tail of CUTE_CATEGORIES** — both append after
-  'keychain'. Resolution: keep both blocks, books' first, each with its own `/**` opener:
+## Merge forecast (re-measured 14 Oct, review round 1; `merge-tree` + `commit-tree`, no refs touched)
+Measured at art f54f21c0, building 6ae408d3, books 9083ecd4, this branch b4d1c06b (its later
+commits touch this file only). The tips are still moving, so re-run before merging:
+`git merge-tree --write-tree --name-only <integration> origin/feat/library-714-shared`, or the
+whole table with `library-shared-fixer/forecast.sh <worktree>` in the orchestrator scratchpad.
+
+**What changed.** Books fixed the deep-links race itself (9083ecd4: wait until
+`spaces.isChanging === false`). That hunk covers the same lines as 69dfa5df (wait for inside
+*and* on the spot), which art, building and this branch all carry. So **building + books now
+conflict on their own**, in `scripts/check-deep-links.mts` and `src/main.ts`, with or without this
+branch. The old "building + books: clean" line was stale.
+
+| merge order (art is inside building, so art then building is a fast-forward) | conflicts |
+|---|---|
+| this branch alone, against art / against building | none / none |
+| this branch alone, against books | check-deep-links.mts, types.ts |
+| **B (recommended):** building, **this branch**, then books | this branch: none; books: check-deep-links.mts, main.ts, types.ts |
+| A: building, books keeping building's 69dfa5df hunk, then this branch | this branch: types.ts |
+| A: building, books keeping books' 9083ecd4 hunk (or any blend), then this branch | this branch: check-deep-links.mts, types.ts |
+
+- **`src/state/types.ts`**, tail of `CUTE_CATEGORIES` (both append after `'keychain'`). The shared
+  `/**` line sits *above* the conflict markers, so the second block needs its own opener. Keep
+  both blocks, books' first:
   `'keychain', /** …#717 book doc… */ 'book', /** …#718 card doc… */ 'card', ] as const;`.
-  test/procgenShards.ts auto-merges (this branch inserts before live-look; books appends at the end).
+- **`scripts/check-deep-links.mts`**, when it conflicts on this branch's merge: **take the
+  integration's copy** (`git checkout --ours scripts/check-deep-links.mts`). This branch's only
+  change to the file is the 69dfa5df hunk, so nothing of its own is lost. Measured: merged blob
+  131a5172 = the integration's blob 131a5172. Which fix the integration keeps is the integrator's
+  call. Building's `libraryCheck` entries in the same file already wait the 69dfa5df way.
+- `test/procgenShards.ts` auto-merges (this branch inserts before live-look; books appends at the
+  end). `src/main.ts` conflicts between building and books only; this branch does not touch it.
 
 ## Decisions (made here, with reasons)
+- **4a39b06c stays (review round 1).** Dropping it would put main's race back on this branch:
+  without it check:served-deep-links went red on every local run at seed 5 (twice here, once on
+  an untouched origin/main control) and passed on CI only by frame timing. That is flaky, and
+  flaky counts as failing. Dropping it also means rewriting pushed history. Swapping it for books' 9083ecd4 would only move the conflict onto art and
+  building, which carry 69dfa5df. Keeping it costs at most one hunk at merge time, settled by
+  taking the integration's copy, which loses nothing of this branch's.
 - **isRunning guard placement.** The plan says spawnRunningDust "starts with
   `if (!this.isRunning) return;`". It replaces the old guard line *in place*, after the
   `previousWalkPhase` bookkeeping — moving it above would stop the phase following her on
