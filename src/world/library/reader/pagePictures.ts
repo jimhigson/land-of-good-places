@@ -26,7 +26,7 @@ import { createKeychain, KEYCHAIN_KINDS, type KeychainKind } from '../../../art/
 import { createBreakfastBowl, createPetBed, type BreakfastKind } from '../../../art/models/hotelAssets';
 import { createStarToy } from '../../../art/models/shopItems';
 import { duckBarAssetGeometry } from '../../../art/models/duckBarAsset';
-import { createStoryBook, createStoryDragon } from '../../../art/models/libraryAssets';
+import { createStoryBook, createStoryDragon } from './readerAssets';
 import { hazardTapeTexture } from '../../../core/textures';
 import { createCatBus } from '../../entrance/catBus';
 import { createCart } from '../../railRace/cart';

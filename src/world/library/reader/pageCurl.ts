@@ -85,7 +85,7 @@ export interface LeafGrid {
 
 /**
  * Writes a leaf's vertex positions at turn progress `t` into `out`, in the
- * reader's book-local frame (`art/models/libraryAssets.ts`): x across, spine at
+ * reader's book-local frame (`reader/readerAssets.ts`): x across, spine at
  * x = 0; y up the page; z out of the paper.
  *
  * `out` is laid out exactly as three's `PlaneGeometry(width, height, columns,

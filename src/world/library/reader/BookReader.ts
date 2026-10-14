@@ -26,7 +26,7 @@ import {
   READER_PAGE_HEIGHT,
   READER_PAGE_WIDTH,
   type ReaderCoverHandle,
-} from '../../../art/models/libraryAssets';
+} from './readerAssets';
 import { bookById, type LibraryBook } from '../books';
 import { TURN_SECONDS, writeLeaf, type LeafGrid } from './pageCurl';
 import { bookFaces, PAGE_CANVAS_HEIGHT, PageArtist, type PageFace, type PaintedFace } from './pageFaces';

@@ -1,14 +1,21 @@
 import { CylinderGeometry, Group, Mesh } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { PALETTE } from '../../core/palette';
-import { ART } from '../style/artPalette';
-import { addOutline, decal, inkTint, solid, toonMaterial } from '../style/materials';
-import { createBakedFace, type Expression } from '../style/faces';
-import { applyWalk, blob, makeLimbs, stub, type AssetHandle, type CreatureHandle } from '../style/asset';
+import { PALETTE } from '../../../core/palette';
+import { ART } from '../../../art/style/artPalette';
+import { addOutline, decal, inkTint, solid, toonMaterial } from '../../../art/style/materials';
+import { createBakedFace, type Expression } from '../../../art/style/faces';
+import { applyWalk, blob, makeLimbs, stub, type AssetHandle, type CreatureHandle } from '../../../art/style/asset';
 
 /**
- * **The library's small things, built from primitives until Blender's arrive**
+ * **The book reader's own models, built from primitives until Blender's arrive**
  * (#717, part 3 of the Library epic #714).
+ *
+ * They live beside the reader rather than in `art/models/` because nothing but
+ * the reader uses them — the cover it turns pages in, and two props that only
+ * ever appear inside a book's pictures — and because `art/models/libraryAssets.ts`
+ * belongs to the library building (#716): its shelves, desk, lamps and shelf
+ * books. A shelf book is not a picture-book prop; the two are drawn at
+ * different scales for different jobs, and each has its own owner.
  *
  * Three factories, each the one owner of its thing:
  *
