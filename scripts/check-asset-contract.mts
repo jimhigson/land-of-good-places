@@ -94,6 +94,13 @@ import {
 import { createReptileHouseExterior } from '../src/art/models/reptileHouseAssets.ts';
 import { createNoodleRock, createNoodleTailMound } from '../src/art/models/reptileNoodleAssets.ts';
 import { createNoodleMeter, createReptileStallDressing } from '../src/art/models/reptileStallAssets.ts';
+import {
+  createLibraryBookPile,
+  createLibraryCat,
+  createLibraryDragon,
+  createLibraryDragonNest,
+  createLibraryOwl,
+} from '../src/art/models/libraryCreatures.ts';
 
 /**
  * How far a declared height may sit from the measured one, in metres.
@@ -318,6 +325,16 @@ function collect(): Subject[] {
   add('reptile.noodleTailMound', createNoodleTailMound(), 'anchor');
   add('reptile.stallDressing', createReptileStallDressing(), 'anchor');
   add('reptile.meter', createNoodleMeter());
+
+  // The Library's creatures (#718, #719): the owl librarian, the baby dragon
+  // and its nest of books, the library cat and her pile of books. Each origin
+  // is at the feet and each height is measured off the built model, so these
+  // carry no recorded drift and a hand-typed height would show here at once.
+  add('library.owl', createLibraryOwl());
+  add('library.dragon', createLibraryDragon());
+  add('library.dragonNest', createLibraryDragonNest());
+  add('library.cat', createLibraryCat());
+  add('library.bookPile', createLibraryBookPile());
 
   // Scenery. Seeded, so a few seeds each is a fair sample of what a seed can do.
   for (const seed of [0, 1, 2, 3]) {

@@ -18,9 +18,10 @@ closest a background render gets to that in a second.
   read by that module out of ``kid.ts`` with ``ts_const``. Nothing is typed
   here — the bridge kit's render script once hand-copied its build's numbers
   and five committed renders were of a bridge that was not on the branch.
-* **The colours** are the Engineer's ``STYLES`` table in
-  ``src/art/models/libraryAssets.ts`` once that exists; until then
-  :data:`PROPOSED` — palette *keys*, never hex — printed loudly as a proposal.
+* **The colours** are the Engineer's ``LIBRARY_GLB_STYLES`` table in
+  ``src/art/models/libraryAssets.ts`` (read by :func:`resolve_colours`'s regex,
+  whatever the table is called); without that file, :data:`PROPOSED` —
+  palette *keys*, never hex — printed loudly as a proposal.
 * **The eye dots** on the face shots are painted at the anchors the build
   stored on each head (``face_eyes_uv``), through the head's own UVs, so the
   picture shows where the Engineer's painted eyes will land.
@@ -74,7 +75,7 @@ from castle_render import (  # noqa: E402
 OUT = os.path.join(REPO, "art", "renders", "library")
 ENGINEER_MODULE = "src/art/models/libraryAssets.ts"
 
-# The Artist's suggestion for the Engineer's STYLES table — palette keys only.
+# The Artist's suggestion for the Engineer's LIBRARY_GLB_STYLES table — palette keys only.
 PROPOSED = {
     "shell-plinth": "PALETTE.stoneGreyLight",
     "shell-steps": "PALETTE.stoneGrey",

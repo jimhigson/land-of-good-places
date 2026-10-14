@@ -53,7 +53,7 @@ import {
   REPTILE_LOG_CENTRE_X,
 } from '../src/world/reptileHouse/layout.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
-import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_SECRET_STAND } from '../src/world/library/layout.ts';
+import { LIBRARY_ARRIVAL, LIBRARY_DESK_STAND, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_SECRET_STAND } from '../src/world/library/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -176,6 +176,9 @@ const GAME_READY_TIMEOUT_MS = 120000;
  */
 const AUTOSAVE_TIMEOUT_MS = 60000;
 
+/** How far her facing may be from the one a link asked for, in radians: a link's facing is set, not steered to. */
+const FACING_TOLERANCE = 0.05;
+
 /**
  * **A `/library` link lands inside the reading room, on `spot`** (room-local),
  * converted back to world here from the layout's own constants. It waits for
@@ -184,8 +187,13 @@ const AUTOSAVE_TIMEOUT_MS = 60000;
  * written inside has her inside from the first frame (the Reptile House's
  * race, 14 Oct 2026). A link that never moves her still fails: the wait times
  * out and the read says where she is.
+ *
+ * With `facing` (degrees, the URL's own number), she must also face that way —
+ * `Player.facing` within {@link FACING_TOLERANCE} of it, as radians, whichever
+ * way round the circle. A facing that equals the arrival's own (180) cannot
+ * tell an honoured `facing=` from a dropped one, and the read says so.
  */
-function libraryCheck(path: string, spot: { readonly x: number; readonly z: number }, what: string): DeepLinkCheck {
+function libraryCheck(path: string, spot: { readonly x: number; readonly z: number }, what: string, facing?: number): DeepLinkCheck {
   return {
     path,
     assert: async (page) => {
@@ -207,6 +215,7 @@ function libraryCheck(path: string, spot: { readonly x: number; readonly z: numb
           hasGame: !!g,
           inside: g?.world?.library?.playerIsInside ?? null,
           playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+          facing: typeof g?.player?.facing === 'number' ? (g.player.facing as number) : null,
         };
       });
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
@@ -217,13 +226,24 @@ function libraryCheck(path: string, spot: { readonly x: number; readonly z: numb
       if (space !== SPACE_LIBRARY || off > CASTLE_TOLERANCE) {
         return { ok: false, detail: `asked for ${what}, room (${spot.x}, ${spot.z}) = world (${want.x}, ${want.z}); she is in '${space}' at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}), ${off.toFixed(1)} m off` };
       }
-      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}` };
+      if (facing === undefined) return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}` };
+      const asked = (facing * Math.PI) / 180;
+      if (s.facing === null) return { ok: false, detail: `on ${what}, but the player reported no facing to read` };
+      const turn = Math.abs(Math.atan2(Math.sin(s.facing - asked), Math.cos(s.facing - asked)));
+      const blind = facing === LIBRARY_ARRIVAL.facing ? ' (the arrival faces this way too, so this read cannot tell an honoured facing= from a dropped one)' : '';
+      if (turn > FACING_TOLERANCE) {
+        return { ok: false, detail: `on ${what}, ${off.toFixed(2)} m off, but facing ${s.facing.toFixed(3)} rad where the link asked ${asked.toFixed(3)} (${facing}°): ${turn.toFixed(3)} rad round` };
+      }
+      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}, facing ${s.facing.toFixed(3)} rad (asked ${facing}°, ${turn.toFixed(3)} rad round)${blind}` };
     },
   };
 }
 
 /** Where `/library?at=` is asked to stand: the secret shelf's stand spot, to the centimetre a URL carries. */
 const LIBRARY_AT = { x: Number(LIBRARY_SECRET_STAND.x.toFixed(2)), z: Number(LIBRARY_SECRET_STAND.z.toFixed(2)) };
+
+/** And at the desk's front, where she talks to the owl (#718) — the link the owl's preview is sent with. */
+const LIBRARY_DESK_AT = { x: Number(LIBRARY_DESK_STAND.x.toFixed(2)), z: Number(LIBRARY_DESK_STAND.z.toFixed(2)) };
 
 /** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
 const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
@@ -235,7 +255,16 @@ const CHECKS: DeepLinkCheck[] = [
   // Primed inside the room (the plain link lands at the arrival), so the
   // returning-save run is the case that must still move her: restored inside,
   // then asked for a spot in it.
-  { ...libraryCheck(`/library?at=${LIBRARY_AT.x},${LIBRARY_AT.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_AT, LIBRARY_SECRET_STAND.what), primerPath: '/library' },
+  {
+    ...libraryCheck(`/library?at=${LIBRARY_AT.x},${LIBRARY_AT.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_AT, LIBRARY_SECRET_STAND.what, LIBRARY_SECRET_STAND.facing),
+    primerPath: '/library',
+  },
+  // At the desk's front, turned to the owl's desk (plan Step 4): the parsed
+  // `/library` link — at, facing — every number read from the layout.
+  {
+    ...libraryCheck(`/library?at=${LIBRARY_DESK_AT.x},${LIBRARY_DESK_AT.z}&facing=${LIBRARY_DESK_STAND.facing}`, LIBRARY_DESK_AT, LIBRARY_DESK_STAND.what, LIBRARY_DESK_STAND.facing),
+    primerPath: '/library',
+  },
   {
     // Outside the Library's door, in the park, on the plot's own doormat.
     path: '/library-door',

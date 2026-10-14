@@ -3,7 +3,10 @@
 Branch `feat/library-714` (from `origin/main` d2cdb1f2), worktree
 `.claude/worktrees/library-714`. Engineer, Claude Opus 5.5. This file is the integration
 branch's own; every source branch's handoff is kept unchanged beside it
-(`HANDOFF-library-art.md`, `-building.md`, `-shared.md`, `-books.md`).
+(`HANDOFF-library-art.md`, `-building.md`, `-shared.md`, `-books.md`). The one exception is
+the foundation's second half: its `HANDOFF-library-assets.md` is folded into this file
+("Foundation, second half" and the lists after it) and was deleted in the merge commit that
+brought `feat/library-714-assets` in (14 Oct), so the foundation has one record.
 
 **The one Library PR** (Jim's 13 Oct ruling: one PR for the whole Library) is a draft whose head
 is a SEPARATE branch, `feat/library`. It moves only at a milestone, by a fast-forward push of
@@ -12,9 +15,12 @@ run that re-solves all 16 parks (30-45 min) and cancels the run before it, so wo
 goes to `feat/library-714` (or a track branch) only. A push to `feat/library-714` runs no CI
 (`ci.yml` runs on `pull_request`, on `push` to `main`, and by dispatch).
 
-**PR #720** (draft), head `feat/library` at **8f0cb8c3** (the foundation head, this file's
-first commit), base `main`; GitHub links it to all six issues (`closingIssuesReferences`:
-714, 715, 716, 717, 718, 719). Its CI run started on opening; nobody waited for it.
+**PR #720** (draft), head `feat/library`, base `main`; GitHub links it to all six issues
+(`closingIssuesReferences`: 714, 715, 716, 717, 718, 719). Opened at **8f0cb8c3** (the
+foundation head, this file's first commit). Read again at the Steps 3-4 merge (14 Oct): head
+**9e49816b** (the first half's head; the orchestrator moved it there), still a draft, and its
+newest "Deploy PR preview" comment still names the build of 8f0cb8c. The merge does not move
+`feat/library`; only the orchestrator does, at a milestone.
 The preview link comes from the PR's newest "Deploy PR preview" comment, never built by hand.
 
 ## Status
@@ -45,10 +51,20 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
         cause on this branch** — procgen shard 4's `railRaceRoadBounded` (a stale seed pin; see
         "The PR's CI" below), 04e98676 — **and a second, Checks shard 8 killed by its
         watchdog in check:served-book-reader**, fixed at cause in 588c413b + c136443b.
+- [x] **Foundation, second half** (plan Steps 3 and 4, and the WITH A REAL CHILD harness from
+      Step 6's "Checks"; another engineer, 14 Oct, on `feat/library-714-assets` from 009dea3e,
+      head 88ac6218). Section "Foundation, second half" below, folded from its handoff.
+- [x] **The Steps 3-4 merge** (14 Oct; section "The Steps 3-4 merge" below):
+      `git merge --no-ff origin/feat/library-714-assets` onto 9e49816b, rerere off, no conflict
+      (the halves touch disjoint files; every merged file is byte-identical to the side that
+      changed it). Seed 5's park built for the merged source, and the checks the task names run
+      on it (results in that section).
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
-      foundation head; then Step 9, Step 10's labels/tap spacing, Step 14 and the cross-part
-      pieces here after the merges.
+      head after this merge (the whole foundation). Track D (six chapter books,
+      `feat/library-714-books2`) was already at 9e49816b when this merge was made, so it starts
+      without Steps 3-4 (see "For the join"). Then Step 9, Step 10's labels/tap spacing, Step 14
+      and the cross-part pieces here after the merges.
 
 ## The foundation merge (14 Oct)
 All four with `--no-ff`, in the order the groundwork's merge-tree forecast measured as cleanest,
@@ -240,6 +256,8 @@ the app shell, and `/parks/5.json` serves seed 5 restart 1.
   that table, exported. Where it differs from the plan's Step 3 list (Step 3's call):
   `dragon-wings` is `PALETTE.markerPink` (plan `ART.miniLilac`); outlines `owl-head` 0.02
   (plan 0.016), `owl-glasses` 0.01 (plan 0.012), `cat-*` 0.012 and 0.01 (plan 0.016).
+  **Step 3 then decided** (second half): `dragon-wings` is now `ART.miniLilac`, and the
+  building's outlines are kept; see "Decisions from the second half".
 - `/library?at=x,z&facing=deg` **is already a parsed `DeepLink`** (building's
   `parseLibraryLink`, `Game.enterLibrarySpawn`); `/library` is not in `RIDE_DEEP_LINKS`,
   `/library-door` is.
@@ -479,6 +497,137 @@ Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not mai
   AssertionError: the card was dropped on load: expected [] to have a length of 1 but got +0
   ```
 
+## Foundation, second half (14 Oct): plan Steps 3, 4 and the WITH A REAL CHILD harness
+Folded from `HANDOFF-library-assets.md`, which the merge commit deleted. Built by another
+engineer (Claude Opus 5.5) on `feat/library-714-assets`, cut from 009dea3e (the foundation
+head), in the worktree `.claude/worktrees/library-714-assets` (removed after this merge). Plan
+Steps 3 and 4, plus Step 6's "Checks" harness. It stayed off the first half's files (props.ts,
+layout.ts, libraryLines.ts, check-copy-brevity.mts, this file). Scratch instruments and logs:
+the orchestrator scratchpad's `assets714/`.
+
+### What was done (commits on `feat/library-714-assets`)
+- Step 3: `LIBRARY_GLB_STYLES` exported + `libraryKitMesh` (c6ec7f5c); `libraryFaces.ts`,
+  `libraryCreatures.ts`, the storybook dragon's colours (77c1044c); check:assets x5 (4a6eca48);
+  PAINTED FACES + the `LIBRARY_CHECK_MUTATE` allow-list (d6486af8).
+- Step 4: the `/library?at=6,8.7&facing=180` case with a facing read (6ec484d7).
+- The WITH A REAL CHILD harness, its own clause and its red (d6486af8).
+- `art/blend/library_render.py`'s docstring names the colour table by its name,
+  `LIBRARY_GLB_STYLES` (88ac6218; stale-comment rule, no code change).
+
+### What each file now gives the tracks
+- `src/art/models/libraryAssets.ts`: `LIBRARY_GLB_STYLES` (the one table, exported; the building's
+  STYLES renamed), `PartStyle` (type), `libraryKitMesh(name, material?)` (the one dresser; an own
+  material for a part that must own one).
+- `src/art/models/libraryFaces.ts`: `owlFaceTextures()` (neutral, blink, happy, shush),
+  `dragonFaceTextures()` (neutral, blink, happy, puff), `catFaceTextures()` (asleep, happy),
+  `LIBRARY_FACE_ROWS`, `LIBRARY_FACED_HEADS`, `libraryFaceCanvasSize(head)`. 10 canvases.
+- `src/art/models/libraryCreatures.ts`: `createLibraryOwl()` → `OwlHandle` {root, height, body,
+  head, wingL, wingR, headMaterial, face, setFace, setExpression}; `createLibraryDragon()` →
+  `DragonHandle` (a CreatureHandle: limbs null, setWalkPhase no-op) + {tail, belly, mouth,
+  mouthInHead, headMaterial, face, setFace}; `createLibraryDragonNest()` → {root, height, padTop,
+  radius}; `createLibraryCat()` → {root, height, body, head, earL, earR, tail, headMaterial, face,
+  setFace, setExpression}; `createLibraryBookPile()` → {root, height, plan}; `DRAGON_BELLY_REST_GLOW`.
+- `scripts/check-library.mts`: `MUTATIONS` / `mutating(name)`, `slope()`, PAINTED FACES, and the
+  harness `child: RealChild` with one marker per track below its own clause.
+- `scripts/check-deep-links.mts`: `libraryCheck(path, spot, what, facing?)` reads her facing back.
+
+### Measured (seed 5 park at source 94225e98, and the bare handles)
+| creature | height (outline incl.) | bottom | plan reach | notes |
+|---|---|---|---|---|
+| owl | 1.619 | -0.012 | 0.6548 at rest; **0.6674** with breathing (1+0.6·0.02) and head yaw ±1 rad | head pivot (0, 0.7352, 0.0200); wings ±0.34 at y 0.6975 |
+| dragon | 0.910 | -0.016 | 0.6927 | head pivot (-0.044, 0.4336, 0.060), horns on it; tail pivot (-0.070, 0.1281, -0.3389); mouth (root) (-0.044, 0.4336, 0.5461), in head (0, 0, 0.4861) |
+| nest | 0.200 | -0.012 | 0.8340 | padTop 0.145 |
+| cat | 0.359 | -0.010 | 0.3483 | head pivot (-0.0508, 0.1242, 0.040); ears under it at (0.0324, 0.1472, 0.06) / (-0.1474, 0.1472, 0.06) |
+| pile | 0.911 | -0.011 | 0.5357 | plan (outline incl.) x -0.454..0.455, z -0.320..0.357 |
+Every glb creature node has identity rotation and scale (read off the file), so hanging by
+translation subtraction is exact. Face canvases 512 x 412 / 346 / 408; parked back faces at glTF
+(0.020, 0.980): owl 184, dragon 146, cat 155; front-mapped 164 / 130 / 139.
+
+### Red proofs (each reverted; geometry: seed 5, restart 1, source 94225e98, digest 9acd3a626f55d35c)
+- **check:assets**, the owl's height typed `1.5` in createLibraryOwl → exit 1:
+  `library.owl: declares height 1.500 m but measures 1.619 m (+0.119 m)`.
+- **PAINTED FACES**, `LIBRARY_CHECK_MUTATE=faces-upside-down` → exit 1, `3 clause(s) FAILED`:
+  ```
+  note: FLIPPED all 10 painted faces the other way up on purpose ...
+  ✗ owl-head: 164 front vertices (184 parked), the canvas row RISES 1.01/m as the head rises (flipY false); the eye row lands at y 1.169, over the beak's top at 0.948
+  ✗ dragon-head: 130 front vertices (146 parked), the canvas row RISES 1.95/m as the head rises (flipY false); the eye row lands at y 0.552 and the mouth row at y 0.667
+  ✗ cat-head: 139 front vertices (155 parked), the canvas row RISES 3.27/m as the head rises (flipY false); the eye row lands at y 0.136 and the mouth row at y 0.199
+  ```
+  Green: owl eye y 1.058 over beak top 0.948, slope -1.013; dragon eye 0.552 / mouth 0.437, slope
+  -1.951; cat eye 0.157 / mouth 0.115, slope -3.273. **Note:** on the owl the eye-above-beak half
+  alone cannot see a flip (her eye row is mid-head: flipped it lands at 1.169, still over the
+  beak); the falling-row half is what goes red there.
+- **WITH A REAL CHILD**, `LIBRARY_CHECK_MUTATE=block-walk` (a wall x -3..3 at room z 9.6,
+  half-thickness 0.2, a metre ahead of the arrival (0, 10.6)) → exit 1:
+  `✗ steered up the central aisle for 2 s (the stick pushed on 120 of 120 frames), she travelled 0.18 m (at least 1.5) to (0.00, 10.42), ...`
+  Green: 14.26 m to (0.00, -3.66), feet 0.000 m off the floor.
+- **The allow-list**: `LIBRARY_CHECK_MUTATE=shift-books` (no clause arms it yet) → exit 1,
+  `✗ LIBRARY_CHECK_MUTATE=shift-books was asked for, but no clause in this build arms it — this run ASSERTS NOTHING about it`;
+  `=bogus` → throws `... is not one of this check's mutations: ...`.
+- **check:deep-links**, `Game.enterLibrarySpawn` calling `requestEnter()` without `at` → exit 1:
+  `/library?at=6,8.7&facing=180 (startFresh): asked for the desk's front, room (6, 8.7) = world (-594, -591.3); she is in 'library' at (-600.0, -589.4), 6.3 m off`
+  (and continueGame the same; the secret-shelf case 21.7 m off).
+- **check:deep-links**, `parseLibraryLink` dropping `facing` → exit 1:
+  `/library?at=-16.1,-4&facing=270 (startFresh): on in front of the secret shelf, 0.00 m off, but facing 3.142 rad where the link asked 4.712 (270°): 1.571 rad round`.
+  The desk case stays green there, as its own read says: 180° is the arrival's facing too.
+
+### Parks, on that branch
+Only libraryAssets.ts is a park-closure edit here (measured with `parkSourceClosure`: libraryAssets.ts
+IN; readerAssets.ts, the three check scripts, main.ts, Game.ts OUT; the new libraryFaces.ts and
+libraryCreatures.ts are imported by no closure file). Source hash at the head:
+`94225e989746ab584747672e0385ff5671dadf3ac0386c5865f61872a54882bf`.
+`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` → seed 5 restart 0 rejected by
+check:coplanar, **restart 1 accepted** (134 measures), digest 9acd3a626f55d35c, 506 s; `.parks/` in
+this worktree. A merge with the first half's closure edits makes a new hash.
+
+### Checks at that branch's head (88ac6218), read off its logs in `assets714/`
+- `check:library` (`final-library.log`): **60 ✓, 0 ✗**, "All clauses passed." — the
+  foundation's 55, plus PAINTED FACES' 3 and the harness's 2; seed 5 restart 1 hydrated.
+- `check:assets` (`final-assets.log`): "135 assets check out, 48 of them creatures that stand
+  still as built (32 also posed through update()); 28 still carry recorded drift (worst:
+  balloon.corgi +0.077 m)" — the foundation's 130 / 47, plus the five handles.
+- `check:served-deep-links` (`served-deeplinks-1.log`): exit 0, "check:deep-links passed",
+  10 links x 2 starts = 20 OK lines.
+- Its `final-tsc.log` and `final-tsct.log` record no exit code; the merged tree's own runs
+  (below) are the ones that count.
+
+## The Steps 3-4 merge (14 Oct)
+`git pull` first (already up to date at 9e49816b), then
+`git -c rerere.enabled=false merge --no-ff --no-commit origin/feat/library-714-assets`
+(88ac6218), merge base 009dea3e: "Automatic merge went well". No conflict to resolve: since
+the base, this branch changed 11 files and the assets branch 9, and no file is in both lists.
+- **Every merged file audited by blob id** (not by eye): each of this branch's 11 equals this
+  branch's blob and each of the assets branch's 9 equals its blob (0 differ). The index
+  differs from HEAD in exactly those 9 files and from the assets head in exactly those 11.
+  CONTROL: the assets branch's 9 files compared with the merge base's blobs instead, 9 of 9
+  differ, so the audit can say no.
+- `package.json` is this branch's blob (the assets branch never touched it), so the check chain
+  is the first half's, step for step (shard 9 included). Nothing to re-derive.
+- **In the same commit:** this file takes the second half's facts, and
+  `HANDOFF-library-assets.md` is deleted.
+- **Park source hash after the merge:
+  `d283ffaa1e89b40eba9249c08678a4da3f18167607ea3ca185dc3174f1f2e55e`** (494 closure files). It
+  is new because both halves edited the closure: Collision.ts, props.ts and layout.ts in the
+  first, libraryAssets.ts in the second. Outside it (measured): libraryLines.ts,
+  libraryCreatures.ts, libraryFaces.ts, readerAssets.ts, and every changed script and test.
+- **tsc does not see `scripts/`.** `tsconfig.json` includes src, procgen and the vite config;
+  `tsconfig.test.json` includes test and vitest.config.ts, and says "`scripts/` is
+  deliberately NOT listed". So `tsc` exit 0 cannot catch a merged-in check script calling an
+  API the other half changed (check-library against `props.box`'s new return, say).
+  Instrument: a scratch tsconfig (`m714b/tsconfig.scripts.json`, extending tsconfig.test.json,
+  `types` pointed at this worktree's `vite/client`) over the six changed scripts:
+  check-library, check-asset-contract, check-deep-links, check-copy-brevity, check-book-reader
+  and measure-wall-tunnelling. Result: 15 errors, **all environmental**: 10 `process.argv` /
+  `process.exit` on the test project's minimal `process`, 2 `node:fs` members its node-env
+  does not declare, and 3 browser-side `/src/...` imports inside `page.evaluate`. None names a
+  library type. (The assets engineer's run of its three scripts showed the same kinds.)
+  CONTROL (`m714b/control-api.mts`, two deliberate mismatches against the merged source): both
+  reported — `Type 'OwlHandle' is not assignable to type 'number'` and `Type 'BoxWalls' is not
+  assignable to type 'undefined'` — so the instrument reads both halves' types.
+
+### Checks at the merged source (logs: the orchestrator scratchpad's `m714b/`)
+Running when the merge commit was made; the next commit fills this in.
+
 ## Decisions (made here, with reasons)
 - **The zero-length capsule is fixed in `Collision.ts`, not worked round in props.ts**
   (first half, 773efb7c). Alternatives weighed: register the owl as an `addCircle` disc (but
@@ -506,6 +655,43 @@ Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not mai
   GitHub links only the first issue in the bare comma form ("Closes #714, #715"), so the
   literal line would have closed #714 alone on merge.
 
+### Decisions from the second half (Steps 3-4; folded from its handoff)
+- **One table, one decode, one dresser.** `libraryKit.ts` already decodes the glb once and
+  libraryAssets.ts already dressed all 65 nodes from a private STYLES. So the plan's
+  `libraryKit()`/`loadReptileKit` is NOT added (a second decode); STYLES is renamed and exported as
+  `LIBRARY_GLB_STYLES`, and the dresser exported as `libraryKitMesh`. Existing callers build the
+  same meshes (kitMesh unchanged in behaviour).
+- **Outlines: the building's table is kept**, not the plan's parenthesised figures. The plan's
+  `cat-* (0.016)` breaks ART_DIRECTION §2 (small creatures 0.010–0.014; she is 0.35 m), and the
+  owl's 0.02 vs the plan's 0.016 are both inside the kid/prop range. The only colour change is the
+  plan's: `dragon-wings` → `ART.miniLilac` (the storybook dragon's wings).
+- **The render script's regex** reads every `name: { ... colour: PALETTE|ART.key` in
+  libraryAssets.ts's TEXT, so no example row may appear in a comment there (one written that way
+  would make `library_render.py` assert on `PALETTE.key`). Verified 77 rows before and after, only
+  dragon-wings changed.
+- **Head and wings hang under `body`** (the CreatureHandle convention "everything above the ground
+  lives in body"), so breathing on `body.scale` moves them too; the head turns on `head.rotation.y`.
+- **Faced heads and the dragon's belly own their materials** (`libraryKitMesh(name, material)`):
+  the cat's parts share one ginger paint, so a face map on the shared paint would have painted her
+  face on her tail.
+- **Expression maps**: owl surprised→shush, sad/frown→neutral; dragon surprised→puff, sad/frown→
+  neutral; cat happy/surprised→happy, everything else→asleep (a blink on a sleeping cat stays asleep).
+- **The cat's asleep mouth** is her 'cat' mouth at 0.7 of its width (the plan's "small mouth").
+- **`DRAGON_BELLY_REST_GLOW = 0.2`** lives in libraryCreatures.ts (the factory sets it), so the
+  plan's LibraryDen rest value has one owner: import it.
+- **The harness world is built with no cat bus pending** (`saveFlags.markArrived()` before
+  `buildHeadlessPark`). A fresh store makes `World.attachPlayer` seat her in the bus (riding), and
+  `Library.requestEnter` rightly refuses a riding child. A `/library` deep link boots with
+  `arriveByBus: false`, so this is the world the link builds. Every check-library line before the
+  harness is byte-identical with and without (89 lines, `diff` empty).
+- **`block-walk` added to the allow-list** for the harness's own red (the plan's list predates the
+  harness clause); an allowed mutation that no clause arms fails the run ("ASSERTS NOTHING") rather
+  than passing, so the plan's later mutations cannot pass by accident before their clauses land.
+- **Step 4 was already built** by the building branch (parsed `library` DeepLink with at/facing,
+  `parseLibraryLink`, loud finishLaunch case, `Game.enterLibrarySpawn`, no `/library` stall id,
+  `/library-door` kept). Added only the plan's check case and a facing read (`FACING_TOLERANCE`
+  0.05 rad), proved red twice. `story=now` is Step 9's.
+
 ## For the join (and the tracks)
 - **check-book-reader.mts (Step 5's served item 6 goes here):** read the reader after an input
   with `settleTurn(page)` / `nextFrames(page)`, never a bare `waitForTimeout` — the runner's
@@ -513,11 +699,9 @@ Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not mai
   `page.goto` (item 6's `/library?at=...`) builds a fresh page with the park drawn, which costs
   most of each frame on CI — hide it again once the item's park-dependent part is done, as
   section 1 does, or measure shard 9 on CI before trusting it. Shard 9 holds only this check.
-- **Merging Steps 3-4 (`feat/library-714-assets`) in is clean** (measured 16:23 BST:
-  `git merge-tree --write-tree --name-only origin/feat/library-714
-  origin/feat/library-714-assets` exit 0 at e7ad82e3 + 88ac6218, no conflicted file). The two
-  halves touch disjoint files. The merged tree, checked out in a throwaway worktree (since
-  removed), typechecks: `tsc --noEmit` exit 0, `typecheck:test` exit 0.
+- **Steps 3-4 are merged.** The forecast held: `git merge-tree` at e7ad82e3 + 88ac6218 had no
+  conflicted file, and the real merge at 9e49816b + 88ac6218 had none either. See "The Steps
+  3-4 merge".
 - **Track A (the owl): march at her with a real mover, not only the flood fill.** The flood
   fill asks `isClearCircle`, which always counted a zero-length wall as solid; the mover did
   not until 773efb7c. OWL's "her middle is not flood-reached" alone would have passed with a
@@ -549,3 +733,39 @@ Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not mai
 - A Node script that imports the park (anything reaching `parkManifest.ts`) runs the acceptance
   loop on a hash miss: hydrate `.parks` from CI's artifact for the exact hash, or pin
   `LGP_PARK_RESTART` for scripts whose result cannot depend on the park.
+- **Track A (Step 6), the owl's capsule:** `visibleReachXZ(owl.root)` at rest is 0.6548, but her
+  live pose reaches 0.6674 (breathing + a ±1 rad head turn). Size OWL_RADIUS over that envelope,
+  or accept 1.3 cm of face past her capsule knowingly (the plan's aisle clearance is 3-5 cm).
+- **Track C (Step 13):** import `DRAGON_BELLY_REST_GLOW` for the belly's rest glow (do not retype
+  0.2); puffs that follow a turned head use `head.localToWorld(mouthInHead.clone())`.
+- **Every track:** add clauses after your marker in check-library's WITH A REAL CHILD; arm your
+  mutation with `mutating('<name>')` inside the clause it breaks (an unarmed one fails the run);
+  leave her standing in the room, not riding. The harness world has no cat bus.
+- **Step 9:** `story=now` goes into the building's `parseLibraryLink` (main.ts); new `/library`
+  deep-link cases go through `libraryCheck(path, spot, what, facing?)`.
+- **Step 14 (ASSET_MANIFEST):** the measured table in "Foundation, second half", the face sets (owl 4, dragon 4, cat 2;
+  512 x 412 / 346 / 408), and `dragon-wings` = ART.miniLilac (one dragon with the storybook).
+- **Track D (six chapter books) was at 9e49816b when this merge was made**, so its branch has
+  none of Steps 3-4: no creatures, no `LIBRARY_GLB_STYLES` export, no harness and no
+  `LIBRARY_CHECK_MUTATE` allow-list. When it merges back: the READABLE clause in
+  check-library.mts (the building's, around line 948) asserts
+  `LIBRARY_READABLE_SLOTS.length === 12`, a typed twelve; D's new slots must make it derive
+  from `BOOKS.length` (the brief: every count of books derives from `BOOKS.length`). This merge
+  added no typed twelve (every added line grepped: none). `readerAssets.ts`'s
+  `createStoryDragon` now takes its colours from `LIBRARY_GLB_STYLES` (one dragon look), so a
+  D edit there merges against that.
+- **Type-check a check script yourself.** Neither tsc project includes `scripts/` (see "The
+  Steps 3-4 merge"), so `tsc` exit 0 says nothing about a clause you add to check-library.mts.
+  Copy `m714b/tsconfig.scripts.json` from the orchestrator scratchpad (it points at this
+  worktree; change the paths to yours) and expect only the environmental errors listed there.
+
+## Findings outside this task (reported, not changed; from the second half)
+- **check-reptile-house's PAINTED FACES skips the wrong corner.** It skips parked UVs with
+  `u < 0.05 && v < 0.05`, but the kits park at Blender (0.02, 0.02) = glTF (0.020, 0.980) once
+  exported: measured on `rr-snake-head`, 0 vertices match its skip and 155 sit at (0.020, 0.980). So
+  its slope and nearest-row search include 155 back-face vertices. It still passes; the instrument
+  is weaker than it reads. check-library's PAINTED FACES skips `u < 0.05 && v > 0.95`.
+- **check:deep-links' reachability probe loads the bare root** (no `?seed=`), so on a source with no
+  built parks the dev middleware starts solving a pooled seed in the background (seed 6 and 10
+  here). Under `with-dev-server` the process group dies with the server; on a hand-started server,
+  killing vite's PID leaves those builds orphaned — I killed mine by PID (5 processes).

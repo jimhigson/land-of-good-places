@@ -5,6 +5,7 @@ import { ART } from '../../../art/style/artPalette';
 import { addOutline, decal, inkTint, solid, toonMaterial } from '../../../art/style/materials';
 import { createBakedFace, type Expression } from '../../../art/style/faces';
 import { applyWalk, blob, makeLimbs, stub, type AssetHandle, type CreatureHandle } from '../../../art/style/asset';
+import { LIBRARY_GLB_STYLES } from '../../../art/models/libraryAssets';
 
 /**
  * **The book reader's own models, built from primitives until Blender's arrive**
@@ -140,9 +141,24 @@ export function createStoryBook(colour: number): AssetHandle {
 const DRAGON_HEAD = 1.35;
 
 /**
+ * A colour of the baby dragon who lives in the library's secret den (#719) —
+ * its `LIBRARY_GLB_STYLES` row — so the dragon a child reads about and the one
+ * she finds behind the bookcase are one dragon, with one owner of its look.
+ */
+function denDragonColour(node: 'dragon-body' | 'dragon-head' | 'dragon-belly' | 'dragon-horns' | 'dragon-wings'): number {
+  const style = LIBRARY_GLB_STYLES[node];
+  if (!style) throw new Error(`readerAssets: LIBRARY_GLB_STYLES has no '${node}' row for the storybook dragon`);
+  return style.colour;
+}
+
+/**
  * The little dragon who would rather have books than gold. Mint, with a cream
  * tummy, two stubby cream horns, a pair of lilac wings that could not lift a
  * biscuit, and a curly tail. Origin at the feet, facing +Z, ~0.8 m tall.
+ *
+ * Its mint, tummy, horns, wings and the skin its face is painted on are the
+ * den dragon's colours ({@link denDragonColour}); only the darker feet and
+ * paws are the storybook's own.
  */
 export function createStoryDragon(): CreatureHandle {
   const root = new Group();
@@ -150,11 +166,11 @@ export function createStoryDragon(): CreatureHandle {
   const body = new Group();
   root.add(body);
 
-  const scales = toonMaterial(ART.snakeMint);
+  const scales = toonMaterial(denDragonColour('dragon-body'));
   const scalesDark = toonMaterial(PALETTE.leafLight);
-  const tummyMat = toonMaterial(ART.snakeBelly);
-  const hornMat = toonMaterial(ART.miniHorn);
-  const wingMat = toonMaterial(ART.miniLilac);
+  const tummyMat = toonMaterial(denDragonColour('dragon-belly'));
+  const hornMat = toonMaterial(denDragonColour('dragon-horns'));
+  const wingMat = toonMaterial(denDragonColour('dragon-wings'));
 
   const limbs = makeLimbs();
 
@@ -226,7 +242,7 @@ export function createStoryDragon(): CreatureHandle {
   }
 
   const face = createBakedFace({
-    fill: ART.snakeMint,
+    fill: denDragonColour('dragon-head'),
     spreadX: 1.9,
     spreadY: 1.8,
     tilt: 0.14,
