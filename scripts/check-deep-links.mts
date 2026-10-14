@@ -53,7 +53,7 @@ import {
   REPTILE_LOG_CENTRE_X,
 } from '../src/world/reptileHouse/layout.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
-import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
+import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_SECRET_STAND } from '../src/world/library/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -176,19 +176,30 @@ const GAME_READY_TIMEOUT_MS = 120000;
  */
 const AUTOSAVE_TIMEOUT_MS = 60000;
 
-/** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
-const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
-
-const CHECKS: DeepLinkCheck[] = [
-  {
-    // The Library's reading room (#716): inside, standing on the arrival just
-    // in from the door — converted back to world here from the same layout
-    // constants the building uses.
-    path: '/library',
+/**
+ * **A `/library` link lands inside the reading room, on `spot`** (room-local),
+ * converted back to world here from the layout's own constants. It waits for
+ * the link's own end state — inside *and* on the spot — never for `inside`
+ * alone: `requestEnter` teleports at the iris's midpoint, and a returning save
+ * written inside has her inside from the first frame (the Reptile House's
+ * race, 14 Oct 2026). A link that never moves her still fails: the wait times
+ * out and the read says where she is.
+ */
+function libraryCheck(path: string, spot: { readonly x: number; readonly z: number }, what: string): DeepLinkCheck {
+  return {
+    path,
     assert: async (page) => {
-      const want = { x: LIBRARY_ORIGIN_X + LIBRARY_ARRIVAL.x, z: LIBRARY_ORIGIN_Z + LIBRARY_ARRIVAL.z };
+      const want = { x: LIBRARY_ORIGIN_X + spot.x, z: LIBRARY_ORIGIN_Z + spot.z };
       await page
-        .waitForFunction(() => ((window as unknown as { game?: any }).game)?.world?.library?.playerIsInside === true, undefined, { timeout: 10000 })
+        .waitForFunction(
+          ({ x, z, tolerance }) => {
+            const g = (window as unknown as { game?: any }).game;
+            const p = g?.player?.position;
+            return g?.world?.library?.playerIsInside === true && !!p && Math.hypot(p.x - x, p.z - z) <= tolerance;
+          },
+          { x: want.x, z: want.z, tolerance: CASTLE_TOLERANCE },
+          { timeout: 10000 },
+        )
         .catch(() => {});
       const s = await page.evaluate(() => {
         const g = (window as unknown as { game?: any }).game;
@@ -204,11 +215,24 @@ const CHECKS: DeepLinkCheck[] = [
       const space = spaceAt(s.playerPos.x, s.playerPos.z);
       const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
       if (space !== SPACE_LIBRARY || off > CASTLE_TOLERANCE) {
-        return { ok: false, detail: `expected the arrival at world (${want.x}, ${want.z}); she is in '${space}' at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
+        return { ok: false, detail: `asked for ${what}, room (${spot.x}, ${spot.z}) = world (${want.x}, ${want.z}); she is in '${space}' at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}), ${off.toFixed(1)} m off` };
       }
-      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from the arrival` };
+      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}` };
     },
-  },
+  };
+}
+
+/** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
+const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
+
+const CHECKS: DeepLinkCheck[] = [
+  libraryCheck('/library', LIBRARY_ARRIVAL, 'the arrival'),
+  // At a spot in the reading room: in front of the secret shelf, turned to it —
+  // the room-local point converted back to world from the layout's own table.
+  // Primed inside the room (the plain link lands at the arrival), so the
+  // returning-save run is the case that must still move her: restored inside,
+  // then asked for a spot in it.
+  { ...libraryCheck(`/library?at=${LIBRARY_SECRET_STAND.x},${LIBRARY_SECRET_STAND.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_SECRET_STAND, LIBRARY_SECRET_STAND.what), primerPath: '/library' },
   {
     // Outside the Library's door, in the park, on the plot's own doormat.
     path: '/library-door',

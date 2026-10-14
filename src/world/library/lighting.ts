@@ -1,5 +1,6 @@
 import { Color, DirectionalLight, Group, HemisphereLight, PointLight, Vector3, type Light } from 'three';
 import { PALETTE } from '../../core/palette';
+import { LIGHT_DECAY } from '../LampPosts';
 
 /**
  * **The reading room's own light — dim, warm, and the same at midnight as at
@@ -33,8 +34,6 @@ import { PALETTE } from '../../core/palette';
 /** How bright one lamp's pool is, and how far it reaches before it is gone. */
 export const LIBRARY_POOL_INTENSITY = 5.5;
 export const LIBRARY_POOL_DISTANCE = 11;
-/** The park's lamp posts' falloff, so a pool of light dies the same way everywhere. */
-export const LIBRARY_POOL_DECAY = 1;
 /** The point lights a room in this park may spend. */
 export const LIBRARY_LIGHT_BUDGET = 8;
 
@@ -71,7 +70,8 @@ export class LibraryLighting {
     this.lights.push(fill, key);
 
     for (const pool of pools) {
-      const light = new PointLight(PALETTE.fairyWarm, LIBRARY_POOL_INTENSITY, LIBRARY_POOL_DISTANCE, LIBRARY_POOL_DECAY);
+      // The park's lamp posts' own falloff, asked of them: a pool of light dies the same way everywhere.
+      const light = new PointLight(PALETTE.fairyWarm, LIBRARY_POOL_INTENSITY, LIBRARY_POOL_DISTANCE, LIGHT_DECAY);
       light.name = `library-pool-${pool.id}`;
       light.position.set(pool.x, pool.y, pool.z);
       light.castShadow = false;

@@ -20,7 +20,7 @@ import { ANCHORS_BY_ID } from '../anchors';
 import { createLibraryExterior, createLibrarySkirt, dressedReach, type LibraryExterior } from '../../art/models/libraryAssets';
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
-import { LibraryProps, type LibrarySolid } from './props';
+import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
 import { furnishReadingRoom, type StackFader } from './furnish';
 import {
   buildReadingRoomShell,
@@ -244,6 +244,11 @@ export class Library implements GameSystem {
     return this.props.solids;
   }
 
+  /** Every top in the reading room she may stand on, with its drawn footprint — so a check can land a jump on each. */
+  get standables(): readonly LibraryStandable[] {
+    return this.props.standables;
+  }
+
   /** The building's name over its door (the owl's bubbles arrive with #714 part 4). */
   get screenLabels(): readonly ManagedLabel[] {
     return [this.nameLabel];
@@ -271,10 +276,11 @@ export class Library implements GameSystem {
   // --------------------------------------------------------------- doors
 
   /**
-   * `/library`, and `/library?at=x,z&facing=deg`: into the reading room —
+   * `/library`, and `/library?at=x,z&facing=deg` (`main.ts`'s `library`
+   * `DeepLink`, through `Game.enterLibrarySpawn`): into the reading room —
    * **from anywhere, the room included** (a save written inside restores her
-   * there before a link runs; the Reptile House's lesson). Without `at`, just
-   * inside the door, facing up the central aisle.
+   * there before a link runs; the Reptile House's lesson). `at` is room-local
+   * metres; without it, just inside the door, facing up the central aisle.
    */
   requestEnter(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
     const player = this.player;

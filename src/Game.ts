@@ -1004,9 +1004,9 @@ export class Game {
       if (stallId === 'reptileHouseDoor') return this.world.reptileHouse.requestEnterDoor();
       // The Tortoise Ride (`/tortoise-ride`): into the hall and onto the shell.
       if (stallId === 'reptileTortoiseRide') return this.world.reptileHouse.requestTortoiseRide();
-      // Not rides either: the Library's reading room (`/library`) and its
-      // front door from outside (`/library-door`), #716.
-      if (stallId === 'library') return this.world.library.requestEnter();
+      // Not a ride either: the Library's front door from outside
+      // (`/library-door`), #716. The reading room is its own `DeepLink` kind,
+      // `enterLibrarySpawn`, never a stall id.
       if (stallId === 'libraryDoor') return this.world.library.requestEnterDoor();
       return false;
     };
@@ -1560,6 +1560,15 @@ export class Game {
    */
   enterReptileSpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
     return this.world.reptileHouse.requestEnter(at);
+  }
+
+  /**
+   * `/library` and `/library?at=x,z&facing=deg` (#716): into the Library's
+   * reading room, at that room-local spot or just in from the door — from
+   * anywhere, the room included (`Library.requestEnter`).
+   */
+  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
+    return this.world.library.requestEnter(at);
   }
 
   start(): void {

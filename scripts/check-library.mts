@@ -4,8 +4,11 @@
  *
  * ```
  * pnpm run check:library
- * LIBRARY_CHECK_REMOVE='stack-2-3' pnpm run check:library    # take a solid out: must go red
- * LIBRARY_CHECK_OPEN_SHELL=1 pnpm run check:library          # open the exterior's back wall: must go red
+ * LIBRARY_CHECK_REMOVE='stack-2-3' pnpm run check:library    # take a room solid out: must go red
+ * LIBRARY_CHECK_OPEN_SHELL=1 pnpm run check:library          # open one of the cella's ring walls (1..8): must go red
+ * LIBRARY_CHECK_OPEN_CORNERS=1 pnpm run check:library        # take the corner squaring out: must go red
+ * LIBRARY_CHECK_OPEN_EDGE=1 pnpm run check:library           # open one of the plinth's edges (1 east, 2 back, 3 west): must go red
+ * LIBRARY_CHECK_DARK=1 pnpm run check:library                # the room's fill and key turned off: must go red
  * ```
  *
  * Built on the real `World` (`park-harness.mts`), so every number is measured
@@ -27,40 +30,59 @@
  *  5. MARCHED — a player-sized body marched at every bookcase, the desk and
  *     every chair from sixteen bearings, at 5 cm and at the sprint stride, and
  *     at the room's four walls: the body's edge never gets into a drawn box
- *     past the corner rounding its capsules leave.
- *  6. FACADE — the building marched at from forty-eight bearings at both
+ *     past the corner rounding its capsules leave. Every box is the **model's**
+ *     drawn footprint (`libraryAssets.ts`), never the collider's own.
+ *  6. LANDING — a jump landed on every top she may stand on (the chairs, the
+ *     desk, the bins, the cushions) finds it under her feet everywhere across
+ *     its drawn footprint; the control: just outside the footprint, the floor.
+ *  7. FACADE — the building marched at from forty-eight bearings at both
  *     strides: nothing gets inside the cella but through the doorway, nothing
- *     into a column, and a sprinter through the door stops on the recess's
- *     back wall.
- *  7. STEPS — up the steps at seven points across them: her feet on the stone.
- *  8. DOORS — both ways, on the real `Library`: the door link stands her on the
+ *     into a column, the deepest reading reported per outside corner; marches
+ *     square at the plinth's sides and back stop at its drawn edge; marches
+ *     sideways in the recess stay in the doorway; and a sprinter through the
+ *     door stops on the door leaves, inside the band.
+ *  8. STEPS — up the steps across the whole front, between and beside the
+ *     columns: wherever she stands over the drawn stone, her feet are on it.
+ *  9. DOORS — both ways, on the real `Library`: the door link stands her on the
  *     doormat; a sprint stride across the front band enters at the arrival,
  *     clear of the exit band; a stride across the exit band leaves onto clear
  *     ground on the doormat, clear of the front band; `/library` enters from
  *     inside too.
- *  9. FADE — standing behind a stack, the stack fades; standing in the open
+ * 10. FADE — standing behind a stack, the stack fades; standing in the open
  *     central aisle (the control), nothing does.
- * 10. LIGHT — no light is black or off, the pools are within the budget, and
- *     the darkest patch of floor renders brighter than `PALETTE.ink` (with a
- *     control: the same floor with no lift under a dark rig measures below it).
+ * 11. LIGHT — no light is black or off, the pools are within the budget, and
+ *     the darkest patch of floor, **lit by the room's lights alone**, renders
+ *     brighter than `PALETTE.ink` (the floor's own lift is reported, not
+ *     counted: it would pass a room with no lights at all); with a control —
+ *     the same measure under a near-dark rig goes below it.
+ * 12. READABLE — the twelve readable slots' shelves, measured, within her reach.
+ *
+ * **One seed, and why that is the whole of it.** The reading room stands at its
+ * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
+ * about it depends on the park's seed — so one seed measures it completely.
+ * The exterior *does* change with the seed (where the plot is, how the ground
+ * falls under it, how far the building leans): this check measures it on the
+ * canonical seed, and `test/procgen/invariants.ts`'s
+ * `aChildWalksUpTheLibraryStepsAndIn` walks it on every seed in the pool.
  *
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, MeshToonMaterial, Vector3, type Mesh } from 'three';
+import { Color, Group, HemisphereLight, MeshToonMaterial, Vector3, type Light, type Mesh } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
+import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
-import { libraryKeepOuts } from '../src/world/library/props.ts';
+import { END_HALF, libraryKeepOuts, type BoxFootprint } from '../src/world/library/props.ts';
 import { bookcaseCentre } from '../src/world/library/furnish.ts';
 import { buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
-import { libraryBookcaseSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
+import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
 import {
   LIBRARY_AISLES,
   LIBRARY_ARRIVAL,
@@ -75,6 +97,8 @@ import {
   LIBRARY_INNER_Z,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
+  LIBRARY_READABLE_SLOTS,
+  type FurnitureSpec,
   type LocalPoint,
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -82,6 +106,15 @@ import type { FrameContext } from '../src/core/types.ts';
 const OX = LIBRARY_ORIGIN_X;
 const OZ = LIBRARY_ORIGIN_Z;
 const CELL = 0.25;
+/**
+ * The resolver's slack: how far a body may end past a face it was pushed back
+ * to, from a sub-step's overshoot. 3 cm, the room's and the facade's both.
+ */
+const RESOLVER_SLACK = 0.03;
+/** A capsule's square-off at a corner leaves `END_HALF · (√2 − 1)` of the drawn corner outside it. */
+const CORNER_ALLOWANCE = END_HALF * (Math.SQRT2 - 1) + RESOLVER_SLACK;
+/** Feet on the stone means on its top, to float noise: the sampler returns the plate's own height. */
+const FEET_TOLERANCE = 1e-3;
 
 let bad = 0;
 const say = (ok: boolean, line: string): void => {
@@ -162,16 +195,13 @@ function march(collision: CollisionWorld, from: Vector3, to: Vector3, step: numb
   return p;
 }
 
-/** A drawn box, room-local: how far outside it (x, z) stands — negative inside. */
-interface DrawnBox {
+/** A drawn box, room-local. */
+interface DrawnBox extends BoxFootprint {
   readonly what: string;
-  readonly x: number;
-  readonly z: number;
-  readonly facing: number;
-  readonly halfLength: number;
-  readonly halfDepth: number;
 }
-function outsideBox(box: DrawnBox, x: number, z: number): number {
+
+/** How far outside a drawn box (x, z) stands — negative inside. */
+function outsideBox(box: BoxFootprint, x: number, z: number): number {
   const yaw = (box.facing * Math.PI) / 180;
   const dx = x - box.x;
   const dz = z - box.z;
@@ -181,7 +211,18 @@ function outsideBox(box: DrawnBox, x: number, z: number): number {
   return outside > 0 ? outside : Math.max(along, out);
 }
 
-/** Every drawn box the room registers, from the same tables the room is built from. */
+/** A model's own-frame point carried to a piece's spot and turned with it (`furnish.ts`'s frame). */
+function turned(piece: FurnitureSpec, x: number, z: number): LocalPoint {
+  const yaw = (piece.facing * Math.PI) / 180;
+  return { x: piece.at.x + x * Math.cos(yaw) + z * Math.sin(yaw), z: piece.at.z - x * Math.sin(yaw) + z * Math.cos(yaw) };
+}
+
+/**
+ * Every drawn box the room stands, **from the models** — each bookcase's
+ * measured size at its spot, the desk's and every chair's measured footprint
+ * at its drawn middle — never from the colliders, so a collider that has
+ * slipped off its mesh cannot measure itself.
+ */
 function drawnBoxes(): DrawnBox[] {
   const boxes: DrawnBox[] = [];
   for (const spec of LIBRARY_BOOKCASES) {
@@ -189,10 +230,16 @@ function drawnBoxes(): DrawnBox[] {
     const centre = bookcaseCentre(spec);
     boxes.push({ what: `bookcase ${spec.id}`, x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2 });
   }
-  const desk = LIBRARY_FURNITURE.find((piece) => piece.kind === 'desk');
-  if (desk) {
-    const size = libraryDeskSize();
-    boxes.push({ what: 'the desk', x: desk.at.x, z: desk.at.z, facing: desk.facing, halfLength: size.width / 2, halfDepth: size.depth / 2 });
+  const desk = libraryDeskSize();
+  const chair = libraryArmchairSize();
+  for (const piece of LIBRARY_FURNITURE) {
+    if (piece.kind === 'desk') {
+      const centre = turned(piece, desk.centreX, desk.centreZ);
+      boxes.push({ what: 'the desk', x: centre.x, z: centre.z, facing: piece.facing, halfLength: desk.width / 2, halfDepth: desk.depth / 2 });
+    } else if (piece.kind === 'armchair' || piece.kind === 'storyChair') {
+      const centre = turned(piece, chair.centreX, chair.centreZ);
+      boxes.push({ what: piece.id, x: centre.x, z: centre.z, facing: piece.facing, halfLength: chair.width / 2, halfDepth: chair.depth / 2 });
+    }
   }
   return boxes;
 }
@@ -235,7 +282,19 @@ if (openShell) {
   const wall = library.shellSolids.walls[index - 1];
   if (!Number.isInteger(index) || !wall) throw new Error(`LIBRARY_CHECK_OPEN_SHELL=${openShell}: walls are 1..${library.shellSolids.walls.length}`);
   collision.removeWall(wall);
-  note(`OPENED the exterior's wall ${index} (1 is the back) on purpose — this run must go red`);
+  note(`OPENED the cella's ring wall ${index} (back, west, east, front west, front east, west jamb, east jamb, recess back) on purpose — this run must go red`);
+}
+if (process.env['LIBRARY_CHECK_OPEN_CORNERS']) {
+  for (const corner of library.shellSolids.corners) collision.removeWall(corner);
+  note(`REMOVED the ${library.shellSolids.corners.length} corner-squaring capsules on purpose — this run must go red`);
+}
+const openEdge = process.env['LIBRARY_CHECK_OPEN_EDGE'];
+if (openEdge) {
+  const index = Number(openEdge);
+  const edge = library.shellSolids.edges[index - 1];
+  if (!Number.isInteger(index) || !edge) throw new Error(`LIBRARY_CHECK_OPEN_EDGE=${openEdge}: edges are 1..${library.shellSolids.edges.length}`);
+  collision.removeWall(edge);
+  note(`OPENED the plinth's edge ${index} (east, back, west) on purpose — this run must go red`);
 }
 const bounds = collision.playBounds;
 collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 } as never);
@@ -307,19 +366,7 @@ console.log('\nAISLES — a player disc swept along every aisle:');
 
 console.log('\nMARCHED at every case, the desk and every chair — 16 bearings, 5 cm and the sprint stride:');
 {
-  // A filled box is a capsule down its length plus a 0.1 m capsule across each
-  // end (`LibraryProps.box`), so its square corners round off by
-  // 0.1 x (sqrt 2 - 1) = 0.04 m; plus 3 cm of resolver slack.
-  const allowance = 0.1 * (Math.SQRT2 - 1) + 0.03;
   const boxes = drawnBoxes();
-  for (const piece of LIBRARY_FURNITURE) {
-    if (piece.kind !== 'armchair' && piece.kind !== 'storyChair') continue;
-    const drawn = library.solids.find((solid) => solid.what === `${piece.id} (body)`);
-    if (!drawn || drawn.points.length !== 2) continue;
-    const [a, b] = drawn.points as [LocalPoint, LocalPoint];
-    const half = Math.hypot(b.x - a.x, b.z - a.z) / 2 + drawn.radius;
-    boxes.push({ what: piece.id, x: piece.at.x, z: piece.at.z, facing: piece.facing, halfLength: half, halfDepth: drawn.radius });
-  }
   let marches = 0;
   let skipped = 0;
   let worst = { what: '', over: 0 };
@@ -340,9 +387,9 @@ console.log('\nMARCHED at every case, the desk and every chair — 16 bearings, 
       }
     }
     if (deepest > worst.over) worst = { what: box.what, over: deepest };
-    if (deepest > allowance) say(false, `${box.what}: a body's edge got ${deepest.toFixed(3)} m into it (allowance ${allowance.toFixed(3)})`);
+    if (deepest > CORNER_ALLOWANCE) say(false, `${box.what}: a body's edge got ${deepest.toFixed(3)} m into it (allowance ${CORNER_ALLOWANCE.toFixed(3)})`);
   }
-  say(worst.over <= allowance, `${boxes.length} drawn boxes, ${marches} marches; deepest a body's edge got into one: ${worst.over.toFixed(3)} m (${worst.what || 'none'}), allowance ${allowance.toFixed(3)}`);
+  say(worst.over <= CORNER_ALLOWANCE, `${boxes.length} drawn boxes, ${marches} marches; deepest a body's edge got into one: ${worst.over.toFixed(3)} m (${worst.what || 'none'}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
   note(`${skipped} march starts skipped (off the plate or inside another solid)`);
   // The walls: from inside, at 12 stations a side, nobody leaves but through the door.
   let escaped = 0;
@@ -364,25 +411,104 @@ console.log('\nMARCHED at every case, the desk and every chair — 16 bearings, 
   say(escaped === 0, `the walls hold: ${escaped} of 48 marches left the room other than through the door`);
 }
 
+console.log('\nLANDING — a jump landed on every top she may stand on:');
+{
+  let points = 0;
+  let missed = 0;
+  let controls = 0;
+  let controlWrong = 0;
+  const firstMiss: string[] = [];
+  const standables = library.standables;
+  /** Does any standable's drawn footprint (other than `except`) cover room-local (x, z)? */
+  const coveredByAnother = (x: number, z: number, except: (typeof standables)[number]): boolean =>
+    standables.some((other) => other !== except && footprintCovers(other.footprint, x, z));
+  for (const standable of standables) {
+    for (const [u, v] of grid(standable.footprint, 0)) {
+      points += 1;
+      const y = surfaces.sample(OX + u, OZ + v, standable.top + 0.1);
+      if (Math.abs(y - standable.top) > FEET_TOLERANCE) {
+        missed += 1;
+        if (firstMiss.length < 4) firstMiss.push(`${standable.what} at (${u.toFixed(2)}, ${v.toFixed(2)}): landed at ${y.toFixed(3)}, its top is ${standable.top.toFixed(3)}`);
+      }
+    }
+    // The control: a ring just outside the drawn footprint is the floor (or another top).
+    for (const [u, v] of grid(standable.footprint, 0.1)) {
+      if (coveredByAnother(u, v, standable)) continue;
+      controls += 1;
+      const y = surfaces.sample(OX + u, OZ + v, standable.top + 0.1);
+      if (Math.abs(y) > FEET_TOLERANCE) controlWrong += 1;
+    }
+  }
+  for (const line of firstMiss) say(false, line);
+  say(standables.length >= 10 && missed === 0, `${standables.length} tops, ${points} landings across their drawn footprints: ${missed} fell through`);
+  say(controls > 0 && controlWrong === 0, `CONTROL: ${controls} landings 0.1 m outside a footprint found the floor (${controlWrong} found a top in the air)`);
+  note(`the tops: ${standables.map((s) => `${s.what} ${s.top.toFixed(2)}`).join(', ')}`);
+}
+
+/** Does a standable footprint cover room-local (x, z)? */
+function footprintCovers(footprint: (typeof library.standables)[number]['footprint'], x: number, z: number): boolean {
+  if ('radius' in footprint) return Math.abs(x - footprint.x) <= footprint.radius && Math.abs(z - footprint.z) <= footprint.radius;
+  return outsideBox(footprint, x, z) <= 0;
+}
+
+/** A grid of room-local points across a footprint grown by `grow` (on its edge when growing). */
+function grid(footprint: (typeof library.standables)[number]['footprint'], grow: number): [number, number][] {
+  const out: [number, number][] = [];
+  if ('radius' in footprint) {
+    const r = footprint.radius;
+    if (grow > 0) {
+      for (let k = 0; k < 16; k += 1) {
+        const a = (k / 16) * Math.PI * 2;
+        // The square plate's corners reach r·√2; a ring outside that is clear of it.
+        out.push([footprint.x + Math.cos(a) * (r * Math.SQRT2 + grow), footprint.z + Math.sin(a) * (r * Math.SQRT2 + grow)]);
+      }
+      return out;
+    }
+    for (let i = -4; i <= 4; i += 1) for (let j = -4; j <= 4; j += 1) out.push([footprint.x + (i / 4) * r * 0.98, footprint.z + (j / 4) * r * 0.98]);
+    return out;
+  }
+  const yaw = (footprint.facing * Math.PI) / 180;
+  const along = (a: number, o: number): [number, number] => [footprint.x + a * Math.cos(yaw) + o * Math.sin(yaw), footprint.z - a * Math.sin(yaw) + o * Math.cos(yaw)];
+  if (grow > 0) {
+    const hl = footprint.halfLength + grow;
+    const hd = footprint.halfDepth + grow;
+    for (let i = -6; i <= 6; i += 1) {
+      out.push(along((i / 6) * hl, hd), along((i / 6) * hl, -hd));
+      out.push(along(hl, (i / 6) * hd), along(-hl, (i / 6) * hd));
+    }
+    return out;
+  }
+  for (let i = -6; i <= 6; i += 1) {
+    for (let j = -6; j <= 6; j += 1) out.push(along((i / 6) * footprint.halfLength * 0.98, (j / 6) * footprint.halfDepth * 0.98));
+  }
+  return out;
+}
+
 console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and the sprint stride:');
 {
   const frame = library.frame;
   const plan = library.plan;
   const local = new Vector3();
-  /** How far a body's edge is into the cella's drawn walls (the recess excepted), or into a column. */
-  const intoSolid = (x: number, z: number): { depth: number; what: string } => {
-    frame.toLocal(x, terrainHeight(x, z), z, local);
+  /**
+   * Building-local plan point of a world point, **read at the building's own
+   * base** — where its colliders' feet are. The building leans (tan up to
+   * ~0.4), so a plan point read at some other height (world y 0 is metres
+   * above the ground out on the sphere's curve) slides across the building by
+   * that height times the lean: read at y 0, a sprinter stopped on the door
+   * leaves once measured 1.3 m "inside" them.
+   */
+  const toPlan = (x: number, z: number): Vector3 => frame.toLocal(x, frame.surfaceY(x, z, 0, () => true) ?? 0, z, local);
+  /** How far a body's edge is into the cella's drawn extent (the recess excepted), or into a column. */
+  const intoSolid = (x: number, z: number): { depth: number; what: string; lx: number; lz: number } => {
+    toPlan(x, z);
     const inRecess = Math.abs(local.x) < plan.doorHalf && local.z > plan.recessBackZ;
     let depth = -Infinity;
     let what = '';
     if (!inRecess) {
       const dx = Math.abs(local.x) - plan.cellaHalfX;
-      const dzBack = plan.cellaBackZ - local.z;
-      const dzFront = local.z - plan.cellaFrontZ;
-      const dz = Math.max(dzBack, dzFront);
+      const dz = Math.max(plan.cellaBackZ - local.z, local.z - plan.cellaFrontZ);
       const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
-      const signed = outside > 0 ? outside : Math.max(dx, dz);
-      depth = PLAYER_RADIUS - signed;
+      depth = PLAYER_RADIUS - (outside > 0 ? outside : Math.max(dx, dz));
       what = 'the cella';
     }
     for (const [i, column] of plan.columns.entries()) {
@@ -392,8 +518,17 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
         what = `column ${i + 1}`;
       }
     }
-    return { depth, what };
+    return { depth, what, lx: local.x, lz: local.z };
   };
+  const corners = [
+    { name: 'back west', x: -plan.cellaHalfX, z: plan.cellaBackZ },
+    { name: 'back east', x: plan.cellaHalfX, z: plan.cellaBackZ },
+    { name: 'front west', x: -plan.cellaHalfX, z: plan.cellaFrontZ },
+    { name: 'front east', x: plan.cellaHalfX, z: plan.cellaFrontZ },
+    { name: 'mouth west', x: -plan.doorHalf, z: plan.cellaFrontZ },
+    { name: 'mouth east', x: plan.doorHalf, z: plan.cellaFrontZ },
+  ];
+  const atCorner = new Map<string, number>(corners.map((corner) => [corner.name, -Infinity]));
   let deepest = { depth: -Infinity, what: '', bearing: 0 };
   let reachedShell = 0;
   let marches = 0;
@@ -406,18 +541,96 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
       for (let travelled = 0; travelled < 20; travelled += step) {
         collision.resolveMovement(p, -Math.sin(bearing) * step, -Math.cos(bearing) * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
         const into = intoSolid(p.x, p.z);
-        if (into.depth > deepest.depth) deepest = { ...into, bearing: (i / 48) * 360 };
+        if (into.depth > deepest.depth) deepest = { depth: into.depth, what: into.what, bearing: (i / 48) * 360 };
+        if (into.what === 'the cella') {
+          for (const corner of corners) {
+            if (Math.hypot(into.lx - corner.x, into.lz - corner.z) < PLAYER_RADIUS + 1) atCorner.set(corner.name, Math.max(atCorner.get(corner.name)!, into.depth));
+          }
+        }
         closest = Math.min(closest, Math.hypot(p.x - frame.x, p.z - frame.z));
       }
-      if (closest < Math.hypot(plan.cellaHalfX, plan.cellaFrontZ) + 1.5) reachedShell += 1;
+      if (closest < Math.hypot(plan.plinthHalfX, plan.stepFrontZ) + 1.5) reachedShell += 1;
     }
   }
-  // The cella's colliders are its drawn walls exactly; a column is its base.
-  // 3 cm of resolver slack, as for the room's boxes.
-  say(deepest.depth <= 0.03, `deepest a body's edge got into the cella or a column: ${deepest.depth.toFixed(3)} m (${deepest.what}, ${deepest.bearing.toFixed(0)}° round from the door)`);
+  say(deepest.depth <= CORNER_ALLOWANCE, `deepest a body's edge got into the cella or a column: ${deepest.depth.toFixed(3)} m (${deepest.what}, ${deepest.bearing.toFixed(0)}° round from the door), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
   say(reachedShell >= marches * 0.75, `${reachedShell} of ${marches} marches reached the building (the rest met a neighbour or the doorway)`);
-  // A sprinter through the door stops on the recess's back wall, inside the band.
+  note(`deepest per outside corner: ${corners.map((corner) => `${corner.name} ${Number.isFinite(atCorner.get(corner.name)!) ? atCorner.get(corner.name)!.toFixed(3) : 'not reached'}`).join(', ')}`);
+
+  // Square at the plinth's sides and back, from the lawn: she stops at its drawn edge.
+  let edgeMarches = 0;
+  let worstEdge = { depth: -Infinity, at: '' };
+  const intoPlinth = (x: number, z: number): number => {
+    toPlan(x, z);
+    const dx = Math.abs(local.x) - plan.plinthHalfX;
+    const dz = Math.max(plan.plinthBackZ - local.z, local.z - plan.stepFrontZ);
+    const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+    return PLAYER_RADIUS - (outside > 0 ? outside : Math.max(dx, dz));
+  };
+  const approaches: { from: { x: number; z: number }; to: { x: number; z: number }; at: string }[] = [];
+  for (let z = plan.plinthBackZ + 0.4; z <= plan.stepFrontZ - 0.4; z += 0.8) {
+    for (const side of [-1, 1]) {
+      approaches.push({ from: { x: side * (plan.plinthHalfX + 3), z }, to: { x: 0, z }, at: `${side < 0 ? 'west' : 'east'} side, ${z.toFixed(1)} along` });
+    }
+  }
+  for (let x = -plan.plinthHalfX + 0.4; x <= plan.plinthHalfX - 0.4; x += 0.8) {
+    approaches.push({ from: { x, z: plan.plinthBackZ - 3 }, to: { x, z: 0 }, at: `the back, ${x.toFixed(1)} across` });
+  }
+  // And head-on at the plinth's two back corners, where its edges meet.
+  for (const side of [-1, 1]) {
+    approaches.push({
+      from: { x: side * (plan.plinthHalfX + 3), z: plan.plinthBackZ - 3 },
+      to: { x: side * plan.plinthHalfX, z: plan.plinthBackZ },
+      at: `the back ${side < 0 ? 'west' : 'east'} corner, head on`,
+    });
+  }
+  for (const approach of approaches) {
+    const from = frame.foot(approach.from.x, approach.from.z);
+    const to = frame.foot(approach.to.x, approach.to.z);
+    for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+      edgeMarches += 1;
+      const p = new Vector3(from.x, 0, from.z);
+      const dir = new Vector3(to.x - from.x, 0, to.z - from.z).normalize();
+      for (let travelled = 0; travelled < 5; travelled += step) {
+        collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        const depth = intoPlinth(p.x, p.z);
+        if (depth > worstEdge.depth) worstEdge = { depth, at: approach.at };
+      }
+    }
+  }
+  say(worstEdge.depth <= CORNER_ALLOWANCE, `${edgeMarches} marches square at the plinth's sides and back: deepest a body's edge got over its stone ${worstEdge.depth.toFixed(3)} m (${worstEdge.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+
+  // From inside the recess — sideways, into its back corners, and straight on
+  // at the door: her body never gets into the masonry round it. (The recess
+  // is shallow — the door leaves stand 0.79 m behind the cella's front — so
+  // the wings' corner caps and the recess's back wall overlap behind each
+  // jamb, leaving 0.19 m: a jamb taken out opens nothing she fits through.
+  // The recess's back wall, taken out, lets her in by metres.)
   const band = library.doorBands()[0]!;
+  let recessWorst = { depth: -Infinity, at: '' };
+  const bandCentre = toPlan(band.centreX, band.centreZ).clone();
+  const aims = [
+    { x: plan.doorHalf + 3, z: bandCentre.z, at: 'east' },
+    { x: -plan.doorHalf - 3, z: bandCentre.z, at: 'west' },
+    { x: plan.doorHalf + 3, z: plan.recessBackZ - 3, at: 'the back east corner' },
+    { x: -plan.doorHalf - 3, z: plan.recessBackZ - 3, at: 'the back west corner' },
+    { x: 0, z: plan.cellaBackZ, at: 'straight at the door' },
+  ];
+  for (const aim of aims) {
+    for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+      const start = frame.foot(0, bandCentre.z);
+      const target = frame.foot(aim.x, aim.z);
+      const p = new Vector3(start.x, 0, start.z);
+      const dir = new Vector3(target.x - start.x, 0, target.z - start.z).normalize();
+      for (let travelled = 0; travelled < 8; travelled += step) {
+        collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        const into = intoSolid(p.x, p.z);
+        if (into.what === 'the cella' && into.depth > recessWorst.depth) recessWorst = { depth: into.depth, at: aim.at };
+      }
+    }
+  }
+  say(recessWorst.depth <= CORNER_ALLOWANCE, `${aims.length * 2} marches from inside the recess: deepest a body's edge got into the masonry round it ${recessWorst.depth.toFixed(3)} m (${recessWorst.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+
+  // A sprinter through the door stops on the door leaves, inside the band.
   const start = frame.foot(0, plan.stepFrontZ + 3);
   const p = new Vector3(start.x, 0, start.z);
   let crossed = false;
@@ -427,33 +640,57 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     collision.resolveMovement(p, -Math.sin(frame.yaw) * PLAYER_LONGEST_STEP, -Math.cos(frame.yaw) * PLAYER_LONGEST_STEP, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
     if (bandCrossed(band, fx, fz, p.x, p.z)) crossed = true;
   }
-  frame.toLocal(p.x, 0, p.z, local);
-  say(crossed && local.z > plan.recessBackZ && local.z < plan.cellaFrontZ + 0.2, `a sprinter through the door crosses the band and stops at ${local.z.toFixed(2)} m along (recess back wall ${plan.recessBackZ.toFixed(2)})`);
+  toPlan(p.x, p.z);
+  say(crossed && local.z > plan.recessBackZ && local.z < plan.cellaFrontZ + 0.2, `a sprinter through the door crosses the band and stops at ${local.z.toFixed(2)} m along (door leaves' front ${plan.recessBackZ.toFixed(2)})`);
+  note(`the building at (${frame.x.toFixed(1)}, ${frame.z.toFixed(1)}) leaning tan ${frame.leanTangent().toFixed(3)}; set ${library.baseSink.toFixed(3)} m along its up; skirt ${library.skirtDepth.toFixed(2)} m`);
 }
 
-console.log('\nSTEPS — straight up the step at seven points across it, feet on the stone:');
+console.log('\nSTEPS — up the steps across the whole front, feet on the stone:');
 {
   const frame = library.frame;
   const plan = library.plan;
   const local = new Vector3();
+  const columns = plan.columns.map((column) => column.x).sort((a, b) => a - b);
+  // Every column's line, every gap's middle, the middle and either end she can
+  // reach inside the plinth's edges: the ground falls away under one end of a
+  // step on a sloping seed, and a column stops a climb at its foot.
+  const reachEnd = plan.plinthHalfX - END_HALF * 2 - PLAYER_RADIUS;
+  const across = [
+    0,
+    -reachEnd,
+    reachEnd,
+    ...columns,
+    ...columns.slice(1).map((x, i) => (x + columns[i]!) / 2),
+  ];
+  /** The highest drawn top over a world column, asked the way the plates ask it: at each top's own height. */
+  const stoneTop = (x: number, z: number): number | null => {
+    let top: number | null = null;
+    for (const [height, fromZ, toZ] of [
+      [plan.plinthTop, plan.plinthBackZ, plan.stepBackZ],
+      [plan.stepTop, plan.stepBackZ, plan.stepFrontZ],
+    ] as const) {
+      const y = frame.surfaceY(x, z, height, (lx, lz) => Math.abs(lx) <= plan.plinthHalfX && lz >= fromZ && lz <= toZ);
+      if (y !== null && (top === null || height > top)) top = height;
+    }
+    return top;
+  };
   let worst = { at: 0, deepest: 0 };
   let over = 0;
-  for (const across of [-8.3, -6.5, -3.5, 0, 3.5, 6.5, 8.3]) {
-    const start = frame.foot(across, plan.stepFrontZ + 2.5);
+  for (const x of across) {
+    const start = frame.foot(x, plan.stepFrontZ + 2.5);
     const p = new Vector3(start.x, surfaces.sample(start.x, start.z, terrainHeight(start.x, start.z) + 3), start.z);
     for (let t = 0; t < 4.5; t += 0.05) {
       collision.resolveMovement(p, -Math.sin(frame.yaw) * 0.05, -Math.cos(frame.yaw) * 0.05, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
       p.y = surfaces.sample(p.x, p.z, p.y);
-      frame.toLocal(p.x, p.y, p.z, local);
-      if (Math.abs(local.x) <= plan.plinthHalfX && local.z <= plan.stepFrontZ && local.z >= plan.recessBackZ) {
-        over += 1;
-        const top = local.z >= plan.stepBackZ ? plan.stepTop : plan.plinthTop;
-        if (top - local.y > worst.deepest) worst = { at: across, deepest: top - local.y };
-      }
+      const top = stoneTop(p.x, p.z);
+      if (top === null) continue;
+      over += 1;
+      const feet = frame.toLocal(p.x, p.y, p.z, local).y;
+      if (top - feet > worst.deepest) worst = { at: x, deepest: top - feet };
     }
   }
-  say(over > 50, `${over} samples over the stone`);
-  say(worst.deepest <= 0.02, `her feet at worst ${worst.deepest.toFixed(3)} m into the stone (${worst.at} m across; step-up rule ${BUILDING_STEP_UP} m, base set ${library.baseSink.toFixed(3)} m)`);
+  say(over > 50, `${over} samples over the stone, ${across.length} climbs`);
+  say(worst.deepest <= FEET_TOLERANCE, `her feet at worst ${worst.deepest.toFixed(3)} m into the stone (${worst.at.toFixed(2)} m across; step-up rule ${BUILDING_STEP_UP} m, base set ${library.baseSink.toFixed(3)} m)`);
 }
 
 console.log('\nDOORS — both ways, on the real building:');
@@ -534,6 +771,10 @@ console.log('\nDOORS — both ways, on the real building:');
 console.log('\nLIGHT — dim, warm, never black:');
 {
   const lights = library.lighting.lights;
+  if (process.env['LIBRARY_CHECK_DARK']) {
+    for (const light of lights) if (light.name === 'library-fill' || light.name === 'library-key') light.intensity = 1e-4;
+    note("TURNED the room's fill and key down to nothing on purpose — this run must go red");
+  }
   const black = lights.filter((light) => light.intensity <= 0 || light.color.r + light.color.g + light.color.b < 0.01);
   say(black.length === 0, `no light is black or off: ${lights.length} lights, ${black.map((light) => light.name).join(', ') || 'none'} dark`);
   const pools = lights.filter((light) => light.type === 'PointLight').length;
@@ -544,29 +785,42 @@ console.log('\nLIGHT — dim, warm, never black:');
     say(false, 'the floor mesh was not found — nothing measured');
   } else {
     const luminance = (c: Color): number => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    /** What the floor renders at (x, z): albedo x irradiance / pi (three.js's Lambert), plus its own lift. */
-    const rendered = (x: number, z: number, rig = lights, lift = true): number => {
-      const irradiance = floorIrradiance(rig, x, z);
-      const out = material.color.clone().multiply(irradiance).multiplyScalar(1 / Math.PI);
-      if (lift) out.add(material.emissive.clone().multiplyScalar(material.emissiveIntensity));
-      return luminance(out);
-    };
+    /** What the floor renders at (x, z) from the given lights alone: albedo x irradiance / pi (three.js's Lambert). */
+    const lit = (x: number, z: number, rig: readonly Light[]): number =>
+      luminance(material.color.clone().multiply(floorIrradiance(rig, x, z)).multiplyScalar(1 / Math.PI));
+    const lift = luminance(material.emissive.clone().multiplyScalar(material.emissiveIntensity));
     const ink = luminance(new Color(PALETTE.ink));
     let darkest = { at: [0, 0], value: Infinity };
     let brightest = 0;
     for (let x = -LIBRARY_INNER_X; x <= LIBRARY_INNER_X; x += 1) {
       for (let z = -LIBRARY_INNER_Z; z <= LIBRARY_INNER_Z; z += 1) {
-        const value = rendered(x, z);
+        const value = lit(x, z, lights);
         brightest = Math.max(brightest, value);
         if (value < darkest.value) darkest = { at: [x, z], value };
       }
     }
-    say(darkest.value > ink, `the darkest patch of floor, (${darkest.at[0]}, ${darkest.at[1]}), renders at ${darkest.value.toFixed(4)} linear, brighter than PALETTE.ink's ${ink.toFixed(4)}`);
+    say(
+      darkest.value > ink,
+      `the darkest patch of floor, (${darkest.at[0]}, ${darkest.at[1]}), lit by the room's lights alone renders at ${darkest.value.toFixed(4)} linear, brighter than PALETTE.ink's ${ink.toFixed(4)}`,
+    );
+    note(`the floor's own lift adds ${lift.toFixed(4)} on top (not counted: it would light a room with no lights)`);
     say(brightest > darkest.value * 2, `the pools read as pools: brightest ${brightest.toFixed(4)}, ${(brightest / darkest.value).toFixed(1)}x the darkest`);
     const dark = [new HemisphereLight(PALETTE.ink, PALETTE.ink, 0.05)];
-    const control = rendered(darkest.at[0]!, darkest.at[1]!, dark, false);
-    say(control < ink, `CONTROL: the same floor with no lift under a near-dark rig renders ${control.toFixed(4)}, below ink — the measure can fail`);
+    const control = lit(darkest.at[0]!, darkest.at[1]!, dark);
+    say(control < ink, `CONTROL: the same measure under a near-dark rig renders ${control.toFixed(4)}, below ink — the measure can fail`);
   }
+}
+
+console.log('\nREADABLE — the twelve readable books within her reach:');
+{
+  const heights = LIBRARY_READABLE_SLOTS.map((slot) => {
+    const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
+    return spec ? (libraryBookcaseSize(spec.kind).shelfTops[slot.shelf] ?? Infinity) : Infinity;
+  });
+  const highest = Math.max(...heights);
+  say(LIBRARY_READABLE_SLOTS.length === 12 && highest <= KID_REACH_HEIGHT, `${LIBRARY_READABLE_SLOTS.length} slots, the highest shelf ${highest.toFixed(3)} m, her reach ${KID_REACH_HEIGHT} m`);
+  const shelves = libraryBookcaseSize('wall').shelfTops;
+  say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
 }
 
 console.log('\nHOUSEKEEPING:');
@@ -578,7 +832,12 @@ console.log('\nHOUSEKEEPING:');
   say(library.parkRoot.parent?.name === 'anchor:library' && Boolean(parent), `the building stands in its park plot (${library.parkRoot.parent?.name ?? 'nowhere'})`);
   say(library.bookCount >= 300, `${library.bookCount} decorative books on the shelves`);
   say(library.stacks.length === LIBRARY_BOOKCASES.filter((spec) => spec.kind === 'stack').length, `${library.stacks.length} stacks, each able to fade`);
-  note(`seed's library at (${library.frame.x.toFixed(1)}, ${library.frame.z.toFixed(1)}), ${library.solids.length} room solids, ${library.shellSolids.walls.length} shell walls, ${library.shellSolids.columns.length} columns`);
+  say(library.screenLabels.includes(library.nameLabel), `the building names itself over its door ('${library.nameLabel.identity.id}')`);
+  note(
+    `seed's library at (${library.frame.x.toFixed(1)}, ${library.frame.z.toFixed(1)}), ${library.solids.length} room solids, ` +
+      `${library.shellSolids.walls.length} ring walls, ${library.shellSolids.corners.length} corner squares, ${library.shellSolids.edges.length} plinth edges, ${library.shellSolids.columns.length} columns`,
+  );
+  note('the reading room is seed-independent, so one seed measures it; the exterior is walked on every seed by aChildWalksUpTheLibraryStepsAndIn');
 }
 
 console.log(bad === 0 ? '\nAll clauses passed.' : `\n${bad} clause(s) FAILED.`);

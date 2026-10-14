@@ -1495,8 +1495,9 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
     { band: castleFrontDoorBand(facts), front: 'entrance-steps' },
     { band: facts.world.reptileHouse.doorBands()[0] ?? null, front: 'rh-mouth' },
     // The Library's door (#716) is reached up its steps, so its front — where
-    // the paving arrives and runs in under — is the lower step's.
-    { band: facts.world.library.doorBands()[0] ?? null, front: 'library-step' },
+    // the paving arrives and runs in under — is the steps' (`library.glb`'s
+    // `shell-steps`).
+    { band: facts.world.library.doorBands()[0] ?? null, front: 'shell-steps' },
   ];
   let overlapsMeasured = 0;
   for (const { band, front } of bands) {
@@ -1725,6 +1726,23 @@ function boothHollowAt(facts: ParkFacts, x: number, z: number): { id: string; de
   return null;
 }
 
+/**
+ * **The Library's plinth and steps are part of its body.** They are walk
+ * surfaces, not colliders (she walks up onto them), and the cella's ring is
+ * four walls round a hollow, so `solidDepthAt` sees none of an 18 x 14 m slab
+ * a path could be laid across. So the body is asked as well, off the measured
+ * plan in the building's own frame at the ground's height. Returns how far
+ * inside the plinth's footprint the point is, or null. The door's own overlap
+ * in under the steps is a door allowance, let through before this is asked.
+ */
+function libraryBodyAt(facts: ParkFacts, x: number, z: number): number | null {
+  const { frame, plan } = facts.world.library;
+  const local = frame.toLocal(x, terrainHeight(x, z), z, libraryScratch);
+  const depth = Math.min(plan.plinthHalfX - Math.abs(local.x), local.z - plan.plinthBackZ, plan.stepFrontZ - local.z);
+  return depth > UNDER_A_SOLID_TOLERANCE ? depth : null;
+}
+const libraryScratch = new Vector3();
+
 /** One stretch of door apron paving may lie under a building — see `pathGraph.ts`'s `doorAllowances`. */
 interface DoorAllowance {
   readonly what: string;
@@ -1771,6 +1789,7 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
   let paved = 0;
   let carried = 0;
   let otherSolids = 0;
+  let libraryAsked = 0;
   for (let k = 0; k < raster.cols * raster.rows; k += 1) {
     if (!isPaved(raster, k)) continue;
     const [x, z] = cellCentre(raster, k);
@@ -1786,8 +1805,12 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
     }
     const solid = collision.solidDepthAt(x, z, BUILT_SOLIDS);
     const booth = boothHollowAt(facts, x, z);
+    const nearLibrary = Math.hypot(x - facts.world.library.frame.x, z - facts.world.library.frame.z) <= facts.world.library.plan.reach + 1;
+    if (nearLibrary) libraryAsked += 1;
+    const library = nearLibrary ? libraryBodyAt(facts, x, z) : null;
     if (solid.depth > UNDER_A_SOLID_TOLERANCE) under.push({ k, detail: solid });
     else if (booth) under.push({ k, detail: { depth: booth.depth, what: `${booth.id}'s body (its hollow middle)`, owner: 'booth' } });
+    else if (library !== null) under.push({ k, detail: { depth: library, what: "the Library's plinth and steps", owner: 'library' } });
     else if (!walkable.allowed(k)) shut.push({ k, detail: collision.solidDepthAt(x, z) });
     else if (collision.solidDepthAt(x, z).depth > UNDER_A_SOLID_TOLERANCE) otherSolids += 1;
   }
@@ -1809,7 +1832,7 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
       `left out; ${allowances.length} door allowance(s) let through ` +
       `[${[...allowed].map(([what, cells]) => `${what} ${(cells * area).toFixed(2)} m²`).join(', ')}]; ` +
       `${under.length} under a building, booth or ` +
-      `the boundary wall. Not judged here: ${otherSolids} under other solids (garden walls, the fountain rim, posts), ` +
+      `the boundary wall (${libraryAsked} cells within the Library's reach asked of its plinth and steps). Not judged here: ${otherSolids} under other solids (garden walls, the fountain rim, posts), ` +
       `${shut.length} shut in where nobody can reach${shutPlaces.length ? ` (largest ${(Math.max(...shutPlaces.map((p) => p.cells)) * area).toFixed(2)} m² near ${fmt(shutPlaces.reduce((a, b) => (b.cells > a.cells ? b : a)).at)})` : ''}\n`,
   );
   if (paved === 0) complaints.push('no paving was judged — this measured nothing');
@@ -13379,30 +13402,39 @@ const theParkIsFurnished: Invariant = (facts) => {
 
 /**
  * **A child walks from the Library's doormat up its steps and in through its
- * door — and nowhere else gets in** (#716).
+ * door — and nowhere else gets in, and nowhere does she stand in the stone**
+ * (#716).
  *
  * The plot is new procgen (`parkManifest.ts`'s `library`), so it carries its
  * own invariant, measured on the built park: a player-sized body
- * ({@link PLAYER_RADIUS}) is walked from the plot's doormat — where the
- * paths arrive — straight at the front door's band, through the real
- * `CollisionWorld` and the real `WalkSurfaces` sampler, 5 cm at a time:
+ * ({@link PLAYER_RADIUS}) is walked through the real `CollisionWorld` and the
+ * real `WalkSurfaces` sampler, 5 cm at a time:
  *
- * 1. **She gets in.** The walk crosses the door's own band
- *    (`bandCrossed`, the door's own trigger). Anything the seed stood
- *    between the doormat and the door — a lamp post, a tree, a bench, a
- *    column — stops her short, and says how far short.
- * 2. **She walks up the steps, never through them.** Wherever her centre is
- *    over the drawn step or plinth, her feet are on its top — the sampler
- *    only lifts her onto a surface within {@link BUILDING_STEP_UP}, so a riser
- *    the ground fell away from on this seed's slope leaves her feet inside
- *    the stone, and that is measured to the centimetre.
+ * 1. **She gets in.** From the plot's doormat — where the paths arrive —
+ *    straight at the front door's band, the walk crosses it (`bandCrossed`,
+ *    the door's own trigger). Anything the seed stood between the doormat and
+ *    the door stops her short, and says how far short.
+ * 2. **She walks up the steps, never through them.** Up the full width of the
+ *    steps — every column's line, every gap between columns, the middle and
+ *    either end she can reach — and square at the plinth's sides and back from
+ *    the lawn: wherever her centre is over the drawn stone, her feet are on its
+ *    top. "Over the stone" is asked **the way the plates ask it**: each top
+ *    (`LibraryFrame.surfaceY`) at its own height in the building's leaning
+ *    frame, never her plan point read at her feet, which a lean of up to ~22°
+ *    shifts off the drawn edge (that reading once blamed a terrain riser that
+ *    did not exist). The sampler lifts her onto a surface within
+ *    {@link BUILDING_STEP_UP} only, so a riser the ground fell away from leaves
+ *    her feet in the stone, and the message carries the riser measured there.
  * 3. **The control, and the other half of "the door is the one way in":**
  *    the same walk from directly behind the building, aimed at the same band,
  *    must *not* get in — the cella's ring is closed. A walk that cannot be
  *    stopped is not measuring the door.
  *
- * Thresholds are the game's own: her radius, the step-up rule, the band.
+ * Thresholds are the game's own: her radius, the step-up rule, the band; feet
+ * "on" the stone means on its top to float noise ({@link LIBRARY_FEET_TOLERANCE}).
  */
+const LIBRARY_FEET_TOLERANCE = 1e-3;
+
 const aChildWalksUpTheLibraryStepsAndIn: Invariant = (facts) => {
   const library = facts.world.library;
   const collision = facts.world.collision;
@@ -13413,81 +13445,135 @@ const aChildWalksUpTheLibraryStepsAndIn: Invariant = (facts) => {
   const plan = library.plan;
   const fouls: string[] = [];
   const local = new Vector3();
-  const walkTowards = (
-    fromX: number,
-    fromZ: number,
-    aimX: number,
-    aimZ: number,
-  ): { crossed: boolean; short: number; deepest: number; steps: number; over: number } => {
+  const tops = [
+    { top: plan.plinthTop, fromZ: plan.plinthBackZ, toZ: plan.stepBackZ },
+    { top: plan.stepTop, fromZ: plan.stepBackZ, toZ: plan.stepFrontZ },
+  ];
+  /** The highest drawn top over a world column, each asked at its own height in the leaning frame — or null. */
+  const stoneTop = (x: number, z: number): number | null => {
+    let found: number | null = null;
+    for (const { top, fromZ, toZ } of tops) {
+      if (found !== null && found >= top) continue;
+      const y = frame.surfaceY(x, z, top, (lx, lz) => Math.abs(lx) <= plan.plinthHalfX && lz >= fromZ && lz <= toZ);
+      if (y !== null) found = top;
+    }
+    return found;
+  };
+  interface Walk {
+    readonly crossed: boolean;
+    readonly short: number;
+    readonly deepest: number;
+    /** The riser from the ground to the drawn top where her feet went deepest. */
+    readonly riser: number;
+    readonly steps: number;
+    readonly over: number;
+  }
+  const walkTowards = (fromX: number, fromZ: number, aimX: number, aimZ: number, travel = 40): Walk => {
     const p = new Vector3(fromX, surfaces.sample(fromX, fromZ, terrainHeight(fromX, fromZ) + 3), fromZ);
     let crossed = false;
     let deepest = 0;
+    let riser = 0;
     let over = 0;
     let steps = 0;
     let still = 0;
-    for (; steps < 800 && !crossed; steps += 1) {
-      const toX = aimX - p.x;
-      const toZ = aimZ - p.z;
-      if (Math.hypot(toX, toZ) < 0.05) break;
-      const length = Math.hypot(toX, toZ);
-      if (length < 1e-6) break;
+    const directionX = aimX - fromX;
+    const directionZ = aimZ - fromZ;
+    const length = Math.hypot(directionX, directionZ);
+    if (length < 1e-6) return { crossed, short: 0, deepest, riser, steps, over };
+    for (; steps * 0.05 < travel && !crossed; steps += 1) {
       const fromPX = p.x;
       const fromPZ = p.z;
-      collision.resolveMovement(p, (toX / length) * 0.05, (toZ / length) * 0.05, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+      collision.resolveMovement(p, (directionX / length) * 0.05, (directionZ / length) * 0.05, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
       p.y = surfaces.sample(p.x, p.z, p.y);
       if (bandCrossed(band, fromPX, fromPZ, p.x, p.z)) crossed = true;
       still = Math.hypot(p.x - fromPX, p.z - fromPZ) < 1e-4 ? still + 1 : 0;
       if (still > 20) break;
-      // Over the drawn stone: her feet on its top, not in it.
-      frame.toLocal(p.x, p.y, p.z, local);
-      if (Math.abs(local.x) <= plan.plinthHalfX && local.z >= plan.recessBackZ && local.z <= plan.stepFrontZ) {
-        over += 1;
-        const top = local.z >= plan.stepBackZ ? plan.stepTop : plan.plinthTop;
-        deepest = Math.max(deepest, top - local.y);
+      const top = stoneTop(p.x, p.z);
+      if (top === null) continue;
+      over += 1;
+      const feet = frame.toLocal(p.x, p.y, p.z, local).y;
+      if (top - feet > deepest) {
+        deepest = top - feet;
+        riser = top - frame.toLocal(p.x, terrainHeight(p.x, p.z), p.z, local).y;
       }
     }
-    return { crossed, short: Math.hypot(band.centreX - p.x, band.centreZ - p.z), deepest, steps, over };
+    return { crossed, short: Math.hypot(band.centreX - p.x, band.centreZ - p.z), deepest, riser, steps, over };
   };
-  const walk = (fromX: number, fromZ: number): ReturnType<typeof walkTowards> => walkTowards(fromX, fromZ, band.centreX, band.centreZ);
-  // Up the steps everywhere along them, not only on the path's line: straight
-  // in, square to the facade, from 2.5 m out, at seven points across — the
-  // ground falls away under one end of the step on a sloping seed.
-  let worstAcross = { at: 0, deepest: 0 };
-  for (const across of [-8.3, -6.5, -3.5, 0, 3.5, 6.5, 8.3]) {
-    const start = frame.foot(across, plan.stepFrontZ + 2.5);
-    const target = frame.foot(across, plan.stepBackZ - 1);
-    const climb = walkTowards(start.x, start.z, target.x, target.z);
-    if (climb.deepest > worstAcross.deepest) worstAcross = { at: across, deepest: climb.deepest };
+
+  // Up the steps across the whole front, square to the facade, from 2.5 m out.
+  const edge = library.shellSolids.edges[0]?.halfThickness ?? 0;
+  const reachEnd = plan.plinthHalfX - 2 * edge - PLAYER_RADIUS;
+  const columns = plan.columns.map((column) => column.x).sort((a, b) => a - b);
+  const across = [0, -reachEnd, reachEnd, ...columns, ...columns.slice(1).map((x, i) => (x + columns[i]!) / 2)];
+  let worstClimb = { at: 0, deepest: 0, riser: 0, over: 0 };
+  let climbOver = 0;
+  for (const x of across) {
+    const start = frame.foot(x, plan.stepFrontZ + 2.5);
+    const target = frame.foot(x, plan.plinthBackZ);
+    const climb = walkTowards(start.x, start.z, target.x, target.z, 6);
+    climbOver += climb.over;
+    if (climb.deepest > worstClimb.deepest) worstClimb = { at: x, deepest: climb.deepest, riser: climb.riser, over: climb.over };
   }
-  if (worstAcross.deepest > 0.02) {
+  if (worstClimb.deepest > LIBRARY_FEET_TOLERANCE) {
     fouls.push(
-      `walking straight up the Library's step ${worstAcross.at} m across its front, her feet went ` +
-        `${worstAcross.deepest.toFixed(3)} m below the stone — a riser past what she can step up (${BUILDING_STEP_UP} m) on this seed's ground`,
+      `walking straight up the Library's steps ${worstClimb.at.toFixed(2)} m across its front, her feet went ` +
+        `${worstClimb.deepest.toFixed(3)} m below the stone she stood over — the riser there measures ` +
+        `${worstClimb.riser.toFixed(3)} m (step-up ${BUILDING_STEP_UP} m)`,
     );
   }
-  const front = walk(library.doormat.x, library.doormat.z);
+  if (climbOver === 0) fouls.push("the climbs up the Library's steps never stood over its stone — they measured nothing of it");
+
+  // Square at the plinth's sides and back, from the lawn: never in the stone.
+  let worstSide = { at: '', deepest: 0, riser: 0 };
+  let sideWalks = 0;
+  for (let z = plan.plinthBackZ + 0.5; z <= plan.stepFrontZ - 0.3 + 1e-9; z += 1) {
+    for (const side of [-1, 1]) {
+      const start = frame.foot(side * (plan.plinthHalfX + 3), z);
+      const target = frame.foot(0, z);
+      const walk = walkTowards(start.x, start.z, target.x, target.z, 4.5);
+      sideWalks += 1;
+      if (walk.deepest > worstSide.deepest) worstSide = { at: `the ${side < 0 ? 'west' : 'east'} side, ${z.toFixed(1)} m along`, deepest: walk.deepest, riser: walk.riser };
+    }
+  }
+  for (let x = -plan.plinthHalfX + 0.5; x <= plan.plinthHalfX - 0.5 + 1e-9; x += 1.5) {
+    const start = frame.foot(x, plan.plinthBackZ - 3);
+    const target = frame.foot(x, 0);
+    const walk = walkTowards(start.x, start.z, target.x, target.z, 4.5);
+    sideWalks += 1;
+    if (walk.deepest > worstSide.deepest) worstSide = { at: `the back, ${x.toFixed(1)} m across`, deepest: walk.deepest, riser: walk.riser };
+  }
+  if (worstSide.deepest > LIBRARY_FEET_TOLERANCE) {
+    fouls.push(
+      `walking at the Library's plinth from the lawn at ${worstSide.at}, her feet went ${worstSide.deepest.toFixed(3)} m ` +
+        `below the stone she stood over — the riser there measures ${worstSide.riser.toFixed(3)} m (step-up ${BUILDING_STEP_UP} m)`,
+    );
+  }
+
+  const front = walkTowards(library.doormat.x, library.doormat.z, band.centreX, band.centreZ);
   if (!front.crossed) {
     fouls.push(
       `a child walking from the Library's doormat ${fmt([library.doormat.x, library.doormat.z])} at its door stopped ` +
         `${front.short.toFixed(2)} m short of ${band.what} — something stands between the path and the door`,
     );
   }
-  if (front.deepest > 0.02) {
+  if (front.deepest > LIBRARY_FEET_TOLERANCE) {
     fouls.push(
-      `walking up the Library's steps her feet went ${front.deepest.toFixed(3)} m below the stone she stood over — ` +
-        `a riser past what she can step up (${BUILDING_STEP_UP} m) on this seed's ground`,
+      `walking up the Library's steps from its doormat her feet went ${front.deepest.toFixed(3)} m below the stone she ` +
+        `stood over — the riser there measures ${front.riser.toFixed(3)} m (step-up ${BUILDING_STEP_UP} m)`,
     );
   }
   if (front.over === 0) fouls.push("the walk to the Library's door never stood over its steps — it measured nothing of them");
   const behind = frame.foot(0, plan.plinthBackZ - 3);
-  const back = walk(behind.x, behind.z);
+  const back = walkTowards(behind.x, behind.z, band.centreX, band.centreZ);
   if (back.crossed) {
     fouls.push(`CONTROL: a walk from behind the Library ${fmt([behind.x, behind.z])} reached its door through the back wall — the cella's ring is open`);
   }
   process.stderr.write(
     `  aChildWalksUpTheLibraryStepsAndIn: seed ${facts.seed}, doormat to door in ${front.steps} x 5 cm steps ` +
       `(${front.over} over the stone, feet at worst ${front.deepest.toFixed(3)} m into it), ${front.crossed ? 'in' : 'NOT in'}; ` +
-      `seven climbs across the step, feet at worst ${worstAcross.deepest.toFixed(3)} m into it (${worstAcross.at} m across); ` +
+      `${across.length} climbs across the steps (${climbOver} over the stone), feet at worst ${worstClimb.deepest.toFixed(3)} m into it; ` +
+      `${sideWalks} walks at the sides and back, feet at worst ${worstSide.deepest.toFixed(3)} m into it; ` +
+      `lean tan ${frame.leanTangent().toFixed(3)}, set ${library.baseSink.toFixed(3)} m; ` +
       `from behind: ${back.crossed ? 'IN (open)' : `stopped ${back.short.toFixed(2)} m short`}\n`,
   );
   return fouls;
