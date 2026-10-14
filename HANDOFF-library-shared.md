@@ -71,7 +71,35 @@ the integration branch later without conflicts.
       check:served-deep-links exit 0, all 12 lines OK.
 - [x] second local `pnpm run check` (with 4a39b06c): **exit 0 after 1734 s**, all 8 shards.
 - [x] `pnpm run build` with CI's 16 parks in `.parks`: exit 0, 16 files in dist/parks.
-- [ ] `pnpm run test:procgen` locally with CI's 16 parks (running)
+- [x] `pnpm run test:procgen` locally with CI's 16 parks: **exit 0 after 343 s — Test Files 45
+      passed (45), Tests 2131 passed (2131)**, no skips; every seed's restart read from the
+      manifest (0:0 1:1 2:7 3:8 4:0 5:3 6:5 7:1 8:1 9:0 10:0 11:0 12:2 13:0 14:0 15:0).
+- [ ] CI again on the final code head (with 4a39b06c) — see the last line of this file.
+
+## For whoever integrates this (and builds Steps 3-14 on it)
+- **What this branch gives the library:** `lineSeconds` (ui/speechTiming), `Player.isRunning`,
+  `'listening'` + `applyListeningPose`, `CollisionWorld.restoreWall` + `JUMP_CLEARANCE_GRACE`,
+  `SpritePuffs`, `visibleReachXZ`, `'card'` kind/category + `gameStore.grantKeepsakeOnce` +
+  `world/library/libraryCard.ts` (+ its vitest in procgen shard 6), `scripts/lib/seatedPose.mts`
+  (`FLOOR_TOLERANCE`, `SEAT_TOLERANCE`, `seatedErrors`), `entities/npc/residentLooks.ts`,
+  `PLAYER_SEPARATION` export, `ResidentSpec.driver`, the furniture separation rules,
+  `NpcCharacter.beginSeated/endSeated/seated`, `playSecretDoor/playSecretThunk/playPurr`.
+- **Not done here, by the task's scope:** Step 1 change 5 (props.ts `box` returning walls,
+  `attach`/`detach`, `den?` on KeepOut/StandSpot — the building branch owns those files), Step 2's
+  `libraryLines.ts` and the brevity loop (they need `BOOKS` from the books branch), and everything
+  in Steps 3-14 that lives in `src/world/library/` or the checks.
+- **One merge conflict to expect:** `src/state/types.ts`, tail of `CUTE_CATEGORIES` (see "Merge
+  forecast"). Everything else merges clean against art, building and books.
+- **The SIT red must rotate both legs** (see Decisions: seatedErrors' one-foot blind spot).
+- Scratch instruments (not committed), in the orchestrator scratchpad `library-shared/`:
+  `measure-listen.mts`, `exercise-seated.mts`, `exercise-seams.mts`, `exercise-separation.mts`,
+  `exercise-driver.mts`, `compare.sh`, `run-checks.sh`; logs under `baseline/` and `after/`.
+
+## Taking over at zero notice
+`cd .claude/worktrees/library-shared` (or `git worktree add <path> feat/library-714-shared`),
+`fnm use --install-if-missing`, `pnpm install --frozen-lockfile`. Parks for this source
+(a51ca115…): `gh run download 38550516901 --name parks-a51ca115291f87d7505e1563f745a7410e4551c4fcfeb3867325ec1aba0febfc --dir .parks`
+— any closure edit changes the hash and needs `LGP_SEEDS=5 pnpm run build:parks` (≈15 min) or CI.
 
 ## Merge forecast (trial merges with `git merge-tree`, no refs touched)
 - with origin/art/library-715: clean. With origin/feat/library-building-716: clean (incl.
