@@ -37,7 +37,9 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
         and SECRETS loops — 9f650da1. Both reds proved (below). Groundwork state slice verified.
   - [x] Step 0 baselines (foundation code) and the same ten after these edits: all 0, identical
         but for brevity's intended +65 (table below).
-  - [ ] The PR's CI (run 38580957653 on 8f0cb8c3) read, every job.
+  - [x] The PR's CI (run 38580957653 on 8f0cb8c3) read, every job: **one red, fixed at
+        cause on this branch** — procgen shard 4's `railRaceRoadBounded` (a stale seed pin; see
+        "The PR's CI" below), 04e98676. CI_SHARD8_PLACEHOLDER
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
       foundation head; then Step 9, Step 10's labels/tap spacing, Step 14 and the cross-part
@@ -371,6 +373,26 @@ dividing by a zero length. Documented on `WallCollider`.
   --reporter=verbose` exit 0, **Test Files 1 passed (1), Tests 4 passed (4)**, all four named
   cases ticked, none skipped. `check:seed-coverage` exit 0 ("procgen shards: 46 suite files
   over 6 shards (5/5/5/8/8/15 files), each exactly once"). `tsc --noEmit` 0, `typecheck:test` 0.
+
+### The PR's CI on the foundation (run 38580957653, head 8f0cb8c3; not dispatched here)
+Parks: all 16 found (restarts 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:5 10:9 11:4 12:0 13:6 14:8
+15:4; seeds 10 and 14 needed blocks past the first two). Then: Every seed builds, Checks build,
+Entrance road, Deploy PR preview, Swept bus, Coplanar faces, Walk reach, Checks shards 1-7,
+Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not main);
+**Procgen invariants shard 4 — failure**, and so the `Procgen invariants` gate.
+- **The red:** `test/railRaceRoadBounded.test.ts` — "Test timed out in 240000ms"; the solve
+  itself ran 398319 ms and every assertion in it held (`exhausted=decision-zero-per-feature:
+  road still refuses after its 2 unwinds ... turns=179 unwinds=20 decision-zero=11
+  road-unwinds=2 road-refusals=3`).
+- **Root cause:** its pin, seed 10 restart 0, went stale with the Library's plot (#716). Building's
+  own CI (38569170320) ran the same 179-turn solve in 228132 ms and passed by 12 s — luck, which
+  is flaky, which is failing. Building re-pinned the sibling `railRaceRefusals` (d10fd02d) and
+  missed this one.
+- **Fix (04e98676):** re-pinned to seed 3 restart 7, picked by measuring the mutated solve of the
+  seven fastest shipped plans of this run side by side (table in the test's header): 61 turns,
+  0 decision-zero; the real file at the default timeout **20.9 s, 1 passed**. Control red at the
+  new pin: the mutation off, the solve completes (44 turns) and the test fails "expected null to
+  be an instance of Error". Outside the park source closure (hash unchanged).
 
 ### Red transcripts (each with what it was proved against)
 - **check:wall-tunnelling, the zero-length clause.** Mutation: Collision.ts's three
