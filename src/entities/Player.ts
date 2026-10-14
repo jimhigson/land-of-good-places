@@ -48,6 +48,10 @@ import type { WornJetpack } from './WornJetpack';
  * Sits between a flat-out walk (`PLAYER_MAX_SPEED`, 7.4) and a flat-out
  * sprint (× `PLAYER_SPRINT_MULTIPLIER`, 11.1), nearer the walk so the dust
  * starts early in the sprint rather than only at the very top of it.
+ *
+ * Private, and read in exactly one place: {@link Player.isRunning}. The dust,
+ * `secret.dust` and the library owl's shush all ask that getter, so "running"
+ * means one thing everywhere it is asked.
  */
 const DUST_SPEED = PLAYER_MAX_SPEED * 1.12;
 
@@ -796,6 +800,28 @@ export class Player implements GameSystem {
   }
 
   /**
+   * **Is she running?** — the one definition, read by everything that cares
+   * about the difference between a run and a walk.
+   *
+   * True when her feet are on the ground, no ride has her, and the planar
+   * speed she is actually moving at — `hypot(velocity.x, velocity.z)`, the
+   * very number `update` measures for her facing, her gait and her dust — is at
+   * least {@link DUST_SPEED}. That is GAME_DESIGN.md's line between a run and a
+   * walk, and it is a speed rather than `input.isDown('sprint')` for the reason
+   * `DUST_SPEED`'s own note gives: holding sprint while wading is not running,
+   * and nor is the first instant of a sprint before she has got anywhere.
+   *
+   * Three things ask, and before this getter existed they could only have
+   * asked by keeping a copy: the dust off her heels ({@link spawnRunningDust}),
+   * the `secret.dust` card it awards, and the library owl's "Shhh!" (#718).
+   * `DUST_SPEED` itself stays private, so nobody can rebuild the rule beside
+   * it and drift.
+   */
+  get isRunning(): boolean {
+    return !this.airborne && !this.ridingFlag && Math.hypot(this.velocity.x, this.velocity.z) >= DUST_SPEED;
+  }
+
+  /**
    * True where she may actually take off: a jet pack is on her back **and**
    * there is room here to use it.
    *
@@ -1342,7 +1368,7 @@ export class Player implements GameSystem {
     this.walkPhase += planarSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
     if (this.walkPhase > TAU) this.walkPhase -= TAU;
 
-    this.spawnRunningDust(planarSpeed);
+    this.spawnRunningDust();
 
     this.animate(context, hopHeight);
   }
@@ -1398,18 +1424,25 @@ export class Player implements GameSystem {
    * Halving `step` recovers which foot it is, so a foot's pair of puffs both
    * come off the same heel.
    *
-   * Not while airborne — dust comes off the ground, and there is none up
-   * there — and not while riding, where her feet are not doing the moving.
+   * Only while she {@link isRunning} — which is also why it is not while
+   * airborne (dust comes off the ground, and there is none up there) and not
+   * while riding (her feet are not doing the moving). That getter is the one
+   * owner of the rule; this asks it rather than restating it.
+   *
+   * The early return comes **after** the walk-phase bookkeeping, never before
+   * it: `previousWalkPhase` has to follow her on walking frames too, or the
+   * first frame of a sprint would compare against a phase left over from her
+   * last run and drop a puff with no footfall under it.
    *
    * Allocates nothing. The trig is on `facingAngle`, which is already the
    * direction she is actually pointing, so the puffs come off her heels rather
    * than out of her velocity vector during a turn.
    */
-  private spawnRunningDust(planarSpeed: number): void {
+  private spawnRunningDust(): void {
     const previous = this.previousWalkPhase;
     this.previousWalkPhase = this.walkPhase;
 
-    if (this.airborne || this.ridingFlag || planarSpeed < DUST_SPEED) return;
+    if (!this.isRunning) return;
     const step = Math.floor(this.walkPhase / DUST_STRIDE);
     if (step === Math.floor(previous / DUST_STRIDE)) return;
 
