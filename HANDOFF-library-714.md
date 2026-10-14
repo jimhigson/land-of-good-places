@@ -334,6 +334,12 @@ dividing by a zero length. Documented on `WallCollider`.
     libraryLine:owl.welcome  (src/world/library/libraryLines.ts)
       2 sentences; a line is one
   ```
+- **check:brevity's library vacuity guard** (ec0533c4). Mutation: the template branch of
+  `libraryCopyForBrevity` fed no titles (`BOOKS.slice(0, 0)`); reverted. Exit 1:
+  ```
+  Error: check:brevity: libraryCopyForBrevity() measured 31 pieces and rendered no template with ripikaBalloon, biscuitBreakfast, trillaHigh, catBusDay, duckBars, bookDragon, foreverSlide, fireflies, fountainWish, keychainStall, bigParade, goodnightPark — the walk over libraryLines.ts is broken (or the Library has no templates any more, and this guard should go with them)
+  ```
+  (31 = the 21 fixed lines and list entries, 9 chips and the card: everything but the 24 renders.)
 - **vitest library-card, Step 2 red 2.** Mutation: the `'card',` line deleted from
   `INVENTORY_KINDS` (src/state/types.ts); reverted with `git checkout`. Input: the test's own
   fixtures (a fresh store; LIBRARY_CARD granted twice). Exit 1, `Tests  2 failed | 2 passed (4)`:
