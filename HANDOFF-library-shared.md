@@ -38,7 +38,20 @@ the integration branch later without conflicts.
       as shipped (133 measures)**, digest **ea17dc22afe69179 — byte-for-byte main's seed 5 digest**
       (main's manifest at e272e0c0…: `'5': 'ea17dc22afe69179'`). Same restart history as main's
       acceptance. The refactors did not move the park.
-- [ ] the 12 baselines again; compare logs line by line with the before set
+- [x] the 12 baselines again (same .parks-hydrated seed 5 restart 3): **all exit 0, and all twelve
+      logs are byte-identical to the baseline logs** (`cmp` on the whole files, noise lines
+      included: castle 72 → 72, slide-rider 144 → 144). Identical counts, identical numbers.
+- [x] the riding/seated separation rules exercised on the real park (scratch
+      `exercise-separation.mts`, private `separateFromPlayer` called directly, the pair isolated):
+      gap 0.5 m (overlap 1.020, cap 0.0500): CONTROL both move 0.0500; riding → child 0.0500,
+      player never nudged; seated → child 0, player 0.0500; both → neither. Gap
+      PLAYER_SEPARATION−0.04 (whole 0.04 < cap): CONTROL each side 0.0200; riding → child 0.0400;
+      seated → player 0.0400. `ResidentSpec.driver` (scratch `exercise-driver.mts`, a second
+      NpcSystem on the real park): factory called once, its driver drives the body, handed the
+      resident's own fresh stream (first draw 0.088039 = `new Rng(0x0b00c5).unit()`); a resident
+      without one still gets a WaypointDriver.
+- [ ] `pnpm run check` locally (running), `pnpm run test:procgen` (needs all 16 parks: take
+      `parks-<hash>` from CI run 38550516901's Parks job), `pnpm run build` again with parks
 
 ## Decisions (made here, with reasons)
 - **isRunning guard placement.** The plan says spawnRunningDust "starts with
