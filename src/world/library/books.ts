@@ -423,20 +423,18 @@ export const BOOKS: readonly LibraryBook[] = [
       {
         text: 'Hop in the cart for the Rail Race.',
         picture: {
-          cast: [
-            { model: 'cart', colour: 'markerPink', turn: 30 },
-            { model: 'kid', mood: 'happy', pose: 'wave', at: [1.5, 0, 0.6], turn: -20 },
-          ],
+          cast: [{ model: 'raceCart', colour: 'markerPink', mood: 'happy', turn: 30 }],
           sky: 'skyDayBottom',
           ground: 'grassLight',
+          decor: ['sparkles'],
         },
       },
       {
         text: 'A bar is coming, so duck down!',
         picture: {
           cast: [
-            { model: 'raceCart', colour: 'markerPink', mood: 'surprised', pose: 'duck', turn: 55, at: [-1.1, 0, 0] },
-            { model: 'duckBar', turn: 55, at: [1.3, 0, -0.9] },
+            { model: 'raceCart', colour: 'markerPink', mood: 'surprised', turn: 60, at: [-1.2, 0, 0.3] },
+            { model: 'duckBar', turn: 60, at: [2.2, 0, -1.6] },
           ],
           sky: 'skyDayBottom',
           ground: 'grassLight',
@@ -447,8 +445,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Whoosh, under the bar we go.',
         picture: {
           cast: [
-            { model: 'raceCart', colour: 'markerPink', mood: 'happy', pose: 'duck', turn: 55 },
-            { model: 'duckBar', turn: 55 },
+            { model: 'raceCart', colour: 'markerPink', mood: 'happy', pose: 'duck', turn: 35 },
+            { model: 'duckBar', turn: 35 },
           ],
           sky: 'skyDayBottom',
           ground: 'grassLight',
@@ -459,9 +457,9 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Duck, duck, duck again!',
         picture: {
           cast: [
-            { model: 'duckBar', turn: 55, at: [-1.6, 0, 1.1] },
-            { model: 'raceCart', colour: 'markerPink', mood: 'happy', pose: 'duck', turn: 55 },
-            { model: 'duckBar', turn: 55, at: [1.6, 0, -1.1] },
+            { model: 'duckBar', turn: 35, at: [1.15, 0, -1.6] },
+            { model: 'raceCart', colour: 'markerPink', mood: 'happy', pose: 'duck', turn: 35 },
+            { model: 'duckBar', turn: 35, at: [-1.15, 0, 1.6] },
           ],
           sky: 'skyDayBottom',
           ground: 'grassLight',
@@ -708,8 +706,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Up, up goes your wish, like a star!',
         picture: {
           cast: [
-            { model: 'statue', size: 0.55 },
-            { model: 'star', colour: 'flowerYellow', at: [0.7, 2.3, 0.3], size: 1.3 },
+            { model: 'statue', size: 0.45, at: [-0.4, 0, 0] },
+            { model: 'star', colour: 'flowerYellow', at: [1.0, 3.0, 0.8], size: 2.2 },
           ],
           sky: 'skyDayBottom',
           ground: 'waterTop',
