@@ -50,8 +50,29 @@ the integration branch later without conflicts.
       NpcSystem on the real park): factory called once, its driver drives the body, handed the
       resident's own fresh stream (first draw 0.088039 = `new Rng(0x0b00c5).unit()`); a resident
       without one still gets a WaypointDriver.
-- [ ] `pnpm run check` locally (running), `pnpm run test:procgen` (needs all 16 parks: take
-      `parks-<hash>` from CI run 38550516901's Parks job), `pnpm run build` again with parks
+- [x] first local `pnpm run check` (fad0e9f6-equivalent, seed 5 parks): shards 1-4 green, then
+      **exit 1 at shard 5's check:served-deep-links**: `/reptile-house?at=-13,0&facing=90
+      (continueGame)` "asked to stand at hall (-13, 0) = world (587, -600), but the player is at
+      (606.0, -584.2) — 24.7 m off". Reproduced on a rerun, **and on an untouched origin/main
+      control worktree** (`.claude/worktrees/library-shared-control`, d2cdb1f2, main's own parks
+      from library-art): same line, exit 1. So not this branch. Root cause (diagnosed on the
+      control with a scratch read before and 3 s after): the check read her while the link's change
+      of space was still running (`changing: true`, on the restored save's arrival spot); 3 s later
+      `changing: false` and she stood on (587, −600). **Already fixed on feat/library-building-716
+      as 69dfa5df**; brought in here byte-for-byte as **4a39b06c**, so the integration sees the
+      same hunk on both sides (trial merge: clean). check-deep-links.mts is outside the park
+      source closure, so the park hash and CI's parks are unchanged. Rerun after the fix:
+      check:served-deep-links exit 0, all 12 lines OK.
+- [ ] second local `pnpm run check`, `pnpm run test:procgen` (needs all 16 parks: CI run
+      38550516901's `parks-<hash>` artifact), `pnpm run build` again with parks
+
+## Merge forecast (trial merges with `git merge-tree`, no refs touched)
+- with origin/art/library-715: clean. With origin/feat/library-building-716: clean (incl.
+  check-deep-links.mts). Building + books simulated together (clean), then this branch:
+  **one conflict, src/state/types.ts, the tail of CUTE_CATEGORIES** — both append after
+  'keychain'. Resolution: keep both blocks, books' first, each with its own `/**` opener:
+  `'keychain', /** …#717 book doc… */ 'book', /** …#718 card doc… */ 'card', ] as const;`.
+  test/procgenShards.ts auto-merges (this branch inserts before live-look; books appends at the end).
 
 ## Decisions (made here, with reasons)
 - **isRunning guard placement.** The plan says spawnRunningDust "starts with
