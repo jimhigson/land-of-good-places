@@ -16,7 +16,8 @@ import {
   type WebGLRenderer,
 } from 'three';
 import { PALETTE } from '../../../core/palette';
-import { gameStore, type PlayerState } from '../../../state';
+import { gameStore, type GameState } from '../../../state';
+import { isFacePaintDesign } from '../../../entities/kidDressing';
 import { minTextPx, uiUnitPx } from '../../../core/uiScale';
 import { disposeTree, toonMaterial } from '../../../art/style/materials';
 import {
@@ -117,8 +118,15 @@ export interface BookReaderOptions {
   readonly onClosed?: () => void;
 }
 
-/** The girl in the pictures is the one reading: the player's own look. */
-export function readerLookFromPlayer(player: PlayerState): ReaderLook {
+/**
+ * The girl in the pictures is the one reading: the player's own look, down to
+ * the face paint, hat and keyring she has on right now.
+ */
+export function readerLookFromPlayer(state: GameState): ReaderLook {
+  const player = state.player;
+  /** A worn item's catalogue id, or `''` — the same lookup `WornHat` and `WornKeychain` make. */
+  const worn = (uid: string | null): string =>
+    (uid === null ? undefined : state.inventory.find((item) => item.uid === uid)?.id) ?? '';
   return {
     skin: player.skinColour,
     hair: player.hairColour,
@@ -131,6 +139,9 @@ export function readerLookFromPlayer(player: PlayerState): ReaderLook {
     shoeKind: player.shoeKind,
     shoe: player.shoeColour,
     glasses: player.glassesKind,
+    facePaint: isFacePaintDesign(player.facePaint) ? player.facePaint : null,
+    hatId: worn(state.wornHatUid),
+    keychainId: worn(state.wornKeychainUid),
   };
 }
 
@@ -304,7 +315,7 @@ export class BookReader {
     this.turn = null;
     this.queued = 0;
     this.finishedThisOpening = false;
-    this.look = readerLookFromPlayer(gameStore.get().player);
+    this.look = readerLookFromPlayer(gameStore.get());
 
     if (!this.open) {
       this.open = true;

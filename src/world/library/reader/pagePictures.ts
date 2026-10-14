@@ -19,7 +19,8 @@ import { visiblePoints } from '../../../art/style/measure';
 import { createPet } from '../../../art/models/pets';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createKid, type KidHandle } from '../../../art/models/kid';
-import { createGlasses } from '../../../art/models/glasses';
+import type { FacePaintDesign } from '../../../art/style/faces';
+import { dressKid } from '../../../entities/kidDressing';
 import { createRipikaStatue } from '../../../art/models/ripikaStatue';
 import { createBalloon, type BalloonKind } from '../../../art/models/balloons';
 import { createKeychain, KEYCHAIN_KINDS, type KeychainKind } from '../../../art/models/keychains';
@@ -81,7 +82,11 @@ import type { PagePicture, PictureActor } from '../books';
 export const PICTURE_WIDTH = 672;
 export const PICTURE_HEIGHT = 576;
 
-/** How the reader's girl looks — `gameStore`'s player, reduced to what the kid model needs. */
+/**
+ * How the reader's girl looks — `gameStore`'s player, reduced to what the kid
+ * model needs, down to what she is wearing today: face paint, hat, glasses and
+ * the keyring on her bag (`entities/kidDressing.ts`).
+ */
 export interface ReaderLook {
   readonly skin: number;
   readonly hair: number;
@@ -94,6 +99,11 @@ export interface ReaderLook {
   readonly shoeKind: ShoeKind;
   readonly shoe: number;
   readonly glasses: GlassesKind | null;
+  readonly facePaint: FacePaintDesign | null;
+  /** The worn hat's catalogue id, or `''`. */
+  readonly hatId: string;
+  /** The worn keyring's catalogue id, or `''`. */
+  readonly keychainId: string;
 }
 
 /** A stable string for a look, so a cached picture of her is redrawn when she changes. */
@@ -110,6 +120,9 @@ export function lookKey(look: ReaderLook): string {
     look.shoeKind,
     look.shoe,
     look.glasses ?? '-',
+    look.facePaint ?? '-',
+    look.hatId || '-',
+    look.keychainId || '-',
   ].join(':');
 }
 
@@ -191,7 +204,7 @@ function createDuckBarGate(): AssetHandle {
   return { root, height: barCentre };
 }
 
-/** The reader herself, dressed as she is: `kid` is whoever holds the book. */
+/** The reader herself, dressed as she is today: `kid` is whoever holds the book. */
 function buildReaderKid(look: ReaderLook): KidHandle {
   const kid: KidHandle = createKid({
     skin: look.skin,
@@ -205,7 +218,7 @@ function buildReaderKid(look: ReaderLook): KidHandle {
     shoeKind: look.shoeKind,
     shoe: look.shoe,
   });
-  if (look.glasses) kid.glassesAnchor.add(createGlasses(look.glasses).root);
+  dressKid(kid, { facePaint: look.facePaint, hatId: look.hatId, glasses: look.glasses, keychainId: look.keychainId });
   return kid;
 }
 

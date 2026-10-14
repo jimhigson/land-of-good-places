@@ -16,21 +16,19 @@ import {
 import { PALETTE } from '../core/palette';
 import { ART } from '../art/style/artPalette';
 import { disposeTree, toonMaterial } from '../art/style/materials';
-import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
+import { createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
-import { createGlasses } from '../art/models/glasses';
 import type { Expression, FacePaintDesign } from '../art/style/faces';
 import { createFaceLife } from '../art/style/faceLife';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
+import { dressKid } from '../entities/kidDressing';
 import {
   KEYCHAIN_SWAY_X,
   KEYCHAIN_SWAY_X_RATE,
   KEYCHAIN_SWAY_Z,
   KEYCHAIN_SWAY_Z_RATE,
-  KEYCHAIN_WORN_SCALE,
-  keychainWornLift,
 } from '../art/models/keychains';
 
 /**
@@ -480,59 +478,23 @@ export class CharacterPreview {
     this.kid = kid;
     group.add(kid.root);
 
-    // The face paint, if this screen has any — built by the very same call the
-    // face-painting stall makes on the real player (`attachFacePaint`), so the
-    // design previewed here is the design she walks away wearing, drawn by one
-    // piece of code rather than two that agree today.
-    const paint = choice.facePaint ?? null;
-    if (paint) attachFacePaint(kid).setDesign(paint);
-
-    // Same attachment every worn hat uses in the real game — see
-    // `art/models/hats.ts`'s doc comment: no offset maths needed. Gated on
-    // `!kid.hairHidesHat`: the freshly-built kid already knows whether the
-    // chosen hair style (Mohican, today) cannot coexist with a worn hat, and
-    // if so the *hat* is the one that does not get attached — hair is never
-    // the thing that hides any more, see `art/models/hair.ts`'s
-    // `HairPart.hideUnderHat`. `choice.hatId` itself is untouched either
-    // way: the creator's Hat tab still shows it selected, this only decides
-    // what actually renders.
-    const hatAsset = kid.hairHidesHat ? undefined : shopItem(choice.hatId)?.model();
-    if (hatAsset) kid.hatAnchor.add(hatAsset.root);
-    // Same courtesy `entities/WornHat.ts` does in the park: tell the model a
-    // hat's attachment just changed, so its measured height re-checks. Not
-    // "is a hat worn" any more — see `KidHandle.setHatWorn`'s doc comment.
-    kid.setHatWorn(hatAsset !== undefined);
-
-    // Glasses — hats and glasses coexist cleanly (separate anchors, a hat's
-    // brim already contractually clears the eye line: see `art/models/
-    // kid.ts`'s `glassesAnchor` doc comment), so unlike the hat there is no
-    // hiding check here, and no `setXWorn` remeasure call: glasses do not
-    // change `height`. `null` ("None" in the creator) attaches nothing.
-    if (choice.glasses) kid.glassesAnchor.add(createGlasses(choice.glasses).root);
-
-    // The worn keychain, hung exactly the way `entities/WornKeychain.ts` hangs
-    // the real one: the keyring models stand up from their own base (the asset
-    // contract grants the `'anchor'` origin reading only to `hat.` ids), so it
-    // is dropped by its own measured `height` (at `KEYCHAIN_WORN_SCALE`, and
-    // lifted the same `keychainWornLift` amount off the bag's exact corner)
-    // and swung about the top rather than about its feet — the picker must
-    // not show a smaller keyring than the one she is about to actually wear.
-    // `keychainPivot` is cleared first — see its own doc comment for why it
-    // is not part of the per-choice `character` group.
-    this.keychainPivot.clear();
-    this.keychainPivot.removeFromParent();
-    const keychainAsset = choice.keychainId ? shopItem(choice.keychainId)?.model() : undefined;
-    if (keychainAsset) {
-      keychainAsset.root.position.y = -keychainAsset.height * KEYCHAIN_WORN_SCALE;
-      keychainAsset.root.scale.setScalar(KEYCHAIN_WORN_SCALE);
-      this.keychainPivot.position.set(
-        0,
-        keychainWornLift(kid.keychainAnchor.position.y, keychainAsset.height),
-        0,
-      );
-      this.keychainPivot.add(keychainAsset.root);
-      kid.keychainAnchor.add(this.keychainPivot);
-    }
+    // Face paint, hat, glasses and keyring — `entities/kidDressing.ts`, the one
+    // owner of dressing a kid for a picture of her (the library's books dress
+    // their girl with the same call). `choice.hatId` itself is untouched
+    // either way: the creator's Hat tab still shows it selected even when the
+    // hair hides it; dressing only decides what actually renders.
+    // `keychainPivot` is handed over to be emptied and re-hung — see its own
+    // doc comment for why it is not part of the per-choice `character` group.
+    dressKid(
+      kid,
+      {
+        facePaint: choice.facePaint ?? null,
+        hatId: choice.hatId,
+        glasses: choice.glasses,
+        keychainId: choice.keychainId,
+      },
+      this.keychainPivot,
+    );
 
     // The chosen starting pet, stood beside the kid at its own natural scale
     // — the same scale it will actually walk behind the player at in the

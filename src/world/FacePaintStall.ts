@@ -28,19 +28,19 @@ import { blob, stub } from '../art/style/asset';
 import { createFacePatch } from '../art/style/faces';
 import {
   createFacePaintOverlay,
-  FACE_PAINT_DESIGNS,
   type FacePaintDesign,
   type FacePaintControl,
   type FacePaintOverlayHandle,
 } from '../art/style/faces';
 import { attachFacePaint } from '../art/models/kid';
+import { isFacePaintDesign } from '../entities/kidDressing';
 import { pressZone, type InteractZone } from './interact';
 import { highlightObject } from './highlight';
 import { placeOnSphere, standOnSphere, terrainHeight } from './terrain';
 import type { CollisionWorld } from './Collision';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
-import { gameStore, type FacePaintId } from '../state';
+import { gameStore } from '../state';
 import { playOpenChime, playSurpriseChime } from '../ui/chime';
 import { FacePaintPanel, type FacePaintLook } from '../ui/FacePaintPanel';
 import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderDriver';
@@ -718,9 +718,6 @@ export class FacePaintStall implements GameSystem {
 
 // ------------------------------------------------------------------ helpers
 
-function isFacePaintDesign(value: FacePaintId): value is FacePaintDesign {
-  return value !== null && (FACE_PAINT_DESIGNS as readonly string[]).includes(value);
-}
 
 /**
  * How the player looks right now, for the picker's preview to wear.
