@@ -85,6 +85,8 @@ interface FaceMeasure {
   readonly index: number;
   readonly kind: string;
   readonly fontPx: number;
+  /** How many lines of words were painted on it. */
+  readonly lines: number;
   readonly onScreenPx: number;
   readonly coverage: number | null;
   readonly canvas: boolean;
@@ -131,7 +133,7 @@ async function measureFaces(page: Page): Promise<{ rootPx: number; faces: FaceMe
       return (Math.abs(top.y - bottom.y) / 2) * view.height; // flat-ok: normalised device coordinates on screen, not metres
     };
     const faces = (r.facesPainted() as any[]).map((painted, index) => {
-      if (!painted) return { index, kind: 'unpainted', fontPx: 0, onScreenPx: 0, coverage: null, canvas: false };
+      if (!painted) return { index, kind: 'unpainted', fontPx: 0, lines: 0, onScreenPx: 0, coverage: null, canvas: false };
       const mesh = r.faceMesh(index);
       const image = painted.texture.image as HTMLCanvasElement | undefined;
       const onScreenPx = mesh ? (painted.fontPx * screenHeight(mesh)) / painted.canvasHeight : 0;
@@ -139,6 +141,7 @@ async function measureFaces(page: Page): Promise<{ rootPx: number; faces: FaceMe
         index,
         kind: painted.face.kind as string,
         fontPx: painted.fontPx as number,
+        lines: (painted.lines as readonly string[]).length,
         onScreenPx,
         coverage: painted.coverage as number | null,
         canvas: !!image && image.width > 0 && image.height > 0,
@@ -204,17 +207,68 @@ async function waitPainted(page: Page): Promise<void> {
   );
 }
 
-async function turnAndWait(page: Page, button: 'next' | 'prev'): Promise<void> {
-  await page.click(`.book-turn--${button}`);
+async function waitTurned(page: Page): Promise<void> {
   await page.waitForFunction(() => !(window as unknown as { game: any }).game.bookReader.turning, undefined, {
     timeout: TURN_TIMEOUT_MS,
   });
 }
 
+async function turnAndWait(page: Page, button: 'next' | 'prev'): Promise<void> {
+  await page.click(`.book-turn--${button}`);
+  await waitTurned(page);
+}
+
+/** A page button's box and its round arrow's, as the browser laid them out. */
+async function arrowBoxes(page: Page, which: 'next' | 'prev'): Promise<{ button: DOMRect; arrow: DOMRect; shown: boolean }> {
+  return page.evaluate((w) => {
+    const button = document.querySelector(`.book-turn--${w}`) as HTMLButtonElement;
+    const arrow = button.querySelector('.book-turn-arrow') as HTMLElement;
+    return {
+      button: button.getBoundingClientRect().toJSON(),
+      arrow: arrow.getBoundingClientRect().toJSON(),
+      shown: button.dataset.show === 'true' && !button.disabled,
+    };
+  }, which);
+}
+
+/**
+ * Taps the half of a page's round arrow that hangs **outside** its button —
+ * the half off the paper, the half a child aims at — and returns the spread
+ * before and after. A mouse click, not a touch tap: Chromium's touch
+ * adjustment snaps a tap near an edge onto the nearest button, which would
+ * make this green against an arrow that takes no taps at all.
+ */
+async function tapArrowOuterHalf(page: Page, which: 'next' | 'prev'): Promise<{ before: number; after: number; outside: boolean; at: string }> {
+  const { button, arrow } = await arrowBoxes(page, which);
+  const x = which === 'next' ? (button.right + arrow.right) / 2 : (arrow.left + button.left) / 2;
+  const y = arrow.top + arrow.height / 2;
+  const outside = which === 'next' ? x > button.right : x < button.left;
+  const before = (await readerState(page)).spread;
+  await page.mouse.click(x, y);
+  await page.waitForTimeout(100);
+  await waitTurned(page);
+  const after = (await readerState(page)).spread;
+  return { before, after, outside, at: `(${x.toFixed(0)}, ${y.toFixed(0)}); button [${button.left.toFixed(0)}–${button.right.toFixed(0)}], arrow [${arrow.left.toFixed(0)}–${arrow.right.toFixed(0)}]` };
+}
+
+/**
+ * Every worded face's on-screen text size against the floor. A face with words
+ * must report a size and lines, and a blank one must report none — so a
+ * regression that stops reporting sizes is a failure here, never a face
+ * quietly skipped — and something must have been measured at all.
+ */
 function textFloor(where: string, measured: { rootPx: number; faces: FaceMeasure[] }): number {
   let smallest = Infinity;
+  let counted = 0;
   for (const face of measured.faces) {
-    if (face.fontPx <= 0) continue;
+    const worded = face.kind !== 'blank';
+    assert(
+      worded ? face.fontPx > 0 && face.lines > 0 : face.fontPx === 0 && face.lines === 0,
+      `${where} face ${face.index} (${face.kind}) reports its words`,
+      `${face.lines} line(s) at ${face.fontPx.toFixed(1)} canvas px — ${worded ? 'a face with words must have both' : 'a blank face must have neither'}`,
+    );
+    if (!worded || face.fontPx <= 0) continue;
+    counted += 1;
     smallest = Math.min(smallest, face.onScreenPx);
     assert(
       face.onScreenPx >= measured.rootPx - 0.01,
@@ -222,6 +276,11 @@ function textFloor(where: string, measured: { rootPx: number; faces: FaceMeasure
       `${face.onScreenPx.toFixed(2)} CSS px on screen against the ${measured.rootPx} px minimum (drawn at ${face.fontPx.toFixed(1)} canvas px)`,
     );
   }
+  assert(
+    counted > 0 && Number.isFinite(smallest),
+    `${where} the text floor measured something`,
+    `${counted} worded face(s) measured, the smallest ${smallest.toFixed(1)} CSS px`,
+  );
   return smallest;
 }
 
@@ -274,7 +333,7 @@ try {
   assert(mode.menu === 'none', 'the HUD menu is off the screen', `.hud-menu display is "${mode.menu}"`);
   await page.screenshot({ path: `${SHOTS}/${FIRST}-open.png` });
 
-  // 2. A tap turns the page.
+  // 2. A tap turns the page — forwards, and back again.
   await turnAndWait(page, 'next');
   const turned = await readerState(page);
   assert(
@@ -283,6 +342,31 @@ try {
     `spread ${opened.spread} → ${turned.spread} of ${turned.spreads}`,
   );
   await page.screenshot({ path: `${SHOTS}/${FIRST}-turned.png` });
+  await turnAndWait(page, 'prev');
+  const turnedBack = await readerState(page);
+  assert(
+    turnedBack.spread === opened.spread,
+    'a tap on the left-hand page turns it back',
+    `spread ${turned.spread} → ${turnedBack.spread}`,
+  );
+  const atStart = await arrowBoxes(page, 'prev');
+  assert(!atStart.shown, 'at the first spread there is no page to turn back to', atStart.shown ? 'the previous-page button is still live' : 'the previous-page button is hidden and disabled');
+
+  // 2a. The round arrows take taps all over, including the half of each that
+  // hangs off the paper, outside its button's box.
+  for (const [which, step] of [
+    ['next', 1],
+    ['prev', -1],
+  ] as const) {
+    const tapped = await tapArrowOuterHalf(page, which);
+    assert(tapped.outside, `the ${which} arrow's outer half is outside its button`, `probed at ${tapped.at}`);
+    assert(
+      tapped.after === tapped.before + step,
+      `a tap on the outer half of the ${which} arrow turns the page`,
+      `spread ${tapped.before} → ${tapped.after}, tapped at ${tapped.at}`,
+    );
+  }
+  await turnAndWait(page, 'next');
 
   // 3 + 4. The words and the buttons, at three window sizes.
   for (const viewport of VIEWPORTS) {
@@ -315,6 +399,28 @@ try {
         layout.close.top < pageRect.bottom &&
         layout.close.bottom > pageRect.top;
       assert(!overlaps, `${viewport.name} the ✕ is clear of the ${name === 'next' ? 'right' : 'left'} page`, `close button at [${layout.close.left.toFixed(0)},${layout.close.top.toFixed(0)}]`);
+      const onButton =
+        layout.close.left < rect.right &&
+        layout.close.right > rect.left &&
+        layout.close.top < rect.bottom &&
+        layout.close.bottom > rect.top;
+      assert(!onButton, `${viewport.name} the ✕ is clear of the ${name}-page button`, `a tap on the ✕ must never land on a page`);
+    }
+    // The round arrows are whole on screen: a "tap here" half off the glass
+    // is half a target.
+    for (const which of ['prev', 'next'] as const) {
+      const boxes = await arrowBoxes(page, which);
+      if (!boxes.shown) continue;
+      const inside =
+        boxes.arrow.left >= -0.5 &&
+        boxes.arrow.top >= -0.5 &&
+        boxes.arrow.right <= viewport.width + 0.5 &&
+        boxes.arrow.bottom <= viewport.height + 0.5;
+      assert(
+        inside,
+        `${viewport.name} the ${which} arrow is whole on screen`,
+        `arrow [${boxes.arrow.left.toFixed(1)},${boxes.arrow.top.toFixed(1)}–${boxes.arrow.right.toFixed(1)},${boxes.arrow.bottom.toFixed(1)}] in a ${viewport.width}x${viewport.height} window`,
+      );
     }
     await page.screenshot({ path: `${SHOTS}/${FIRST}-${viewport.name}.png` });
   }

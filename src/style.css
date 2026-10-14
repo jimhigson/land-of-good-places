@@ -4992,7 +4992,10 @@ kbd {
 }
 
 /* "Tap here": a big round arrow on the page's outer edge, half off the paper
-   so it never sits on a word. */
+   so it never sits on a word. The reader pulls it in (`--book-arrow-overhang`,
+   px) when the page runs to the edge of the screen, so it is always whole.
+   It takes taps itself: half of it is outside its button's box, and a tap on
+   that half bubbles up to the button's own click like any other child's. */
 .book-turn-arrow {
   position: absolute;
   bottom: 0.6rem;
@@ -5004,18 +5007,32 @@ kbd {
   border-radius: 999px;
   background: var(--lgp-pink);
   box-shadow: var(--lgp-shadow);
-  font-size: var(--lgp-text-xl);
-  font-weight: 800;
-  line-height: 1;
-  pointer-events: none;
+}
+
+/* The chevron: two thick ink strokes, round-ended, the house's chunky look. */
+.book-turn-arrow::before {
+  content: '';
+  width: 0.78rem;
+  height: 0.78rem;
+  border-top: 0.3rem solid var(--lgp-ink);
+  border-right: 0.3rem solid var(--lgp-ink);
+  border-radius: 0.15rem;
 }
 
 .book-turn--prev .book-turn-arrow {
-  left: -1.45rem;
+  left: calc(var(--book-arrow-overhang, 1.45rem) * -1);
+}
+
+.book-turn--prev .book-turn-arrow::before {
+  transform: translateX(0.12rem) rotate(-135deg);
 }
 
 .book-turn--next .book-turn-arrow {
-  right: -1.45rem;
+  right: calc(var(--book-arrow-overhang, 1.45rem) * -1);
+}
+
+.book-turn--next .book-turn-arrow::before {
+  transform: translateX(-0.12rem) rotate(45deg);
 }
 
 .book-close {

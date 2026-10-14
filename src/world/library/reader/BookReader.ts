@@ -212,8 +212,8 @@ export class BookReader {
     this.root.setAttribute('aria-modal', 'true');
     this.root.setAttribute('aria-label', 'A picture book');
 
-    this.prevButton = this.turnButton('prev', 'Previous page', '‹', () => this.previous());
-    this.nextButton = this.turnButton('next', 'Next page', '›', () => this.next());
+    this.prevButton = this.turnButton('prev', 'Previous page', () => this.previous());
+    this.nextButton = this.turnButton('next', 'Next page', () => this.next());
 
     this.closeButton = document.createElement('button');
     this.closeButton.type = 'button';
@@ -409,15 +409,16 @@ export class BookReader {
 
   // ------------------------------------------------------------ internals
 
-  private turnButton(which: 'prev' | 'next', label: string, arrow: string, action: () => void): HTMLButtonElement {
+  private turnButton(which: 'prev' | 'next', label: string, action: () => void): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `book-turn book-turn--${which}`;
     button.setAttribute('aria-label', label);
+    // The chevron inside is drawn by the stylesheet: a text ‹ › is a small
+    // glyph that sits low in its circle, too faint for "tap here".
     const glyph = document.createElement('span');
     glyph.className = 'book-turn-arrow';
     glyph.setAttribute('aria-hidden', 'true');
-    glyph.textContent = arrow;
     button.append(glyph);
     button.addEventListener('click', action);
     return button;
@@ -688,11 +689,11 @@ export class BookReader {
    */
   private placeButtons(): void {
     const { left, right } = this.visibleFaces();
-    this.placeButton(this.prevButton, this.faceMesh(left));
-    this.placeButton(this.nextButton, this.faceMesh(right));
+    this.placeButton(this.prevButton, -1, this.faceMesh(left));
+    this.placeButton(this.nextButton, 1, this.faceMesh(right));
   }
 
-  private placeButton(button: HTMLButtonElement, page: Mesh | null): void {
+  private placeButton(button: HTMLButtonElement, side: -1 | 1, page: Mesh | null): void {
     if (!page) return;
     const rect = this.screenRect(page);
     // The buttons live in the reader's own box; the page was measured in the
@@ -702,6 +703,16 @@ export class BookReader {
     button.style.top = `${rect.top - origin.top}px`;
     button.style.width = `${rect.right - rect.left}px`;
     button.style.height = `${rect.bottom - rect.top}px`; // flat-ok: CSS pixels on screen, not metres
+    // The round "tap here" arrow hangs half off the page's outer edge, so it
+    // never sits on a word — unless the page runs to the edge of the screen,
+    // where half of it would hang off the glass. Then it comes in just far
+    // enough to be whole. Its size is read off the arrow itself, so the
+    // stylesheet stays its one owner.
+    const arrow = button.firstElementChild as HTMLElement | null;
+    const bubble = arrow?.offsetWidth ?? 0;
+    const room = side > 0 ? origin.right - rect.right : rect.left - origin.left;
+    const overhang = Math.min(bubble / 2, room - uiUnitPx() * 0.25);
+    button.style.setProperty('--book-arrow-overhang', `${overhang}px`);
   }
 
   /** Hides a page button with nothing to turn to. */
