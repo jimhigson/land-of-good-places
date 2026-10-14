@@ -131,3 +131,20 @@ contract goes on #716 first.
 `pnpm run blend:library` prints every CONTRACT figure, pivot and face anchor.
 At `6fbc7560`: 65 nodes, 18 568 triangles; glb 449 528 B of the 460 800 B
 budget (the pack line and `libraryGlb.ts`'s header are the owners).
+
+## Merge gates, round 1 (14 Oct)
+- Run locally on the commit carrying this section: `pnpm run check`, then
+  `pnpm run test:procgen`, then `pnpm run build`, each logged to a file with
+  its exit code read directly. Shell `node` is 25.6.1, so every command goes
+  through `fnm exec --using=26 --` (`.node-version` says 26).
+- **Parks for a fresh worktree, without hours of acceptance loops**: this
+  branch's park source hash is main's (`e272e0c0…`), and CI's
+  `parks-e272e0c0…` artifact (run 37480483453, 30-day retention) is that
+  hash's `.parks/`. Downloaded to scratch, verified with
+  `scripts/verify-parks.mts <dir>` (16 of 16 re-hydrated to their recorded
+  digest and restart, exit 0), then copied into `.parks/` — the same thing
+  CI's `Parks from another run` job does. With it, no check searches a park.
+- Step set (parsed from `scripts`, not grepped): every one of main's 79
+  `check` leaf steps is present, plus this branch's `check:library-glb` and
+  `check:png-integrity` (81). No other script changed but `pack:library`,
+  `blend:library`, `render:library` (new).
