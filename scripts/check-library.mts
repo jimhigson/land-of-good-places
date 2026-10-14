@@ -599,36 +599,57 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
   }
   say(worstEdge.depth <= CORNER_ALLOWANCE, `${edgeMarches} marches square at the plinth's sides and back: deepest a body's edge got over its stone ${worstEdge.depth.toFixed(3)} m (${worstEdge.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
 
-  // From inside the recess — sideways, into its back corners, and straight on
-  // at the door: her body never gets into the masonry round it. (The recess
-  // is shallow — the door leaves stand 0.79 m behind the cella's front — so
-  // the wings' corner caps and the recess's back wall overlap behind each
-  // jamb, leaving 0.19 m: a jamb taken out opens nothing she fits through.
-  // The recess's back wall, taken out, lets her in by metres.)
+  // From the portico — the central bay between the middle columns — at the
+  // front wall either side of the door, head on at the doorway's two outside
+  // corners, along the portico to its ends, and from inside the recess
+  // sideways, into its back corners and straight at the door: her body never
+  // gets into the masonry. (The recess is shallow — the door leaves stand
+  // 0.79 m behind the cella's front — so the wings' corner caps and the
+  // recess's back wall overlap behind each jamb, leaving 0.19 m: a jamb taken
+  // out opens nothing she fits through. The recess's back wall taken out lets
+  // her in by metres, and so does the front wall either side.)
   const band = library.doorBands()[0]!;
-  let recessWorst = { depth: -Infinity, at: '' };
+  let porticoWorst = { depth: -Infinity, at: '' };
   const bandCentre = toPlan(band.centreX, band.centreZ).clone();
-  const aims = [
-    { x: plan.doorHalf + 3, z: bandCentre.z, at: 'east' },
-    { x: -plan.doorHalf - 3, z: bandCentre.z, at: 'west' },
-    { x: plan.doorHalf + 3, z: plan.recessBackZ - 3, at: 'the back east corner' },
-    { x: -plan.doorHalf - 3, z: plan.recessBackZ - 3, at: 'the back west corner' },
-    { x: 0, z: plan.cellaBackZ, at: 'straight at the door' },
+  const columnLine = Math.min(...plan.columns.map((column) => column.z - column.radius));
+  const bay = { x: 0, z: (plan.cellaFrontZ + columnLine) / 2 + PLAYER_RADIUS / 2 };
+  const fromBay = (x: number, z: number, at: string): { from: { x: number; z: number }; to: { x: number; z: number }; at: string } => ({ from: bay, to: { x, z }, at });
+  const fromRecess = (x: number, z: number, at: string): { from: { x: number; z: number }; to: { x: number; z: number }; at: string } => ({
+    from: { x: 0, z: bandCentre.z },
+    to: { x, z },
+    at,
+  });
+  const porticoMarches = [
+    ...[-1, 1].flatMap((side) => [
+      fromBay(side * (plan.doorHalf + 1.5), plan.cellaFrontZ - 2, `the front wall ${side < 0 ? 'west' : 'east'} of the door`),
+      fromBay(side * (plan.cellaHalfX - 1), plan.cellaFrontZ - 2, `the front wall's ${side < 0 ? 'west' : 'east'} end`),
+      fromBay(side * (plan.cellaHalfX + 3), bay.z, `along the portico ${side < 0 ? 'west' : 'east'}`),
+      // At the doorway's outside corner, from the bay: the columns stand too
+      // close for a square-on 45-degree approach, so this is the steepest one
+      // the portico allows.
+      fromBay(side * plan.doorHalf, plan.cellaFrontZ, `the doorway's ${side < 0 ? 'west' : 'east'} corner`),
+      fromRecess(side * (plan.doorHalf + 3), bandCentre.z, `sideways in the recess, ${side < 0 ? 'west' : 'east'}`),
+      fromRecess(side * (plan.doorHalf + 3), plan.recessBackZ - 3, `into the recess's back ${side < 0 ? 'west' : 'east'} corner`),
+    ]),
+    fromRecess(0, plan.cellaBackZ, 'straight at the door'),
   ];
-  for (const aim of aims) {
+  for (const aim of porticoMarches) {
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
-      const start = frame.foot(0, bandCentre.z);
-      const target = frame.foot(aim.x, aim.z);
+      const start = frame.foot(aim.from.x, aim.from.z);
+      const target = frame.foot(aim.to.x, aim.to.z);
       const p = new Vector3(start.x, 0, start.z);
       const dir = new Vector3(target.x - start.x, 0, target.z - start.z).normalize();
-      for (let travelled = 0; travelled < 8; travelled += step) {
+      for (let travelled = 0; travelled < 10; travelled += step) {
         collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
         const into = intoSolid(p.x, p.z);
-        if (into.what === 'the cella' && into.depth > recessWorst.depth) recessWorst = { depth: into.depth, at: aim.at };
+        if (into.what === 'the cella' && into.depth > porticoWorst.depth) porticoWorst = { depth: into.depth, at: aim.at };
       }
     }
   }
-  say(recessWorst.depth <= CORNER_ALLOWANCE, `${aims.length * 2} marches from inside the recess: deepest a body's edge got into the masonry round it ${recessWorst.depth.toFixed(3)} m (${recessWorst.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+  say(
+    porticoWorst.depth <= CORNER_ALLOWANCE,
+    `${porticoMarches.length * 2} marches in the portico and the recess: deepest a body's edge got into the masonry ${porticoWorst.depth.toFixed(3)} m (${porticoWorst.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`,
+  );
 
   // A sprinter through the door stops on the door leaves, inside the band.
   const start = frame.foot(0, plan.stepFrontZ + 3);
