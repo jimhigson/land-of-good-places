@@ -594,8 +594,7 @@ export class BookReader {
     this.vignette.updateMatrixWorld(true);
 
     this.scene.updateMatrixWorld(true);
-    this.placeButton(this.prevButton, -1);
-    this.placeButton(this.nextButton, 1);
+    this.placeButtons();
 
     // The TEXT rule's floor at this layout, in page-canvas pixels.
     const pageScreen = this.pageScreenHeight();
@@ -620,14 +619,20 @@ export class BookReader {
     }
   }
 
-  /** A resting page's height on screen in CSS pixels, the shorter of the two. */
+  /**
+   * A page's height on screen in CSS pixels, the shorter of the two — measured
+   * on the top of the paper block, the farthest from the lens any page ever
+   * lies (the fixed pages sit a hair above it, every leaf a sheet or more
+   * above that), so the smallest any page is ever drawn. A floor taken from it
+   * therefore holds for every face of the book, whichever leaf it is on.
+   */
   private pageScreenHeight(): number {
     let shortest = Infinity;
     for (const side of [-1, 1] as const) {
       const x = (side * READER_PAGE_WIDTH) / 2;
       const top = this.toScreen(new Vector3(x, READER_PAGE_HEIGHT, READER_BLOCK_THICKNESS));
       const bottom = this.toScreen(new Vector3(x, 0, READER_BLOCK_THICKNESS));
-      shortest = Math.min(shortest, Math.abs(bottom.y - top.y));
+      shortest = Math.min(shortest, Math.abs(bottom.y - top.y)); // flat-ok: CSS pixels on screen, not metres
     }
     return Number.isFinite(shortest) ? shortest : this.canvas.getBoundingClientRect().height;
   }
@@ -643,30 +648,60 @@ export class BookReader {
     };
   }
 
-  /** Lays a page button over the page on `side`, exactly where it is drawn. */
-  private placeButton(button: HTMLButtonElement, side: -1 | 1): void {
-    const xs = [0, side * READER_PAGE_WIDTH];
-    const ys = [0, READER_PAGE_HEIGHT];
+  /**
+   * The rectangle `mesh` covers on screen, in CSS pixels from the window's top
+   * left: every one of its vertices, where they are right now, projected
+   * through this camera.
+   *
+   * The mesh is the one owner of where a page is. A resting leaf lies a few
+   * sheets proud of the paper block — how many depends on the spread — and on
+   * a laptop that parallax is a couple of pixels, so a page measured on any
+   * plane but its own comes out narrower than the paper drawn there. This is
+   * the same sum `check:book-reader` does from outside, off the same mesh.
+   */
+  private screenRect(mesh: Mesh): { left: number; top: number; right: number; bottom: number } {
+    mesh.updateWorldMatrix(true, false);
+    const position = mesh.geometry.getAttribute('position');
+    const view = this.canvas.getBoundingClientRect();
+    const point = new Vector3();
     let left = Infinity;
     let top = Infinity;
     let right = -Infinity;
     let bottom = -Infinity;
-    for (const x of xs) {
-      for (const y of ys) {
-        const at = this.toScreen(new Vector3(x, y, READER_BLOCK_THICKNESS));
-        left = Math.min(left, at.x);
-        right = Math.max(right, at.x);
-        top = Math.min(top, at.y);
-        bottom = Math.max(bottom, at.y);
-      }
+    for (let i = 0; i < position.count; i += 1) {
+      point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).project(this.camera);
+      const x = view.left + ((point.x + 1) / 2) * view.width;
+      const y = view.top + ((1 - point.y) / 2) * view.height;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
     }
+    return { left, top, right, bottom };
+  }
+
+  /**
+   * Lays each page button over the page showing on its side, exactly where that
+   * page is drawn. Run on every layout and after every turn settles, because
+   * which leaf is showing — and so how far it stands off the block — changes
+   * with the spread.
+   */
+  private placeButtons(): void {
+    const { left, right } = this.visibleFaces();
+    this.placeButton(this.prevButton, this.faceMesh(left));
+    this.placeButton(this.nextButton, this.faceMesh(right));
+  }
+
+  private placeButton(button: HTMLButtonElement, page: Mesh | null): void {
+    if (!page) return;
+    const rect = this.screenRect(page);
     // The buttons live in the reader's own box; the page was measured in the
     // window's, so take the one from the other.
     const origin = this.root.getBoundingClientRect();
-    button.style.left = `${left - origin.left}px`;
-    button.style.top = `${top - origin.top}px`;
-    button.style.width = `${right - left}px`;
-    button.style.height = `${bottom - top}px`;
+    button.style.left = `${rect.left - origin.left}px`;
+    button.style.top = `${rect.top - origin.top}px`;
+    button.style.width = `${rect.right - rect.left}px`;
+    button.style.height = `${rect.bottom - rect.top}px`; // flat-ok: CSS pixels on screen, not metres
   }
 
   /** Hides a page button with nothing to turn to. */
@@ -684,6 +719,9 @@ export class BookReader {
     this.prevButton.disabled = atStart;
     this.nextButton.disabled = atEnd;
     this.settleIfIdle();
+    // After the leaves are where the spread says: the page now showing on each
+    // side may be a different leaf, a sheet higher or lower than the last.
+    this.placeButtons();
   }
 
   /** With no turn running, every leaf is put exactly where the spread says. */

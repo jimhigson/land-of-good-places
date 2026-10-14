@@ -128,7 +128,7 @@ async function measureFaces(page: Page): Promise<{ rootPx: number; faces: FaceMe
       top.multiplyScalar(1 / nTop).project(camera);
       bottom.multiplyScalar(1 / nBottom).project(camera);
       const view = (document.getElementById('game-canvas') as HTMLCanvasElement).getBoundingClientRect();
-      return (Math.abs(top.y - bottom.y) / 2) * view.height;
+      return (Math.abs(top.y - bottom.y) / 2) * view.height; // flat-ok: normalised device coordinates on screen, not metres
     };
     const faces = (r.facesPainted() as any[]).map((painted, index) => {
       if (!painted) return { index, kind: 'unpainted', fontPx: 0, onScreenPx: 0, coverage: null, canvas: false };

@@ -154,8 +154,10 @@ function createDuckBarGate(): AssetHandle {
   bar.computeBoundingBox();
   const postBox = post.boundingBox;
   const barBox = bar.boundingBox;
-  const postHeight = postBox ? postBox.max.y - postBox.min.y : 1;
-  const postFoot = postBox?.min.y ?? 0;
+  // A picture is its own little flat stage, never on the planet, and these are
+  // the prop's own local bounds — upright by construction, nothing leans.
+  const postHeight = postBox ? postBox.max.y - postBox.min.y : 1; // flat-ok: a picture prop's own local bounds
+  const postFoot = postBox?.min.y ?? 0; // flat-ok: a picture prop's own local bounds
   const halfBar = barBox?.max.x ?? 1;
   // The gate is a picture prop, not a hazard: one post height tall, so the
   // bar is over a child's head the way it is in the race.
@@ -262,10 +264,11 @@ function frameCast(camera: PerspectiveCamera, cast: readonly Object3D[]): { targ
   if (points.length === 0) {
     camera.position.set(0, 1, 6);
     camera.lookAt(0, 1, 0);
-    return { target: new Vector3(0, 1, 0), distance: 6 };
+    return { target: new Vector3(0, 1, 0), distance: 6 }; // flat-ok: a point on the picture's own flat stage
   }
   const forward = VIEW_DIRECTION.clone();
-  const right = new Vector3(0, 1, 0).cross(forward).normalize();
+  // The picture stage is a self-contained flat scene, not on the planet: its up is +Y.
+  const right = new Vector3(0, 1, 0).cross(forward).normalize(); // flat-ok: the picture stage's own up
   const up = forward.clone().cross(right).normalize();
   const tanV = Math.tan((PICTURE_FOV * DEG) / 2);
   const tanH = tanV * (PICTURE_WIDTH / PICTURE_HEIGHT);
