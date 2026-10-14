@@ -4,12 +4,12 @@
  * Written by `pnpm run blend:library`, which runs `art/blend/library_build.py`
  * (the authoring source), then `library_export.py`, then this packer.
  *
- * Seventeen assets in one file — the pillared exterior, a bookcase and its
- * hinged secret twin, the desk, two lamps, an armchair and a floor cushion,
- * six book blocks for instancing, a book pile, the open reader's cover, the
- * owl librarian, the baby dragon and its nest of books, and the library cat.
- * Each is its own asset with its own origin, so inside this file they all
- * overlap at the world origin, which is expected and harmless.
+ * Every asset of the kit in one file — the pillared exterior, a bookcase and
+ * its hinged secret twin, the desk, two lamps, an armchair and a floor
+ * cushion, six book blocks for instancing, a book pile, the open reader's
+ * cover, the owl librarian, the baby dragon and its nest of books, and the
+ * library cat. Each is its own asset with its own origin, so inside this file
+ * they all overlap at the world origin, which is expected and harmless.
  *
  * Shape only: no colour, no material, no texture. The owl, dragon and cat
  * heads carry face UVs, painted through `planarUvCanvasTexture`.

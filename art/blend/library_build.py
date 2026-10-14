@@ -861,11 +861,12 @@ def build_shell() -> None:
     # (📖) — two pages curving down into the gutter over a cover board, three
     # lines of "text" on each page, and a ribbon hanging from the spine.
     #
-    # The brief asked for a *closed* book. Three closed cuts were rendered and
-    # none read as a book from the street: cover-on it was a gold plaque,
-    # fore-edge-on a grille, spine-on a log. Jim's own words were "a pediment
-    # with a book carved in it", and his scale rule puts recognisability
-    # first, so the book is open. Recorded in HANDOFF-library-art.md.
+    # The brief (#714) says only "a pediment with a book carved in it". The
+    # first cut here was a closed book seen cover-on (9bc9fe76), and from the
+    # street it read as a gold plaque; a closed book fore-edge-on reads as a
+    # grille and spine-on as a log. Jim's scale rule puts recognisability
+    # first, so the book is open. Recorded under "Decisions" in
+    # HANDOFF-library-art.md, and named in the Library PR for Jim to judge.
     half_w, page_h, dip = 2.30, 1.20, 0.22
     z0 = CORNICE_TOP + PEDIMENT_FRAME + 0.43
     face_y = TYMPANUM_FRONT_Y
