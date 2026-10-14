@@ -315,8 +315,14 @@ dividing by a zero length. Documented on `WallCollider`.
   branch (dee13412, park hydrated from its own `.parks`): **walls 1289, circles 1793;
   zero-length 0; under 1 cm 0; under 10 cm 0; shortest 0.11963 m; CONTROL counted 1.** The
   count covers the interiors (walls by owner: (none) 382, boundary wall 284, hotel 199,
-  library 157, castle 129, reptile house 106, booth 32). Other seeds: pending the PR's CI parks
-  artifact (`parks-6b86bf43…`), which was still searching seeds 10 and 14 at 16:30 BST.
+  library 157, castle 129, reptile house 106, booth 32). **All sixteen parks**, at the foundation, each hydrated
+  from the PR's CI parks artifact `parks-6b86bf43…` (run 38580957653; restarts 0:3 1:1 2:3 3:7
+  4:1 5:1 6:1 7:5 8:1 9:5 10:9 11:4 12:0 13:6 14:8 15:4, the same as building's CI): **zero
+  zero-length walls on every seed**, none under 10 cm either (shortest 0.11963-0.11999 m;
+  walls 1203-1359, circles 1793-1929 per seed), and the CONTROL wall counted on every seed
+  (`f714/degenerate-16.txt`). So the fix changes no collision in any park that ships; the first
+  zero-length wall will be the owl's. (CI's seed-5 file has the same digest, 9acd3a626f55d35c, as
+  both local builds; only its `acceptance` log of timings differs.)
 - **Seed 5's park at this branch's source** (`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run
   build:parks`, dee134126611…): restart 0 rejected by check:coplanar (236 s), **restart 1
   accepted (134 measures), digest 9acd3a626f55d35c**, proven by hydration, exit 0 in 523 s —
