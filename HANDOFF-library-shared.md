@@ -32,7 +32,13 @@ the integration branch later without conflicts.
 - [x] tsc --noEmit 0, typecheck:test 0, vitest library-card 4/4, check:seed-coverage 0
       ("45 suite files over 6 shards (5/5/5/8/8/14 files), each exactly once"), build 0 (no parks
       shipped locally: .parks was being rebuilt)
-- [ ] CI run **38550516901** dispatched on fad0e9f6 (`gh workflow run ci.yml --ref feat/library-714-shared`)
+- [x] CI run **38550516901** on fad0e9f6 (`gh workflow run ci.yml --ref feat/library-714-shared`):
+      **conclusion success — 72 jobs success, 2 skipped (Deploy, PR preview: not main, no PR)**.
+      Every job: Parks key / from another run / still to find / Parks, all 32+ "Park N block M",
+      Checks shards 1-8 + Checks build + `Checks`, Procgen invariants shards 1-6 + `Procgen
+      invariants`, Coplanar faces, Swept bus, Walk reach, Entrance road, Every seed builds — all
+      success. Its `parks-a51ca115…` artifact: **all 16 seeds have the same accepted restarts and
+      the same park digests as main's manifest** (e272e0c0…) — no park moved.
 - [x] local `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` at source `a51ca115291f…` →
       exit 0 in 852 s: restarts 0, 1 rejected by build, 2 by the paved-detour measure, **3 accepted
       as shipped (133 measures)**, digest **ea17dc22afe69179 — byte-for-byte main's seed 5 digest**
@@ -63,8 +69,9 @@ the integration branch later without conflicts.
       same hunk on both sides (trial merge: clean). check-deep-links.mts is outside the park
       source closure, so the park hash and CI's parks are unchanged. Rerun after the fix:
       check:served-deep-links exit 0, all 12 lines OK.
-- [ ] second local `pnpm run check`, `pnpm run test:procgen` (needs all 16 parks: CI run
-      38550516901's `parks-<hash>` artifact), `pnpm run build` again with parks
+- [x] second local `pnpm run check` (with 4a39b06c): **exit 0 after 1734 s**, all 8 shards.
+- [x] `pnpm run build` with CI's 16 parks in `.parks`: exit 0, 16 files in dist/parks.
+- [ ] `pnpm run test:procgen` locally with CI's 16 parks (running)
 
 ## Merge forecast (trial merges with `git merge-tree`, no refs touched)
 - with origin/art/library-715: clean. With origin/feat/library-building-716: clean (incl.
