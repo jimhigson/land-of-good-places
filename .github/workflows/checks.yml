@@ -88,7 +88,11 @@ jobs:
       matrix:
         # Must name every `check:shard-N` in package.json, each once —
         # `check:chain-coverage` fails if it does not.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        #
+        # 9 is `check:served-book-reader` on its own (14 Oct, the Library PR):
+        # beside `check:served-walking` in 8 it ran shard 8 out of its 27-min
+        # watchdog on its first CI run (38580957653), killed after 19 min in it.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
