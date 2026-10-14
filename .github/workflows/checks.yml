@@ -115,8 +115,8 @@ jobs:
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
 
-      # `check:served-walking` and `check:served-deep-links` drive a real page
-      # in Chromium; `playwright-core` ships the driver but not the browser.
+      # Every `check:served-*` step drives a real page in Chromium;
+      # `playwright-core` ships the driver but not the browser.
       # Installed on every shard rather than the ones holding those steps
       # today: tying it to shard numbers would be a second definition of where
       # a step lives, kept in step by hand.

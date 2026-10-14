@@ -27,7 +27,8 @@
  *
  * The three sources named in the rule that are *data* rather than prose woven
  * into a builder: `whatsnew.json`, the shop catalogue (`displayName`, `blurb`)
- * and the anchor signs (`signTitle`, `signSubtitle`). Those are enumerated
+ * the anchor signs (`signTitle`, `signSubtitle`) and the library's picture
+ * books (`world/library/books.ts`: every title and every page). Those are enumerated
  * from the real modules the game imports, so a new shop item or a new
  * what's-new entry is covered the day it is added, with no list to keep in
  * step.
@@ -59,6 +60,7 @@ import '../scripts/headless-canvas.mjs';
 import { SHOP_ITEMS, EGG_PRIZES } from '../src/world/building/shops/catalogue.ts';
 import { ANCHORS } from '../src/world/anchors.ts';
 import { EXHIBITS } from '../src/world/reptileHouse/exhibits.ts';
+import { BOOKS } from '../src/world/library/books.ts';
 
 /**
  * The longest a title may be, in characters.
@@ -196,6 +198,26 @@ function collect(): Copy[] {
       where: 'src/world/reptileHouse/exhibits.ts',
       shape: 'title',
       text: exhibit.chip,
+    });
+  }
+
+  // The library's twelve picture books (#717): every title and every page.
+  // A page is the whole of what a child reads at once, so it is a `line` —
+  // one sentence, at most fifty characters, the same as a shop blurb.
+  for (const book of BOOKS) {
+    copy.push({
+      key: `bookTitle:${book.id}`,
+      where: 'src/world/library/books.ts',
+      shape: 'title',
+      text: book.title,
+    });
+    book.pages.forEach((page, index) => {
+      copy.push({
+        key: `bookPage:${book.id}#${index + 1}`,
+        where: 'src/world/library/books.ts',
+        shape: 'line',
+        text: page.text,
+      });
     });
   }
 

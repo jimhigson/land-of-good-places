@@ -127,6 +127,101 @@ describe('markArrived is what closes the sequence', () => {
   });
 });
 
+/**
+ * **The library's read books (#717) ride the save's own collection.**
+ *
+ * A book read to its last page is a `book` `CuteThing` (`book.<id>`), and the
+ * every-book prize is a one-time flag, `bookPrizeSeen`. Neither is a new
+ * mechanism — so what needs proving is that the existing one carries them, and
+ * that a save from before the library still loads exactly as it did.
+ */
+describe('the library books ride the save (#717)', () => {
+  it('round-trips a read book and the book prize', async () => {
+    const { writeSave, loadSave } = await saveModule();
+    writeSave({
+      ...fileWithFlags({ createdCharacter: true, bookPrizeSeen: true }),
+      game: {
+        collection: {
+          'book.catBusDay': {
+            id: 'book.catBusDay',
+            name: "The Cat Bus's Long Day",
+            category: 'book',
+            count: 1,
+            placement: 'backpack',
+            discovered: true,
+          },
+        },
+      },
+    });
+    const read = loadSave();
+    expect(read?.game.collection?.['book.catBusDay']?.category).toBe('book');
+    expect(read?.game.collection?.['book.catBusDay']?.discovered).toBe(true);
+    expect(read?.flags.bookPrizeSeen).toBe(true);
+
+    const { saveFlags } = await import('../../src/state/flags.ts');
+    saveFlags.hydrate(read?.flags ?? {});
+    expect(saveFlags.bookPrizeSeen).toBe(true);
+  });
+
+  it('loads a save from before the library with nothing read and no prize seen', async () => {
+    const { writeSave, loadSave } = await saveModule();
+    writeSave({
+      ...fileWithFlags({ createdCharacter: true }),
+      game: {
+        collection: {
+          'secret.dust': {
+            id: 'secret.dust',
+            name: 'Dust cloud',
+            category: 'secret',
+            count: 1,
+            placement: 'backpack',
+            discovered: true,
+          },
+        },
+      },
+    });
+    const read = loadSave();
+    expect(read, 'a pre-library save must still load').not.toBeNull();
+    expect(Object.keys(read?.game.collection ?? {})).toEqual(['secret.dust']);
+    expect(read?.flags.bookPrizeSeen).toBeUndefined();
+  });
+
+  /**
+   * What an *older* build does with a newer save is the same rule, from the
+   * other side: it does not know the word `book`, so it drops those entries
+   * and loads everything else. Shown here with a category this build does not
+   * know either — the tolerance is per entry, never all-or-nothing.
+   */
+  it('drops an entry whose category it does not know, and keeps the rest', async () => {
+    const { writeSave, loadSave } = await saveModule();
+    writeSave({
+      ...fileWithFlags({ createdCharacter: true }),
+      game: {
+        collection: {
+          'book.fireflies': {
+            id: 'book.fireflies',
+            name: 'Fireflies at Night',
+            category: 'book',
+            count: 1,
+            placement: 'backpack',
+            discovered: true,
+          },
+          'future.thing': {
+            id: 'future.thing',
+            name: 'Something from next year',
+            category: 'notYetInvented' as never,
+            count: 1,
+            placement: 'backpack',
+            discovered: true,
+          },
+        },
+      },
+    });
+    const read = loadSave();
+    expect(Object.keys(read?.game.collection ?? {})).toEqual(['book.fireflies']);
+  });
+});
+
 /** A minimal but *real* `SaveFile`, so `writeSave` is exercised as it is used. */
 function fileWithFlags(flags: SavedFlags): SaveFile {
   return {

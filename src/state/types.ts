@@ -128,6 +128,15 @@ export const CUTE_CATEGORIES = [
   'secret',
   'keychain',
   /**
+   * A library book read to the end (#717) — `world/library/books.ts`'s
+   * `bookCollectionId`. A thing she *did*, filed like a secret: recorded
+   * through `gameStore.collect`, so it is saved, restored and counted with
+   * everything else and needs no save field of its own. An older build reading
+   * a newer save drops these entries (its `readCuteThing` does not know the
+   * word) rather than failing the load — the save's ordinary tolerance.
+   */
+  'book',
+  /**
    * A keepsake she was given — the library card (#718, `world/library/
    * libraryCard.ts`). Filed under its own category so that its `collection`
    * entry survives a load: `state/save.ts` drops an entry whose category it

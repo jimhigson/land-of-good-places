@@ -287,24 +287,35 @@ const CHECKS: DeepLinkCheck[] = [
     primerPath: '/reptile-house',
     assert: async (page) => {
       const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
-      // **Wait for the link's own end state, inside *and* on the spot, never
-      // for `inside` alone.** `requestEnter` returns before its change of
-      // space has run (the teleport is the iris's midpoint), and on the
+      // **Wait for the link's own end state: inside, the change of space
+      // finished, *and* on the spot. Never for `inside` alone.** On the
       // `continueGame` path the restored save has her inside the hall from the
-      // first frame, so `inside` was true before the link had moved her at
-      // all. Read then, she was still on the save's spot, the arrival.
-      // Measured 14 Oct 2026, seed 5, local Chromium: 3 of 3 runs read
-      // (606.0, -584.2), 24.71 m off, with the space change still running,
-      // and every one stood on (587.0, -600.0) five frames (~350 ms) later.
-      // The same read passed on CI at 6fbc7560: whether the iris had closed by
-      // then was frame timing, not the link. A link that never moves her still
-      // fails: the wait times out and the read below says where she is.
+      // first frame, on the primer's arrival spot, while the link's own change
+      // of space is still running: `requestEnter` returns before it has run, and
+      // the teleport is the iris's midpoint. Measured 14 Oct 2026, seed 5, local
+      // Chromium, on `main` and on the library branches alike: the read gave
+      // (606.0, -584.2), 24.71 m off, with the change still running, and she
+      // stood on (587.0, -600.0) with it done about 350 ms later. CI passed the
+      // same read on frame timing, so the old wait raced the iris instead of
+      // measuring the link. Both halves are kept: on the spot proves the link
+      // moved her, whenever its change began; `isChanging === false` proves the
+      // change is over. `isChanging` must be a real boolean, so a renamed field
+      // times the wait out and fails below rather than passing with nothing
+      // waited for; and a link that never moves her still fails, because the
+      // wait times out and the read below says where she is. No retry: the
+      // wait is for the end state, and the read after it is the measurement.
       await page
         .waitForFunction(
           ({ x, z, tolerance }) => {
             const g = (window as unknown as { game?: any }).game;
+            const house = g?.world?.reptileHouse;
             const p = g?.player?.position;
-            return g?.world?.reptileHouse?.playerIsInside === true && !!p && Math.hypot(p.x - x, p.z - z) <= tolerance;
+            return (
+              house?.playerIsInside === true &&
+              house?.spaces?.isChanging === false &&
+              !!p &&
+              Math.hypot(p.x - x, p.z - z) <= tolerance
+            );
           },
           { x: want.x, z: want.z, tolerance: CASTLE_TOLERANCE },
           { timeout: 10000 },
@@ -312,14 +323,19 @@ const CHECKS: DeepLinkCheck[] = [
         .catch(() => {});
       const s = await page.evaluate(() => {
         const g = (window as unknown as { game?: any }).game;
+        const changing = g?.world?.reptileHouse?.spaces?.isChanging;
         return {
           hasGame: !!g,
           inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          changing: typeof changing === 'boolean' ? changing : 'missing',
           playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
         };
       });
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
       if (s.inside !== true) return { ok: false, detail: `the Reptile House was not entered (inside=${s.inside})` };
+      if (s.changing !== false) {
+        return { ok: false, detail: `the change of space into the hall never finished (isChanging=${s.changing})` };
+      }
       if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
       const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
       if (off > CASTLE_TOLERANCE) {

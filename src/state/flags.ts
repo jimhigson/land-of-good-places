@@ -23,6 +23,7 @@ class SaveFlags {
   private dexPrizeSeenFlag = false;
   private whatsNewSeenIdValue: number | null = null;
   private hotelKeyFlag = false;
+  private bookPrizeSeenFlag = false;
   private changes = 0;
 
   /**
@@ -40,6 +41,7 @@ class SaveFlags {
     if (flags.arrivedByBus !== undefined) this.arrivedByBusFlag = flags.arrivedByBus;
     if (flags.dexPrizeSeen !== undefined) this.dexPrizeSeenFlag = flags.dexPrizeSeen;
     if (flags.hotelKey !== undefined) this.hotelKeyFlag = flags.hotelKey;
+    if (flags.bookPrizeSeen !== undefined) this.bookPrizeSeenFlag = flags.bookPrizeSeen;
     if (flags.whatsNewSeenId !== undefined) this.whatsNewSeenIdValue = flags.whatsNewSeenId;
     this.changes += 1;
   }
@@ -57,12 +59,14 @@ class SaveFlags {
       arrivedByBus: boolean;
       dexPrizeSeen: boolean;
       hotelKey: boolean;
+      bookPrizeSeen: boolean;
       whatsNewSeenId?: number;
     } = {
       createdCharacter: this.createdCharacterFlag,
       arrivedByBus: this.arrivedByBusFlag,
       dexPrizeSeen: this.dexPrizeSeenFlag,
       hotelKey: this.hotelKeyFlag,
+      bookPrizeSeen: this.bookPrizeSeenFlag,
     };
     // Omitted rather than null: `exactOptionalPropertyTypes`, and "never seen
     // one" is exactly what an absent field means everywhere else in the save.
@@ -102,6 +106,17 @@ class SaveFlags {
   markDexPrizeSeen(): void {
     if (this.dexPrizeSeenFlag) return;
     this.dexPrizeSeenFlag = true;
+    this.changes += 1;
+  }
+
+  /** True once the every-library-book-read celebration has fired (#717). */
+  get bookPrizeSeen(): boolean {
+    return this.bookPrizeSeenFlag;
+  }
+
+  markBookPrizeSeen(): void {
+    if (this.bookPrizeSeenFlag) return;
+    this.bookPrizeSeenFlag = true;
     this.changes += 1;
   }
 
