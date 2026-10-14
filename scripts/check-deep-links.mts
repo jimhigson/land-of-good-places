@@ -191,23 +191,43 @@ const CHECKS: DeepLinkCheck[] = [
     primerPath: '/reptile-house',
     assert: async (page) => {
       const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
+      // **Wait for the link's change of space to finish, not for `inside`.**
+      // On a returning save she is restored *into the hall already* — at the
+      // primer's arrival spot — so `playerIsInside` is true from the first
+      // frame, while the link's own iris is still carrying her to the asked-for
+      // spot. Measured, on `main` and on #717 alike: the first frame after the
+      // reload reads (606.0, −584.2) with the change still running, and half a
+      // second later (587.0, −600.0) with it done — so this read used to race
+      // the iris, and lost on any machine where the autosave landed inside the
+      // hall. The deep-link switch runs before `window.game` is published, so
+      // the change has already begun by the first poll. `isChanging` must be a
+      // real boolean, so a renamed field times the wait out (and fails below)
+      // rather than letting it pass with nothing waited for.
       await page
         .waitForFunction(
-          () => ((window as unknown as { game?: any }).game)?.world?.reptileHouse?.playerIsInside === true,
+          () => {
+            const house = ((window as unknown as { game?: any }).game)?.world?.reptileHouse;
+            return house?.playerIsInside === true && house?.spaces?.isChanging === false;
+          },
           undefined,
           { timeout: 10000 },
         )
         .catch(() => {});
       const s = await page.evaluate(() => {
         const g = (window as unknown as { game?: any }).game;
+        const changing = g?.world?.reptileHouse?.spaces?.isChanging;
         return {
           hasGame: !!g,
           inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          changing: typeof changing === 'boolean' ? changing : 'missing',
           playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
         };
       });
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
       if (s.inside !== true) return { ok: false, detail: `the Reptile House was not entered (inside=${s.inside})` };
+      if (s.changing !== false) {
+        return { ok: false, detail: `the change of space into the hall never finished (isChanging=${s.changing})` };
+      }
       if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
       const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
       if (off > CASTLE_TOLERANCE) {
