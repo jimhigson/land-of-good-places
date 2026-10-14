@@ -74,7 +74,17 @@ the integration branch later without conflicts.
 - [x] `pnpm run test:procgen` locally with CI's 16 parks: **exit 0 after 343 s — Test Files 45
       passed (45), Tests 2131 passed (2131)**, no skips; every seed's restart read from the
       manifest (0:0 1:1 2:7 3:8 4:0 5:3 6:5 7:1 8:1 9:0 10:0 11:0 12:2 13:0 14:0 15:0).
-- [ ] CI again on the final code head (with 4a39b06c) — see the last line of this file.
+- [x] CI again on the final code head **0476c9fd** (includes 4a39b06c): run **38560794408**,
+      **conclusion success — 23 success, 7 skipped**. Skipped = the five park-search jobs (this
+      source's parks were already cached by 38550516901, "Parks key" found them) plus Deploy and
+      PR preview. Checks shards 1-8 + Checks build + `Checks`, Procgen invariants shards 1-6 +
+      `Procgen invariants`, Coplanar faces, Swept bus, Walk reach, Entrance road, Every seed
+      builds: all success. Commits after 0476c9fd touch this handoff only.
+
+## DONE — handed back
+All five items built, verified and pushed; no PR raised (the orchestrator raises the single
+Library PR). The worktree is removed at handback; recreate it with
+`git worktree add .claude/worktrees/library-shared feat/library-714-shared`.
 
 ## For whoever integrates this (and builds Steps 3-14 on it)
 - **What this branch gives the library:** `lineSeconds` (ui/speechTiming), `Player.isRunning`,
