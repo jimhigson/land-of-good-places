@@ -87,6 +87,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/procgen/gridAxes.test.ts',
     'test/procgen/pavingLegibility.test.ts',
     'test/spookyJumpscare.test.ts',
+    'test/store/library-card.test.ts',
     'test/store/live-look.test.ts',
     'test/store/overlay-pause.test.ts',
     'test/store/save-flags-round-trip.test.ts',

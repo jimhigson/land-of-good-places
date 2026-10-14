@@ -110,3 +110,31 @@ export function visibleTop(root: Object3D): number {
   const { top } = visibleBounds(root);
   return top > 0 ? top : 0;
 }
+
+/**
+ * **How far a model reaches out from its own vertical axis**, in metres — the
+ * largest `hypot(x, z)` over every visible vertex of `root`, in `root`'s own
+ * frame. 0 for a model with nothing visible.
+ *
+ * The radius of the disc a standing thing actually covers on the plan, which
+ * is the honest radius for a collider that has to keep a child out of it: the
+ * library owl's capsule (#718) and the dragon's nest (#719) are both sized by
+ * this, so a head, a wing or the brim of a pair of glasses that sticks out past
+ * the body is inside the solid rather than something she can walk her face
+ * into.
+ *
+ * Built on {@link visiblePoints}, so it follows the same rules as
+ * {@link visibleBounds}: hidden meshes and meshes under a hidden parent are
+ * skipped, `InstancedMesh` is expanded per instance, and it is vertices rather
+ * than bounding boxes (a rotated box's corners would overstate the reach).
+ * Ink outlines are visible meshes and so count — they are drawn, so they are
+ * part of what a child can walk into.
+ */
+export function visibleReachXZ(root: Object3D): number {
+  let reach = 0;
+  visiblePoints(root, (point) => {
+    const r = Math.hypot(point.x, point.z);
+    if (r > reach) reach = r;
+  });
+  return reach;
+}

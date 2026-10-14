@@ -1,4 +1,4 @@
-import { Group, Sprite, SpriteMaterial, Vector3, type Object3D } from 'three';
+import { Group, Vector3, type Object3D } from 'three';
 import { clearsTop, type CollisionWorld, type WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -17,8 +17,8 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { Rng } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
-import { glowTexture } from '../../core/textures';
 import { SpeechBubble } from '../../ui/SpeechBubble';
+import { SpritePuffs } from '../../art/effects/spritePuffs';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { discoverSecret } from '../../state/secrets';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
@@ -128,48 +128,6 @@ export interface ReptileHouseDeps {
 /** The exit chip and the tail-tickle chip's ids. */
 const ENTRANCE_ZONE = 'reptile-entrance';
 
-/** A fixed pool of heart puffs over whatever was just greeted. */
-class HeartPuffs {
-  private readonly sprites: Sprite[] = [];
-  private readonly life: number[] = [];
-  private next = 0;
-
-  constructor(parent: Group, count: number) {
-    for (let i = 0; i < count; i += 1) {
-      const sprite = new Sprite(new SpriteMaterial({ map: glowTexture(PALETTE.markerPink), transparent: true, depthWrite: false }));
-      sprite.visible = false;
-      sprite.scale.setScalar(0.35);
-      parent.add(sprite);
-      this.sprites.push(sprite);
-      this.life.push(0);
-    }
-  }
-
-  puff(x: number, y: number, z: number, rng: Rng): void {
-    for (let i = 0; i < 3; i += 1) {
-      const index = this.next;
-      this.next = (this.next + 1) % this.sprites.length;
-      const sprite = this.sprites[index]!;
-      sprite.position.set(x + rng.range(-0.3, 0.3), y, z + rng.range(-0.3, 0.3));
-      sprite.visible = true;
-      this.life[index] = 1.2;
-    }
-  }
-
-  update(dt: number): void {
-    this.sprites.forEach((sprite, index) => {
-      const life = this.life[index] ?? 0;
-      if (life <= 0) return;
-      const remaining = Math.max(0, life - dt);
-      this.life[index] = remaining;
-      sprite.position.y += dt * 0.8;
-      sprite.scale.setScalar(0.35 * (0.6 + remaining / 1.2));
-      (sprite.material as SpriteMaterial).opacity = remaining / 1.2;
-      sprite.visible = remaining > 0;
-    });
-  }
-}
-
 export class ReptileHouse implements GameSystem {
   readonly name = 'reptileHouse';
   /** The hall, at the hall origin, hidden unless she is inside. */
@@ -198,7 +156,8 @@ export class ReptileHouse implements GameSystem {
   private readonly frame: FacadeFrame;
   /** Every line the hall says — an answer to a press, so `actionFeedback`. Its item is set per line. */
   private readonly bubble = new SpeechBubble({ id: 'reptile-house-say', item: '', kind: 'actionFeedback' }, PALETTE.markerMint);
-  private readonly hearts: HeartPuffs;
+  /** Hearts over whatever was just greeted — `art/effects/spritePuffs.ts`, the reptile house's own pink at 0.35. */
+  private readonly hearts: SpritePuffs;
   private readonly rng = new Rng(0x5e7a1e);
   private player: Player | null = null;
   private inside = false;
@@ -232,7 +191,7 @@ export class ReptileHouse implements GameSystem {
     buildHallShell(this.hallRoot, collision, surfaces);
     this.props = new ReptileProps(collision, surfaces, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
     const atlas = new SignAtlas();
-    this.hearts = new HeartPuffs(this.hallRoot, 12);
+    this.hearts = new SpritePuffs(this.hallRoot, 12);
     this.hallRoot.add(this.bubble.sprite);
     const adults = new SnakeSegmentPool(this.hallRoot, 260, 'reptile-adults');
     const babies = new SnakeSegmentPool(this.hallRoot, 200, 'reptile-babies');

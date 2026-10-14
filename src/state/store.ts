@@ -578,6 +578,28 @@ class GameStore {
   }
 
   /**
+   * She was **given** something to keep — the library card the owl hands her
+   * (#718, `world/library/libraryCard.ts`) — and it is hers, once.
+   *
+   * {@link catchWildPetOnce}'s sibling, and the same two lines: a keepsake is
+   * not a purchase, so it must not touch the purse through `buy()`, and
+   * `grantFree` is private, so this is the public door for it. Idempotent by
+   * catalogue id through {@link grantFreeOnce}: pressing the owl's chip a
+   * second time, or a save that already holds the card, hands back the card
+   * she already owns — one card, never two — and its `acquiredAt` stays the
+   * day she first got it.
+   *
+   * Filed exactly as `grantFree` files anything that is neither worn nor
+   * paradeable: stowed, in the backpack, with its `collection` entry beside
+   * it. The `card` kind is never worn, eaten or paraded (`INVENTORY_KINDS`).
+   */
+  grantKeepsakeOnce(spec: PurchaseSpec): InventoryItem {
+    const item = this.grantFreeOnce(spec, false);
+    this.notify();
+    return item;
+  }
+
+  /**
    * Picks a free flower straight out of the meadow — no shop, no price.
    *
    * Unlike `buy()` it never touches the purse and it is never carryable or
