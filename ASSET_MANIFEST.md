@@ -172,6 +172,7 @@ only question asked is whether the bytes still match.
 | `reptileCreatures.glb` | `pnpm run blend:reptile-creatures` | 124 KB | the Reptile House's creature parts — 13 nodes, 4 452 triangles |
 | `reptileNoodle.glb` | `pnpm run blend:reptile-noodle` | 112 KB | Noodle the python and her rock — 8 nodes, 4 982 triangles |
 | `reptileStall.glb` | `pnpm run blend:reptile-stall` | 73 KB | Scales & Tails' dressing and the Noodle-o-meter — 17 nodes, 2 449 triangles |
+| `library.glb` | `pnpm run blend:library` | 439 KB | the Library kit (#715): building, furniture, books, owl, dragon, cat — 65 nodes, 18 568 triangles |
 
 **Two shapes of kit, and the difference matters.** Some are *models* a placer
 puts down whole (the castle's furniture, the hotel's fittings); some are **kits
@@ -538,3 +539,59 @@ planar, `v = (hi − z)/h` the gate arch's way — so they are dressed with a
 each in a cell painted at the plank's own measured aspect. No rig,
 no hinges, no animation, no materials. Renders:
 `art/renders/reptile-stall/*.png` by `pnpm run render:reptile-stall`.
+
+### 41 — The Library kit (issue #715, part 1 of epic #714)
+
+Twenty assets in one file, each its own collection with its own origin:
+`shell` (the pillared exterior — plinth, steps, six turned columns,
+entablature, a pediment carrying an **open** carved book, the round-headed
+door in its recess, roof), `shelf` and `secretShelf` (the same bookcase vertex
+for vertex, the secret one re-originated on its **hinge**, the vertical line
+through its front-left corner), `desk` (top at the kiosk counter height),
+`readingLamp`, `floorLamp`, `armchair` and `cushion` (both seats at
+`KID_HIP_HEIGHT`, the one seat height the kneeless rig's feet reach the floor
+from), six `book-<height>-<thickness>` blocks for instancing (28 triangles
+each), `bookPile` (where the cat sleeps), `reader-cover` (the 3D reader's
+boards and spine; its pages are code because they bend), `owl` (the
+librarian), `dragon` and `dragonNest`, and `cat`. Node names are hyphenated —
+`<asset>-<part>`, or just `<asset>` for a one-node asset — because
+`GLTFLoader` deletes full stops (ART-AGENT-NOTES §6a).
+
+`art/blend/library_build.py` → `art/blend/library.blend` →
+`library_export.py` → `src/art/assets/library.glb` →
+`scripts/pack-library-asset.mts` → `libraryGlb.ts`; `pnpm run blend:library`
+runs all three, and `pnpm run render:library` writes
+`art/renders/library/*.png` (31 pictures: one per asset beside a child-height
+post, the three faces with eye dots at the shipped anchors, the exterior with
+children at the door, a corner of the reading room, the secret shelf swung
+open onto the den, and every interior asset in elevation against the rig's
+hip and reach lines). Budget 450 KB, a hard gate in the pack step; the size on
+the day is in `libraryGlb.ts`'s header. Shape only: no colour, no material.
+
+- **Every CONTRACT figure is asserted against the emitted vertices on every
+  build** — sizes, the step rise, the door opening (found by rays), every shelf
+  row's clear height (by rays, with a control), the seats, the secret shelf's
+  hinge and its sameness to the shelf, and `headOverBody` for the owl and the
+  dragon (ART_DIRECTION §4). The build also asserts every origin family
+  (FLOOR, HINGE, PIVOT), every pivot sits inside the parts it joins, every
+  closed piece faces outward, and no creature had to be stretched more than 8%
+  to fit its brief.
+- **Pivot nodes** carry a pure translation to their joint: `owl-head` (neck;
+  `owl-beak` and `owl-glasses` **ride** it), `owl-wingL`/`owl-wingR`
+  (shoulders; `owl-heldBook` rides `owl-wingR`), `dragon-head` (neck;
+  `dragon-horns` ride it), `dragon-tail`, `cat-head`, `cat-earL`, `cat-earR`,
+  `cat-tail`. A rider shares its parent's pivot: turn the two together.
+- **Faces in the heads' own UVs**: `owl-head`, `dragon-head`, `cat-head` map
+  their front polygons over the head node's own bounds (back faces parked at
+  (0.02, 0.02) — keep that canvas corner plain fill), `v` pre-inverted the
+  reptile kit's way, so paint them through `planarUvCanvasTexture`. The
+  figures a painter needs **travel in the asset** as node extras —
+  `face_eyes_uv`, `face_window_m`, and the owl's `face_rim_uv` (the room inside
+  her glasses) — measured off the geometry by the build, read with
+  `readGlbParts(...).get(node).extras`. Nobody types them.
+- **`pnpm run check:library-glb`** (in the gate) reads the shipped bytes: the
+  module is the file, the export's rules hold, texcoords appear exactly where
+  face figures do, `v` climbs with height on every face, and `readGlbParts`
+  and `GLTFLoader` agree on every node, extras included. The CONTRACT is the
+  build's to assert; the Engineer's `check:library` (#716) re-measures what the
+  game builds against with `visibleBounds()`.
