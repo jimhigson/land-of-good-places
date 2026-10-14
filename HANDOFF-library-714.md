@@ -390,6 +390,10 @@ dividing by a zero length. Documented on `WallCollider`.
   literal line would have closed #714 alone on merge.
 
 ## For the join (and the tracks)
+- **Merging Steps 3-4 (`feat/library-714-assets`) in is clean** (measured 16:23 BST:
+  `git merge-tree --write-tree --name-only origin/feat/library-714
+  origin/feat/library-714-assets` exit 0 at e7ad82e3 + 88ac6218, no conflicted file). The two
+  halves touch disjoint files.
 - **Track A (the owl): march at her with a real mover, not only the flood fill.** The flood
   fill asks `isClearCircle`, which always counted a zero-length wall as solid; the mover did
   not until 773efb7c. OWL's "her middle is not flood-reached" alone would have passed with a
