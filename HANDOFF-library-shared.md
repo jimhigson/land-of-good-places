@@ -33,8 +33,12 @@ the integration branch later without conflicts.
       ("45 suite files over 6 shards (5/5/5/8/8/14 files), each exactly once"), build 0 (no parks
       shipped locally: .parks was being rebuilt)
 - [ ] CI run **38550516901** dispatched on fad0e9f6 (`gh workflow run ci.yml --ref feat/library-714-shared`)
-- [ ] local `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` (for the after-baselines), then
-      the 12 baselines again; compare logs line by line with the before set
+- [x] local `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` at source `a51ca115291f…` →
+      exit 0 in 852 s: restarts 0, 1 rejected by build, 2 by the paved-detour measure, **3 accepted
+      as shipped (133 measures)**, digest **ea17dc22afe69179 — byte-for-byte main's seed 5 digest**
+      (main's manifest at e272e0c0…: `'5': 'ea17dc22afe69179'`). Same restart history as main's
+      acceptance. The refactors did not move the park.
+- [ ] the 12 baselines again; compare logs line by line with the before set
 
 ## Decisions (made here, with reasons)
 - **isRunning guard placement.** The plan says spawnRunningDust "starts with
