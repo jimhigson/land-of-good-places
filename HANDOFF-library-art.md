@@ -103,13 +103,18 @@ contract goes on #716 first.
 - [x] dentils removed; book boards one-segment bevel (pile + nest).
 - [x] pack docLine count dropped; pediment comment corrected; ASSET_MANIFEST
       row + §41.
-- [ ] gate on the final head: local `tsc`, `typecheck:test`, `build`,
-      `check:assets`, `check:character-parity`, `check:library-glb`,
-      `check:png-integrity`, `check:chain-coverage` all exit 0. The full
-      `check` / `test:procgen` need accepted parks, which a fresh worktree
-      does not have (seed 5 alone is ~20 min of acceptance loops), so the
-      whole of CI was dispatched on the branch instead (no PR needed):
-      `gh workflow run ci.yml --ref art/library-715` → run 38537415092.
+- [x] gate: local `tsc`, `typecheck:test`, `build`, `check:assets`,
+      `check:character-parity`, `check:library-glb`, `check:png-integrity`,
+      `check:chain-coverage` all exit 0. The full `check` / `test:procgen`
+      need accepted parks, which a fresh worktree does not have (seed 5 alone
+      is ~20 min of acceptance loops), so the whole of CI was dispatched on the
+      branch (no PR needed): `gh workflow run ci.yml --ref art/library-715` →
+      run 38537415092 on `6fbc7560`: **success** — all 8 Checks shards and the
+      build, all 6 Procgen invariants shards, Coplanar, Walk reach, Every seed
+      builds, Swept bus, Entrance road; both required aggregators green; the
+      Parks rebuild paths skipped on a cache hit (same park hash as main).
+      Shard 1's log shows `check:library-glb` and `check:png-integrity` ran
+      and passed. Commits after `6fbc7560` touch only this file.
 
 ## Not done, on purpose
 - **No part-PR from this branch.** Jim's 13 Oct ruling: one PR for the whole
