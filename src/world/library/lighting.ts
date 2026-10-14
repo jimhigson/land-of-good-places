@@ -12,12 +12,16 @@ import { LIGHT_DECAY } from '../LampPosts';
  * (`DayNight.setIndoors`, the hotel's rule), so the room lights itself, and
  * because nothing here follows the clock there is no day or night inside.
  *
- * - **A very low cool fill**: a hemisphere of night-sky blue over plum ink —
- *   what the shadows between the stacks are made of. Low, so the room reads
- *   dim; never zero, so nothing bottoms out at black.
+ * - **A low plum fill**: a hemisphere of lilac over plum ink — what the
+ *   shadows between the stacks are made of. Low, so the room reads dim; never
+ *   zero, so nothing bottoms out at black.
  * - **A dim warm key over the camera's shoulder** (the fixed rig looks from
  *   +X+Z, so the light does too): the faces the camera sees keep their shape
  *   without the room reading lit.
+ * - **The room's own materials barely glow** ({@link LIBRARY_INTERIOR_LIFT}):
+ *   the park's other interiors lift every surface by a sixth of its colour so a
+ *   cutaway never reads gloomy, which is right for a doll's house and wrong for
+ *   a dim reading room — at that lift the floor read lit with no lamps at all.
  * - **Warm pools**: one `PointLight` per lamp the layout marks `pool` — the
  *   story corner's two floor lamps, the nooks' lamps, the desk lamp and three
  *   sconces. Every other lamp and sconce glows (an emissive shade) without a
@@ -31,23 +35,37 @@ import { LIGHT_DECAY } from '../LampPosts';
  * anything in the park.
  */
 
-/** How bright one lamp's pool is, and how far it reaches before it is gone. */
-export const LIBRARY_POOL_INTENSITY = 5.5;
-export const LIBRARY_POOL_DISTANCE = 11;
+/**
+ * How bright one lamp's pool is, and how far it reaches before it is gone.
+ * Short on purpose: eleven metres of reach (the first cut) overlapped every
+ * pool with every other and lit the whole room the same warm orange, so there
+ * were no pools at all. At five and a half, each lamp lights its own corner
+ * and the aisles between stay dim.
+ */
+export const LIBRARY_POOL_INTENSITY = 4.5;
+export const LIBRARY_POOL_DISTANCE = 5.5;
 /** The point lights a room in this park may spend. */
 export const LIBRARY_LIGHT_BUDGET = 8;
 
 /**
- * The fill and the key: low, and exactly high enough that the room's darkest
- * floor — the aisles between the stacks, out of every lamp's reach, lit by
- * these two alone — renders brighter than `PALETTE.ink` **without** the
- * interior materials' own lift (`check:library`'s LIGHT clause: 0.0536 there
- * against ink's 0.0509, measured). The lift then carries it on to about twice
- * ink, so the shadows are plum, never black, while the hotel's fill (1.05 of
- * full daylight) and key (1.55) keep this room far the dimmest in the park.
+ * The fill and the key: low, so the room reads dim and its lamps read as
+ * pools, and high enough that its darkest floor — the aisles between the
+ * stacks, out of every lamp's reach — still renders brighter than
+ * `PALETTE.ink` (`check:library`'s LIGHT clause, which measures it with the
+ * floor's own small lift and asserts the lift alone could not pass). The hotel
+ * lights its rooms with a daylight fill of 1.05 and a key of 1.55; this is the
+ * park's dimmest room on purpose.
  */
-const FILL_INTENSITY = 1.05;
-const KEY_INTENSITY = 0.675;
+const FILL_INTENSITY = 0.4;
+const KEY_INTENSITY = 0.25;
+
+/**
+ * How much the reading room's floor and walls glow by themselves, as a share
+ * of their own colour — a quarter of the park's other interiors' lift
+ * (`building/parts.ts`'s `interiorMaterial`), so the lights, not the paint,
+ * decide how bright the room is.
+ */
+export const LIBRARY_INTERIOR_LIFT = 0.04;
 
 export interface PoolSpot {
   readonly id: string;
@@ -68,7 +86,7 @@ export class LibraryLighting {
       throw new Error(`Library: ${pools.length} lamp pools asked for, the budget is ${LIBRARY_LIGHT_BUDGET} — mark fewer lamps 'pool' in layout.ts`);
     }
 
-    const fill = new HemisphereLight(PALETTE.ambientNight, PALETTE.ink, FILL_INTENSITY);
+    const fill = new HemisphereLight(PALETTE.markerLilac, PALETTE.ink, FILL_INTENSITY);
     fill.name = 'library-fill';
     const key = new DirectionalLight(PALETTE.fairyWarm, KEY_INTENSITY);
     key.name = 'library-key';

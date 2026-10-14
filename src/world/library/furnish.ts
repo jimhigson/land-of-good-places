@@ -49,6 +49,7 @@ import type { LibraryProps } from './props';
 import type { PoolSpot } from './lighting';
 import {
   LIBRARY_BOOKCASES,
+  LIBRARY_DOOR_HALF,
   LIBRARY_FURNITURE,
   LIBRARY_READABLE_SLOTS,
   LIBRARY_SCONCE_HEIGHT,
@@ -315,6 +316,8 @@ const CUSHION_CLOTH = [PALETTE.markerLemon, PALETTE.markerMint, PALETTE.markerSk
 /** The story rug's drawn size. */
 const RUG_WIDTH = 7;
 const RUG_DEPTH = 4.4;
+/** How deep the doormat inside the way out is. */
+const DOORMAT_DEPTH = 1.2;
 
 export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished {
   assertReadableSlotsInReach();
@@ -336,7 +339,7 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       group.add(shell);
     }
     for (const glow of baked.glows) {
-      const lit = new Mesh(glow.geometry, bakedGlowMaterial(glow.colour));
+      const lit = new Mesh(glow.geometry, bakedGlowMaterial(glow.colour, glow.intensity));
       lit.name = `${group.name}.glow`;
       group.add(lit);
     }
@@ -504,6 +507,12 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       }
       case 'rug': {
         place(piece, createLibraryRug(RUG_WIDTH, RUG_DEPTH).root, 0);
+        break;
+      }
+      case 'doormat': {
+        // As wide as the doorway less a hand's breadth each side, and deep
+        // enough to read from across the room.
+        place(piece, createLibraryRug(LIBRARY_DOOR_HALF * 2 - 0.4, DOORMAT_DEPTH, 'doormat').root, 0);
         break;
       }
       case 'cushion': {

@@ -262,6 +262,9 @@ export const LIBRARY_SECRET_BOOKCASE: BookcaseSpec = (() => {
  *   the readers' armchair, in the storyteller's own cloth.
  * - `floorLamp` / `readingLamp` (on a `sideTable`) — warm pools of light.
  * - `rug` — the story rug, flat, walked on.
+ * - `doormat` — inside the way out, across the doorway's own width: the south
+ *   wall is drawn hidden so the camera can look in, so this is what tells a
+ *   child where the door is from across the room.
  * - `cushion` — a floor cushion on the rug: soft, so a platform she steps up
  *   onto rather than a wall she bumps (the hotel beds' "a prop that is its
  *   own floor is placed soft").
@@ -269,7 +272,7 @@ export const LIBRARY_SECRET_BOOKCASE: BookcaseSpec = (() => {
  *   out of reach: drawn, lit, no collider, because nothing at that height can
  *   meet her.
  */
-export type FurnitureKind = 'desk' | 'armchair' | 'storyChair' | 'floorLamp' | 'sideTable' | 'readingLamp' | 'rug' | 'cushion' | 'sconce';
+export type FurnitureKind = 'desk' | 'armchair' | 'storyChair' | 'floorLamp' | 'sideTable' | 'readingLamp' | 'rug' | 'doormat' | 'cushion' | 'sconce';
 
 export interface FurnitureSpec {
   readonly id: string;
@@ -292,6 +295,9 @@ export const LIBRARY_SCONCE_HEIGHT = 3.9;
 export const LIBRARY_STORY_RUG: LocalPoint = { x: 4, z: -9 };
 
 export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
+  // The doormat inside the way out, on the wall's inner face.
+  { id: 'doormat', kind: 'doormat', at: { x: LIBRARY_DOOR_X, z: LIBRARY_INNER_Z }, facing: 0 },
+
   // The librarian's desk, just inside the door to the right, facing the
   // camera so the owl behind it (#714 part 4) faces it too.
   { id: 'desk', kind: 'desk', at: { x: 6, z: 6.8 }, facing: 0 },

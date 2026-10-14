@@ -50,11 +50,11 @@
  *     inside too.
  * 10. FADE — standing behind a stack, the stack fades; standing in the open
  *     central aisle (the control), nothing does.
- * 11. LIGHT — no light is black or off, the pools are within the budget, and
- *     the darkest patch of floor, **lit by the room's lights alone**, renders
- *     brighter than `PALETTE.ink` (the floor's own lift is reported, not
- *     counted: it would pass a room with no lights at all); with a control —
- *     the same measure under a near-dark rig goes below it.
+ * 11. LIGHT — no light is black or off, the pools are within the budget, the
+ *     floor's own small lift is asserted to be under `PALETTE.ink` (so it
+ *     cannot pass the room by itself), and the darkest patch of floor — the
+ *     room's lights plus that lift — renders brighter than ink; with a control
+ *     — the same floor under a near-dark rig goes below it.
  * 12. READABLE — the twelve readable slots' shelves, measured, within her reach.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
@@ -820,15 +820,25 @@ console.log('\nLIGHT — dim, warm, never black:');
         if (value < darkest.value) darkest = { at: [x, z], value };
       }
     }
+    // The floor's own lift is part of what renders, so it is counted — but a
+    // lift past ink would pass a room with no lights at all, so it is asserted
+    // to be under ink first: then the clause after it is a measure of the lights.
     say(
-      darkest.value > ink,
-      `the darkest patch of floor, (${darkest.at[0]}, ${darkest.at[1]}), lit by the room's lights alone renders at ${darkest.value.toFixed(4)} linear, brighter than PALETTE.ink's ${ink.toFixed(4)}`,
+      lift < ink,
+      `the floor's own lift alone renders ${lift.toFixed(4)}, under PALETTE.ink's ${ink.toFixed(4)} — so the next clause measures the room's lights, not its paint`,
     );
-    note(`the floor's own lift adds ${lift.toFixed(4)} on top (not counted: it would light a room with no lights)`);
-    say(brightest > darkest.value * 2, `the pools read as pools: brightest ${brightest.toFixed(4)}, ${(brightest / darkest.value).toFixed(1)}x the darkest`);
+    say(
+      darkest.value + lift > ink,
+      `the darkest patch of floor, (${darkest.at[0]!.toFixed(1)}, ${darkest.at[1]!.toFixed(1)}), renders at ${(darkest.value + lift).toFixed(4)} linear ` +
+        `(${darkest.value.toFixed(4)} from the room's lights, ${lift.toFixed(4)} its own lift), brighter than PALETTE.ink's ${ink.toFixed(4)}`,
+    );
+    say(
+      brightest + lift > (darkest.value + lift) * 2,
+      `the pools read as pools: brightest ${(brightest + lift).toFixed(4)}, ${((brightest + lift) / (darkest.value + lift)).toFixed(1)}x the darkest`,
+    );
     const dark = [new HemisphereLight(PALETTE.ink, PALETTE.ink, 0.05)];
-    const control = lit(darkest.at[0]!, darkest.at[1]!, dark);
-    say(control < ink, `CONTROL: the same measure under a near-dark rig renders ${control.toFixed(4)}, below ink — the measure can fail`);
+    const control = lit(darkest.at[0]!, darkest.at[1]!, dark) + lift;
+    say(control < ink, `CONTROL: the same floor under a near-dark rig renders ${control.toFixed(4)}, below ink — the measure can fail`);
   }
 }
 

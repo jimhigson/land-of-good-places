@@ -68,6 +68,8 @@ interface PartStyle {
   readonly outline?: number;
   /** Self-lit: a lamp's shade, a lit window. Casts and catches nothing. */
   readonly glow?: true;
+  /** A soft glow of its own colour, this share of it — less than a lamp's. */
+  readonly lift?: number;
 }
 
 /**
@@ -193,9 +195,15 @@ const OWN = {
   sconceShade: { colour: PALETTE.fairyWarm, glow: true },
   binFrame: { colour: PALETTE.woodDark, outline: 0.02 },
   binBoard: { colour: PALETTE.wood, outline: 0.012 },
-  binBack: { colour: PALETTE.barkDark },
+  // The bins line the two walls the camera looks in over, so it is their backs
+  // it sees: a warm wood, never the near-black bark a dim room would make of it.
+  binBack: { colour: PALETTE.woodDark },
   rugField: { colour: PALETTE.markerPink },
   rugBorder: { colour: PALETTE.flowerYellow },
+  // The doormat inside the way out: daylight cream edged in sky blue, the
+  // lightest thing on the dim floor, so the door reads from across the room.
+  doormatField: { colour: ART.cream, lift: 0.35 },
+  doormatBorder: { colour: PALETTE.markerSky },
   skirtPlinth: { colour: PALETTE.stoneGreyLight },
   skirtSteps: { colour: PALETTE.stoneGrey },
 } satisfies Record<string, PartStyle>;
@@ -203,10 +211,14 @@ const OWN = {
 /** One material per paint, shared by every part painted with it. */
 const materials = new Map<string, Material>();
 function paint(style: PartStyle): Material {
-  const key = `${style.colour}:${style.glow ? 'glow' : 'toon'}`;
+  const key = `${style.colour}:${style.glow ? 'glow' : 'toon'}:${style.lift ?? 0}`;
   let material = materials.get(key);
   if (!material) {
-    const options: ToonOptions = style.glow ? { emissive: style.colour, emissiveIntensity: 0.9 } : {};
+    const options: ToonOptions = style.glow
+      ? { emissive: style.colour, emissiveIntensity: 0.9 }
+      : style.lift !== undefined
+        ? { emissive: style.colour, emissiveIntensity: style.lift }
+        : {};
     material = markShared(toonMaterial(style.colour, options));
     materials.set(key, material);
   }
@@ -729,13 +741,20 @@ export function librarySideTableSize(): { readonly top: number; readonly radius:
   return { top: plan.maxY, radius: Math.max(plan.maxX - plan.minX, plan.maxZ - plan.minZ) / 2 };
 }
 
-/** The story rug — this file's own piece: a rounded rectangle with a sunny border, flat on the floor. */
-export function createLibraryRug(width: number, depth: number): AssetHandle {
+/**
+ * A rug — this file's own piece: a rounded rectangle with a border, flat on the
+ * floor. The story rug is pink with a sunny border; the doormat inside the way
+ * out is cream with a sky-blue one.
+ */
+export function createLibraryRug(width: number, depth: number, kind: 'story' | 'doormat' = 'story'): AssetHandle {
   const root = new Group();
-  root.name = 'library.rug';
-  const border = decal(ownPart('rug-border', new RoundedBoxGeometry(width, 0.02, depth, 2, 0.009), OWN.rugBorder));
+  root.name = kind === 'story' ? 'library.rug' : 'library.doormat';
+  const [fieldStyle, borderStyle] = kind === 'story' ? [OWN.rugField, OWN.rugBorder] : [OWN.doormatField, OWN.doormatBorder];
+  // A border a quarter of a metre wide on the story rug, half that on a doormat.
+  const rim = Math.min(0.25, Math.min(width, depth) / 8);
+  const border = decal(ownPart('rug-border', new RoundedBoxGeometry(width, 0.02, depth, 2, 0.009), borderStyle));
   border.position.y = 0.01;
-  const field = decal(ownPart('rug-field', new RoundedBoxGeometry(width - 0.5, 0.02, depth - 0.5, 2, 0.009), OWN.rugField));
+  const field = decal(ownPart('rug-field', new RoundedBoxGeometry(width - rim * 2, 0.02, depth - rim * 2, 2, 0.009), fieldStyle));
   field.position.y = 0.03;
   root.add(border, field);
   return { root, height: visibleBounds(root).top };
@@ -770,7 +789,8 @@ export function createLibrarySconce(): LampHandle {
 export interface BakedModel {
   readonly body: BufferGeometry;
   readonly outline: BufferGeometry | null;
-  readonly glows: readonly { readonly colour: number; readonly geometry: BufferGeometry }[];
+  /** Each self-lit colour, with how strongly it glows — a lamp's shade, or a softly lit doormat. */
+  readonly glows: readonly { readonly colour: number; readonly intensity: number; readonly geometry: BufferGeometry }[];
 }
 
 function coloured(geometry: BufferGeometry, transform: Matrix4, colour: Color): BufferGeometry {
@@ -792,7 +812,7 @@ export function bakeModel(root: Object3D): BakedModel {
   const toRoot = new Matrix4().copy(root.matrixWorld).invert();
   const bodies: BufferGeometry[] = [];
   const outlines: BufferGeometry[] = [];
-  const glows = new Map<number, BufferGeometry[]>();
+  const glows = new Map<string, { colour: number; intensity: number; list: BufferGeometry[] }>();
   root.traverse((node) => {
     if (!(node instanceof Mesh) || !node.visible) return;
     const transform = new Matrix4().multiplyMatrices(toRoot, node.matrixWorld);
@@ -803,9 +823,10 @@ export function bakeModel(root: Object3D): BakedModel {
     }
     if (material instanceof MeshToonMaterial && material.emissive.getHex() !== 0) {
       const hex = material.color.getHex();
-      const list = glows.get(hex) ?? [];
-      list.push(coloured(node.geometry, transform, material.color));
-      glows.set(hex, list);
+      const key = `${hex}:${material.emissiveIntensity}`;
+      const glow = glows.get(key) ?? { colour: hex, intensity: material.emissiveIntensity, list: [] };
+      glow.list.push(coloured(node.geometry, transform, material.color));
+      glows.set(key, glow);
       return;
     }
     const colour = (material as Material & { color?: Color }).color ?? new Color(PALETTE.ink);
@@ -820,7 +841,7 @@ export function bakeModel(root: Object3D): BakedModel {
   return {
     body: merge(bodies),
     outline: outlines.length > 0 ? merge(outlines) : null,
-    glows: [...glows.entries()].map(([colour, list]) => ({ colour, geometry: merge(list) })),
+    glows: [...glows.values()].map(({ colour, intensity, list }) => ({ colour, intensity, geometry: merge(list) })),
   };
 }
 
@@ -840,9 +861,9 @@ export function bakedOutlineMaterial(): MeshBasicMaterial {
   return new MeshBasicMaterial({ color: 0xffffff, vertexColors: true, side: BackSide });
 }
 
-/** A glow part's material, shared by colour. */
-export function bakedGlowMaterial(colour: number): Material {
-  return paint({ colour, glow: true });
+/** A glow part's material, shared by colour and strength: a lamp's full glow, or a softer lift. */
+export function bakedGlowMaterial(colour: number, intensity: number): Material {
+  return paint(intensity >= 0.9 ? { colour, glow: true } : { colour, lift: intensity });
 }
 
 /** Every bookcase kind, baked once. */

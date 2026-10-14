@@ -601,8 +601,11 @@ export class World implements GameSystem {
     // The nap's own sky, over `DayNight.setIndoors`'s frozen backdrop — see
     // `DayNight.setNapSkyOverride`'s own doc comment (PR #279's follow-up,
     // 18 Aug 2026: the hotel's nap sky has to be the real sky shader at
-    // night-time uniforms, not a separate hand-built moon and stars).
-    this.dayNight.setNapSkyOverride(this.hotel.isNapping);
+    // night-time uniforms, not a separate hand-built moon and stars). The
+    // Library's reading room asks for the same night (#716, Jim's brief: dim,
+    // no day or night indoors): its walls are open-topped for the camera, and
+    // a noon sky over a lamplit room read as a lit room with the lamps on.
+    this.dayNight.setNapSkyOverride(this.hotel.isNapping || this.library.playerIsInside);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read

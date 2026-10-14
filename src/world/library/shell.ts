@@ -5,9 +5,9 @@ import { Plate } from '../hotel/place';
 import { segmentsMinusGaps, cornerClosedSpans } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
 import { placeOnSphere } from '../terrain';
-import { interiorMaterial } from '../building/parts';
 import { PALETTE } from '../../core/palette';
-import { solid } from '../../art/style/materials';
+import { solid, toonMaterial } from '../../art/style/materials';
+import { LIBRARY_INTERIOR_LIFT } from './lighting';
 import { END_HALF } from './props';
 import {
   LIBRARY_DOOR_HALF,
@@ -344,7 +344,7 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
   // The floor: warm boards under the dim light, one slab with a little apron
   // past the walls so the doorway's threshold has floor under it.
   const floor = solid(
-    new Mesh(new BoxGeometry(LIBRARY_HALF_X * 2 + 1.2, 0.5, LIBRARY_HALF_Z * 2 + 1.2), interiorMaterial(PALETTE.wood, 0.72)),
+    new Mesh(new BoxGeometry(LIBRARY_HALF_X * 2 + 1.2, 0.5, LIBRARY_HALF_Z * 2 + 1.2), roomMaterial(PALETTE.wood)),
   );
   floor.position.set(0, -0.25, 0);
   floor.name = 'library.floor';
@@ -366,7 +366,7 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
     { side: 'west', x1: -LIBRARY_HALF_X, z1: -LIBRARY_HALF_Z, x2: -LIBRARY_HALF_X, z2: LIBRARY_HALF_Z, hidden: false },
     { side: 'east', x1: LIBRARY_HALF_X, z1: -LIBRARY_HALF_Z, x2: LIBRARY_HALF_X, z2: LIBRARY_HALF_Z, hidden: true },
   ] as const;
-  const material = interiorMaterial(PALETTE.buildingTrimDeep, 0.7);
+  const material = roomMaterial(PALETTE.buildingTrimDeep);
   const walls: WallCollider[] = [];
   for (const { side, x1, z1, x2, z2, hidden } of sides) {
     const along = side === 'north' || side === 'south' ? 'x' : 'z';
@@ -411,6 +411,15 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
     }
   }
   return walls;
+}
+
+/**
+ * The reading room's own fabric — floor and walls: toon-shaded like every
+ * interior, with the room's own small lift (`lighting.ts`'s
+ * `LIBRARY_INTERIOR_LIFT`) so the lamps, not the paint, light it.
+ */
+function roomMaterial(colour: number) {
+  return toonMaterial(colour, { emissive: colour, emissiveIntensity: LIBRARY_INTERIOR_LIFT });
 }
 
 /** Room-local -> world plan. */
