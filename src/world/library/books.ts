@@ -193,8 +193,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'It floats over the big fountain.',
         picture: {
           cast: [
-            { model: 'statue', size: 0.55 },
-            { model: 'balloon', variant: 'dalmatian', at: [0.6, 2.4, 0.4] },
+            { model: 'statue', size: 0.45, at: [-0.5, 0, 0] },
+            { model: 'balloon', variant: 'dalmatian', at: [0.9, 1.6, 0.6] },
           ],
           sky: 'skyDayBottom',
           ground: 'waterTop',
@@ -827,8 +827,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'First comes you, then RiPika.',
         picture: {
           cast: [
-            { model: 'kid', mood: 'happy', at: [0.9, 0, 0.3], turn: 70 },
-            { model: 'ripika', mood: 'happy', at: [-1.0, 0, 0], turn: 70 },
+            { model: 'kid', mood: 'happy', at: [0.9, 0, 0.3], turn: 35 },
+            { model: 'ripika', mood: 'happy', at: [-1.0, 0, 0], turn: 35 },
           ],
           sky: 'skyDayBottom',
           ground: 'pathSand',
@@ -839,8 +839,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Then Biscuit, then Trilla too.',
         picture: {
           cast: [
-            { model: 'biscuit', mood: 'happy', at: [0.8, 0, 0.2], turn: 70 },
-            { model: 'trilla', mood: 'happy', at: [-0.9, 0, 0], turn: 70 },
+            { model: 'biscuit', mood: 'happy', at: [0.8, 0, 0.2], turn: 35 },
+            { model: 'trilla', mood: 'happy', at: [-0.9, 0, 0], turn: 35 },
           ],
           sky: 'skyDayBottom',
           ground: 'pathSand',
@@ -851,9 +851,9 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Then a bunny, a kitten and a mouse!',
         picture: {
           cast: [
-            { model: 'bunny', mood: 'happy', at: [1.3, 0, 0.2], turn: 70 },
-            { model: 'kitten', mood: 'happy', at: [0, 0, 0], turn: 70 },
-            { model: 'mouse', mood: 'happy', at: [-1.3, 0, -0.2], turn: 70 },
+            { model: 'bunny', mood: 'happy', at: [1.3, 0, 0.2], turn: 35 },
+            { model: 'kitten', mood: 'happy', at: [0, 0, 0], turn: 35 },
+            { model: 'mouse', mood: 'happy', at: [-1.3, 0, -0.2], turn: 35 },
           ],
           sky: 'skyDayBottom',
           ground: 'pathSand',
@@ -920,7 +920,7 @@ export const BOOKS: readonly LibraryBook[] = [
       {
         text: 'RiPika yawns a great big yawn.',
         picture: {
-          cast: [{ model: 'ripika', mood: 'surprised' }, { model: 'petBed', at: [0, -0.02, 0] }],
+          cast: [{ model: 'ripika', mood: 'surprised', at: [0, 0, 0.35] }, { model: 'petBed', at: [0, -0.02, -0.1] }],
           sky: 'skyNightBottom',
           ground: 'grassDark',
           night: true,
