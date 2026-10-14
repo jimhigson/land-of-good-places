@@ -245,7 +245,8 @@ function collect(): Copy[] {
   if (library.length === 0 || unrendered.length > 0) {
     throw new Error(
       `check:brevity: libraryCopyForBrevity() measured ${library.length} pieces and rendered no template with ` +
-        `${unrendered.map((book) => book.id).join(', ') || 'every title'} — the walk over libraryLines.ts is broken`,
+        `${unrendered.map((book) => book.id).join(', ') || 'every title'} — the walk over libraryLines.ts is broken ` +
+        '(or the Library has no templates any more, and this guard should go with them)',
     );
   }
   const rendered = library.filter((entry) => BOOKS.some((book) => entry.key.endsWith(`:${book.id}`))).length;
