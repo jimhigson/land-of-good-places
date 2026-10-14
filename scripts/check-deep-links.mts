@@ -260,10 +260,26 @@ const CHECKS: DeepLinkCheck[] = [
     primerPath: '/reptile-house',
     assert: async (page) => {
       const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
+      // **Wait for the link's own end state, inside *and* on the spot, never
+      // for `inside` alone.** `requestEnter` returns before its change of
+      // space has run (the teleport is the iris's midpoint), and on the
+      // `continueGame` path the restored save has her inside the hall from the
+      // first frame, so `inside` was true before the link had moved her at
+      // all. Read then, she was still on the save's spot, the arrival.
+      // Measured 14 Oct 2026, seed 5, local Chromium: 3 of 3 runs read
+      // (606.0, -584.2), 24.71 m off, with the space change still running,
+      // and every one stood on (587.0, -600.0) five frames (~350 ms) later.
+      // The same read passed on CI at 6fbc7560: whether the iris had closed by
+      // then was frame timing, not the link. A link that never moves her still
+      // fails: the wait times out and the read below says where she is.
       await page
         .waitForFunction(
-          () => ((window as unknown as { game?: any }).game)?.world?.reptileHouse?.playerIsInside === true,
-          undefined,
+          ({ x, z, tolerance }) => {
+            const g = (window as unknown as { game?: any }).game;
+            const p = g?.player?.position;
+            return g?.world?.reptileHouse?.playerIsInside === true && !!p && Math.hypot(p.x - x, p.z - z) <= tolerance;
+          },
+          { x: want.x, z: want.z, tolerance: CASTLE_TOLERANCE },
           { timeout: 10000 },
         )
         .catch(() => {});

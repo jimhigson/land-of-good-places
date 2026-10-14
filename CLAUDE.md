@@ -129,7 +129,12 @@ Engineer.
 
 ### Engineer
 
-**Default model: Opus.** Picks up a GitHub issue, implements it, ships a PR.
+**Default model: Fable 5.1, with ultracode on.** Picks up a GitHub issue,
+implements it, ships a PR. Jim, 13 October 2026: *"Fable can do all work
+except where better delegated to Opus 5.5"* — so every role below runs on
+Fable unless a stage is genuinely better on Opus 5.5 (cheap mechanical work:
+running a check, a rename, a fan-out that needs no judgement). This replaced
+the earlier "default to Opus" standing rule the same day.
 
 - **One engineer per ticket, always. Run as many at once as there are
   tickets ready** — engineers are the unit that scales here, and they only
@@ -194,7 +199,8 @@ Allocates the browser and the Artist, decides who works on what, and merges.
   Opus5 agents to match demand."* Standing authority, not a per-case
   approval. If three tickets are ready, run three engineers; if the asset
   queue is long, run several headless Artists; when a workstream is done,
-  retire its agent rather than leaving it idle. Default to Opus.
+  retire its agent rather than leaving it idle. Default to Fable 5.1; Opus
+  5.5 only where it is the better fit (see the Engineer's default above).
 - Speaks to Jim only as set out in "The Overseer stays silent" below.
 
 ### Reviewer
@@ -1126,7 +1132,7 @@ top-down camera, not inferring the shape of the paths from a segment-length
 assertion. If a feature can be seen, QA must see it before it can be signed
 off. "The checks pass" is an engineer's claim, not a QA verdict.
 
-**The QA agent runs on Opus, not a smaller or faster model.** This is the one
+**The QA agent runs on Fable 5.1, never a smaller or faster model.** This is the one
 stage in the whole pipeline that is pure judgement — does this look right,
 does this play right, is this actually what was asked for — and it carries
 the most weight of any gate here. Give it the model that can tell the
