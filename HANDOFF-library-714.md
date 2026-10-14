@@ -39,7 +39,8 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
         but for brevity's intended +65 (table below).
   - [x] The PR's CI (run 38580957653 on 8f0cb8c3) read, every job: **one red, fixed at
         cause on this branch** — procgen shard 4's `railRaceRoadBounded` (a stale seed pin; see
-        "The PR's CI" below), 04e98676. CI_SHARD8_PLACEHOLDER
+        "The PR's CI" below), 04e98676 — **and a second, Checks shard 8 killed by its
+        watchdog in check:served-book-reader**, fixed at cause in 588c413b + c136443b.
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
       foundation head; then Step 9, Step 10's labels/tap spacing, Step 14 and the cross-part
@@ -379,7 +380,8 @@ Parks: all 16 found (restarts 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:5 10:9 11:4 
 15:4; seeds 10 and 14 needed blocks past the first two). Then: Every seed builds, Checks build,
 Entrance road, Deploy PR preview, Swept bus, Coplanar faces, Walk reach, Checks shards 1-7,
 Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not main);
-**Procgen invariants shard 4 — failure**, and so the `Procgen invariants` gate.
+**Procgen invariants shard 4 — failure**, and so the `Procgen invariants` gate;
+**Checks shard 8 — failure** (exit 124), and so the `Checks` gate. Run conclusion: failure.
 - **The red:** `test/railRaceRoadBounded.test.ts` — "Test timed out in 240000ms"; the solve
   itself ran 398319 ms and every assertion in it held (`exhausted=decision-zero-per-feature:
   road still refuses after its 2 unwinds ... turns=179 unwinds=20 decision-zero=11
@@ -393,6 +395,43 @@ Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not mai
   0 decision-zero; the real file at the default timeout **20.9 s, 1 passed**. Control red at the
   new pin: the mutation off, the solve completes (44 turns) and the test fails "expected null to
   be an instance of Error". Outside the park source closure (hash unchanged).
+
+- **The second red: Checks shard 8**, `watchdog[check:shard-8] — RAN OUT OF CLOCK ... killed
+  during check-book-reader (after 19m04s in it)` at the 27m00s budget; check:served-walking had
+  passed first (~8 min). Its report, flushed on the kill, had reached "reading catBusDay to
+  the end" (section 6 of 8). check:served-book-reader had never run on CI before this PR (the
+  books branch ran its gates locally); locally on a GPU the whole check takes 36 s.
+- **Root cause, measured** (a timed copy of the check in the scratchpad, against my own dev
+  server on 5791, Chromium forced onto SwiftShader — the runner's renderer — at 1280x800, seed 5):
+  the paused park drawn under the open book is most of every frame. Park drawn: **380 s**;
+  park hidden after the first screenshot: **70 s**, every assertion the same. Device pixel ratio
+  0.5 changed nothing (384 s): it is draw-bound, not fill-bound. CI ran ~4.1x slower than this
+  machine's SwiftShader (section 6 reached at 1144 s vs 279 s), so the check was ~26 min on CI.
+- **And a race the measurement exposed:** with the park drawn under SwiftShader the old check
+  went red on 7 assertions, each a page read before its turn began (`A (the hop) presses the
+  page ...: spread 2 → 2`, `a tap of ← ...: 2 → 2`, `Space ...: 2 → 2`) or after a late one
+  landed (`a swipe leftwards turns exactly one page: spread 2 → 0`, `... rightwards: 0 → 0`,
+  `phone-portrait a tap pans ...: face 1 → 2, spread 0 → 1`, `... the next tap turns the leaf
+  ...: face 2 → 3, spread 1 → 1`). Every read after an input waited 100-400 ms, a guess at the
+  frame rate. Flaky is failing.
+- **Fix (588c413b, check-book-reader.mts):** `nextFrames`/`settleTurn` wait for the game's own
+  frames after every input (and look again a frame later, so a late second turn still counts),
+  and frame waits follow the other timed reads that precede an assertion; the park scene is
+  hidden after the first screenshot (`<id>-open.png` keeps the composition for QA;
+  `CHECK_BOOK_READER_PARK=shown` keeps it drawn; stderr says which on every run). **Same
+  conditions as the 7 reds (SwiftShader, park drawn): exit 0, 421 s.** Default (park hidden)
+  under SwiftShader: exit 0, 71 s (~5 min on CI by the 4.1x). GPU: exit 0, 36 s. **Red still
+  reachable:** the reader's swipe click guard removed (BookReader.ts, outside the park closure)
+  -> `a swipe leftwards turns exactly one page: spread 1 → 3`, exit 1; reverted.
+- **Fix (c136443b, package.json + checks.yml):** `check:shard-9` = check:served-book-reader on
+  its own; shard 8 = check:served-walking. Step sets parsed and compared (never grepped): 79
+  before, 79 after, none missing/added/duplicated; scripts 173 -> 174 (+check:shard-9); values
+  changed: `check`, `check:shard-8`; control (shard 8 loses the step) -> exit 1 naming it.
+  check:chain-coverage exit 0 (93 leaves reachable, "check" is 9 shards holding 79 steps); its
+  control (matrix without 9) -> exit 1, `check:shard-9 is run directly by 0 workflow
+  invocation(s)`. `pnpm run check:shard-9` locally: exit 0, 36 s, its own server stopped.
+- **Unproven until the next CI run** (not dispatched here, by the task): shard 9's real time on
+  the runner (estimate ~5 min plus setup) and shard 4's re-pinned test there.
 
 ### Red transcripts (each with what it was proved against)
 - **check:wall-tunnelling, the zero-length clause.** Mutation: Collision.ts's three
@@ -464,6 +503,12 @@ Procgen invariants shards 1, 2, 3, 5, 6 — **success**; Deploy skipped (not mai
   literal line would have closed #714 alone on merge.
 
 ## For the join (and the tracks)
+- **check-book-reader.mts (Step 5's served item 6 goes here):** read the reader after an input
+  with `settleTurn(page)` / `nextFrames(page)`, never a bare `waitForTimeout` — the runner's
+  frames are slow. The park under the book is hidden after section 1's first screenshot; a new
+  `page.goto` (item 6's `/library?at=...`) builds a fresh page with the park drawn, which costs
+  most of each frame on CI — hide it again once the item's park-dependent part is done, as
+  section 1 does, or measure shard 9 on CI before trusting it. Shard 9 holds only this check.
 - **Merging Steps 3-4 (`feat/library-714-assets`) in is clean** (measured 16:23 BST:
   `git merge-tree --write-tree --name-only origin/feat/library-714
   origin/feat/library-714-assets` exit 0 at e7ad82e3 + 88ac6218, no conflicted file). The two
