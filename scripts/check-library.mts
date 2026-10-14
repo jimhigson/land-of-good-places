@@ -9,7 +9,13 @@
  * LIBRARY_CHECK_OPEN_CORNERS=1 pnpm run check:library        # take the corner squaring out: must go red
  * LIBRARY_CHECK_OPEN_EDGE=1 pnpm run check:library           # open one of the plinth's edges (1 east, 2 back, 3 west): must go red
  * LIBRARY_CHECK_DARK=1 pnpm run check:library                # the room's fill and key turned off: must go red
+ * LIBRARY_CHECK_MUTATE=faces-upside-down pnpm run check:library  # the creatures' faces flipped: must go red
+ * LIBRARY_CHECK_MUTATE=block-walk pnpm run check:library      # a wall across the real child's way in: must go red
  * ```
+ *
+ * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
+ * (see {@link MUTATIONS}); an unknown value throws, and a known one no clause
+ * in this build arms fails the run rather than passing it.
  *
  * Built on the real `World` (`park-harness.mts`), so every number is measured
  * off the colliders, surfaces and lights the game registers, never off a
@@ -56,6 +62,13 @@
  *     room's lights plus that lift — renders brighter than ink; with a control
  *     — the same floor under a near-dark rig goes below it.
  * 12. READABLE — the twelve readable slots' shelves, measured, within her reach.
+ * 13. PAINTED FACES — the owl's, the dragon's and the cat's faces (#718, #719),
+ *     on freshly built creatures: each head's UVs read against its own
+ *     texture's flip, the canvas row falling as the head rises, and the eyes
+ *     above the mouth (the owl's, above her beak).
+ * 14. WITH A REAL CHILD — from here on a real `Player`, stepped the game's way
+ *     and steered by the stick ({@link RealChild}): from the arrival, she walks
+ *     into the room on the floor. Parts 4 and 5 add their clauses to it.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -68,8 +81,11 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, MeshToonMaterial, Vector3, type Light, type Mesh } from 'three';
+import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Vector3, type BufferAttribute, type Light, type Object3D, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { Player } from '../src/entities/Player.ts';
+import { InputSystem } from '../src/core/input/InputSystem.ts';
+import { saveFlags } from '../src/state/flags.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP } from '../src/core/constants.ts';
@@ -84,12 +100,29 @@ import { buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
 import {
+  createLibraryBookPile,
+  createLibraryCat,
+  createLibraryDragon,
+  createLibraryDragonNest,
+  createLibraryOwl,
+} from '../src/art/models/libraryCreatures.ts';
+import {
+  catFaceTextures,
+  dragonFaceTextures,
+  LIBRARY_FACE_ROWS,
+  LIBRARY_FACED_HEADS,
+  libraryFaceCanvasSize,
+  owlFaceTextures,
+  type LibraryFacedHead,
+} from '../src/art/models/libraryFaces.ts';
+import {
   LIBRARY_AISLES,
   LIBRARY_ARRIVAL,
   LIBRARY_BOOKCASES,
   LIBRARY_DESK_STAND,
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
+  LIBRARY_FLOOR_Y,
   LIBRARY_FURNITURE,
   LIBRARY_HALF_X,
   LIBRARY_HALF_Z,
@@ -124,6 +157,61 @@ const say = (ok: boolean, line: string): void => {
 const note = (line: string): void => {
   process.stderr.write(`  note: ${line}\n`);
 };
+
+/**
+ * **`LIBRARY_CHECK_MUTATE` — the one allow-list of this check's own
+ * mutations** (#714 parts 4 and 5 arm theirs here; no clause invents a second
+ * switch). Each breaks the thing one clause measures, in the check only —
+ * never a test branch in game code — so the run must go red.
+ *
+ * Two guards, so a red proof cannot pass by accident: an unknown value throws
+ * before anything is built, and a known value that **no clause in this build
+ * arms** fails the verdict ("asserts nothing"), which is what a run would
+ * otherwise quietly report on a branch where that clause has not landed yet.
+ * A clause arms its mutation by asking {@link mutating}.
+ *
+ * `block-walk` is the real child's own (the WITH A REAL CHILD harness clause,
+ * added with the harness); the rest are the plan's (Steps 3-14).
+ */
+const MUTATIONS = [
+  '',
+  'faces-upside-down',
+  'shift-books',
+  'card-twice',
+  'block-route',
+  'block-cushion',
+  'no-story',
+  'no-lintel',
+  'seal-den',
+  'open-leaf-hollow',
+  'resident-in-den',
+  'block-walk',
+] as const;
+type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
+const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
+if (!(MUTATIONS as readonly string[]).includes(MUTATE)) {
+  throw new Error(`LIBRARY_CHECK_MUTATE=${MUTATE} is not one of this check's mutations: ${MUTATIONS.filter((m) => m !== '').join(', ')}`);
+}
+let mutationArmed = false;
+/** Is `name` the mutation this run was asked for? Asking is what arms it — see {@link MUTATIONS}. */
+function mutating(name: Mutation): boolean {
+  if (MUTATE !== name) return false;
+  mutationArmed = true;
+  return true;
+}
+
+/** Least-squares slope of one series against another (`check-reptile-house.mts`'s, for the painted faces). */
+function slope(xs: readonly number[], ys: readonly number[]): number {
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < xs.length; i += 1) {
+    num += (xs[i]! - mx) * (ys[i]! - my);
+    den += (xs[i]! - mx) ** 2;
+  }
+  return den > 0 ? num / den : Number.NaN;
+}
 
 // ---------------------------------------------------------------------------
 // The instrument: a flood fill over the plate at the player's radius.
@@ -262,6 +350,14 @@ console.log('CONTROL — the fill instrument:');
 // ---------------------------------------------------------------------------
 // The real building, in the real park.
 // ---------------------------------------------------------------------------
+// Built the way a `/library` link builds it: with no cat bus at the kerb. A
+// deep link boots with `arriveByBus: false` (`main.ts`), and a returning save
+// has already arrived; headless, the arrival's default is the save's flag
+// (`arrivalIsDue`), so it is set first. Without it, `world.attachPlayer` seats
+// WITH A REAL CHILD's player in the bus, riding, and the Library (rightly)
+// refuses to let a riding child through its door. Nothing before that section
+// reads the arrival: the probe above is never attached to the world.
+saveFlags.markArrived();
 const { world, scene, camera } = quietly(() => buildHeadlessPark());
 const library = world.library;
 const collision = world.collision;
@@ -854,6 +950,274 @@ console.log('\nREADABLE — the twelve readable books within her reach:');
   say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
 }
 
+console.log('\nPAINTED FACES — the owl, the dragon and the cat wear their faces the right way up:');
+{
+  // The three heads carry their faces in their own UVs, authored the planar
+  // way (`library_build.py`, "Faces"), so they are painted through
+  // `planarUvCanvasTexture`. Read each head's UVs against its texture's own
+  // `flipY` and ask which canvas row a vertex samples: higher on the head must
+  // be nearer the top of the canvas, and the eye row must land above the mouth
+  // row (the owl's, above her beak — she has no painted mouth). Painted through
+  // the other helper, every face would wear its mouth over its eyes and no
+  // frame would say so: the Reptile House's snakes did (2 October 2026).
+  // Freshly built handles, so this measures the assets, not where a room put them.
+  const handles = {
+    owl: createLibraryOwl(),
+    dragon: createLibraryDragon(),
+    nest: createLibraryDragonNest(),
+    cat: createLibraryCat(),
+    pile: createLibraryBookPile(),
+  };
+  const sets: Readonly<Record<LibraryFacedHead, Readonly<Record<string, Texture>>>> = {
+    'owl-head': owlFaceTextures(),
+    'dragon-head': dragonFaceTextures(),
+    'cat-head': catFaceTextures(),
+  };
+  if (mutating('faces-upside-down')) {
+    let flipped = 0;
+    for (const set of Object.values(sets)) {
+      for (const texture of Object.values(set)) {
+        texture.flipY = !texture.flipY;
+        flipped += 1;
+      }
+    }
+    note(`FLIPPED all ${flipped} painted faces the other way up on purpose (what painting them through glbCanvasTexture does) — this run must go red`);
+  }
+  const owners: Readonly<Record<LibraryFacedHead, { readonly root: Object3D; readonly rows: { readonly eye: number; readonly mouth?: number } }>> = {
+    'owl-head': { root: handles.owl.root, rows: LIBRARY_FACE_ROWS.owl },
+    'dragon-head': { root: handles.dragon.root, rows: LIBRARY_FACE_ROWS.dragon },
+    'cat-head': { root: handles.cat.root, rows: LIBRARY_FACE_ROWS.cat },
+  };
+  const point = new Vector3();
+  /** Every vertex of a mesh (never its outline, which is a child), as heights in its handle's frame. */
+  const heightsOf = (mesh: Mesh): number[] => {
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const out: number[] = [];
+    for (let i = 0; i < position.count; i += 1) out.push(point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).y);
+    return out;
+  };
+  for (const head of LIBRARY_FACED_HEADS) {
+    const { root, rows: faceRows } = owners[head];
+    root.updateMatrixWorld(true);
+    const mesh = root.getObjectByName(head);
+    if (!(mesh instanceof Mesh)) {
+      say(false, `${head}: no such mesh under its creature — nothing measured`);
+      continue;
+    }
+    const map = (mesh.material as MeshToonMaterial).map;
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const uv = mesh.geometry.getAttribute('uv') as BufferAttribute | undefined;
+    if (!map || !uv) {
+      say(false, `${head} wears no painted face (map ${!!map}, uv ${!!uv})`);
+      continue;
+    }
+    const ys: number[] = [];
+    const rows: number[] = [];
+    let parked = 0;
+    for (let i = 0; i < uv.count; i += 1) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      // The back faces, parked at library_build.py's (0.02, 0.02) — (0.02, 0.98)
+      // once the exporter's 1 − v has been applied: plain fill, no face.
+      if (u < 0.05 && v > 0.95) {
+        parked += 1;
+        continue;
+      }
+      ys.push(point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).y);
+      rows.push(map.flipY ? 1 - v : v);
+    }
+    if (ys.length < 30) {
+      say(false, `${head}: only ${ys.length} front vertices carry the face (${parked} parked) — nothing to measure`);
+      continue;
+    }
+    const fall = slope(ys, rows);
+    const nearest = (target: number): number => rows.reduce((best, row, i) => (Math.abs(row - target) < Math.abs(rows[best]! - target) ? i : best), 0);
+    const eyeY = ys[nearest(faceRows.eye)]!;
+    const how = `${ys.length} front vertices (${parked} parked), the canvas row ${fall < 0 ? 'falls' : 'RISES'} ${Math.abs(fall).toFixed(2)}/m as the head rises (flipY ${map.flipY})`;
+    if (faceRows.mouth === undefined) {
+      const beak = root.getObjectByName('owl-beak');
+      const beakTop = beak instanceof Mesh ? Math.max(...heightsOf(beak)) : Number.NaN;
+      say(fall < 0 && eyeY > beakTop, `${head}: ${how}; the eye row lands at y ${eyeY.toFixed(3)}, over the beak's top at ${beakTop.toFixed(3)}`);
+    } else {
+      const mouthY = ys[nearest(faceRows.mouth)]!;
+      say(fall < 0 && eyeY > mouthY, `${head}: ${how}; the eye row lands at y ${eyeY.toFixed(3)} and the mouth row at y ${mouthY.toFixed(3)}`);
+    }
+    const image = map.image as { readonly width: number; readonly height: number };
+    const size = libraryFaceCanvasSize(head);
+    note(`${head}: canvas ${image.width} x ${image.height} (asked ${size.width} x ${size.height}); slope ${fall.toFixed(3)}`);
+  }
+  const showing = new Set<Texture>();
+  for (const handle of Object.values(handles)) {
+    handle.root.traverse((object) => {
+      if (object instanceof Mesh && (object.material as MeshToonMaterial).map) showing.add((object.material as MeshToonMaterial).map!);
+    });
+  }
+  const painted = Object.entries(sets).map(([head, set]) => `${head.replace('-head', '')} ${Object.keys(set).length}`);
+  const total = Object.values(sets).reduce((sum, set) => sum + Object.keys(set).length, 0);
+  note(
+    `textures: ${showing.size} face canvases showing under the five creature handles, ${total} painted in all (${painted.join(', ')}) — ` +
+      "the creatures' share of ASSET_MANIFEST's informal under-40 budget",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WITH A REAL CHILD — a real Player, stepped the game's way, steered by the stick.
+// ---------------------------------------------------------------------------
+
+/** One frame of the real child: the game's 60 fps. */
+const CHILD_DT = 1 / 60;
+
+/** A thumb on the stick for one frame: called after `input.update()`, before anything reads the input. */
+type Steer = (input: InputSystem) => void;
+
+/**
+ * **The real child — the harness every clause from here on drives** (plan
+ * Step 6's recipe, which is `check-labels.mts`'s).
+ *
+ * The DOORS probe above is a position and two flags. From here on she is a
+ * real `Player` in the real park — her own collision, ground sampler, walk
+ * and face — attached the way `Game` attaches her (`world.attachPlayer`, which
+ * also takes the probe's place in the Library). One {@link RealChild.step} is
+ * the game's own order for everything a library clause reads, at 1/60 s:
+ *
+ *     input.update → (steer) → player.update → camera.update → library.update → world.npcs.update
+ *
+ * `world.npcs.update` is in it so the library's children (#718, Step 8) walk
+ * exactly as the game walks them.
+ *
+ * - `child.enter(at?)` — into the reading room through `Library.requestEnter`,
+ *   the road `/library?at=x,z&facing=deg` takes; without `at`, at the arrival.
+ *   Headless, the iris is instant, so she is there when it returns; the camera
+ *   is snapped onto her the way the iris snaps it.
+ * - `child.stand(x, z, facing?)` — stand her at a room-local spot (degrees, the
+ *   layout's convention) without a change of space; for a clause already inside.
+ * - `child.step(steer?)`, `child.run(seconds, steer?)` — frames.
+ * - `child.towards(dx, dz, sprint?)` — a {@link Steer} that holds the stick
+ *   the way a thumb would to walk her along world direction (dx, dz): the
+ *   stick is camera-relative, so it is solved from the live camera's ground
+ *   basis, and fed in through `input.setNavigationMove` (tap-to-move's road
+ *   into the same stick). Sprint is `setNavigationSprint`, released every frame
+ *   a steer does not ask for it.
+ * - `child.room()` — where she stands, room-local.
+ * - `child.player`, `child.input`, `child.frames` — the real ones, for the
+ *   rest (`input.pressVirtual('jump')`, `player.isRunning`, `player.riding`…).
+ *
+ * Parts 4 and 5 add their clauses below the harness's own, each track after
+ * its own marker. Leave her as you found her: standing in the reading room,
+ * not riding, with nothing of yours still running.
+ */
+interface RealChild {
+  readonly player: Player;
+  readonly input: InputSystem;
+  /** Frames stepped so far. */
+  readonly frames: number;
+  step(steer?: Steer): void;
+  run(seconds: number, steer?: Steer): void;
+  enter(at?: { readonly x: number; readonly z: number; readonly facing?: number }): void;
+  stand(x: number, z: number, facing?: number): void;
+  towards(dx: number, dz: number, sprint?: boolean): Steer;
+  room(): { readonly x: number; readonly z: number };
+}
+
+const child: RealChild = (() => {
+  const player = quietly(() => new Player(world.collision, camera, new Vector3(OX + LIBRARY_ARRIVAL.x, LIBRARY_FLOOR_Y, OZ + LIBRARY_ARRIVAL.z)));
+  scene.add(player.group);
+  quietly(() => world.attachPlayer(player));
+  const input = new InputSystem();
+  const context = { dt: CHILD_DT, elapsed: 0, input, playerPosition: player.position, cameraForward: camera.forward, frame: 0 };
+  let frames = 0;
+  const step = (steer?: Steer): void => {
+    input.update();
+    input.setNavigationSprint(false);
+    steer?.(input);
+    context.frame = frames;
+    context.elapsed = frames * CHILD_DT;
+    quietly(() => {
+      player.update(context);
+      camera.update(context, player.position, player.velocity);
+      library.update(context);
+      world.npcs.update(context);
+    });
+    frames += 1;
+  };
+  return {
+    player,
+    input,
+    get frames() {
+      return frames;
+    },
+    step,
+    run(seconds, steer) {
+      for (let i = 0; i < Math.round(seconds / CHILD_DT); i += 1) step(steer);
+    },
+    enter(at) {
+      if (!quietly(() => library.requestEnter(at))) throw new Error('WITH A REAL CHILD: Library.requestEnter refused her (riding, or a change of space already running)');
+      camera.snapTo(player.position);
+    },
+    stand(x, z, facing) {
+      player.teleportTo(OX + x, LIBRARY_FLOOR_Y, OZ + z, facing === undefined ? undefined : (facing * Math.PI) / 180);
+      camera.snapTo(player.position);
+    },
+    towards(dx, dz, sprint = false) {
+      const length = Math.hypot(dx, dz);
+      if (length === 0) throw new Error('WITH A REAL CHILD: towards() needs a direction');
+      const x = dx / length;
+      const z = dz / length;
+      return (held) => {
+        const right = camera.right;
+        const forward = camera.forward;
+        held.setNavigationMove(x * right.x + z * right.z, x * forward.x + z * forward.z);
+        held.setNavigationSprint(sprint);
+      };
+    },
+    room() {
+      return { x: player.position.x - OX, z: player.position.z - OZ };
+    },
+  };
+})();
+
+console.log('\nWITH A REAL CHILD — a real Player, from the arrival, walks up the central aisle on the stick:');
+{
+  child.enter();
+  const start = child.room();
+  say(
+    library.playerIsInside && Math.hypot(start.x - LIBRARY_ARRIVAL.x, start.z - LIBRARY_ARRIVAL.z) < 0.01,
+    `the real child enters at the arrival: (${start.x.toFixed(2)}, ${start.z.toFixed(2)}), inside ${library.playerIsInside}`,
+  );
+  // `block-walk`: a wall across the aisle a metre ahead of her, the width of the
+  // entrance hall — her way into the room is shut, so she cannot travel.
+  const blocker = mutating('block-walk')
+    ? collision.addWall(OX + LIBRARY_ARRIVAL.x - 3, OZ + LIBRARY_ARRIVAL.z - 1, OX + LIBRARY_ARRIVAL.x + 3, OZ + LIBRARY_ARRIVAL.z - 1, 0.2)
+    : null;
+  if (blocker) note(`BUILT a wall across the central aisle at z ${(LIBRARY_ARRIVAL.z - 1).toFixed(1)}, a metre ahead of the arrival, on purpose — this run must go red`);
+  // Up the central aisle: the room's -Z, away from the door.
+  const up = child.towards(0, -1);
+  const seconds = 2;
+  let pushed = 0;
+  let offFloor = 0;
+  const frames = Math.round(seconds / CHILD_DT);
+  for (let i = 0; i < frames; i += 1) {
+    child.step(up);
+    if (child.input.moveAmount > 0.99) pushed += 1;
+    offFloor = Math.max(offFloor, Math.abs(child.player.position.y - LIBRARY_FLOOR_Y)); // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere; her height above its one floor
+  }
+  const end = child.room();
+  const travelled = Math.hypot(end.x - start.x, end.z - start.z);
+  say(
+    pushed === frames && travelled >= 1.5 && offFloor <= 0.02 && library.playerIsInside,
+    `steered up the central aisle for ${seconds} s (the stick pushed on ${pushed} of ${frames} frames), she travelled ${travelled.toFixed(2)} m (at least 1.5) ` +
+      `to (${end.x.toFixed(2)}, ${end.z.toFixed(2)}), her feet never more than ${offFloor.toFixed(3)} m off the floor (0.02 allowed), still inside: ${library.playerIsInside}`,
+  );
+  if (blocker) collision.removeWall(blocker);
+  note(`the real child: ${child.frames} frames stepped; camera forward (${camera.forward.x.toFixed(2)}, ${camera.forward.z.toFixed(2)}), right (${camera.right.x.toFixed(2)}, ${camera.right.z.toFixed(2)})`);
+}
+
+// ── Track A (#718: the readable shelves and the owl, plan Steps 5-6) adds its WITH A REAL CHILD clauses below this line. ──
+
+// ── Track B (#718: the story cushions and the library's children, plan Steps 7-8) adds its clauses below this line. ──
+
+// ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──
+
 console.log('\nHOUSEKEEPING:');
 {
   say(spaceAt(OX, OZ) === SPACE_LIBRARY, `spaceAt the room's origin is '${spaceAt(OX, OZ)}'`);
@@ -871,5 +1235,8 @@ console.log('\nHOUSEKEEPING:');
   note('the reading room is seed-independent, so one seed measures it; the exterior is walked on every seed by aChildWalksUpTheLibraryStepsAndIn');
 }
 
+if (MUTATE !== '' && !mutationArmed) {
+  say(false, `LIBRARY_CHECK_MUTATE=${MUTATE} was asked for, but no clause in this build arms it — this run ASSERTS NOTHING about it`);
+}
 console.log(bad === 0 ? '\nAll clauses passed.' : `\n${bad} clause(s) FAILED.`);
 process.exit(bad === 0 ? 0 : 1);
