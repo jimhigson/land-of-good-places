@@ -296,6 +296,11 @@ dividing by a zero length. Documented on `WallCollider`.
   accepted (134 measures), digest 9acd3a626f55d35c**, proven by hydration, exit 0 in 523 s —
   the restart building's CI accepted for seed 5. `.parks/` in this worktree now holds it, so
   World-building checks here hydrate instead of solving (until the next closure edit).
+  **The same build at the foundation's source** (6b86bf43…, in the baseline worktree): restart 0
+  rejected by check:coplanar (238 s), **restart 1 accepted (134 measures), digest
+  9acd3a626f55d35c**, exit 0 in 507 s. Same restart, same digest: these edits moved neither
+  seed 5's park nor its acceptance verdict. And the foundation's seed 5 registers the same
+  colliders as this branch's (walls 1289, circles 1793, the same owners), zero-length 0.
 
 ### Step 2's remainder (9f650da1)
 - `src/world/library/libraryLines.ts`: `LIBRARY_LINES` and `LIBRARY_CHIPS` exactly as the plan
