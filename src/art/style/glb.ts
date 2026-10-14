@@ -15,19 +15,24 @@ import { BufferAttribute, BufferGeometry, CanvasTexture, Matrix4, Quaternion, SR
  * park better.
  *
  * So the game reads the subset of glTF it actually authors, itself, in one pass.
- * That subset is small on purpose: **meshes, their vertex attributes, and the
- * local transform of the node each one hangs off.** No materials, no textures,
+ * That subset is small on purpose: **meshes, their vertex attributes, the
+ * local transform of the node each one hangs off, and that node's `extras`**
+ * (the custom properties a build script measured and handed over — the
+ * Library heads' painted-eye anchors, for one). No materials, no textures,
  * no skins, no animations, no cameras, no scene graph deeper than one level —
  * all of which stay in code by design (see `scripts/export-kid-glb.mts`).
  *
  * ## Why this is safe to hand-roll
  *
  * Because it is checked against the real thing rather than trusted.
- * `check:character-parity` reads every authored asset **twice** — once with this
- * and once with three.js's own `GLTFLoader` — and asserts the two agree vertex
- * for vertex, and that both agree with the procedural build. A bug in here is
- * not a bug that can reach the park quietly; it is a build failure. Two
- * independent readers agreeing is the evidence, not this file looking correct.
+ * `check:character-parity` reads the kid **twice** — once with this and once
+ * with three.js's own `GLTFLoader` — and asserts the two agree vertex for
+ * vertex, and that both agree with the procedural build; `check:library-glb`
+ * does the same for every node of the Library kit, extras included. A bug in
+ * here is not a bug that can reach the park quietly; it is a build failure.
+ * Two independent readers agreeing is the evidence, not this file looking
+ * correct. (Those two are the files read twice today — the other kits are
+ * read by this reader alone, and measured by their own checks.)
  */
 
 /** One mesh out of a `.glb`: its shape, and where its node sits. */
@@ -38,6 +43,13 @@ export interface GlbPart {
   readonly position: Vector3;
   readonly quaternion: Quaternion;
   readonly scale: Vector3;
+  /**
+   * The node's glTF `extras` — custom properties the authoring script set on
+   * the object and exported — exactly as `GLTFLoader` puts them on
+   * `userData`. Absent when the node has none, which is every node of every
+   * kit except the few that hand over a measured number this way.
+   */
+  readonly extras?: Readonly<Record<string, unknown>>;
 }
 
 const GLB_MAGIC = 0x46546c67; // 'glTF'
@@ -103,6 +115,7 @@ interface GltfJson {
     rotation?: [number, number, number, number];
     scale?: [number, number, number];
     matrix?: number[];
+    extras?: unknown;
   }[];
   accessors?: GltfAccessor[];
   bufferViews?: GltfBufferView[];
@@ -255,7 +268,16 @@ export function readGlbParts(data: ArrayBuffer): Map<string, GlbPart> {
       if (node.scale) scale.fromArray(node.scale);
     }
 
-    parts.set(name, { name, geometry: geometryFor(node.mesh), position, quaternion, scale });
+    // glTF allows any JSON value as `extras`. `GLTFLoader` copies an object's
+    // keys onto `userData` and ignores a primitive; a plain object is the only
+    // shape an exporter writes for custom properties, so that is all kept here.
+    const extras = node.extras;
+    const geometry = geometryFor(node.mesh);
+    const part: GlbPart =
+      typeof extras === 'object' && extras !== null && !Array.isArray(extras)
+        ? { name, geometry, position, quaternion, scale, extras: extras as Record<string, unknown> }
+        : { name, geometry, position, quaternion, scale };
+    parts.set(name, part);
   });
 
   return parts;

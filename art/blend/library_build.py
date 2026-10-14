@@ -66,13 +66,25 @@ the rig are seat heights and reach (see :data:`CHILD_HIP`).
 
 The owl, the dragon and the cat each carry their face **in their own head's
 UVs** — no second mesh. Front-facing polygons of the head node get a planar
-projection over a stated window; every other polygon is parked at
-``(0.02, 0.02)``, which must be plain fill on the canvas. ``v`` is written
-``(top − z) / height`` exactly as ``reptile_creatures_build.py``'s
-``snake_face_uvs`` does, to cancel the exporter's ``1 − v``; so **paint these
-through ``planarUvCanvasTexture`` (flipY = true), not ``glbCanvasTexture``**.
-Canvas (u, v) in the printed anchors are fractions from the canvas's
-top-left corner.
+projection over **the head node's own measured bounds** (x across, z down), so
+the whole front silhouette — ear tufts and all — fills the canvas, as
+``reptile_creatures_build.py``'s ``snake_face_uvs`` does; every other polygon
+is parked at ``(0.02, 0.02)``, which must be plain fill on the canvas. ``v`` is
+written ``(top − z) / height`` exactly as ``snake_face_uvs`` does, to cancel
+the exporter's ``1 − v``; so **paint these through ``planarUvCanvasTexture``
+(flipY = true), not ``glbCanvasTexture``**. Canvas (u, v) are fractions from
+the canvas's top-left corner.
+
+**The numbers a painter needs travel in the asset, not in a comment.** Each
+faced head node carries custom properties that ``library_export.py`` ships as
+glTF node ``extras`` (``readGlbParts``' ``extras``, ``GLTFLoader``'s
+``userData``): ``face_eyes_uv`` — the two eye centres ``[uL, vL, uR, vR]``,
+``L`` being the creature's own left (+X here, the canvas's right half) —
+``face_window_m`` — the canvas's ``[width, height]`` in metres, for painting a
+round eye round — and, on the owl, ``face_rim_uv`` — the inner radius of her
+glasses rims as ``[fraction of width, fraction of height]``, which her painted
+eyes must sit inside. All three are measured off the built geometry by
+:meth:`Asset.emit`; nobody types them, here or in TypeScript.
 """
 
 import math
@@ -374,8 +386,17 @@ class Asset:
         self.marks: dict[str, Vector] = {}
         # node -> (landmark, parent node it turns against)
         self.pivots: dict[str, tuple[str, str]] = {}
-        # node -> (lo landmark, hi landmark, [eye landmarks])
-        self.faces: dict[str, tuple[str, str, list]] = {}
+        # node -> [eye landmarks], for a node whose front carries a painted face
+        self.faces: dict[str, list[str]] = {}
+        # node -> (eye landmark, landmark on the rim's inner edge level with the
+        # eye, landmark on it straight above the eye): a ring the eye must be
+        # painted inside, measured as a canvas fraction
+        self.rims: dict[str, tuple[str, str, str]] = {}
+        # node -> (lo, hi): the face canvas, the node's own bounds — filled in by
+        # emit() from the vertices, never typed
+        self.windows: dict[str, tuple[Vector, Vector]] = {}
+        # node -> how many loops face_window_uvs front-mapped (the coverage note)
+        self.front_loops: dict[str, int] = {}
         self.scale = (1.0, 1.0, 1.0)
 
     def part(self, suffix=None) -> Part:
@@ -427,6 +448,12 @@ class Asset:
     def emit(self) -> dict:
         coll = collection(self.name)
         objs = {}
+        # The face canvas is the head node's own extent, read off its vertices
+        # in the asset frame before a pivot shifts them — so the canvas covers
+        # every front polygon the node has (an ear tuft included) by
+        # construction, rather than a window typed or marked beside the shape.
+        for node in self.faces:
+            self.windows[node] = self.parts[node].bounds()
         for node, part in self.parts.items():
             pivot = self.pivots.get(node)
             if pivot is None:
@@ -435,40 +462,68 @@ class Asset:
             p = self.marks[pivot[0]]
             part.verts = [(v[0] - p.x, v[1] - p.y, v[2] - p.z) for v in part.verts]
             objs[node] = part.emit(coll, location=tuple(p))
-        for node, (lo_key, hi_key, eyes) in self.faces.items():
-            face_window_uvs(objs[node], self.marks[lo_key], self.marks[hi_key])
-            # The eye anchors travel with the .blend (never the .glb:
-            # `export_extras` is off) so the review render can paint dots on
-            # them without a second copy of the numbers.
-            objs[node]["face_eyes_uv"] = [c for key in eyes for c in self.face_uv(node, key)]
+        for node, eyes in self.faces.items():
+            lo, hi = self.windows[node]
+            self.front_loops[node] = face_window_uvs(objs[node], lo, hi)
+            # These ride into the .glb as node extras (library_export.py turns
+            # `export_extras` on), so the Engineer reads them off the asset and
+            # the review render paints its dots at them — one owner, the
+            # geometry they were measured from.
+            objs[node]["face_eyes_uv"] = [round(c, 4) for key in eyes for c in self.face_uv(node, key)]
+            objs[node]["face_window_m"] = [round(hi.x - lo.x, 4), round(hi.z - lo.z, 4)]
+            if node in self.rims:
+                objs[node]["face_rim_uv"] = [round(c, 4) for c in self.face_rim_uv(node)]
         return objs
 
     def face_uv(self, node: str, key: str):
         """Where landmark ``key`` lands on ``node``'s canvas, as (u, v) from the
         top-left — the same mapping :func:`face_window_uvs` writes."""
-        lo_key, hi_key, _ = self.faces[node]
-        return window_uv(self.marks[key], self.marks[lo_key], self.marks[hi_key])
+        lo, hi = self.windows[node]
+        return window_uv(self.marks[key], lo, hi)
+
+    def face_rim_uv(self, node: str):
+        """The inner radius of the rim round a painted eye, as fractions of the
+        canvas's width and height — measured between landmarks that went
+        through every transform the rim did, so it cannot drift from it."""
+        eye, side, top = self.rims[node]
+        e, s, t = (self.face_uv(node, k) for k in (eye, side, top))
+        return abs(s[0] - e[0]), abs(t[1] - e[1])
 
 
 def window_uv(point: Vector, lo: Vector, hi: Vector):
     return ((point.x - lo.x) / (hi.x - lo.x), (hi.z - point.z) / (hi.z - lo.z))
 
 
-def face_window_uvs(obj, lo: Vector, hi: Vector) -> None:
+# How far a front-mapped UV may stray past the canvas edge: float rounding on a
+# vertex that *is* the window's edge, and nothing a texture lookup could see.
+UV_EDGE_TOL = 1e-4
+
+
+def face_window_uvs(obj, lo: Vector, hi: Vector) -> int:
     """Planar front projection of a head node's front-facing polygons over the
     window ``lo``..``hi`` (asset frame, x and z); everything else parked.
+    Returns how many loops were front-mapped.
 
     Computed from where each vertex **is** after emit, in the node's own frame
     (a pivoted head's vertices are relative to its neck, so the window is
     shifted by the node's location). A per-face table keyed by pre-weld index
     lands on the wrong polygons — the gate arch's lesson, which the reptile
     kit's ``snake_face_uvs`` also follows.
+
+    **Every front-mapped UV must land on the canvas.** One outside it samples
+    the canvas's edge row (three.js clamps) or the far side of the face (if
+    anyone repeats), so a mark painted along the top edge would smear up an
+    ear tuft. The owl's tufts did exactly that while the window was the bare
+    skull: 23 vertices at v up to 1.11. The window is now the node's own
+    bounds, which makes this true by construction — and this assertion is
+    what says so if that ever stops being the case.
     """
     mesh = obj.data
     off = Vector(obj.location)
     lo_l = lo - off
     hi_l = hi - off
     layer = mesh.uv_layers.new(name="UVMap")
+    front_loops = 0
     for poly in mesh.polygons:
         front = poly.normal.y < -0.05
         for loop_index in poly.loop_indices:
@@ -476,7 +531,16 @@ def face_window_uvs(obj, lo: Vector, hi: Vector) -> None:
                 layer.data[loop_index].uv = PARKED_UV
                 continue
             co = mesh.vertices[mesh.loops[loop_index].vertex_index].co
-            layer.data[loop_index].uv = window_uv(co, lo_l, hi_l)
+            u, v = window_uv(co, lo_l, hi_l)
+            assert -UV_EDGE_TOL <= u <= 1.0 + UV_EDGE_TOL and -UV_EDGE_TOL <= v <= 1.0 + UV_EDGE_TOL, (
+                f"{obj.name}: a front-facing vertex at {tuple(round(c, 3) for c in co)} maps to "
+                f"uv ({u:.4f}, {v:.4f}), off the canvas — the face window does not cover the "
+                "node's front"
+            )
+            layer.data[loop_index].uv = (u, v)
+            front_loops += 1
+    assert front_loops > 0, f"{obj.name}: no front-facing polygon to carry a face"
+    return front_loops
 
 
 ASSETS: dict[str, Asset] = {}
@@ -1226,8 +1290,6 @@ def build_owl() -> None:
     head.add(*ellipsoid(0.085, 0.07, 0.17, 2), matrix=place(0.30, 0.0, 1.46, ry=22.0))
     head.add(*ellipsoid(0.085, 0.07, 0.17, 2), matrix=place(-0.30, 0.0, 1.45, ry=-32.0))
     head.at(*ellipsoid(0.10, 0.08, 0.06, 2), x=0.07, y=0.04, z=1.52)
-    a.mark("faceLo", head_c[0] - head_r[0], 0.0, head_c[2] - head_r[2])
-    a.mark("faceHi", head_c[0] + head_r[0], 0.0, head_c[2] + head_r[2])
 
     beak.add(*ellipsoid(0.065, 0.11, 0.075, 2), matrix=place(0.0, -0.47, 1.02, rx=25.0))
 
@@ -1239,6 +1301,13 @@ def build_owl() -> None:
         glasses.add(*torus(rim_r, rim_t, 16, 5),
                     matrix=place(sx * eye_x, rim_y, eye_z, rz=sx * 14.0) @ rot(x=90.0))
         a.mark(key, sx * eye_x, rim_y, eye_z)
+        # Two points on the rim's inner edge — level with the eye, and straight
+        # above it — so the room inside the rim is *measured* as a canvas
+        # fraction (`Asset.face_rim_uv`) rather than re-typed from these locals.
+        inner = rim_r - rim_t
+        a.mark(key + "RimSide", sx * (eye_x + inner * math.cos(deg(14.0))),
+               rim_y + inner * math.sin(deg(14.0)), eye_z)
+        a.mark(key + "RimTop", sx * eye_x, rim_y, eye_z + inner)
         out_x = sx * (eye_x + rim_r * math.cos(deg(14.0)))
         out_y = rim_y + rim_r * math.sin(deg(14.0))
         # The arms run back hugging the head and end inside it, rather than
@@ -1266,7 +1335,8 @@ def build_owl() -> None:
         "owl-wingR": ("shoulderR", "owl-body"),
         "owl-heldBook": ("shoulderR", "owl-wingR"),
     }
-    a.faces = {"owl-head": ("faceLo", "faceHi", ["eyeL", "eyeR"])}
+    a.faces = {"owl-head": ["eyeL", "eyeR"]}
+    a.rims = {"owl-head": ("eyeL", "eyeLRimSide", "eyeLRimTop")}
     a.normalise(height=OWL_HEIGHT)
 
 
@@ -1303,8 +1373,6 @@ def build_dragon() -> None:
     head.at(*ellipsoid(0.15, 0.11, 0.10, 2), y=-0.35, z=0.53)
     for sx in (-1.0, 1.0):
         head.at(*icosphere(0.025, 1), x=sx * 0.05, y=-0.42, z=0.61)
-    a.mark("faceLo", head_c[0] - head_r[0], 0.0, head_c[2] - head_r[2])
-    a.mark("faceHi", head_c[0] + head_r[0], 0.0, head_c[2] + head_r[2])
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
         a.mark(key, sx * 0.115, ellipsoid_front_y(head_c, head_r, sx * 0.115, 0.67), 0.67)
 
@@ -1350,7 +1418,7 @@ def build_dragon() -> None:
     a.mark("neck", 0.0, -0.06, 0.48)
     a.mark("tailRoot", *path[0])
     a.pivots = {"dragon-head": ("neck", "dragon-body"), "dragon-tail": ("tailRoot", "dragon-body")}
-    a.faces = {"dragon-head": ("faceLo", "faceHi", ["eyeL", "eyeR"])}
+    a.faces = {"dragon-head": ["eyeL", "eyeR"]}
     a.normalise(height=DRAGON_HEIGHT, length=DRAGON_LENGTH)
 
 
@@ -1414,8 +1482,6 @@ def build_cat() -> None:
     for sx in (-1.0, 1.0):
         head.at(*ellipsoid(0.045, 0.038, 0.038, 2), x=head_c[0] + sx * 0.042, y=head_c[1] - head_r[1] + 0.04,
                 z=head_c[2] - 0.05)
-    a.mark("faceLo", head_c[0] - head_r[0], 0.0, head_c[2] - head_r[2])
-    a.mark("faceHi", head_c[0] + head_r[0], 0.0, head_c[2] + head_r[2])
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
         x, z = head_c[0] + sx * 0.065, head_c[2] + 0.015
         a.mark(key, x, ellipsoid_front_y(head_c, head_r, x, z), z)
@@ -1457,7 +1523,7 @@ def build_cat() -> None:
         "cat-earR": ("earBaseR", "cat-head"),
         "cat-tail": ("tailRoot", "cat-body"),
     }
-    a.faces = {"cat-head": ("faceLo", "faceHi", ["eyeL", "eyeR"])}
+    a.faces = {"cat-head": ["eyeL", "eyeR"]}
     a.normalise(height=CAT_HEIGHT, length=CAT_LENGTH)
 
 
@@ -1834,13 +1900,13 @@ def check_faces() -> str:
     face is invisible to arithmetic and visible to a ray."""
     rows = []
     for asset in ASSETS.values():
-        for node, (lo_key, hi_key, eyes) in asset.faces.items():
+        for node, eyes in asset.faces.items():
             nodes = list(asset.parts)
             bvh, owner = bvh_for(nodes)
             obj = bpy.data.objects[node]
             mesh = obj.data
             layer = mesh.uv_layers["UVMap"]
-            lo, hi = asset.marks[lo_key], asset.marks[hi_key]
+            lo, hi = asset.windows[node]
             for key in eyes:
                 e = asset.marks[key]
                 hit = bvh.ray_cast(Vector((e.x, -10.0, e.z)), Vector((0.0, 1.0, 0.0)))
@@ -1869,12 +1935,14 @@ def check_faces() -> str:
             w, h = hi.x - lo.x, hi.z - lo.z
             eye_txt = ", ".join(
                 f"{k} ({asset.face_uv(node, k)[0]:.3f}, {asset.face_uv(node, k)[1]:.3f})" for k in eyes)
-            rows.append(f"  {node:<12} window {w:.3f} × {h:.3f} m; {eye_txt}")
-            if node == "owl-head":
-                rows.append(f"               rim inner radius {0.15 - 0.03:.3f} m = "
-                            f"{(0.15 - 0.03) * asset.scale[0] / w:.3f} of the canvas width, "
-                            f"{(0.15 - 0.03) * asset.scale[2] / h:.3f} of its height — paint "
-                            "the eyes inside that")
+            rows.append(f"  {node:<12} window {w:.3f} × {h:.3f} m (the node's own bounds); {eye_txt}")
+            rows.append(f"               {asset.front_loops[node]} front-mapped loops, every one on "
+                        "the canvas")
+            if node in asset.rims:
+                ru, rv = asset.face_rim_uv(node)
+                assert 0.0 < ru < 0.5 and 0.0 < rv < 0.5, f"{node}: rim radius ({ru}, {rv}) is nonsense"
+                rows.append(f"               rim inner radius {ru:.3f} of the canvas width, {rv:.3f} "
+                            "of its height (measured between landmarks) — paint the eyes inside that")
     return "\n".join(rows)
 
 
