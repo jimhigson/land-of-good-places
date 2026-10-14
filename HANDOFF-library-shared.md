@@ -82,10 +82,21 @@ the integration branch later without conflicts.
       PR preview. Checks shards 1-8 + Checks build + `Checks`, Procgen invariants shards 1-6 +
       `Procgen invariants`, Coplanar faces, Swept bus, Walk reach, Entrance road, Every seed
       builds: all success. Commits after 0476c9fd touch this handoff only.
+- [x] **Review round 1 (fixer, 14 Oct): one finding, the merge forecast was stale.** Judged
+      real: after books' 9083ecd4, `merge-tree` of books + this branch gives 2 conflicted files
+      (check-deep-links.mts, types.ts), and building + books gives 2 (check-deep-links.mts,
+      main.ts). Fixed in d84db938 by re-measuring the forecast (below); re-run at d84db938, same
+      table. Code unchanged. Park source hash a51ca115… before and after. Instrument controlled:
+      types.ts and chime.ts read inside the closure, check-deep-links.mts and this file outside.
+      No check reads this file, so CI 38560794408 still covers the code head (re-read: 23 success,
+      7 skipped, every job); not re-dispatched. `tsc --noEmit` exit 0, `typecheck:test` exit 0.
+      Both controlled: a string assigned to a number in speechTiming.ts / library-card.test.ts
+      gave exit 2, TS2322; reverted.
 
 ## DONE — handed back
 All five items built, verified and pushed; no PR raised (the orchestrator raises the single
-Library PR). The worktree is removed at handback; recreate it with
+Library PR). Review round 1 (one finding, the merge forecast) is fixed in d84db938. The worktree
+is removed at handback; recreate it with
 `git worktree add .claude/worktrees/library-shared feat/library-714-shared`.
 
 ## For whoever integrates this (and builds Steps 3-14 on it)
