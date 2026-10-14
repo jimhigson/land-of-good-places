@@ -29,8 +29,10 @@ import { duckBarAssetGeometry } from '../../../art/models/duckBarAsset';
 import { createStoryBook, createStoryDragon } from './readerAssets';
 import { hazardTapeTexture } from '../../../core/textures';
 import { createCatBus } from '../../entrance/catBus';
-import { createCart } from '../../railRace/cart';
+import { createCart, SEAT_HEIGHT } from '../../railRace/cart';
 import { RIDE_SCALE } from '../../railRace/dimensions';
+import { poseRailRaceRider, riderLegsShow, SEATED, setRiderLegsVisible } from '../../railRace/duckPose';
+import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../../railRace/hazards';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../../../state';
 import type { PagePicture, PictureActor } from '../books';
 
@@ -123,7 +125,11 @@ export interface RenderedPicture {
   readonly coverage: number;
 }
 
-/** How far a limb swings for each {@link PictureActor.pose}. */
+/**
+ * How far a limb swings for each {@link PictureActor.pose}. `duck` is not
+ * here: it is a rider's, and a `raceCart` poses its rider itself, through the
+ * Rail Race's own owner of that pose.
+ */
 function applyPose(handle: CreatureHandle, pose: PictureActor['pose']): void {
   const limbs = handle.limbs;
   if (!limbs || !pose || pose === 'stand') return;
@@ -146,7 +152,17 @@ function isCreature(handle: AssetHandle): handle is CreatureHandle {
   return typeof (handle as Partial<CreatureHandle>).setExpression === 'function';
 }
 
-/** The duck bar from the Rail Race, as one standalone gate: two posts and the striped bar. */
+/**
+ * The duck bar from the Rail Race, as one standalone gate: two posts and the
+ * striped bar, at **park scale** — the scale a `raceCart` seats its rider at.
+ *
+ * The bar's centre hangs at the race's own height for it,
+ * `DUCK_CLEARANCE_AT_PARK_SCALE` (halfway between a sitting rider's head and a
+ * ducked one, plus the bar's half depth), so a rider sitting up meets it and a
+ * ducked one clears it, in the picture exactly as on the ride. The posts are
+ * stretched on Y alone to reach it, the way `railRace/track.ts` stretches its
+ * own.
+ */
 function createDuckBarGate(): AssetHandle {
   const root = new Group();
   const post = duckBarAssetGeometry('post');
@@ -157,43 +173,48 @@ function createDuckBarGate(): AssetHandle {
   const barBox = bar.boundingBox;
   // A picture is its own little flat stage, never on the planet, and these are
   // the prop's own local bounds — upright by construction, nothing leans.
-  const postHeight = postBox ? postBox.max.y - postBox.min.y : 1; // flat-ok: a picture prop's own local bounds
-  const postFoot = postBox?.min.y ?? 0; // flat-ok: a picture prop's own local bounds
+  const postBottom = postBox?.min.y ?? 0; // flat-ok: a picture prop's own local bounds
+  const postTop = postBox?.max.y ?? 1; // flat-ok: a picture prop's own local bounds
   const halfBar = barBox?.max.x ?? 1;
-  // The gate is a picture prop, not a hazard: one post height tall, so the
-  // bar is over a child's head the way it is in the race.
+  const barCentre = DUCK_CLEARANCE_AT_PARK_SCALE;
+  const stretch = barCentre / Math.max(0.01, postTop - postBottom);
   const frame = toonMaterial(PALETTE.buildingTrim);
   for (const side of [-1, 1] as const) {
     const mesh = solid(new Mesh(post, frame));
-    mesh.position.set(side * halfBar * 0.92, -postFoot, 0);
+    mesh.scale.set(1, stretch, 1);
+    mesh.position.set(side * halfBar * 0.92, -postBottom * stretch, 0);
     root.add(mesh);
   }
   const barMesh = solid(new Mesh(bar, toonMaterial(0xffffff, { map: hazardTapeTexture() })));
-  barMesh.position.set(0, postHeight * 0.92, 0);
+  barMesh.position.set(0, barCentre, 0);
   root.add(barMesh);
-  return { root, height: postHeight };
+  return { root, height: barCentre };
+}
+
+/** The reader herself, dressed as she is: `kid` is whoever holds the book. */
+function buildReaderKid(look: ReaderLook): KidHandle {
+  const kid: KidHandle = createKid({
+    skin: look.skin,
+    hair: look.hair,
+    hairStyle: look.hairStyle,
+    outfit: look.outfit,
+    outfitArms: look.outfitArms,
+    eyeColour: look.eye,
+    backpackKind: look.backpackKind,
+    backpackColour: look.backpackColour,
+    shoeKind: look.shoeKind,
+    shoe: look.shoe,
+  });
+  if (look.glasses) kid.glassesAnchor.add(createGlasses(look.glasses).root);
+  return kid;
 }
 
 /** Builds one actor's model. Every branch is a factory the park itself uses. */
 function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
   const colour = actor.colour ? PALETTE[actor.colour] : undefined;
   switch (actor.model) {
-    case 'kid': {
-      const kid: KidHandle = createKid({
-        skin: look.skin,
-        hair: look.hair,
-        hairStyle: look.hairStyle,
-        outfit: look.outfit,
-        outfitArms: look.outfitArms,
-        eyeColour: look.eye,
-        backpackKind: look.backpackKind,
-        backpackColour: look.backpackColour,
-        shoeKind: look.shoeKind,
-        shoe: look.shoe,
-      });
-      if (look.glasses) kid.glassesAnchor.add(createGlasses(look.glasses).root);
-      return kid;
-    }
+    case 'kid':
+      return buildReaderKid(look);
     case 'ripika':
       return createPet('ripika');
     case 'trilla':
@@ -218,6 +239,28 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
       cart.root.scale.setScalar(RIDE_SCALE);
       root.add(cart.root);
       return { root, height: RIDE_SCALE, dispose: () => cart.dispose() };
+    }
+    case 'raceCart': {
+      // The cart with her riding in it, seated exactly as the race seats a
+      // rival — a child of the cart at its own SEAT_HEIGHT — and both at park
+      // scale, the scale the duck bar gate is hung for. Posed by the race's own
+      // one owner of a rider's body: folded for `duck`, sat up otherwise, legs
+      // hidden while ducking because the race hides them while racing (a
+      // folded rider's legs sink through the tub floor).
+      const cart = createCart(colour ?? PALETTE.markerPink);
+      const kid = buildReaderKid(look);
+      kid.root.position.y = SEAT_HEIGHT;
+      cart.root.add(kid.root);
+      const ducking = actor.pose === 'duck';
+      poseRailRaceRider(kid, ducking ? { ...SEATED, duck: 1 } : SEATED);
+      setRiderLegsVisible(kid, riderLegsShow(ducking ? 'racing' : 'waiting'));
+      kid.setExpression(actor.mood ?? 'happy');
+      return {
+        root: cart.root,
+        height: SEAT_HEIGHT + kid.height,
+        dispose: () => cart.dispose(),
+        resetHair: () => kid.resetHair(),
+      } as AssetHandle;
     }
     case 'balloon':
       return createBalloon((actor.variant as BalloonKind | undefined) ?? 'dalmatian');

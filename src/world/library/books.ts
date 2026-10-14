@@ -45,29 +45,49 @@ import type { BreakfastKind } from '../../art/models/hotelAssets';
  * is `import type`, which is erased.
  */
 
-/** A model the reader knows how to build for a picture — see `reader/pagePictures.ts`. */
-export type PictureModel =
-  | 'kid'
-  | 'ripika'
-  | 'trilla'
-  | 'biscuit'
-  | 'bunny'
-  | 'kitten'
-  | 'mouse'
-  | 'catBus'
-  | 'statue'
-  | 'cart'
-  | 'balloon'
-  | 'keychain'
-  | 'bowl'
-  | 'petBed'
-  | 'star'
-  | 'dragon'
-  | 'book'
-  | 'duckBar';
+/**
+ * Every model the reader knows how to build for a picture — see
+ * `reader/pagePictures.ts`, whose `buildActor` has one branch for each, and
+ * which warms every one's shader programs before a book is ever opened. A
+ * list rather than only a type, so that warming can walk it.
+ *
+ * `cart` is the Rail Race cart on its own, at the size the race draws it
+ * beside a child on foot; `raceCart` is the cart **with the reader riding in
+ * it**, both at park scale exactly as the race seats a rider, under duck bars
+ * (`duckBar`) hung at the race's own height for them.
+ */
+export const PICTURE_MODELS = [
+  'kid',
+  'ripika',
+  'trilla',
+  'biscuit',
+  'bunny',
+  'kitten',
+  'mouse',
+  'catBus',
+  'statue',
+  'cart',
+  'raceCart',
+  'balloon',
+  'keychain',
+  'bowl',
+  'petBed',
+  'star',
+  'dragon',
+  'book',
+  'duckBar',
+] as const;
 
-/** How a creature with arms and legs holds them. Anything without limbs ignores it. */
-export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit';
+/** A model the reader knows how to build for a picture — see {@link PICTURE_MODELS}. */
+export type PictureModel = (typeof PICTURE_MODELS)[number];
+
+/**
+ * How a creature with arms and legs holds them. Anything without limbs ignores
+ * it. `duck` is a rider's: the reader in a `raceCart`, folded under a bar by
+ * the Rail Race's own pose (`railRace/duckPose.ts`); a `raceCart` with any
+ * other pose has her sitting up.
+ */
+export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit' | 'duck';
 
 /** One model on a page, and how it stands. Everything optional has a sensible default. */
 export interface PictureActor {
@@ -415,8 +435,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'A bar is coming, so duck down!',
         picture: {
           cast: [
-            { model: 'duckBar', at: [0, 0, -0.6] },
-            { model: 'kid', mood: 'surprised', pose: 'armsUp', at: [0, 0, 1.2] },
+            { model: 'raceCart', colour: 'markerPink', mood: 'surprised', pose: 'duck', turn: 55, at: [-1.1, 0, 0] },
+            { model: 'duckBar', turn: 55, at: [1.3, 0, -0.9] },
           ],
           sky: 'skyDayBottom',
           ground: 'grassLight',
@@ -427,8 +447,8 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Whoosh, under the bar we go.',
         picture: {
           cast: [
-            { model: 'duckBar', at: [0, 0, 0] },
-            { model: 'cart', colour: 'markerPink', turn: 70, at: [0.4, 0, 0.6] },
+            { model: 'raceCart', colour: 'markerPink', mood: 'happy', pose: 'duck', turn: 55 },
+            { model: 'duckBar', turn: 55 },
           ],
           sky: 'skyDayBottom',
           ground: 'grassLight',
@@ -439,9 +459,9 @@ export const BOOKS: readonly LibraryBook[] = [
         text: 'Duck, duck, duck again!',
         picture: {
           cast: [
-            { model: 'duckBar', at: [-1.2, 0, -1] },
-            { model: 'duckBar', at: [1.2, 0, -1] },
-            { model: 'kid', mood: 'happy', pose: 'sit', at: [0, 0, 0.8] },
+            { model: 'duckBar', turn: 55, at: [-1.6, 0, 1.1] },
+            { model: 'raceCart', colour: 'markerPink', mood: 'happy', pose: 'duck', turn: 55 },
+            { model: 'duckBar', turn: 55, at: [1.6, 0, -1.1] },
           ],
           sky: 'skyDayBottom',
           ground: 'grassLight',
@@ -482,7 +502,7 @@ export const BOOKS: readonly LibraryBook[] = [
         },
       },
       {
-        text: 'He did not want gold at all.',
+        text: 'He did not want shiny gold stars.',
         picture: {
           cast: [
             { model: 'dragon', mood: 'frown', turn: -30 },
@@ -490,6 +510,7 @@ export const BOOKS: readonly LibraryBook[] = [
           ],
           sky: 'skyDawnBottom',
           ground: 'grassLight',
+          decor: ['sparkles'],
         },
       },
       {
@@ -675,21 +696,24 @@ export const BOOKS: readonly LibraryBook[] = [
         },
       },
       {
-        text: 'You make a wish with a penny.',
+        text: 'You close your eyes and make a wish.',
         picture: {
-          cast: [{ model: 'kid', mood: 'blink', pose: 'wave' }],
+          cast: [{ model: 'kid', mood: 'blink' }],
           sky: 'skyDayBottom',
           ground: 'pathSand',
           decor: ['sparkles'],
         },
       },
       {
-        text: 'Plop goes the penny in the water.',
+        text: 'Up, up goes your wish, like a star!',
         picture: {
-          cast: [{ model: 'star', colour: 'flowerYellow', at: [0, 0.6, 0], size: 1.2 }],
+          cast: [
+            { model: 'statue', size: 0.55 },
+            { model: 'star', colour: 'flowerYellow', at: [0.7, 2.3, 0.3], size: 1.3 },
+          ],
           sky: 'skyDayBottom',
           ground: 'waterTop',
-          decor: ['splash'],
+          decor: ['sparkles', 'clouds'],
         },
       },
       {
