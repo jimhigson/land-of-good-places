@@ -12,7 +12,10 @@ run that re-solves all 16 parks (30-45 min) and cancels the run before it, so wo
 goes to `feat/library-714` (or a track branch) only. A push to `feat/library-714` runs no CI
 (`ci.yml` runs on `pull_request`, on `push` to `main`, and by dispatch).
 
-PR: see "Status" below.
+**PR #720** (draft), head `feat/library` at **8f0cb8c3** (the foundation head, this file's
+first commit), base `main`; GitHub links it to all six issues (`closingIssuesReferences`:
+714, 715, 716, 717, 718, 719). Its CI run started on opening; nobody waited for it.
+The preview link comes from the PR's newest "Deploy PR preview" comment, never built by hand.
 
 ## Status
 - [x] Foundation merge (this file's first section). Heads merged, confirmed by `git fetch` at
@@ -21,7 +24,8 @@ PR: see "Status" below.
       feat/library-714-shared **d02843aa**, feat/library-books-717 **5a0cb5fd**.
 - [x] Quick local checks, exit codes read from files (below). World-building checks are left
       to the PR's CI, as the task says.
-- [x] Draft PR opened from `feat/library` at the foundation head (number under "PR").
+- [x] Draft **PR #720** opened from `feat/library` at 8f0cb8c3 (`gh pr create --draft`); body in
+      the orchestrator scratchpad `merge714/pr-body.md`. Not waited for: its CI.
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
       foundation head; then Step 9, Step 10's labels/tap spacing, Step 14 and the cross-part
