@@ -13,7 +13,7 @@ import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
 import type { NpcAvatar } from './npcAvatar';
-import { applyRidePose } from '../ridePose';
+import { applyRidePose, type RidePosture } from '../ridePose';
 
 /**
  * A character that is not the player.
@@ -135,6 +135,19 @@ export class NpcCharacter {
   private scriptedFlag = false;
   /** Gait the script asked for, 0..1 — what makes scripted legs actually walk. */
   private scriptedGait = 0;
+
+  // --- sitting down (see world/library/storyTime.ts) -------------------------
+  // The fourth owner of a child's pose, for a child **sitting on something** —
+  // a story cushion on the library's rug (#718). Modelled on `scriptedFlag`:
+  // explicit begin and end (story time lasts minutes, across many frames
+  // nobody else writes), no `move()` and no gravity while it lasts, and the
+  // same one-directional exemption from separation — a seated child is
+  // furniture, so whoever bumps into her steps aside, never her. Posed in
+  // `ridePose.ts`'s `'listening'`, with her own phase so a row of listeners
+  // does not breathe in lockstep.
+  private seatedFlag = false;
+  /** Added to `elapsed` for her pose, so each sitter sways on her own clock. */
+  private seatedPhase = 0;
 
   private readonly collision: CollisionWorld;
 
@@ -313,6 +326,49 @@ export class NpcCharacter {
     );
   }
 
+  /** True while she is sitting down — see {@link beginSeated}. */
+  get seated(): boolean {
+    return this.seatedFlag;
+  }
+
+  /**
+   * Sits her down at (x, y, z), facing `facing` — a story cushion on the
+   * library's rug (#718). `y` is the **floor** under the seat, never the
+   * cushion top: the model's origin is at her feet, and `'listening'` hangs
+   * her legs straight down from a `KID_HIP_HEIGHT` cushion onto that floor
+   * (the dining rule, `ridePose.ts`).
+   *
+   * Until {@link endSeated}: no `move()`, no gravity, no collision, the
+   * `'listening'` pose on `elapsed + phase`, and furniture to separation
+   * (`separateFrom`, `NpcSystem.separateFromPlayer`) — the one who bumps into
+   * her steps aside. Velocity and the airborne state go to rest, and
+   * `previousPosition` is collapsed onto the seat with `position`, so the snap
+   * from where she stopped walking to the cushion's centre is never read back
+   * as speed.
+   */
+  beginSeated(x: number, y: number, z: number, facing: number, phase: number): void {
+    this.seatedFlag = true;
+    this.seatedPhase = phase;
+    this.velocity.set(0, 0, 0);
+    this.verticalVelocity = 0;
+    this.airborne = false;
+    this.position.set(x, y, z);
+    this.previousPosition.copy(this.position);
+    this.facing = facing;
+    this.avatar.rig.root.position.copy(this.position);
+    faceOnGround(this.avatar.rig.root, facing);
+  }
+
+  /**
+   * Stands her up, where she sat. Nothing else is touched: the next frame's
+   * `move()` resamples the ground under her, so she steps up onto the
+   * cushion's plate and off it again — a visible "getting up" rather than a
+   * snap — and her own driver walks her away.
+   */
+  endSeated(): void {
+    this.seatedFlag = false;
+  }
+
   /** True while a ride is carrying this character instead of `move()` walking it. */
   get carried(): boolean {
     return this.carriedFlag;
@@ -433,17 +489,23 @@ export class NpcCharacter {
       // because a bus ride spans phase changes and must not lapse on a frame
       // its owner happens not to have written to.
       this.gait = this.scriptedGait;
+    } else if (this.seatedFlag) {
+      // Sitting on a cushion — see beginSeated. She stays exactly where she was
+      // sat: no `move()`, no gravity. Only the walk cycle winds down, so the
+      // legs never pedal on the spot.
+      this.gait = damp(this.gait, 0, 0.07, dt);
     } else if (this.carriedFlag) {
       this.rideAlong(dt);
     } else {
       this.move(dt);
     }
-    // Read before the reset below clears it — see `animate`'s own note on
-    // why the seated fold has to be decided here rather than inside it.
-    const seated = this.carriedFlag;
+    // Read before the reset below clears the carry — see `animate`'s own note
+    // on why the posture has to be decided here rather than inside it. Sitting
+    // listens; being carried holds on; anything else walks.
+    const posture: RidePosture | null = this.seatedFlag ? 'listening' : this.carriedFlag ? 'seated' : null;
     // The carry is re-asserted every frame; one that is not is over.
     this.carriedFlag = false;
-    this.animate(elapsed, seated);
+    this.animate(elapsed, posture);
   }
 
   /**
@@ -475,8 +537,13 @@ export class NpcCharacter {
     // shoving them "apart" empties the vehicle through its own side panels).
     // A scripted child and a free one is a real encounter, and the free one is
     // the one who steps aside.
-    const bothScripted = this.scriptedFlag && other.scriptedFlag;
-    if (bothScripted) return;
+    //
+    // **A seated child is treated exactly the same way** (`beginSeated`): she
+    // is sitting on a cushion and cannot step aside, so two sitters are left
+    // where they sat and a walker who brushes one is the one who moves.
+    const thisFixed = this.scriptedFlag || this.seatedFlag;
+    const otherFixed = other.scriptedFlag || other.seatedFlag;
+    if (thisFixed && otherFixed) return;
     // A scripted child cannot react at all, so the free one takes the *whole*
     // correction (`pushAway`, never the halved one below) at a faster rate
     // than the ordinary two-sided case — the one place in this system where
@@ -489,11 +556,11 @@ export class NpcCharacter {
     // child's own wander target keeps steering it back onto the same
     // crossing; only moving it faster, once it is actually being corrected,
     // clears the gap in time.
-    if (this.scriptedFlag) {
+    if (thisFixed) {
       pushAway(other, this, minimum, maxPush * SCRIPTED_ENCOUNTER_SPEED_FACTOR);
       return;
     }
-    if (other.scriptedFlag) {
+    if (otherFixed) {
       pushAway(this, other, minimum, maxPush * SCRIPTED_ENCOUNTER_SPEED_FACTOR);
       return;
     }
@@ -702,8 +769,10 @@ export class NpcCharacter {
   }
 
   /**
-   * The house walk cycle, posed onto the rig — or, for a rider `setCarriedPose`
-   * just touched this frame, the game's own seated ride pose instead.
+   * The house walk cycle, posed onto the rig — or, when `update` names a
+   * `posture`, that `ridePose.ts` posture instead: `'seated'` for a rider
+   * `setCarriedPose` touched this frame, `'listening'` for a child sitting on
+   * a story cushion (`beginSeated`), `null` for everyone on their own feet.
    *
    * Deliberately the same maths as `Player.animate` — bob on each step, squash
    * at the bottom of it, arms and legs in opposition, head lagging a touch —
@@ -713,8 +782,8 @@ export class NpcCharacter {
    * Nothing here hardcodes a joint's rest position; the head's is read off the
    * model at build time, so retuning the kid's proportions carries through.
    *
-   * **`seated` has to be read before `update` clears `carriedFlag`, not from
-   * the flag itself.** `setCarriedPose` sets `carriedFlag` for the ride to
+   * **The posture has to be decided before `update` clears `carriedFlag`,
+   * not from the flag itself.** `setCarriedPose` sets `carriedFlag` for the ride to
    * re-assert every frame it still owns the child, and `update` deliberately
    * clears it straight after branching on it — "the carry is re-asserted
    * every frame; one that is not is over" — so that a ride which stops
@@ -732,23 +801,27 @@ export class NpcCharacter {
    * `animate` and this one, is what lets `train/clearance.ts` measure a
    * pose the game actually renders instead of one only a comment promised.
    */
-  private animate(elapsed: number, seated = false): void {
+  private animate(elapsed: number, posture: RidePosture | null): void {
     const rig = this.avatar.rig;
-    if (seated) {
+    if (posture !== null) {
       // No bob, no squash, no walk-cycle lean — she is not walking, she is
-      // riding. Reset to rest before folding the seated pose over it, or a
-      // stride caught mid-frame at the moment she boarded would freeze into
-      // the ride.
+      // riding or sitting. Reset to rest before folding the posture over it,
+      // or a stride caught mid-frame at the moment she boarded would freeze
+      // into the ride.
       rig.body.position.y = 0;
       rig.body.scale.set(1, 1, 1);
       rig.head.position.y = this.avatar.headBaseY;
-      // `applyRidePose` only ever touches `head.rotation.x`, and only while
-      // waving (`climbWave > 0`, never true here) — a rider who boarded
-      // mid-stride would otherwise keep whatever idle head tilt the walk
-      // cycle last wrote, frozen for the length of the ride.
+      // `'seated'` only ever touches `head.rotation.x` while waving
+      // (`climbWave > 0`, never true here) — a rider who boarded mid-stride
+      // would otherwise keep whatever idle head tilt the walk cycle last
+      // wrote, frozen for the length of the ride. (`'listening'` writes both
+      // of these itself; zeroing first costs nothing.)
       rig.head.rotation.x = 0;
       rig.head.rotation.z = 0;
-      applyRidePose(rig, 0, elapsed, 'seated');
+      // One switch for every posture a child can be put in: `ridePose.ts`
+      // decides what each one means. Her own phase rides on `elapsed`, so a
+      // row of sitters does not sway in lockstep.
+      applyRidePose(rig, 0, elapsed + this.seatedPhase, posture);
       if (this.intent.expression !== this.expression) {
         this.expression = this.intent.expression;
         this.avatar.setExpression(this.expression);
