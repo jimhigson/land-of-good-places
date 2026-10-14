@@ -35,7 +35,11 @@
  * 4. **The buttons are where the pages are, and clear of the ✕.** Each page
  *    button must cover its page's projected rectangle (that is where the
  *    HIGHLIGHT RULE's rainbow is drawn), and neither page may sit under the
- *    close button.
+ *    close button. On the portrait phone the book shows **one page at a
+ *    time**: the framed page must fill most of the screen's width, the
+ *    forward button must cover it, the back button must sit clear of it, a
+ *    tap must pan to the facing page and then turn the leaf, ‹ must come
+ *    back, and reading to the last page there must file the bookmark too.
  * 5. **All twelve books resolve.** Each is opened in turn and every face
  *    painted: 4–6 pages, an even number of faces, every texture a real canvas,
  *    every picture's model coverage — read off the rendered *pixels* — above
@@ -173,8 +177,29 @@ async function measureFaces(page: Page): Promise<{ rootPx: number; faces: FaceMe
 }
 
 /** The two visible pages' projected rectangles, the page buttons' and the close button's. */
+interface ScreenRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+function overlap(a: ScreenRect, b: ScreenRect): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function covers(outer: ScreenRect, inner: ScreenRect): boolean {
+  return outer.left <= inner.left + 1 && outer.top <= inner.top + 1 && outer.right >= inner.right - 1 && outer.bottom >= inner.bottom - 1;
+}
+
+function rectText(rect: ScreenRect): string {
+  return `[${rect.left.toFixed(0)},${rect.top.toFixed(0)}–${rect.right.toFixed(0)},${rect.bottom.toFixed(0)}]`;
+}
+
 async function measureLayout(page: Page): Promise<{
-  pages: { left: number; top: number; right: number; bottom: number }[];
+  pages: ScreenRect[];
+  framing: 'spread' | 'page';
+  framed: ScreenRect | null;
   prev: DOMRect;
   next: DOMRect;
   close: DOMRect;
@@ -205,8 +230,24 @@ async function measureLayout(page: Page): Promise<{
     };
     const { left, right } = r.visibleFaces();
     const pages = [r.faceMesh(left), r.faceMesh(right)].map(rectOf);
+    const framedFace = r.framedFace() as number | null;
+    const framed = framedFace === null ? null : rectOf(r.faceMesh(framedFace));
     const box = (selector: string) => (document.querySelector(selector) as HTMLElement).getBoundingClientRect().toJSON();
-    return { pages, prev: box('.book-turn--prev'), next: box('.book-turn--next'), close: box('.book-close') };
+    return {
+      pages,
+      framing: r.framing as 'spread' | 'page',
+      framed,
+      prev: box('.book-turn--prev'),
+      next: box('.book-turn--next'),
+      close: box('.book-close'),
+    };
+  });
+}
+
+async function framedState(page: Page): Promise<{ framing: string; face: number | null; spread: number }> {
+  return page.evaluate(() => {
+    const r = (window as unknown as { game: any }).game.bookReader;
+    return { framing: r.framing as string, face: r.framedFace() as number | null, spread: r.spread as number };
   });
 }
 
@@ -485,18 +526,69 @@ try {
     said.push(`  (${viewport.name}: the smallest page text is ${smallest.toFixed(1)} CSS px on screen)`);
     const layout = await measureLayout(page);
     const [leftPage, rightPage] = layout.pages;
+    const tall = viewport.height > viewport.width;
+    assert(
+      layout.framing === (tall ? 'page' : 'spread'),
+      `${viewport.name} frames ${tall ? 'one page at a time' : 'the whole spread'}`,
+      `framing is "${layout.framing}"`,
+    );
+    if (layout.framing === 'page' && layout.framed) {
+      const framed = layout.framed;
+      const share = (framed.right - framed.left) / viewport.width;
+      assert(share >= 0.85, `${viewport.name} the page fills the screen's width`, `${(share * 100).toFixed(0)}% of ${viewport.width} px`);
+      assert(covers(layout.next, framed), `${viewport.name} the page is the forward button`, `button ${rectText(layout.next)} page ${rectText(framed)}`);
+      assert(!overlap(layout.close, framed), `${viewport.name} the ✕ is clear of the page`, `close ${rectText(layout.close)} page ${rectText(framed)}`);
+      const prevShown = (await arrowBoxes(page, 'prev')).shown;
+      if (prevShown) {
+        assert(!overlap(layout.prev, framed), `${viewport.name} the back button is clear of the page`, `back ${rectText(layout.prev)} page ${rectText(framed)}`);
+      }
+      // A tap pans to the facing page, the next turns the leaf, ‹ comes back.
+      const start = await framedState(page);
+      const tapTo = async (which: 'next' | 'prev'): Promise<{ face: number | null; spread: number }> => {
+        await page.click(`.book-turn--${which}`);
+        await page.waitForTimeout(150);
+        await waitTurned(page);
+        return framedState(page);
+      };
+      const across = await tapTo('next');
+      assert(
+        across.face === (start.face ?? 0) + 1 && across.spread === start.spread,
+        `${viewport.name} a tap pans to the facing page`,
+        `face ${start.face} → ${across.face}, spread ${start.spread} → ${across.spread}`,
+      );
+      const over = await tapTo('next');
+      assert(
+        over.face === (across.face ?? 0) + 1 && over.spread === across.spread + 1,
+        `${viewport.name} the next tap turns the leaf and follows it`,
+        `face ${across.face} → ${over.face}, spread ${across.spread} → ${over.spread}`,
+      );
+      const back = await tapTo('prev');
+      assert(
+        back.face === across.face && back.spread === across.spread,
+        `${viewport.name} ‹ turns back to the page before`,
+        `face ${over.face} → ${back.face}, spread ${over.spread} → ${back.spread}`,
+      );
+      // And the camera went with her: the page now in view is the one framed.
+      const after = await measureLayout(page);
+      const followed =
+        after.framed !== null &&
+        after.framed.left >= -1 &&
+        after.framed.right <= viewport.width + 1 &&
+        (after.framed.right - after.framed.left) / viewport.width >= 0.85;
+      assert(
+        followed,
+        `${viewport.name} the camera follows her to the page she is reading`,
+        `page ${after.framed ? rectText(after.framed) : 'none'} in a ${viewport.width} px wide window`,
+      );
+      await page.screenshot({ path: `${SHOTS}/${FIRST}-${viewport.name}-one-page.png` });
+    }
     for (const [name, rect, pageRect] of [
       ['previous', layout.prev, leftPage],
       ['next', layout.next, rightPage],
     ] as const) {
-      if (!pageRect) continue;
-      const covers =
-        rect.left <= pageRect.left + 1 &&
-        rect.top <= pageRect.top + 1 &&
-        rect.right >= pageRect.right - 1 &&
-        rect.bottom >= pageRect.bottom - 1;
+      if (!pageRect || layout.framing === 'page') continue;
       assert(
-        covers,
+        covers(rect, pageRect),
         `${viewport.name} ${name}-page button covers its page`,
         `button [${rect.left.toFixed(0)},${rect.top.toFixed(0)}–${rect.right.toFixed(0)},${rect.bottom.toFixed(0)}] ` +
           `page [${pageRect.left.toFixed(0)},${pageRect.top.toFixed(0)}–${pageRect.right.toFixed(0)},${pageRect.bottom.toFixed(0)}]`,
@@ -531,6 +623,26 @@ try {
       );
     }
     await page.screenshot({ path: `${SHOTS}/${FIRST}-${viewport.name}.png` });
+    if (layout.framing === 'page') {
+      // Reading to the last page one page at a time files the bookmark too.
+      const portraitBook = BOOKS[1]?.id ?? FIRST;
+      await page.evaluate((id) => (window as unknown as { game: any }).game.bookReader.openBook(id), portraitBook);
+      await waitPainted(page);
+      for (let guard = 0; guard < 12; guard += 1) {
+        if (!(await arrowBoxes(page, 'next')).shown) break;
+        await page.click('.book-turn--next');
+        await page.waitForTimeout(150);
+        await waitTurned(page);
+      }
+      const filed = await page.evaluate(async (collectionId) => {
+        const { gameStore } = await import('/src/state/index.ts');
+        return gameStore.get().collection[collectionId]?.discovered === true;
+      }, bookCollectionId(portraitBook));
+      const last = await framedState(page);
+      assert(filed, `${viewport.name} reading to the last page files the bookmark`, `${portraitBook} ended on face ${last.face}, bookmark ${filed ? 'filed' : 'missing'}`);
+      await page.evaluate((id) => (window as unknown as { game: any }).game.bookReader.openBook(id), FIRST);
+      await waitPainted(page);
+    }
   }
   await page.setViewportSize({ width: first.width, height: first.height });
   await page.waitForTimeout(400);

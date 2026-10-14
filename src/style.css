@@ -4996,14 +4996,21 @@ kbd {
   visibility: hidden;
 }
 
+/* One page at a time, the back button is just its round arrow, ringed round. */
+.book-reader[data-framing='page'] .book-turn--prev {
+  border-radius: 999px;
+}
+
 /* "Tap here": a big round arrow on the page's outer edge, half off the paper
    so it never sits on a word. The reader pulls it in (`--book-arrow-overhang`,
-   px) when the page runs to the edge of the screen, so it is always whole.
-   It takes taps itself: half of it is outside its button's box, and a tap on
-   that half bubbles up to the button's own click like any other child's. */
+   px) when the page runs to the edge of the screen, so it is always whole,
+   and on a tall screen, one page at a time, it moves it into the band under
+   the page (`--book-arrow-lift`). It takes taps itself: half of it is outside
+   its button's box, and a tap on that half bubbles up to the button's own
+   click like any other child's. */
 .book-turn-arrow {
   position: absolute;
-  bottom: 0.6rem;
+  bottom: var(--book-arrow-lift, 0.6rem);
   display: grid;
   place-items: center;
   width: 2.9rem;

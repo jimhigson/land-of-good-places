@@ -54,8 +54,11 @@ export const CURL_CORNER = 0.35;
 /** Seconds one page takes to turn. */
 export const TURN_SECONDS = 0.8;
 
-/** Smootherstep: zero velocity *and* acceleration at both ends. */
-function smootherstep(t: number): number {
+/**
+ * Smootherstep: zero velocity *and* acceleration at both ends. Exported so the
+ * reader's camera pan on a tall screen eases exactly as the page it follows.
+ */
+export function smootherstep(t: number): number {
   const x = Math.min(1, Math.max(0, t));
   return x * x * x * (x * (x * 6 - 15) + 10);
 }
