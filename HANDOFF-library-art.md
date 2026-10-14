@@ -55,16 +55,57 @@ contract goes on #716 first.
   from an earlier script. The #716 contract comment (6155362071) predates it,
   so its owl and cat eye anchors are stale.
 
-## Review round (14 Oct) — work list
-- [ ] renders: one complete run, every PNG ends in IEND; render script writes
-      atomically and verifies its own output; repo-wide PNG integrity check
-- [ ] eye anchors travel in the glb (node extras), #716 told
-- [ ] face window = head node bounds; every front-mapped UV asserted in [0,1]
-- [ ] owl rim figure measured off landmarks, not a typed `0.15 - 0.03`
-- [ ] dragon: head wider than body, eyes lower, one horn asymmetric, wings
-      smooth
-- [ ] owl: HEAD constant, skull ratio, glasses round/fat; cat: bigger head,
-      soft ears
-- [ ] lamps fatter; dentils; nest books
-- [ ] pack docLine count; ASSET_MANIFEST; checks (`check`, `build`,
-      `test:procgen`)
+## Review round (14 Oct) — done
+- [x] renders: one complete run (31 PNGs, all IEND, all RGB). The render
+      script now clears the folder first, writes each frame to a hidden
+      `.part` file, verifies it (signature, IHDR size + colour type, IEND)
+      and renames it into place. `check:png-integrity` (gate, shard-1) walks
+      every PNG git tracks — proved red on the old truncated `exterior.png`
+      and on a flipped byte / appended bytes in a hotel render.
+- [x] face figures travel in the glb as node extras (`face_eyes_uv`,
+      `face_window_m`, owl `face_rim_uv`); `export_extras` on, the export
+      asserts nothing else carries a custom property; `readGlbParts` exposes
+      `GlbPart.extras`. #716 told (comment 6164272315), with a correction of
+      the stale anchors in 6155362071.
+- [x] face window = the head node's own bounds; `face_window_uvs` asserts
+      every front-mapped uv is on the canvas (proved red with the skull-only
+      window: owl tuft vertex → v −0.051).
+- [x] owl rim room measured between landmarks (`Asset.face_rim_uv`), no
+      typed `0.15 - 0.03`.
+- [x] `check:library-glb` (gate, shard-1): module == file, no material or
+      texture, names without full stops, translation-only, texcoords iff
+      face figures, dv/dy > 0 on every face, `readGlbParts` and
+      `GLTFLoader` agree on every node incl. extras. Each clause proved red.
+- [x] dragon: head 0.76 m on a 0.67 m body, `headOverBody >= 1.10` in the
+      CONTRACT (1.134); features placed from head_c/head_r; eyes on the
+      equator, snout low; left horn leans 15° (asymmetric feature); wings
+      8 cm thick (0 sharp edges), fingers dropped. Head horns ride the head
+      pivot; back spines → new node `dragon-spines`.
+- [x] owl: `OWL_HEAD` 1.18, skull ~56%; eyes on the equator, beak under;
+      glasses torus(20, 8), 8-sided 3.5 cm arms/bridge; beak + glasses ride
+      the head pivot. CONTRACT owl depth 1.00 → 1.10 (1.056).
+- [x] cat: `CAT_HEAD` 1.25, loaf shorter, `soft_ear` rounded triangles.
+      Eyes left at +0.115 r_z (inside the house band; the cat is asleep).
+- [x] floor lamp tapered 12 → 9 cm pole, bead, rolled rim (no lean: it
+      breaks width/centring); reading lamp 6 → 4.5 cm gooseneck.
+- [x] dentils removed; book boards one-segment bevel (pile + nest).
+- [x] pack docLine count dropped; pediment comment corrected; ASSET_MANIFEST
+      row + §41.
+- [ ] `pnpm run check` / `build` / `test:procgen` on the final head — see
+      the bottom of this file for the result.
+
+## Not done, on purpose
+- **No part-PR from this branch.** Jim's 13 Oct ruling: one PR for the whole
+  Library; the workflow raises it from the integration branch.
+- **check:character-parity is not the glb's reader check** and gets no hook:
+  it is the kid's parity check by design. `check:library-glb` is the
+  library's; #716's `check:library` re-measures the CONTRACT.
+- `library_render.py` colours from its PROPOSED palette-key table until
+  `src/art/models/libraryAssets.ts` exists (#716); it switches by itself.
+- The cat's head stays a little narrower than its loaf: "head wider than
+  the body" literally would need a longer cat than the 0.6 m contract.
+
+## Figures (quote from the build, never by hand)
+`pnpm run blend:library` prints every CONTRACT figure, pivot and face anchor.
+At `0b941d81`: 65 nodes, 18 568 triangles; glb 449 528 B of the 460 800 B
+budget (the pack line and `libraryGlb.ts`'s header are the owners).
