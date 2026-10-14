@@ -26,6 +26,7 @@ import {
   createLibraryReadingLamp,
   createLibraryRug,
   createLibrarySconce,
+  createLibrarySecretBookcase,
   createLibrarySideTable,
   libraryArmchairSize,
   libraryBookcaseBaked,
@@ -34,18 +35,23 @@ import {
   libraryBookShapes,
   libraryCushionSize,
   libraryDeskSize,
-  measurePlan,
+  libraryFloorLampSize,
+  libraryReadingLampSize,
+  librarySideTableSize,
   LIBRARY_BOOK_COLOURS,
   type BakedModel,
   type BookShape,
   type BookcaseKind,
+  type LampHandle,
 } from '../../art/models/libraryAssets';
+import { KID_REACH_HEIGHT } from '../../art/models/kid';
 import type { LibraryProps } from './props';
 import type { PoolSpot } from './lighting';
 import {
   LIBRARY_BOOKCASES,
   LIBRARY_FURNITURE,
   LIBRARY_READABLE_SLOTS,
+  LIBRARY_SCONCE_HEIGHT,
   type BookcaseSpec,
   type FurnitureSpec,
   type LocalPoint,
@@ -72,8 +78,8 @@ import {
 /** A seed for the decoration, so the same room is built on every load. */
 const BOOK_SEED = 0x11b7a7;
 
-/** How far a book's spine stands back from its case's front edge. */
-const SPINE_INSET = 0.04;
+/** How far a book's spine stands back from the front edge of the board it stands on. */
+const SPINE_INSET = 0.01;
 /** The gap left on a shelf for a readable book's slot (#718), either side of its middle. */
 const SLOT_HALF = 0.1;
 
@@ -94,6 +100,29 @@ export function bookcaseCentre(spec: BookcaseSpec): LocalPoint {
   return { x: spec.at.x + Math.sin(yaw) * (depth / 2), z: spec.at.z + Math.cos(yaw) * (depth / 2) };
 }
 
+/**
+ * **Every readable book within her reach** (#718's twelve): the slot's shelf
+ * top, measured off the drawn case, at or under `KID_REACH_HEIGHT` — how far a
+ * child's hand reaches above the floor — or the build throws. A shelf the
+ * Artist moves up cannot quietly put a book out of her hand.
+ */
+export function assertReadableSlotsInReach(): void {
+  const problems: string[] = [];
+  for (const slot of LIBRARY_READABLE_SLOTS) {
+    const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
+    if (!spec) {
+      problems.push(`readable slot ${slot.index + 1} names no case '${slot.bookcase}'`);
+      continue;
+    }
+    const top = libraryBookcaseSize(spec.kind).shelfTops[slot.shelf];
+    if (top === undefined) problems.push(`readable slot ${slot.index + 1} is on shelf ${slot.shelf} of ${slot.bookcase}, which has no such shelf`);
+    else if (top > KID_REACH_HEIGHT) {
+      problems.push(`readable slot ${slot.index + 1} (${slot.bookcase}, shelf ${slot.shelf}) stands at ${top.toFixed(3)} m, over her reach (${KID_REACH_HEIGHT} m)`);
+    }
+  }
+  if (problems.length > 0) throw new Error(`Library: a readable book she cannot reach:\n  - ${problems.join('\n  - ')}`);
+}
+
 /** One book: its shape, colour and transform in its case's own frame. */
 interface PlacedBook {
   readonly shape: number;
@@ -108,7 +137,7 @@ interface PlacedBook {
 function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonly BookShape[]): PlacedBook[] {
   const size = libraryBookcaseSize(spec.kind);
   const books: PlacedBook[] = [];
-  const spineZ = size.depth / 2 - SPINE_INSET;
+  const spineZ = size.boardFront - SPINE_INSET;
   const slots = back ? [] : LIBRARY_READABLE_SLOTS.filter((slot) => slot.bookcase === spec.id);
   size.shelfTops.forEach((shelfY, shelf) => {
     const clear = size.shelfClear[shelf] ?? 0;
@@ -141,6 +170,28 @@ function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonl
     }
   });
   return books;
+}
+
+/**
+ * One case's books as a single `InstancedMesh`: every shape is the first
+ * book's geometry scaled to its own measured size, so one case is one draw
+ * call — the stacks fade and the secret shelf swings, so each owns its books.
+ */
+function bookInstances(books: readonly PlacedBook[], shapes: readonly BookShape[], material: Material): InstancedMesh {
+  const base = shapes[0]!;
+  const instanced = new InstancedMesh(base.geometry, material, books.length);
+  const scaled = new Matrix4();
+  const colour = new Color();
+  books.forEach((book, index) => {
+    const shape = shapes[book.shape]!;
+    scaled.makeScale(shape.thickness / base.thickness, shape.height / base.height, shape.depth / base.depth).premultiply(book.matrix);
+    instanced.setMatrixAt(index, scaled);
+    instanced.setColorAt(index, colour.setHex(book.colour));
+  });
+  instanced.instanceMatrix.needsUpdate = true;
+  if (instanced.instanceColor) instanced.instanceColor.needsUpdate = true;
+  instanced.computeBoundingSphere();
+  return instanced;
 }
 
 /**
@@ -243,7 +294,7 @@ export interface Furnished {
   readonly pieces: ReadonlyMap<string, Object3D>;
 }
 
-/** The cloth of each chair and cushion — the park's own bright colours, a different one each. */
+/** The cloth of each chair's frame and each cushion — the park's own bright colours, a different one each; the storyteller's chair the castle's tapestry red. */
 const CHAIR_CLOTH: Readonly<Record<string, number>> = {
   'story-chair': ART.castleTapestry,
   'story-armchair-west': PALETTE.markerLilac,
@@ -258,6 +309,7 @@ const RUG_WIDTH = 7;
 const RUG_DEPTH = 4.4;
 
 export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished {
+  assertReadableSlotsInReach();
   const rng = new Rng(BOOK_SEED);
   const shapes = libraryBookShapes();
   const bodyMaterial = bakedBodyMaterial();
@@ -294,6 +346,20 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     props.box(`bookcase ${spec.id}`, { x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2 }, size.height);
     const books = [...shelveFace(spec, false, rng, shapes), ...(spec.kind === 'stack' ? shelveFace(spec, true, rng, shapes) : [])];
     bookCount += books.length;
+    if (spec.secret) {
+      // The secret shelf (#719) is drawn from the kit's hinge-origin twin, its
+      // books on its own door so they swing with it. Closed, it stands exactly
+      // where an ordinary case would.
+      const secret = createLibrarySecretBookcase();
+      secret.root.name = `library.secret.${spec.id}`;
+      secret.root.applyMatrix4(transform);
+      const instanced = bookInstances(books, shapes, libraryBookMaterial());
+      instanced.position.copy(secret.offset).negate();
+      secret.door.add(instanced);
+      root.add(secret.root);
+      pieces.set(spec.id, secret.root);
+      continue;
+    }
     if (spec.kind !== 'stack') {
       const list = fixedMatrices.get(spec.kind) ?? [];
       list.push(transform);
@@ -309,20 +375,8 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     const outline = bakedOutlineMaterial();
     addBaked(group, libraryBookcaseBaked('stack'), body, outline);
     const bookMaterial = libraryBookMaterial().clone();
-    const base = shapes[0]!;
-    const instanced = new InstancedMesh(base.geometry, bookMaterial, books.length);
+    const instanced = bookInstances(books, shapes, bookMaterial);
     instanced.name = `${group.name}.books`;
-    const scaled = new Matrix4();
-    const colour = new Color();
-    books.forEach((book, index) => {
-      const shape = shapes[book.shape]!;
-      scaled.makeScale(shape.thickness / base.thickness, shape.height / base.height, shape.depth / base.depth).premultiply(book.matrix);
-      instanced.setMatrixAt(index, scaled);
-      instanced.setColorAt(index, colour.setHex(book.colour));
-    });
-    instanced.instanceMatrix.needsUpdate = true;
-    if (instanced.instanceColor) instanced.instanceColor.needsUpdate = true;
-    instanced.computeBoundingSphere();
     group.add(instanced);
     root.add(group);
     pieces.set(spec.id, group);
@@ -367,29 +421,31 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
   const desk = LIBRARY_FURNITURE.find((piece) => piece.kind === 'desk');
   const deskSize = libraryDeskSize();
   const tables = LIBRARY_FURNITURE.filter((piece) => piece.kind === 'sideTable');
-  const tableTop = measurePlan(createLibrarySideTable().root).maxY;
+  const lamps = LIBRARY_FURNITURE.filter((piece) => piece.kind === 'readingLamp');
+  const tableSize = librarySideTableSize();
+  const lampSize = libraryReadingLampSize();
+  const on = (a: LocalPoint, b: LocalPoint): boolean => Math.hypot(a.x - b.x, a.z - b.z) < 0.05;
   /** A reading lamp stands on whatever it is placed over: a side table, or the desk. */
   const standsOn = (piece: FurnitureSpec): number => {
-    if (tables.some((table) => Math.hypot(table.at.x - piece.at.x, table.at.z - piece.at.z) < 0.05)) return tableTop;
+    if (tables.some((table) => on(table.at, piece.at))) return tableSize.top;
     if (desk && Math.abs(piece.at.x - desk.at.x) <= deskSize.width / 2 && Math.abs(piece.at.z - desk.at.z) <= deskSize.depth / 2) return deskSize.top;
     return 0;
   };
-  /** Bake a model, stand it at a spot, and say where its bulb ended up. */
-  const place = (piece: FurnitureSpec, model: Object3D, y: number, bulbName?: string): void => {
+  /** A model's own-frame point carried to a spot and turned with it. */
+  const turned = (piece: FurnitureSpec, x: number, z: number): LocalPoint => {
+    const yaw = (piece.facing * Math.PI) / 180;
+    return { x: piece.at.x + x * Math.cos(yaw) + z * Math.sin(yaw), z: piece.at.z - x * Math.sin(yaw) + z * Math.cos(yaw) };
+  };
+  /** Bake a model and stand it at a spot; a lamp marked `pool` hangs its light in the middle of its glowing shade. */
+  const place = (piece: FurnitureSpec, model: Object3D, y: number, lamp?: LampHandle): void => {
     const group = new Group();
     group.name = `library.${piece.id}`;
     addBaked(group, bakeModel(model), bodyMaterial, outlineMaterial);
     group.applyMatrix4(placement(piece.at.x, y, piece.at.z, piece.facing));
     root.add(group);
     pieces.set(piece.id, group);
-    if (piece.pool && bulbName) {
-      let bulb: Object3D | undefined;
-      model.traverse((node) => {
-        if (node.name === bulbName) bulb = node;
-      });
-      if (!bulb) throw new Error(`Library: ${piece.id}'s model has no '${bulbName}' to hang its light on`);
-      model.updateMatrixWorld(true);
-      const at = new Vector3().setFromMatrixPosition(bulb.matrixWorld).applyMatrix4(placement(piece.at.x, y, piece.at.z, piece.facing));
+    if (piece.pool && lamp) {
+      const at = lamp.bulb.clone().applyMatrix4(placement(piece.at.x, y, piece.at.z, piece.facing));
       pools.push({ id: piece.id, x: at.x, y: at.y, z: at.z });
     }
   };
@@ -399,37 +455,43 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     switch (piece.kind) {
       case 'desk': {
         place(piece, createLibraryDesk().root, 0);
-        props.box('the desk', { x: piece.at.x, z: piece.at.z, facing: piece.facing, halfLength: deskSize.width / 2, halfDepth: deskSize.depth / 2 }, deskSize.top);
+        const centre = turned(piece, deskSize.centreX, deskSize.centreZ);
+        props.box('the desk', { x: centre.x, z: centre.z, facing: piece.facing, halfLength: deskSize.width / 2, halfDepth: deskSize.depth / 2 }, deskSize.top);
         break;
       }
       case 'armchair':
       case 'storyChair': {
-        const big = piece.kind === 'storyChair';
         const cloth = CHAIR_CLOTH[piece.id] ?? PALETTE.markerPink;
-        const model = createLibraryArmchair(cloth, big).root;
-        place(piece, model, 0);
-        const plan = measurePlan(model);
-        const seat = libraryArmchairSize(big).seat;
-        props.box(piece.id, { x: piece.at.x, z: piece.at.z, facing: piece.facing, halfLength: (plan.maxX - plan.minX) / 2, halfDepth: (plan.maxZ - plan.minZ) / 2 }, seat);
+        place(piece, createLibraryArmchair(cloth).root, 0);
+        // The chair is deeper behind its origin than in front of it: its
+        // collider and its seat stand on the drawn footprint's own middle.
+        const chair = libraryArmchairSize();
+        const centre = turned(piece, chair.centreX, chair.centreZ);
+        props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: chair.width / 2, halfDepth: chair.depth / 2 }, chair.seat);
         break;
       }
       case 'floorLamp': {
         const lamp = createLibraryFloorLamp();
-        place(piece, lamp.root, 0, 'lamp-bulb');
-        const plan = measurePlan(lamp.root);
-        props.disc(piece.id, piece.at.x, piece.at.z, (plan.maxX - plan.minX) / 2, lamp.height, { stand: false });
+        place(piece, lamp.root, 0, lamp);
+        const size = libraryFloorLampSize();
+        props.disc(piece.id, piece.at.x, piece.at.z, size.radius, size.height, { stand: false });
         break;
       }
       case 'readingLamp': {
-        place(piece, createLibraryReadingLamp().root, standsOn(piece), 'reading-lamp-bulb');
+        const lamp = createLibraryReadingLamp();
+        const base = standsOn(piece);
+        place(piece, lamp.root, base, lamp);
+        // Solid like everything drawn: a jump onto the desk, or over a side
+        // table, meets the lamp on it. Its shade is no floor.
+        props.disc(piece.id, piece.at.x, piece.at.z, lampSize.radius, base + lampSize.height, { stand: false });
         break;
       }
       case 'sideTable': {
-        const table = createLibrarySideTable().root;
-        place(piece, table, 0);
-        const plan = measurePlan(table);
-        // A lamp stands on it, so its top is not a floor.
-        props.disc(piece.id, piece.at.x, piece.at.z, (plan.maxX - plan.minX) / 2, plan.maxY, { stand: false });
+        place(piece, createLibrarySideTable().root, 0);
+        // A lamp stands on it, so its honest top is the lamp's, and it is no
+        // floor (hotel/place.ts's lamp-topped table).
+        const lit = lamps.some((lamp) => on(lamp.at, piece.at));
+        props.disc(piece.id, piece.at.x, piece.at.z, tableSize.radius, tableSize.top + (lit ? lampSize.height : 0), { stand: false });
         break;
       }
       case 'rug': {
@@ -440,11 +502,12 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         place(piece, createLibraryCushion(CUSHION_CLOTH[cushion % CUSHION_CLOTH.length]!).root, 0);
         cushion += 1;
         const size = libraryCushionSize();
-        props.soft(size.top, piece.at.x, piece.at.z, size.radius);
+        props.soft(piece.id, size.top, piece.at.x, piece.at.z, size.radius);
         break;
       }
       case 'sconce': {
-        place(piece, createLibrarySconce().root, piece.y ?? 3.9, 'sconce-bulb');
+        const sconce = createLibrarySconce();
+        place(piece, sconce.root, LIBRARY_SCONCE_HEIGHT, sconce);
         break;
       }
     }

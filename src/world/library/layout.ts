@@ -38,7 +38,8 @@
  *   +Z is the camera's diagonal (`cameraFacing`), exactly as the hotel's door
  *   is.
  */
-import { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../../core/constants';
+import { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, PLAYER_RADIUS } from '../../core/constants';
+import { LIBRARY_EXTERIOR_PLAN, LIBRARY_SHELF_FOOTPRINT } from '../../art/models/libraryKit';
 
 export { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z };
 
@@ -90,11 +91,11 @@ export const LIBRARY_INNER_Z = LIBRARY_HALF_Z - LIBRARY_WALL_HALF;
 
 /**
  * The south wall's doorway — the inside of the front door — centred on X 0,
- * the exterior's door width (3.2 m), so going in and coming out are the same
- * size of hole.
+ * and exactly as wide as the drawn front door (measured off the shell), so
+ * going in and coming out are the same size of hole.
  */
 export const LIBRARY_DOOR_X = 0;
-export const LIBRARY_DOOR_HALF = 1.6;
+export const LIBRARY_DOOR_HALF = LIBRARY_EXTERIOR_PLAN.doorHalf;
 
 /**
  * Where she lands on coming in: 2.1 m inside the doorway, facing north down
@@ -112,75 +113,54 @@ export const LIBRARY_EXIT_BAND_HALF_ALONG = 0.6;
 // ===========================================================================
 
 /**
- * The plinth: 18 m across the facade by 14 m deep, its top 0.36 m up, with
- * the lower of the two front steps a full-width tread across its front.
- * Building-local. These are the art contract's numbers (#715's
- * `art/blend/library_build.py` CONTRACT); the loader asserts the drawn
- * plinth against them.
+ * **The exterior's plan is the drawn shell's, measured — never typed here.**
+ * `library.glb`'s shell (the 3D Artist's #715, `art/blend/library_build.py`,
+ * its `CONTRACT` asserted against the emitted vertices) is read by
+ * `art/models/libraryKit.ts`, which measures the plinth, the steps, the cella,
+ * the doorway and the six columns off its bare geometry. Everything below is
+ * derived from that, so the plot the park solves, the paths the router keeps
+ * off the stone and the colliders are three readings of one mesh.
  */
-export const LIBRARY_PLINTH_HALF_X = 9;
-export const LIBRARY_PLINTH_HALF_Z = 7;
-export const LIBRARY_PLINTH_TOP = 0.36;
-/** Each of the two risers — the ground to the step, the step to the plinth. */
-export const LIBRARY_STEP_RISE = 0.18;
-/** The lower step's tread, front to back: the step runs z [7 - this, 7]. */
-export const LIBRARY_STEP_TREAD = 0.6;
+export { LIBRARY_EXTERIOR_PLAN, type LibraryExteriorPlan } from '../../art/models/libraryKit';
 
 /**
- * The cella — the walled hall behind the portico — building-local. It runs the
- * plinth's whole width less a 0.3 m ledge, from 0.3 m in off the back to the
- * front wall the door is cut in.
+ * **The park's plot.** The building's footprint is the plinth's rectangle,
+ * steps and all, but plots are axis-aligned and a camera-facing door turns it
+ * 45 degrees, so the plot is the circle that holds the plinth at any turn:
+ * its corner's distance from the centre.
  */
-export const LIBRARY_CELLA_HALF_X = 8.7;
-export const LIBRARY_CELLA_BACK_Z = -6.7;
-export const LIBRARY_CELLA_FRONT_Z = 2;
-
-/** The rounded door opening in the cella's front wall: 3.2 m wide, 4.0 m to the top of its arch. */
-export const LIBRARY_DOOR_WIDTH = 3.2;
-export const LIBRARY_DOOR_HEIGHT = 4;
+export const LIBRARY_FOOTPRINT_RADIUS = Math.hypot(
+  LIBRARY_EXTERIOR_PLAN.plinthHalfX,
+  Math.max(-LIBRARY_EXTERIOR_PLAN.plinthBackZ, LIBRARY_EXTERIOR_PLAN.stepFrontZ),
+);
 
 /**
- * The door is a recess 1.6 m deep, closed by a back wall a sprinting child
- * stops on while the iris closes (the Reptile House's and the hotel tower's
- * rule). Building-local z of that back wall's centre line.
+ * What the drawn building's ink outlines add to its bare reach, at most — a
+ * hand's breadth. `Library.ts` measures the dressed model, outlines and all,
+ * and throws if any vertex stands past {@link LIBRARY_BOUNDING_RADIUS}, so a
+ * thicker outline cannot quietly reach a neighbour's plot.
  */
-export const LIBRARY_RECESS_BACK_Z = 0.4;
+export const LIBRARY_OUTLINE_ALLOWANCE = 0.1;
 
-/**
- * The six fat columns of the portico: their centres across the facade, and
- * the line they stand on. The middle pair stand 2.8 m apart in the clear, so
- * the way to the door is the widest gap; the others 1.8 m, still wider than a
- * child (1.24 m).
- */
-export const LIBRARY_COLUMN_XS: readonly number[] = [-8, -5, -2, 2, 5, 8];
-export const LIBRARY_COLUMN_Z = 4.6;
-
-/**
- * **The park's plot.** The building's footprint is the plinth's 18 x 14
- * rectangle, but plots are axis-aligned and a camera-facing door turns it 45
- * degrees, so the plot is the circle that holds the plinth at any turn: its
- * corner radius, sqrt(9^2 + 7^2) = 11.40. `Library.ts` asserts the drawn
- * plinth inside it.
- */
-export const LIBRARY_FOOTPRINT_RADIUS = 11.41;
-
-/** The manifest's bounding radius: everything drawn stands inside it (the roof is held to the plinth's plan). */
-export const LIBRARY_BOUNDING_RADIUS = 11.5;
+/** The manifest's bounding radius: every drawn vertex, its outline included, stands inside it. */
+export const LIBRARY_BOUNDING_RADIUS = LIBRARY_EXTERIOR_PLAN.reach + LIBRARY_OUTLINE_ALLOWANCE;
 
 /**
  * **Where the path arrives** — the foot of the steps, building-local z: the
- * front of the lower tread. The park's doormat stands a spur's paved
+ * front of the bottom tread. The park's doormat stands a spur's paved
  * half-width (plus the router's margin) out past it, and the paving runs on
  * in to here and `DOOR_PAVING_OVERLAP` under the step (`parkManifest.ts`).
  */
-export const LIBRARY_STEPS_FRONT_Z = LIBRARY_PLINTH_HALF_Z;
+export const LIBRARY_STEPS_FRONT_Z = LIBRARY_EXTERIOR_PLAN.stepFrontZ;
 
 /**
- * The front door's walk-through band, building-local: from the recess back
- * wall's face out to just past the door's front. Crossing it enters.
+ * The front door's walk-through band, as offsets from the measured doorway:
+ * its inner edge this far out from the door leaves (her radius takes her
+ * centre further out than this when she walks into them, so a walk always
+ * crosses it), its outer edge this far out past the cella's front.
  */
-export const LIBRARY_ENTRY_BAND_INNER_Z = LIBRARY_RECESS_BACK_Z + 0.35;
-export const LIBRARY_ENTRY_BAND_OUTER_Z = LIBRARY_CELLA_FRONT_Z + 0.2;
+export const LIBRARY_ENTRY_BAND_INNER_INSET = 0.35;
+export const LIBRARY_ENTRY_BAND_OUTER_REACH = 0.2;
 
 // ===========================================================================
 // The reading room — bookcases
@@ -209,6 +189,21 @@ export interface BookcaseSpec {
    * ordinary bookcase that knows it is the one.
    */
   readonly secret?: true;
+}
+
+/**
+ * How deep a bookcase of each kind stands, off the drawn shelf
+ * (`library.glb`'s `shelf`, measured by `libraryKit.ts`): a wall case and a
+ * low bin are one shelf deep; a stack is two shelves back to back, so it has
+ * books on both faces.
+ */
+export function libraryBookcaseDepth(kind: BookcaseSpec['kind']): number {
+  return kind === 'stack' ? LIBRARY_SHELF_FOOTPRINT.depth * 2 : LIBRARY_SHELF_FOOTPRINT.depth;
+}
+
+/** Where a case's front face is, room-local: out from `at` along its facing. */
+export function bookcaseFrontOut(spec: BookcaseSpec): number {
+  return spec.kind === 'stack' ? libraryBookcaseDepth(spec.kind) / 2 : libraryBookcaseDepth(spec.kind);
 }
 
 /** The north wall's eight tall cases, x centres, backs on the inner face. */
@@ -262,14 +257,16 @@ export const LIBRARY_SECRET_BOOKCASE: BookcaseSpec = (() => {
  * - `desk` — the librarian's desk, 3 m along its facing's across-axis, its top
  *   at the kiosk counter's height (`stallShape.ts`'s `COUNTER_TOP_Y`).
  * - `armchair` — a reading chair. A child sits in it from its front.
- * - `storyChair` — the big chair the owl reads from at story time (#714 part 4).
+ * - `storyChair` — the chair the owl reads from at story time (#714 part 4):
+ *   the readers' armchair, in the storyteller's own cloth.
  * - `floorLamp` / `readingLamp` (on a `sideTable`) — warm pools of light.
  * - `rug` — the story rug, flat, walked on.
  * - `cushion` — a floor cushion on the rug: soft, so a platform she steps up
  *   onto rather than a wall she bumps (the hotel beds' "a prop that is its
  *   own floor is placed soft").
- * - `sconce` — a wall light above the cases, out of reach: drawn, lit, no
- *   collider, because nothing at that height can meet her.
+ * - `sconce` — a wall light above the cases at {@link LIBRARY_SCONCE_HEIGHT},
+ *   out of reach: drawn, lit, no collider, because nothing at that height can
+ *   meet her.
  */
 export type FurnitureKind = 'desk' | 'armchair' | 'storyChair' | 'floorLamp' | 'sideTable' | 'readingLamp' | 'rug' | 'cushion' | 'sconce';
 
@@ -279,11 +276,16 @@ export interface FurnitureSpec {
   readonly at: LocalPoint;
   /** `Player.facing` degrees: a chair's sitter looks this way; a desk's front faces it. */
   readonly facing: number;
-  /** A sconce's height on its wall, or a reading lamp's on its table. */
-  readonly y?: number;
   /** This lamp throws a real `PointLight` pool (the rest glow; see `lighting.ts`'s budget). */
   readonly pool?: true;
 }
+
+/**
+ * How high the wall sconces hang: above the tall cases' tops, out of every
+ * reach (a child's jumping head included), so they are drawn and lit with no
+ * collider.
+ */
+export const LIBRARY_SCONCE_HEIGHT = 3.9;
 
 /** The story rug's centre — the far end of the central aisle, under the storyteller's eye. */
 export const LIBRARY_STORY_RUG: LocalPoint = { x: 4, z: -9 };
@@ -319,16 +321,30 @@ export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
   { id: 'east-floor-lamp', kind: 'floorLamp', at: { x: 15.6, z: -8.2 }, facing: 0, pool: true },
 
   // Sconces above the cases: the north wall's three and the west wall's two.
-  { id: 'sconce-north-1', kind: 'sconce', at: { x: -8, z: -LIBRARY_INNER_Z }, facing: 0, y: 3.9, pool: true },
-  { id: 'sconce-north-2', kind: 'sconce', at: { x: 0, z: -LIBRARY_INNER_Z }, facing: 0, y: 3.9 },
-  { id: 'sconce-north-3', kind: 'sconce', at: { x: 8, z: -LIBRARY_INNER_Z }, facing: 0, y: 3.9, pool: true },
-  { id: 'sconce-west-1', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: -6 }, facing: 90, y: 3.9 },
-  { id: 'sconce-west-2', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: 6 }, facing: 90, y: 3.9, pool: true },
+  { id: 'sconce-north-1', kind: 'sconce', at: { x: -8, z: -LIBRARY_INNER_Z }, facing: 0, pool: true },
+  { id: 'sconce-north-2', kind: 'sconce', at: { x: 0, z: -LIBRARY_INNER_Z }, facing: 0 },
+  { id: 'sconce-north-3', kind: 'sconce', at: { x: 8, z: -LIBRARY_INNER_Z }, facing: 0, pool: true },
+  { id: 'sconce-west-1', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: -6 }, facing: 90 },
+  { id: 'sconce-west-2', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: 6 }, facing: 90, pool: true },
 ];
 
 // ===========================================================================
 // Where a child must be able to stand
 // ===========================================================================
+
+/**
+ * How much clear floor a stand spot keeps round it: her own radius and a
+ * hand's breadth more (`props.ts`'s `libraryKeepOuts` refuses any collider
+ * inside it).
+ */
+export const LIBRARY_STAND_KEEP_OUT = PLAYER_RADIUS + 0.28;
+
+/**
+ * How far in front of a case's front face she stands to take a book down, or
+ * to pull the secret one: the stand's own keep-out and a hand's breadth more,
+ * so the keep-out never reaches the case whatever depth the drawn shelf is.
+ */
+export const LIBRARY_CASE_STAND_OUT = LIBRARY_STAND_KEEP_OUT + 0.1;
 
 /**
  * In front of the librarian's desk, where she is served (and handed her
@@ -342,7 +358,7 @@ export const LIBRARY_LIBRARIAN_SPOT: StandSpot = { what: "the librarian's spot",
 /** Where she stands to pull the secret book (#719): in front of the secret case, facing it. */
 export const LIBRARY_SECRET_STAND: StandSpot = {
   what: 'in front of the secret shelf',
-  x: -LIBRARY_INNER_X + 1.9,
+  x: LIBRARY_SECRET_BOOKCASE.at.x + bookcaseFrontOut(LIBRARY_SECRET_BOOKCASE) + LIBRARY_CASE_STAND_OUT,
   z: LIBRARY_SECRET_BOOKCASE.at.z,
   facing: 270,
 };
@@ -353,6 +369,12 @@ export const LIBRARY_SECRET_STAND: StandSpot = {
  * middle (metres, along the case's right-hand side as you face it), and where
  * she stands to take it down. Books #718 fills them; this PR only keeps their
  * stand spots clear and leaves the gap on the shelf.
+ *
+ * **Only the two bottom shelves**: the drawn shelf's third board stands above
+ * `KID_REACH_HEIGHT` (#715's contract: "only rows 1-2 are under it"), and a
+ * readable book a child cannot reach is a gap she can see and never fill.
+ * `furnish.ts` measures each slot's shelf off the model and throws if one is
+ * out of reach, so a taller glb cannot move a book out of her hand either.
  */
 export interface ReadableSlot {
   readonly index: number;
@@ -372,7 +394,7 @@ function slotStand(bookcase: string, along: number, index: number): StandSpot {
   const outZ = Math.cos(yaw);
   const rightX = -outZ;
   const rightZ = outX;
-  const out = spec.kind === 'stack' ? 1.4 : 1.6;
+  const out = bookcaseFrontOut(spec) + LIBRARY_CASE_STAND_OUT;
   return {
     what: `readable book ${index + 1}'s stand (${bookcase})`,
     x: spec.at.x + outX * out - rightX * along,
@@ -382,18 +404,18 @@ function slotStand(bookcase: string, along: number, index: number): StandSpot {
 }
 
 const READABLE: readonly (readonly [string, number, number])[] = [
-  ['north-2', 2, 0.6],
-  ['north-3', 1, -0.8],
-  ['north-6', 2, 0.6],
-  ['north-8', 1, -0.6],
-  ['west-1', 2, 0.5],
-  ['west-3', 1, -0.5],
-  ['west-5', 2, 0.6],
-  ['stack-3-1', 1, 0.6],
-  ['stack-3-3', 2, -0.6],
-  ['stack-3-4', 1, 0.4],
-  ['stack-2-2', 2, 0.5],
-  ['stack-1-5', 1, -0.5],
+  ['north-2', 1, 0.6],
+  ['north-3', 0, -0.8],
+  ['north-6', 1, 0.6],
+  ['north-8', 0, -0.6],
+  ['west-1', 1, 0.5],
+  ['west-3', 0, -0.5],
+  ['west-5', 1, 0.6],
+  ['stack-3-1', 0, 0.6],
+  ['stack-3-3', 1, -0.6],
+  ['stack-3-4', 0, 0.4],
+  ['stack-2-2', 1, 0.5],
+  ['stack-1-5', 0, -0.5],
 ];
 
 export const LIBRARY_READABLE_SLOTS: readonly ReadableSlot[] = READABLE.map(([bookcase, shelf, along], index) => ({

@@ -8,10 +8,12 @@ import { placeOnSphere } from '../terrain';
 import { interiorMaterial } from '../building/parts';
 import { PALETTE } from '../../core/palette';
 import { solid } from '../../art/style/materials';
-import type { LibraryExteriorPlan } from '../../art/models/libraryAssets';
+import { END_HALF } from './props';
 import {
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
+  LIBRARY_ENTRY_BAND_INNER_INSET,
+  LIBRARY_ENTRY_BAND_OUTER_REACH,
   LIBRARY_EXIT_BAND_HALF_ALONG,
   LIBRARY_FLOOR_Y,
   LIBRARY_HALF_X,
@@ -20,6 +22,7 @@ import {
   LIBRARY_ORIGIN_Z,
   LIBRARY_WALL_HALF,
   LIBRARY_WALL_HEIGHT,
+  type LibraryExteriorPlan,
   type LocalPoint,
 } from './layout';
 
@@ -75,6 +78,16 @@ export class LibraryFrame {
   /** Building-local metres -> world. */
   toWorld(localX: number, localY: number, localZ: number, target = new Vector3()): Vector3 {
     return target.set(localX, localY, localZ).applyMatrix4(this.matrix);
+  }
+
+  /**
+   * The tangent of the building's lean — how far a vertical world line drifts
+   * across the building's own floor per metre it climbs. Zero at the park's
+   * middle, ~0.4 out by the boundary.
+   */
+  leanTangent(): number {
+    const up = this.toWorld(0, 1, 0, new Vector3()).sub(this.toWorld(0, 0, 0, this.scratch));
+    return Math.hypot(up.x, up.z) / up.y;
   }
 
   /** World -> building-local metres. */
@@ -147,73 +160,143 @@ class FramePlate implements MovingPlatform {
 }
 
 /**
- * **The plinth's top and the step, walkable.** Not colliders: a 0.18 m riser
- * with a `topIsAbsolute` collider is a wall to feet on the floor (`clearsTop`
- * forgives 0.15 m, not 0.18), so the steps are surfaces she walks up, each
- * riser well inside `BUILDING_STEP_UP`. The portico's floor runs from the
- * recess's back wall to the lower step; the cella's own walls keep her off
- * the rest of it.
+ * **The plinth's top and the bottom step, walkable** — the whole plinth, the
+ * top step included (its tread is the plinth's own height), and the bottom
+ * step in front of it. Not colliders: a 0.18 m riser with a `topIsAbsolute`
+ * collider is a wall to feet on the floor (`clearsTop` forgives 0.15 m, not
+ * 0.18), so the steps are surfaces she walks up, each riser well inside
+ * `BUILDING_STEP_UP`. The cella's ring and the plinth's own edges keep her to
+ * the portico and the steps.
+ *
+ * **The bottom step runs on in under the plinth.** Each plate asks whether it
+ * covers a world column at its own height, and the building leans: a vertical
+ * line meets the step's top and the plinth's top at local z values
+ * `(plinthTop − stepTop) · tan(lean)` apart, so two plates that only meet at
+ * the riser leave a sliver of ground under one lean and none under the other
+ * (seed 1's library dropped a walker 0.34 m into the stone through 1.4 cm of
+ * it). Overlapped by more than that sliver, the higher plate wins wherever it
+ * covers (`WalkSurfaces.sample` takes the highest surface within a step) and
+ * no column is left uncovered at any lean.
  */
 export function registerLibrarySteps(surfaces: WalkSurfaces, frame: LibraryFrame, plan: LibraryExteriorPlan): void {
-  surfaces.addPlatform(new FramePlate(frame, plan.plinthTop, plan.plinthHalfX, plan.recessBackZ, plan.stepBackZ));
-  surfaces.addPlatform(new FramePlate(frame, plan.stepTop, plan.plinthHalfX, plan.stepBackZ, plan.stepFrontZ));
+  const sliver = (plan.plinthTop - plan.stepTop) * frame.leanTangent();
+  surfaces.addPlatform(new FramePlate(frame, plan.plinthTop, plan.plinthHalfX, plan.plinthBackZ, plan.stepBackZ));
+  surfaces.addPlatform(new FramePlate(frame, plan.stepTop, plan.plinthHalfX, plan.stepBackZ - sliver - STEP_UNDERLAP_MARGIN, plan.stepFrontZ));
 }
 
-/** The half-thickness of the exterior's own walls' colliders. */
+/** How much further than the lean's sliver the bottom step runs on under the plinth. */
+const STEP_UNDERLAP_MARGIN = 0.05;
+
+/** The half-thickness of the cella's ring colliders. */
 const SHELL_HALF = 0.3;
+/**
+ * The half-thickness of the thin capsules that square the ring's corners and
+ * trace the plinth's edges — `props.ts`'s `END_HALF`, the park's own thinnest
+ * collider's figure, so nothing here makes every mover sub-step finer.
+ */
+const EDGE_HALF = END_HALF;
+
+/** What the exterior registered, in order — so a check can take one out and watch a clause go red. */
+export interface LibraryShellSolids {
+  /** The cella's ring: back, west, east, front west, front east, west jamb, east jamb, recess back. */
+  readonly walls: readonly WallCollider[];
+  /** The thin capsules squaring the ring's six outside corners (two each). */
+  readonly corners: readonly WallCollider[];
+  /** The plinth's own edges: east, back, west. */
+  readonly edges: readonly WallCollider[];
+  /** The six columns' feet. */
+  readonly columns: readonly number[];
+}
 
 /**
- * **The exterior's collision: a closed ring with one hole in it**, built from
- * the measured mesh. The cella's back and side walls, the front wall either
- * side of the doorway, the doorway's two jambs (their inner faces on the drawn
- * opening) and the recess's back wall that a sprinting child stops on while
- * the iris closes. Everything inside the ring but the recess is sealed, so
- * nobody can be in it; the recess is three walls round a doorway she walks
- * into and back out of. Then the six columns, each its drawn base.
+ * **The exterior's collision**, every collider built from the measured shell
+ * (`libraryKit.ts`'s plan):
  *
- * Returned in registration order, the ring's walls first, so a check can take
- * one out by index and watch the facade clause go red.
+ * - **The cella: a closed ring with one hole in it.** The masonry's whole
+ *   drawn extent — the side and front window sills stand proud of the wall
+ *   faces at a child's chest, so the ring holds them too — as eight fat
+ *   capsules whose outer faces are the drawn faces, the doorway's two jambs on
+ *   its drawn opening and the recess's back wall on the door leaves' front
+ *   (where a sprinting child stops while the iris closes). Everything inside
+ *   the ring but the recess is sealed, so nobody can be in it; the recess is
+ *   three walls round a doorway she walks into and back out of.
+ * - **Its outside corners squared.** Capsules whose ends meet at a corner
+ *   round it off by `half · (√2 − 1)` — 12 cm of drawn stone she could lean
+ *   into at the back corners. A thin capsule along each face's last stretch,
+ *   its outer face on the drawn face, leaves `EDGE_HALF · (√2 − 1)` (4 cm).
+ * - **The six columns**, each its drawn round foot — the widest a column is
+ *   anywhere a child can reach.
+ * - **The plinth's sides and back.** The portico's open sides and the ledge
+ *   round the cella stand 0.36 m of stone over ground the planet curves away
+ *   from (and the waves rise and fall under), so a riser there can be more
+ *   than she can step up — and the plate does not lift her past
+ *   `BUILDING_STEP_UP`, so without a collider she walked on into the slab.
+ *   A thin wall on each drawn edge, back corner to front step, keeps her to
+ *   the full-width steps: the one way up, the way the paths arrive.
  */
-export function registerLibraryShellCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): {
-  readonly walls: WallCollider[];
-  readonly columns: number[];
-} {
-  const walls: WallCollider[] = [];
-  const wall = (x1: number, z1: number, x2: number, z2: number, half: number): void => {
+export function registerLibraryShellCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): LibraryShellSolids {
+  const add = (list: WallCollider[], x1: number, z1: number, x2: number, z2: number, half: number): void => {
     const a = frame.foot(x1, z1);
     const b = frame.foot(x2, z2);
-    walls.push(collision.addWall(a.x, a.z, b.x, b.z, half));
+    list.push(collision.addWall(a.x, a.z, b.x, b.z, half));
   };
-  const sideX = plan.cellaHalfX - SHELL_HALF;
-  const backZ = plan.cellaBackZ + SHELL_HALF;
-  // The front wall's collider runs from the wall's back face out to the drawn
-  // front of the door frame, so the outer face is the drawn one.
-  const frontHalf = (plan.cellaFrontZ - plan.frontWallBackZ) / 2;
-  const frontZ = plan.frontWallBackZ + frontHalf;
-  const jambX = plan.doorHalf + SHELL_HALF;
-  const recessHalf = 0.35;
-  const recessZ = plan.recessBackZ - recessHalf;
+  const H = SHELL_HALF;
+  const t = EDGE_HALF;
+  const cx = plan.cellaHalfX;
+  const bz = plan.cellaBackZ;
+  const fz = plan.cellaFrontZ;
+  const dh = plan.doorHalf;
+  const rz = plan.recessBackZ;
 
-  wall(-sideX, backZ, sideX, backZ, SHELL_HALF);
-  wall(-sideX, backZ, -sideX, frontZ, SHELL_HALF);
-  wall(sideX, backZ, sideX, frontZ, SHELL_HALF);
-  wall(-sideX, frontZ, -jambX, frontZ, frontHalf);
-  wall(jambX, frontZ, sideX, frontZ, frontHalf);
-  wall(-jambX, plan.recessBackZ, -jambX, frontZ, SHELL_HALF);
-  wall(jambX, plan.recessBackZ, jambX, frontZ, SHELL_HALF);
-  wall(-jambX, recessZ, jambX, recessZ, recessHalf);
+  const walls: WallCollider[] = [];
+  add(walls, -cx + H, bz + H, cx - H, bz + H, H);
+  add(walls, -cx + H, bz + H, -cx + H, fz - H, H);
+  add(walls, cx - H, bz + H, cx - H, fz - H, H);
+  add(walls, -cx + H, fz - H, -dh - H, fz - H, H);
+  add(walls, dh + H, fz - H, cx - H, fz - H, H);
+  add(walls, -dh - H, rz, -dh - H, fz - H, H);
+  add(walls, dh + H, rz, dh + H, fz - H, H);
+  add(walls, -dh - H, rz - H, dh + H, rz - H, H);
+
+  // The outside corners: each drawn corner (x, z) with the directions its two
+  // faces run back along, into the masonry.
+  const corners: WallCollider[] = [];
+  const outside: readonly (readonly [number, number, number, number])[] = [
+    [-cx, bz, 1, 1],
+    [cx, bz, -1, 1],
+    [-cx, fz, 1, -1],
+    [cx, fz, -1, -1],
+    // The doorway's mouth: the wings' corners either side of the recess.
+    [-dh, fz, -1, -1],
+    [dh, fz, 1, -1],
+  ];
+  for (const [x, z, inX, inZ] of outside) {
+    const ix = x + inX * t;
+    const iz = z + inZ * t;
+    add(corners, ix, iz, ix + inX * H, iz, t);
+    add(corners, ix, iz, ix, iz + inZ * H, t);
+  }
+
+  const edges: WallCollider[] = [];
+  const px = plan.plinthHalfX - t;
+  add(edges, px, plan.stepFrontZ - t, px, plan.plinthBackZ + t, t);
+  add(edges, px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, t);
+  add(edges, -px, plan.plinthBackZ + t, -px, plan.stepFrontZ - t, t);
 
   const columns = plan.columns.map((column) => {
     const at = frame.foot(column.x, column.z);
     return collision.addCircle(at.x, at.z, column.radius);
   });
-  return { walls, columns };
+  return { walls, corners, edges, columns };
 }
 
-/** The front door's walk-through band, from the recess's back wall out past the door's front. World metres. */
+/**
+ * The front door's walk-through band, from just out of the door leaves to past
+ * the cella's front (`layout.ts`'s offsets on the measured doorway). World metres.
+ */
 export function libraryEntryBand(frame: LibraryFrame, plan: LibraryExteriorPlan): PortalBand {
-  const inner = plan.recessBackZ + 0.35;
-  const outer = plan.cellaFrontZ + 0.2;
+  const inner = plan.recessBackZ + LIBRARY_ENTRY_BAND_INNER_INSET;
+  const outer = plan.cellaFrontZ + LIBRARY_ENTRY_BAND_OUTER_REACH;
   const centre = frame.foot(0, (inner + outer) / 2);
   return {
     what: "the Library's front door",

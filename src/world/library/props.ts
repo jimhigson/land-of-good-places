@@ -1,9 +1,8 @@
 import type { CollisionWorld, WallCollider } from '../Collision';
-import type { WalkSurfaces } from '../building/surfaces';
+import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { Plate } from '../hotel/place';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
-import { PLAYER_RADIUS } from '../../core/constants';
-import { LIBRARY_ARRIVAL, libraryStandSpots, type LocalPoint } from './layout';
+import { LIBRARY_ARRIVAL, LIBRARY_STAND_KEEP_OUT, libraryStandSpots, type LocalPoint } from './layout';
 
 /**
  * **Putting a thing in the Library is one call, and that call decides whether
@@ -38,11 +37,12 @@ export interface KeepOut {
 }
 
 /**
- * How much clear floor a stand spot keeps round it: her own radius and a
- * hand's breadth more. The arrival and the doorway keep more — she arrives
- * mid-stride and the doorway is where everyone comes and goes.
+ * How much clear floor a stand spot keeps round it: `layout.ts`'s
+ * {@link LIBRARY_STAND_KEEP_OUT} (her radius and a hand's breadth). The
+ * arrival and the doorway keep more — she arrives mid-stride and the doorway
+ * is where everyone comes and goes.
  */
-export const LIBRARY_STAND_KEEP_OUT = PLAYER_RADIUS + 0.28;
+export { LIBRARY_STAND_KEEP_OUT };
 export const LIBRARY_ARRIVAL_KEEP_OUT = 1.4;
 export const LIBRARY_DOORWAY_KEEP_OUT = 1.5;
 
@@ -75,6 +75,18 @@ export interface LibrarySolid {
   readonly handle: number | WallCollider;
 }
 
+/**
+ * A top she can stand on, room-local, as it was registered — so a check can
+ * drop a jump onto every one of them and see it hold her.
+ */
+export interface LibraryStandable {
+  readonly what: string;
+  /** The surface's height above the room's floor. */
+  readonly top: number;
+  /** The drawn footprint the plate covers: a turned box, or a disc. */
+  readonly footprint: BoxFootprint | { readonly x: number; readonly z: number; readonly radius: number };
+}
+
 /** A box's footprint, room-local: centre, half-length along its yaw, half-depth across it. */
 export interface BoxFootprint {
   readonly x: number;
@@ -91,11 +103,19 @@ export interface BoxFootprint {
  * in the world, and the park's own thinnest is the entrance's 0.2 m rope
  * posts, so a 0.1 half-thickness costs nothing it does not already pay.
  */
-const END_HALF = 0.1;
+export const END_HALF = 0.1;
+
+/**
+ * How much of a round thing's radius its square plate covers: the square
+ * inscribed in the disc is `1/√2` of it, and a little under that keeps every
+ * corner of the plate on the drawn top — never a corner of air.
+ */
+const SOFT_PLATE_FRACTION = 0.7;
 
 export class LibraryProps {
   readonly violations: string[] = [];
   readonly solids: LibrarySolid[] = [];
+  readonly standables: LibraryStandable[] = [];
 
   private readonly collision: CollisionWorld;
   private readonly surfaces: WalkSurfaces;
@@ -120,7 +140,12 @@ export class LibraryProps {
       top === 'wall'
         ? this.collision.addCircle(worldX, worldZ, radius)
         : this.collision.addCircle(worldX, worldZ, radius, top, false, true);
-    if (top !== 'wall') this.standable(top, worldX - radius * 0.75, worldX + radius * 0.75, worldZ - radius * 0.75, worldZ + radius * 0.75, options);
+    if (top !== 'wall' && options.stand !== false && top <= JUMP_APEX_HEIGHT) {
+      // The square inside the disc, so no corner of the plate is air.
+      const r = radius * SOFT_PLATE_FRACTION;
+      this.surfaces.addPlatform(new Plate(top, worldX - r, worldX + r, worldZ - r, worldZ + r));
+      this.standables.push({ what, top, footprint: { x, z, radius: r } });
+    }
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
@@ -139,8 +164,12 @@ export class LibraryProps {
    * **A filled box** — one capsule down its length, inset by its own half-depth
    * so its round ends land on the drawn ends, and a thin capsule across each
    * end to square them off. With a top a jump can reach, a walkable plate at
-   * that height (the plate is the box's axis-aligned extent: right for the
-   * room's boxes, which all stand square to the walls).
+   * that height **turned with the box** ({@link OrientedPlate}): two of the
+   * room's chairs stand at 45 degrees, and an axis-aligned `Plate` built from
+   * two of a turned box's corners is a strip through its middle (a 1.4 m chair
+   * got a 10 cm plate that way, and a child who jumped onto it fell through
+   * her own seat), while one built from all four is a square of air round it
+   * she could stand on beside the chair. The turned plate is the drawn seat.
    */
   box(what: string, footprint: BoxFootprint, top: PropTop, options: PropOptions = {}): void {
     const yaw = (footprint.facing * Math.PI) / 180;
@@ -158,13 +187,11 @@ export class LibraryProps {
     for (const side of [-1, 1]) {
       this.wall(`${what} (${side < 0 ? 'left' : 'right'} end)`, at(side * endAt, -endAcross), at(side * endAt, endAcross), END_HALF, top);
     }
-    if (top !== 'wall') {
-      const corners = [at(-halfLength, -halfDepth), at(halfLength, halfDepth)];
-      const minX = Math.min(...corners.map((c) => c.x));
-      const maxX = Math.max(...corners.map((c) => c.x));
-      const minZ = Math.min(...corners.map((c) => c.z));
-      const maxZ = Math.max(...corners.map((c) => c.z));
-      this.standable(top, this.originX + minX, this.originX + maxX, this.originZ + minZ, this.originZ + maxZ, options);
+    if (top !== 'wall' && options.stand !== false && top <= JUMP_APEX_HEIGHT) {
+      this.surfaces.addPlatform(
+        new OrientedPlate(top, this.originX + footprint.x, this.originZ + footprint.z, footprint.facing, halfLength, halfDepth),
+      );
+      this.standables.push({ what, top, footprint });
     }
   }
 
@@ -174,11 +201,12 @@ export class LibraryProps {
    * absolute-top wall at its edge would catch her at the rim of something
    * meant to be walked and sat on.
    */
-  soft(top: number, x: number, z: number, radius: number): void {
+  soft(what: string, top: number, x: number, z: number, radius: number): void {
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
-    const r = radius * 0.75;
+    const r = radius * SOFT_PLATE_FRACTION;
     this.surfaces.addPlatform(new Plate(top, worldX - r, worldX + r, worldZ - r, worldZ + r));
+    this.standables.push({ what, top, footprint: { x, z, radius: r } });
   }
 
   /** Throws with every solid found inside a keep-out — call once, after everything is placed. */
@@ -190,12 +218,6 @@ export class LibraryProps {
     );
   }
 
-  private standable(top: number, minX: number, maxX: number, minZ: number, maxZ: number, options: PropOptions): void {
-    if (options.stand === false) return;
-    if (top > JUMP_APEX_HEIGHT) return;
-    this.surfaces.addPlatform(new Plate(top, minX, maxX, minZ, maxZ));
-  }
-
   private checkKeepOuts(what: string, points: readonly LocalPoint[], radius: number): void {
     for (const keepOut of this.keepOuts) {
       const distance =
@@ -205,6 +227,43 @@ export class LibraryProps {
         this.violations.push(`${what} comes ${(-clearance).toFixed(2)} m into ${keepOut.what} at (${keepOut.x}, ${keepOut.z}) r ${keepOut.radius.toFixed(2)}`);
       }
     }
+  }
+}
+
+/**
+ * **A walkable top turned with its box** — the box's own footprint, in the
+ * box's own frame, so a chair at 45 degrees is stood on exactly where it is
+ * drawn: not through a strip of it, and not on a square of air beside it.
+ * World metres; `facing` is the box's front, `Player.facing` degrees, its
+ * length running across that (`LibraryProps.box`'s frame).
+ */
+export class OrientedPlate implements MovingPlatform {
+  readonly surfaceY: number;
+  private readonly x: number;
+  private readonly z: number;
+  private readonly cos: number;
+  private readonly sin: number;
+  private readonly halfLength: number;
+  private readonly halfDepth: number;
+
+  constructor(surfaceY: number, x: number, z: number, facing: number, halfLength: number, halfDepth: number) {
+    this.surfaceY = surfaceY;
+    this.x = x;
+    this.z = z;
+    const yaw = (facing * Math.PI) / 180;
+    this.cos = Math.cos(yaw);
+    this.sin = Math.sin(yaw);
+    this.halfLength = halfLength;
+    this.halfDepth = halfDepth;
+  }
+
+  covers(x: number, z: number): boolean {
+    const dx = x - this.x;
+    const dz = z - this.z;
+    // Along the box's length is (cos, -sin); out of its front is (sin, cos).
+    const along = dx * this.cos - dz * this.sin;
+    const out = dx * this.sin + dz * this.cos;
+    return Math.abs(along) <= this.halfLength && Math.abs(out) <= this.halfDepth;
   }
 }
 

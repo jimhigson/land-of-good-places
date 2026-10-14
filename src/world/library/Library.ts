@@ -15,7 +15,10 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { BUILDING_STEP_UP } from '../../core/constants';
 import type { ManagedLabel } from '../../ui/LabelManager';
-import { createLibraryExterior, measureLibraryExterior, type LibraryExterior, type LibraryExteriorPlan } from '../../art/models/libraryAssets';
+import { NameLabel } from '../../ui/NameLabel';
+import { ANCHORS_BY_ID } from '../anchors';
+import { createLibraryExterior, createLibrarySkirt, dressedReach, type LibraryExterior } from '../../art/models/libraryAssets';
+import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
 import { LibraryProps, type LibrarySolid } from './props';
 import { furnishReadingRoom, type StackFader } from './furnish';
@@ -26,21 +29,17 @@ import {
   LibraryFrame,
   registerLibraryShellCollision,
   registerLibrarySteps,
+  type LibraryShellSolids,
 } from './shell';
 import {
   LIBRARY_ARRIVAL,
   LIBRARY_BOUNDING_RADIUS,
-  LIBRARY_CELLA_FRONT_Z,
+  LIBRARY_EXTERIOR_PLAN,
   LIBRARY_FLOOR_Y,
-  LIBRARY_FOOTPRINT_RADIUS,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAY_RADIUS,
-  LIBRARY_PLINTH_HALF_X,
-  LIBRARY_PLINTH_HALF_Z,
-  LIBRARY_PLINTH_TOP,
-  LIBRARY_RECESS_BACK_Z,
-  LIBRARY_STEPS_FRONT_Z,
+  type LibraryExteriorPlan,
   type LocalPoint,
 } from './layout';
 
@@ -64,15 +63,28 @@ import {
  *
  * ## What is solid
  *
- * Everything drawn. Outside: the cella is a closed ring of colliders with one
- * aperture, the door's recess (enterable, leavable), the six columns their
- * bases, and the plinth and step are surfaces she walks up. Inside: every
- * bookcase, the desk, every chair, lamp and table goes through
- * {@link LibraryProps}, which refuses a collider on any spot `libraryKeepOuts`
- * says she must stand on, and nothing is a rectangle with a hollow middle.
- * `scripts/check-library.mts` floods the floor from the arrival (with a
- * control first), marches at the facade from forty-eight bearings, and walks
+ * Everything drawn. Outside, every collider is built from the drawn shell's
+ * own vertices (`libraryKit.ts`): the cella is a closed ring with one aperture,
+ * the door's recess (enterable, leavable), its outside corners squared; the
+ * six columns are their round feet; the plinth's sides and back are thin walls
+ * on its drawn edges, so the steps are the one way up; and the plinth and the
+ * steps are surfaces she walks up. Inside: every bookcase, the desk, every
+ * chair, lamp and table goes through {@link LibraryProps}, which refuses a
+ * collider on any spot `libraryKeepOuts` says she must stand on, and nothing
+ * is a rectangle with a hollow middle. `scripts/check-library.mts` floods the
+ * floor from the arrival (with a control first), marches at the facade from
+ * forty-eight bearings, lands a jump on every top she can stand on, and walks
  * the door both ways.
+ *
+ * ## Its name
+ *
+ * "The Library" floats over the door as a name pill (`NameLabel`, the label
+ * system's `name` kind), read from the plot's own sign title — the one owner
+ * of what the building is called. A pill rather than painted letters: the
+ * frieze is half a metre of stone, so a painted word there is under the TEXT
+ * RULE's minimum on screen at the park camera, and the 28 July family ruling
+ * keeps words off in-world boards (`core/textures.ts`); the pill is screen
+ * constant, so it is never too small to read.
  *
  * ## What later PRs add (#714 parts 3-5)
  *
@@ -105,8 +117,12 @@ export class Library implements GameSystem {
   /** The building's frame and the plan measured off its model — for the checks. */
   readonly frame: LibraryFrame;
   readonly plan: LibraryExteriorPlan;
-  /** The exterior's ring walls (registration order) and column discs — so a check can open one and go red. */
-  readonly shellSolids: { readonly walls: readonly WallCollider[]; readonly columns: readonly number[] };
+  /** The exterior's colliders, in registration order — so a check can open one and go red. */
+  readonly shellSolids: LibraryShellSolids;
+  /** How deep the plinth's skirt runs under its base, to meet the lowest ground round it. */
+  readonly skirtDepth: number;
+  /** "The Library", over the door. */
+  readonly nameLabel: NameLabel;
   /** The reading room's own four walls' colliders. */
   readonly roomWalls: readonly WallCollider[];
   /** Every free-standing stack and its fade. */
@@ -155,8 +171,8 @@ export class Library implements GameSystem {
     const plot = deps.plot;
     const yaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
     this.exterior = createLibraryExterior();
-    this.plan = measureLibraryExterior(this.exterior);
-    this.assertExteriorMatchesLayout();
+    this.plan = LIBRARY_EXTERIOR_PLAN;
+    this.assertDressedInsideThePlot();
     // **Set down to meet the ground at the foot of its steps.** The building
     // stands square to the local up at its centre, and the planet falls away
     // from that on every side — 0.11 m at the step's front on a flat seed,
@@ -179,36 +195,36 @@ export class Library implements GameSystem {
     // the plinth stands on the sphere (the hotel's 13 Sep "floating" fix).
     standInPlot(group, this.parkRoot, plot.x, plot.z, sink, yaw);
     this.parkRoot.add(this.exterior.root);
+    // The skirt runs down to the lowest ground round the plinth, and a little
+    // past it, so a gap never opens under a corner the planet falls away from.
+    this.skirtDepth = librarySkirtDepth(this.frame, this.plan);
+    this.parkRoot.add(createLibrarySkirt(this.skirtDepth));
     group.add(this.parkRoot);
     deps.anchorPlots.setPlaceholderVisible('library', false);
     this.shellSolids = registerLibraryShellCollision(collision, this.frame, this.plan);
     registerLibrarySteps(surfaces, this.frame, this.plan);
+
+    // "The Library", over the middle of the entablature, just proud of it.
+    const entablature = kitBounds(['shell-entablature']);
+    this.nameLabel = new NameLabel({ id: 'library-name', item: ENTRANCE_ZONE, kind: 'name' }, ANCHORS_BY_ID.library.signTitle, ANCHORS_BY_ID.library.accent);
+    this.nameLabel.sprite.position.set(0, (entablature.minY + entablature.maxY) / 2, entablature.maxZ + 0.1);
+    this.parkRoot.add(this.nameLabel.sprite);
   }
 
   /**
-   * **The drawn building against the numbers the park was solved with.** The
-   * plot's radius, the bounding radius, the step's front the doormat is placed
-   * from and the plinth's height are literals the solver read before any mesh
-   * existed (`layout.ts`); the model is measured here and a disagreement is a
-   * build failure, not a path under a column. Today the primitives are built
-   * from those literals; the day `library.glb` replaces them, this is what
-   * holds the glb to them.
+   * **The dressed building inside the plot the park was solved with.** The
+   * plot's radius and the paths' clearance are the drawn shell's own bare
+   * vertices (`libraryKit.ts`), so they agree by construction; what the plan
+   * cannot see is the ink outline every part is dressed with, which the
+   * manifest's bounding radius allows a hand's breadth for. Measured here, on
+   * the dressed model, so a thicker outline is a build failure rather than a
+   * neighbour's tree growing through the roof's ink.
    */
-  private assertExteriorMatchesLayout(): void {
-    const plan = this.plan;
-    const problems: string[] = [];
-    const corner = Math.hypot(plan.plinthHalfX, Math.max(Math.abs(plan.plinthBackZ), plan.stepFrontZ));
-    if (corner > LIBRARY_FOOTPRINT_RADIUS) problems.push(`the plinth's corner stands ${corner.toFixed(3)} m out, past the plot's ${LIBRARY_FOOTPRINT_RADIUS}`);
-    if (plan.reach > LIBRARY_BOUNDING_RADIUS) problems.push(`a drawn vertex stands ${plan.reach.toFixed(3)} m out, past the bounding radius ${LIBRARY_BOUNDING_RADIUS}`);
-    if (Math.abs(plan.stepFrontZ - LIBRARY_STEPS_FRONT_Z) > 0.02) problems.push(`the step's front is at ${plan.stepFrontZ.toFixed(3)}, the doormat is placed from ${LIBRARY_STEPS_FRONT_Z}`);
-    if (Math.abs(plan.plinthHalfX - LIBRARY_PLINTH_HALF_X) > 0.02 || Math.abs(-plan.plinthBackZ - LIBRARY_PLINTH_HALF_Z) > 0.02) {
-      problems.push(`the plinth measures ${(plan.plinthHalfX * 2).toFixed(2)} x ${(plan.stepFrontZ - plan.plinthBackZ).toFixed(2)} m, the router keeps paths off ${LIBRARY_PLINTH_HALF_X * 2} x ${LIBRARY_PLINTH_HALF_Z * 2}`);
+  private assertDressedInsideThePlot(): void {
+    const reach = dressedReach(this.exterior.root);
+    if (reach > LIBRARY_BOUNDING_RADIUS) {
+      throw new Error(`Library: a dressed vertex (outline included) stands ${reach.toFixed(3)} m out, past the plot's bounding radius ${LIBRARY_BOUNDING_RADIUS.toFixed(3)}`);
     }
-    if (Math.abs(plan.plinthTop - LIBRARY_PLINTH_TOP) > 0.02) problems.push(`the plinth's top is ${plan.plinthTop.toFixed(3)} m, the layout says ${LIBRARY_PLINTH_TOP}`);
-    if (Math.abs(plan.cellaFrontZ - LIBRARY_CELLA_FRONT_Z) > 0.02 || Math.abs(plan.recessBackZ - LIBRARY_RECESS_BACK_Z) > 0.02) {
-      problems.push(`the doorway runs ${plan.recessBackZ.toFixed(2)}..${plan.cellaFrontZ.toFixed(2)}, the layout's band is ${LIBRARY_RECESS_BACK_Z}..${LIBRARY_CELLA_FRONT_Z}`);
-    }
-    if (problems.length > 0) throw new Error(`Library: the drawn exterior disagrees with layout.ts:\n  - ${problems.join('\n  - ')}`);
   }
 
   // --------------------------------------------------------------- state
@@ -228,9 +244,9 @@ export class Library implements GameSystem {
     return this.props.solids;
   }
 
-  /** No labels of its own yet — the owl's bubbles arrive with #714 part 4. */
+  /** The building's name over its door (the owl's bubbles arrive with #714 part 4). */
   get screenLabels(): readonly ManagedLabel[] {
-    return [];
+    return [this.nameLabel];
   }
 
   attachPlayer(player: Player): void {
@@ -288,6 +304,7 @@ export class Library implements GameSystem {
   update(context: FrameContext): void {
     const { dt } = context;
     this.spaces.update(dt);
+    this.updateNameLabel();
     const player = this.player;
     if (!player) return;
     if (this.inside) this.fadeStacks(player, dt);
@@ -305,6 +322,17 @@ export class Library implements GameSystem {
   }
 
   // ------------------------------------------------------------ private
+
+  /** The name pill: screen-constant like every name, wanted outside and within a name's reach of the camera. */
+  private updateNameLabel(): void {
+    if (this.inside) {
+      this.nameLabel.withhold();
+      return;
+    }
+    const camera = this.deps.camera;
+    const at = this.nameLabel.sprite.getWorldPosition(this.from);
+    this.nameLabel.updateScreenSize(camera.worldUnitsPerPixel, at.distanceTo(camera.focusPoint));
+  }
 
   /** A stack between the camera and her eases translucent; one that is not, back to solid. */
   private fadeStacks(player: Player, dt: number): void {
@@ -395,6 +423,34 @@ export class Library implements GameSystem {
     };
   }
 }
+
+/**
+ * **How deep the skirt under the plinth must run**: the lowest ground round
+ * the plinth and the steps, in the building's own frame (its base at local
+ * y 0), and a hand's breadth past it — the stone carried on into the ground
+ * wherever the planet, or a wave of it, falls away from a building that stands
+ * square to the up at its centre.
+ */
+export function librarySkirtDepth(frame: LibraryFrame, plan: LibraryExteriorPlan): number {
+  const local = new Vector3();
+  let lowest = 0;
+  const ground = (x: number, z: number): void => {
+    const at = frame.foot(x, z);
+    lowest = Math.min(lowest, frame.toLocal(at.x, terrainHeight(at.x, at.z), at.z, local).y);
+  };
+  for (let x = -plan.plinthHalfX; x <= plan.plinthHalfX + 1e-6; x += 0.5) {
+    ground(x, plan.plinthBackZ);
+    ground(x, plan.stepFrontZ);
+  }
+  for (let z = plan.plinthBackZ; z <= plan.stepFrontZ + 1e-6; z += 0.5) {
+    ground(-plan.plinthHalfX, z);
+    ground(plan.plinthHalfX, z);
+  }
+  return -lowest + SKIRT_MARGIN;
+}
+
+/** How far past the lowest ground round the plinth its skirt runs. */
+const SKIRT_MARGIN = 0.3;
 
 /**
  * **How far to move the building along its own up so a child can walk onto its
