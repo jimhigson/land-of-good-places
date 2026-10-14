@@ -148,3 +148,25 @@ budget (the pack line and `libraryGlb.ts`'s header are the owners).
   `check` leaf steps is present, plus this branch's `check:library-glb` and
   `check:png-integrity` (81). No other script changed but `pack:library`,
   `blend:library`, `render:library` (new).
+- **Red found and fixed: `check:served-deep-links` (shard 5), a check-side
+  race.** First full local `check` on 66287029 went red on
+  `/reptile-house?at=-13,0 (continueGame)`: player at (606.0, -584.2), 24.7 m
+  off. Probe (scratch, not committed), 3 of 3 runs: the check's read lands with
+  `reptileHouse.spaces.changing` still true, on the save's spot (the arrival,
+  hall (6, 15.8)), and she stands on (587, -600) five frames (~350 ms) later.
+  The game is right: `requestEnter` teleports at the iris midpoint, after
+  `window.game` exists, and on a returning save she is inside the hall from
+  the first frame, so waiting for `playerIsInside` alone measured nothing.
+  Fix (69dfa5df): wait for inside **and** within tolerance of the asked-for
+  spot, then assert as before. Fixed: 3 of 3 runs green. Control:
+  `Game.enterReptileSpawn` refusing when already inside (the old bug) →
+  continueGame red, "24.7 m off", startFresh green; reverted.
+- **Do not mutate a file inside the park closure for a control.** The first
+  control edited `ReptileHouse.ts`, which changed the park source hash, and
+  `check:deep-links` (via `CANONICAL_PARK_SEED` → the manifest) started the
+  seed-5 acceptance loop (~20 min). `src/Game.ts` and `src/main.ts` are
+  outside the closure (`parkSourceClosure`), so a mutation there costs nothing.
+- Observed, not changed: `/castle?deck=0&at=` has the same wait shape
+  (`building.inside` alone), but its `continueGame` primer is its own path, so
+  the restored spot is the asked-for spot and the read cannot tell a teleport
+  from none. Green, and not this branch's to redesign; worth a ticket.
