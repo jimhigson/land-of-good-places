@@ -26,9 +26,13 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
       to the PR's CI, as the task says.
 - [x] Draft **PR #720** opened from `feat/library` at 8f0cb8c3 (`gh pr create --draft`); body in
       the orchestrator scratchpad `merge714/pr-body.md`. Not waited for: its CI.
-- [ ] **Foundation, first half** (plan Step 0, Step 1 change 5, Step 2's remainder; Engineer,
-      14 Oct; section "Foundation, first half" below). In parallel, Steps 3-4 on
-      `feat/library-714-assets` (another engineer; its files are not touched here).
+- [x] **Foundation, first half** (plan Step 0, Step 1 change 5, Step 2's remainder; Engineer,
+      14 Oct; section "Foundation, first half" below) — done at this branch's head; both CI
+      reds fixed here but unproven on CI until feat/library next moves (the orchestrator's call).
+      Final local checks at ad6c10bc: tsc 0, typecheck:test 0, check:brevity 0 (350 pieces),
+      check:library 0 (55 ✓, 0 ✗), vitest library-card 0 (4 passed of 4). In parallel, Steps 3-4
+      on `feat/library-714-assets` (another engineer; its files are not touched here; the merge
+      with this branch is clean and typechecks).
   - [x] Step 0 facts (below).
   - [x] Step 1 change 5 (props.ts, layout.ts types) — d2a7f00e; **plus a Collision.ts fix the
         plan did not know it needed** (the zero-length capsule was a ghost to the mover) —
