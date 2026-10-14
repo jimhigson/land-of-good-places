@@ -134,9 +134,27 @@ else {
   for (const wall of ring) {
     if (!named.has(wall.id)) failures.push(`ring wall ${wall.id} is not named as a blocker`);
   }
+  // Only the ring bounds the stranded ground — unless a real plot of this
+  // layout stands inside the ring itself, which bounds it too and is rightly
+  // named (seed 5's accepted park puts the ball pit 12 m from the hotel's
+  // doormat once the Library's plot is in the park). Any plot named from
+  // outside the ring is still a false blocker and fails.
   const synthetic = new Set(ring.map((wall) => wall.id));
+  const reachOf = (entry: PlacedEntry): { halfX: number; halfZ: number } =>
+    entry.footprint.kind === 'circle'
+      ? { halfX: entry.footprint.radius, halfZ: entry.footprint.radius }
+      : { halfX: entry.footprint.halfX, halfZ: entry.footprint.halfZ };
+  const insideRing = new Set(
+    placed
+      .filter((entry) => {
+        const { halfX, halfZ } = reachOf(entry);
+        return Math.abs(entry.x - hotel.entranceX) - halfX < face && Math.abs(entry.z - hotel.entranceZ) - halfZ < face;
+      })
+      .map((entry) => entry.id),
+  );
+  said.push(`  plots of this layout standing inside the ring (and so bounding it too): ${[...insideRing].join(', ') || 'none'}`);
   for (const id of named) {
-    if (!synthetic.has(id)) failures.push(`'${id}' is named as bounding the ring, but only the ring does`);
+    if (!synthetic.has(id) && !insideRing.has(id)) failures.push(`'${id}' is named as bounding the ring, but it stands outside it — only the ring and what is inside it do`);
   }
 }
 
