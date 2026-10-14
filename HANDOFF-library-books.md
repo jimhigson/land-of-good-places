@@ -3,7 +3,7 @@
 Branch `feat/library-books-717`, worktree `.claude/worktrees/library-books`.
 Node 26 via `fnm exec --using=26 -- <cmd>` (agent shells have no fnm hook).
 Dev server used for the finishing pass: port 5763, `vite --host 127.0.0.1 --port 5763 --strictPort`
-(kill by the PID listening on 5763 — `lsof -nP -iTCP:5763 -sTCP:LISTEN`).
+(kill by the PID listening on 5763 — `lsof -nP -iTCP:5763 -sTCP:LISTEN`; none is running now).
 Check against it: `CHECK_BOOK_READER_URL=http://127.0.0.1:5763 pnpm run check:book-reader`.
 
 **Park re-solves.** `src/state/{types,save,flags}.ts`, `src/art/style/materials.ts`,
@@ -66,6 +66,18 @@ changes while it runs. For local runs the proven seed-5 park was copied into the
   not done here. The puff's face is also a second mesh positioned by a formula — the exact
   disease `src/art/models/CLAUDE.md` warns about; the cure there is a baked face in the ball's UVs.
 
+## Fixed outside the feature, because the gate was red
+
+- **`check:served-deep-links` (shard 5) failed on this machine on `origin/main` too** (d2cdb1f2,
+  run from a scratch worktree): `/reptile-house?at=-13,0&facing=90 (continueGame): asked to stand
+  at hall (-13, 0) = world (587, -600), but the player is at (606.0, -584.2) — 24.7 m off`. The
+  game is right; the assert raced it. On a returning save she is restored into the hall at the
+  primer's arrival spot, so `playerIsInside` is true from the first frame while the link's own
+  iris is still running (probed: first frame (606.0, -584.2) with `spaces.isChanging` true, half
+  a second later (587.0, -600.0) with it false). `scripts/check-deep-links.mts` now waits for the
+  change of space to finish (and insists `isChanging` is a real boolean). Green after; restoring
+  the old wait → the same FAIL. Worth telling the Overseer: main's gate depends on autosave timing.
+
 ## Proof (red runs, laptop 1280x800, seed 5, ripikaBalloon unless named)
 
 - placeButton: button 3 px narrow → `laptop next-page button covers its page — button
@@ -93,9 +105,32 @@ changes while it runs. For local runs the proven seed-5 park was copied into the
 - [x] screenshots: scratchpad `books/final/` (four books, landscape cover/mid-turn/spreads and
       portrait sequences with mid-move frames), `books/sheets/` (every face of all twelve books),
       Cute-o-dex Books section, both prizes. All looked at; fixes made for what looked wrong.
-- [ ] full `pnpm run check`, `test:procgen`, `build`
+- [x] full gates, exit codes read from files: `pnpm run check` — shards 1-4 green at 89a0e12c,
+      shard 5 red at check:served-deep-links (the race above), fixed in 9083ecd4 (that script
+      only), then shards 5-8 green at 9083ecd4 (`check:book-reader passed`, `check:walking
+      passed`, `check:deep-links passed`); check:brevity `283 pieces of copy are short enough`.
+      `pnpm run test:procgen` — 45 files, 2134 tests passed, none skipped (58 min). `pnpm run
+      build` — exit 0 (warns locally that no prebuilt parks ship; the deploy builds them).
+- [ ] PR not raised here — notes below.
+- [ ] not measured: the first open's frame time on a real GPU. The deterministic proxy is
+      asserted instead (0 program links on every open after the warm-up; 4-23 a book without
+      the pins); a `gpu:frame-time`-style capture around the first open after a bus ride is the
+      remaining measurement.
 
 ## PR notes for whoever raises it
 
-Preview deep link: `/book?id=ripikaBalloon` (any of the twelve ids). Flag for Jim: the endpaper
-order; books in the dex total before the shelves exist; the portrait framing.
+**Preview:** the PR's deploy preview + `/book?id=ripikaBalloon` (any of the twelve ids:
+ripikaBalloon, biscuitBreakfast, trillaHigh, catBusDay, duckBars, bookDragon, foreverSlide,
+fireflies, fountainWish, keychainStall, bigParade, goodnightPark). One sentence for Jim: *open the
+link and tap the right-hand page — the paper curls over like a real page; on a phone held upright
+it shows one big page at a time.*
+
+**Flag for Jim (his yes/no):**
+- Portrait shows one page at a time: words 20 px → 32 px, pictures ~140x115 → full width
+  (before: scratchpad `books/check/ripikaBalloon-phone-portrait.png` from the first run of this
+  session; after: `books/final/ripikaBalloon-375x667-*.png`).
+- Every book opens on [endpaper | title] and ends on [page 5 | The End], like a printed book.
+- The twelve bookmarks count towards the Cute-o-dex 100% from this PR; only `/book` opens a book
+  until the shelves PR (#714 part 4).
+- Trilla is faceless in six pictures — the pre-existing `pets.ts` defect above, for its own ticket.
+- `check:deep-links` was fixed here (above): main's own run of it fails on this machine.
