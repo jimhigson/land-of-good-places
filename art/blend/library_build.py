@@ -346,11 +346,15 @@ def lying_book(width: float, depth: float, thick: float, board: float = 0.03,
     """
     cover = Part("_cover")
     pages = Part("_pages")
-    # Plain boxes for the boards and the page block: 3 cm of board edge seen
-    # from the iso camera does not show a bevel, and two dozen of these books
-    # are in the nest — a bevel there was 40 KB of shipped file.
-    cover.at(*box(width, depth, board), z=board * 0.5)
-    cover.at(*box(width, depth, board), z=thick - board * 0.5)
+    # The boards are the outline a child sees from above, so they get a soft
+    # edge — a **one**-segment bevel. Its 45° faces fall under blendkit's 46°
+    # smoothing angle, so all 24 vertices are shared: 840 B a board in the
+    # .glb against 648 B for a plain box, where a two-segment bevel (72
+    # vertices) was the "40 KB" that once kept them square. The page block
+    # stays a plain box: its edges are buried in the boards.
+    board_box = rounded_box(width, depth, board, 0.01, 1)
+    cover.at(*board_box, z=board * 0.5)
+    cover.at(*board_box, z=thick - board * 0.5)
     spine_d = 0.05
     spine = (rounded_box(width - 0.01, spine_d, thick - 0.004, 0.018, 1) if round_spine
              else box(width - 0.01, spine_d, thick - 0.004))
@@ -608,11 +612,16 @@ READER_BOARD_HEIGHT = 0.60  # along the spine, along Y
 
 # --- creatures -------------------------------------------------------------------
 OWL_HEIGHT = 1.6
+# The owl's head scale-up — ART_DIRECTION §4's `HEAD`, the one number every
+# measurement on her head is written against.
+OWL_HEAD = 1.18
 DRAGON_LENGTH = 1.1
 DRAGON_HEIGHT = 0.9
 NEST_DIAMETER = 1.6
 CAT_LENGTH = 0.6
 CAT_HEIGHT = 0.35
+# The cat's head scale-up, ART_DIRECTION §4's `HEAD`.
+CAT_HEAD = 1.25
 
 EXACT, AT_MOST, AT_LEAST = "=", "<=", ">="
 
@@ -652,9 +661,14 @@ CONTRACT = {
     "reader-cover": {"boardWidth": (EXACT, READER_BOARD_WIDTH),
                      "boardHeight": (EXACT, READER_BOARD_HEIGHT),
                      "height": (AT_MOST, 0.05)},
+    # Depth allows 1.10: a toy-sized head with a beak and glasses in front of
+    # it is deeper than the first cut's 0.99 (which sat at the old 1.00 limit).
     "owl": {"height": (EXACT, OWL_HEIGHT), "headOverBody": (AT_LEAST, 1.10),
-            "width": (AT_MOST, 1.30), "depth": (AT_MOST, 1.00)},
-    "dragon": {"length": (EXACT, DRAGON_LENGTH), "height": (EXACT, DRAGON_HEIGHT)},
+            "width": (AT_MOST, 1.30), "depth": (AT_MOST, 1.10)},
+    # Head wider than the body (ART_DIRECTION §4). Measured against the body
+    # *node*, paws and haunches included, which is stricter than the torso.
+    "dragon": {"length": (EXACT, DRAGON_LENGTH), "height": (EXACT, DRAGON_HEIGHT),
+               "headOverBody": (AT_LEAST, 1.10)},
     "dragonNest": {"diameter": (EXACT, NEST_DIAMETER), "height": (AT_MOST, 0.40)},
     "cat": {"length": (EXACT, CAT_LENGTH), "height": (EXACT, CAT_HEIGHT)},
 }
@@ -888,10 +902,9 @@ def build_shell() -> None:
     z0, z1, half, y0, y1 = CORNICE
     entablature.at(*flat_top_box(half * 2.0, y1 - y0, z1 - z0, 0.06, 1),
                    y=(y0 + y1) * 0.5, z=(z0 + z1) * 0.5)
-    # A row of chunky dentils under the cornice, across the front only.
-    for i in range(13):
-        x = -7.8 + i * 1.30
-        entablature.at(*box(0.24, 0.14, 0.17), x=x, y=FRIEZE[3] - 0.05, z=CORNICE[0] - 0.075)
+    # No dentils. A row of thirteen 24 cm teeth under the cornice sat 18 cm
+    # behind its lip, so at the game's 38° camera the lip hid all but the
+    # bottom 2 cm of each — 78 sharp-cornered triangles that read as nothing.
 
     # --- roof ---------------------------------------------------------------
     roof.add(*extrude_outline(ROOF_OUTLINE, ROOF_BACK_Y - ROOF_FRONT_Y,
@@ -1074,16 +1087,19 @@ def build_desk() -> None:
 
 
 def build_reading_lamp() -> None:
-    """A mushroom of a desk lamp: a round foot, a gooseneck and a fat dome
-    shade with a bulb under it. ``-shade`` is the part the Engineer lights."""
+    """A mushroom of a desk lamp: a round foot, a fat gooseneck and a dome
+    shade with a bulb under it. ``-shade`` is the part the Engineer lights.
+
+    The neck is as chunky as the rest of it (ART_DIRECTION §1, "no thin
+    parts"): the first cut's 7 cm stem was the shade on a stick."""
     a = register(Asset("readingLamp"))
     stem = a.part("stem")
     shade = a.part("shade")
     h = READING_LAMP_HEIGHT
     stem.at(*revolve([(0.0, 0.0), (0.15, 0.0), (0.16, 0.025), (0.14, 0.055),
-                      (0.06, 0.07), (0.0, 0.075)], 16))
+                      (0.08, 0.07), (0.0, 0.075)], 16))
     stem.add(*tapered_sweep([(0.0, 0.03, 0.05), (0.0, 0.03, 0.30), (0.0, 0.0, 0.45),
-                             (0.0, -0.07, 0.52)], [0.036, 0.034, 0.033, 0.032], 8))
+                             (0.0, -0.07, 0.52)], [0.06, 0.055, 0.05, 0.045], 10))
     sy = -0.08
     shade.at(*revolve([(0.0, h - 0.24), (0.16, h - 0.235), (0.20, h - 0.205),
                        (0.195, h - 0.15), (0.15, h - 0.085), (0.075, h - 0.045),
@@ -1095,7 +1111,14 @@ def build_reading_lamp() -> None:
 
 def build_floor_lamp() -> None:
     """A tall standard lamp: a domed foot, a pole with a bead halfway, and a
-    tulip shade topped with a finial at exactly the contract height."""
+    tulip shade topped with a finial at exactly the contract height.
+
+    The pole tapers from 12 cm to 9 cm of radius — the park's own lamp posts
+    (``LampPosts.ts``) run 13 → 9 cm on a 2.35 m shaft — and the shade's rim
+    rolls under in a fat bead. The first cut was a 9 cm-*diameter* pole, dead
+    straight, under a sharp-rimmed cone: from the game camera, a gold cone
+    floating over a disc. Upright, not leaning: a lean would widen the lamp
+    past its contract and walk its foot off its own origin."""
     a = register(Asset("floorLamp"))
     base = a.part("base")
     stem = a.part("stem")
@@ -1103,10 +1126,14 @@ def build_floor_lamp() -> None:
     h = FLOOR_LAMP_HEIGHT
     base.at(*revolve([(0.0, 0.0), (0.32, 0.0), (0.33, 0.03), (0.30, 0.07),
                       (0.12, 0.10), (0.0, 0.11)], 20))
-    stem.at(*tube(0.045, 2.0 - 0.08, sides=10, z0=0.08))
-    stem.at(*ellipsoid(0.09, 0.09, 0.075, 1), z=1.0)
-    shade.at(*revolve([(0.0, h - 0.44), (0.36, h - 0.44), (0.40, h - 0.41),
-                       (0.37, h - 0.30), (0.31, h - 0.12), (0.27, h - 0.05),
+    # Foot buried in the base, top inside the shade: neither cap shares a
+    # plane with anything.
+    stem.add(*tapered_sweep([(0.0, 0.0, 0.08), (0.0, 0.0, 1.0), (0.0, 0.0, h - 0.40)],
+                            [0.12, 0.105, 0.09], 10))
+    stem.at(*ellipsoid(0.15, 0.15, 0.12, 2), z=1.0)
+    shade.at(*revolve([(0.0, h - 0.47), (0.33, h - 0.47), (0.38, h - 0.455),
+                       (0.40, h - 0.425), (0.395, h - 0.39), (0.37, h - 0.36),
+                       (0.36, h - 0.30), (0.31, h - 0.12), (0.27, h - 0.05),
                        (0.21, h - 0.04), (0.0, h - 0.04)], 20))
     stem.at(*icosphere(0.04, 1), z=h - 0.04)
 
@@ -1253,10 +1280,22 @@ def build_owl() -> None:
     """The librarian: a round owl in a cardigan and big round glasses, holding
     a little book under one wing. Faces −Y. Head wider than body (§4).
 
+    **Her head is a toy's head.** ``OWL_HEAD`` is ART_DIRECTION §4's ``HEAD``:
+    every number on the head is written ``x * H``, so retuning it is one line,
+    and the body is cut shorter to pay for it ("the body shortens when the head
+    grows"). At 1.18 the bare skull is ~56% of her height, inside the 55–67%
+    every character in the park sits at after the cartoon pass; the first cut
+    was 49%.
+
+    Eyes on the skull's equator, inside the rims (§4: low = baby); the beak
+    under them.
+
     Pivots: ``-head`` turns at the neck (owls turn their heads — let her
     watch you walk past the desk); ``-wingL``/``-wingR`` at the shoulders for
     a shush or a wave; ``-heldBook`` shares ``-wingR``'s pivot, so turn the
-    two together and the book stays in the wing.
+    two together and the book stays in the wing. ``-beak`` and ``-glasses``
+    **ride** ``-head``'s pivot the same way — turn all three together, or her
+    glasses stay facing the room while her head turns.
     """
     a = register(Asset("owl"))
     feet = a.part("feet")
@@ -1269,6 +1308,7 @@ def build_owl() -> None:
     wing_l = a.part("wingL")
     wing_r = a.part("wingR")
     held = a.part("heldBook")
+    H = OWL_HEAD
 
     for sx in (-1.0, 1.0):
         fx = sx * 0.16
@@ -1276,29 +1316,36 @@ def build_owl() -> None:
             dx, dy = math.sin(deg(yaw)) * 0.07, -math.cos(deg(yaw)) * 0.07
             feet.add(*ellipsoid(0.055, 0.10, 0.045, 2), matrix=place(fx + dx, dy, 0.045, rz=yaw))
 
-    body_c, body_r = (0.0, 0.0, 0.50), (0.40, 0.36, 0.42)
+    body_c, body_r = (0.0, 0.0, 0.46), (0.40, 0.36, 0.38)
+    body_top = body_c[2] + body_r[2]
     body.at(*ellipsoid(*body_r, 3), *body_c)
-    bib.at(*ellipsoid(0.21, 0.10, 0.30, 2), y=-0.29, z=0.53)
+    bib.at(*ellipsoid(0.21, 0.10, 0.28, 2), y=-0.29, z=0.49)
     # Buttons down her left front (+X): her right wing has the book.
-    for z in (0.70, 0.55, 0.40):
+    for z in (0.64, 0.50, 0.36):
         x = 0.22
         buttons.at(*icosphere(0.04, 1), x=x, y=ellipsoid_front_y(body_c, body_r, x, z) - 0.01, z=z)
 
-    head_c, head_r = (0.0, -0.02, 1.13), (0.52, 0.44, 0.40)
+    # The head overlaps the body by the same 0.19 m at any HEAD, so it grows
+    # upward rather than down into her cardigan.
+    head_r = (0.52 * H, 0.39 * H, 0.40 * H)
+    head_c = (0.0, -0.02, body_top - 0.19 + head_r[2])
+    hz = head_c[2]
     head.at(*ellipsoid(*head_r, 3), *head_c)
     # Ear tufts, the left one tipped further out — the asymmetric feature.
-    head.add(*ellipsoid(0.085, 0.07, 0.17, 2), matrix=place(0.30, 0.0, 1.46, ry=22.0))
-    head.add(*ellipsoid(0.085, 0.07, 0.17, 2), matrix=place(-0.30, 0.0, 1.45, ry=-32.0))
-    head.at(*ellipsoid(0.10, 0.08, 0.06, 2), x=0.07, y=0.04, z=1.52)
-
-    beak.add(*ellipsoid(0.065, 0.11, 0.075, 2), matrix=place(0.0, -0.47, 1.02, rx=25.0))
+    head.add(*ellipsoid(0.085 * H, 0.07 * H, 0.17 * H, 2), matrix=place(0.30 * H, 0.0, hz + 0.33 * H, ry=22.0))
+    head.add(*ellipsoid(0.085 * H, 0.07 * H, 0.17 * H, 2), matrix=place(-0.30 * H, 0.0, hz + 0.32 * H, ry=-32.0))
+    head.at(*ellipsoid(0.10 * H, 0.08 * H, 0.06 * H, 2), x=0.07 * H, y=0.04 * H, z=hz + 0.39 * H)
 
     # Glasses: the eyes are painted where the rims are. The eye landmarks ARE
-    # the rim centres, so the two cannot be placed apart.
-    rim_r, rim_t, eye_x, eye_z = 0.15, 0.03, 0.19, 1.20
-    rim_y = ellipsoid_front_y(head_c, head_r, eye_x, eye_z) - 0.045
+    # the rim centres, so the two cannot be placed apart. Eight sides on every
+    # tube — the rims, the arms, the bridge — because blendkit smooths a 45°
+    # crease and keeps a 60° or 72° one: the first cut's five-sided rims and
+    # six-sided arms shipped as faceted bands and sticks.
+    rim_r, rim_t, eye_x, eye_z = 0.15 * H, 0.035 * H, 0.19 * H, hz
+    bar_r = 0.03 * H
+    rim_y = ellipsoid_front_y(head_c, head_r, eye_x, eye_z) - 0.045 * H
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
-        glasses.add(*torus(rim_r, rim_t, 16, 5),
+        glasses.add(*torus(rim_r, rim_t, 20, 8),
                     matrix=place(sx * eye_x, rim_y, eye_z, rz=sx * 14.0) @ rot(x=90.0))
         a.mark(key, sx * eye_x, rim_y, eye_z)
         # Two points on the rim's inner edge — level with the eye, and straight
@@ -1310,27 +1357,36 @@ def build_owl() -> None:
         a.mark(key + "RimTop", sx * eye_x, rim_y, eye_z + inner)
         out_x = sx * (eye_x + rim_r * math.cos(deg(14.0)))
         out_y = rim_y + rim_r * math.sin(deg(14.0))
-        # The arms run back hugging the head and end inside it, rather than
-        # standing off it like whiskers.
-        glasses.add(*tapered_sweep([(out_x, out_y, eye_z + 0.02), (sx * 0.41, -0.30, eye_z + 0.03),
-                                    (sx * 0.45, -0.17, eye_z + 0.03)], [0.022, 0.022, 0.022], 6))
+        # The arms run back hugging the head and end well inside it, rather
+        # than standing off it like whiskers or poking their caps out.
+        glasses.add(*tapered_sweep([(out_x, out_y, eye_z + 0.02 * H),
+                                    (sx * 0.41 * H, -0.02 - 0.28 * H, eye_z + 0.03 * H),
+                                    (sx * 0.41 * H, -0.02 - 0.10 * H, eye_z + 0.03 * H)],
+                                   [bar_r, bar_r, bar_r], 8))
     in_x = eye_x - rim_r * math.cos(deg(14.0))
     in_y = rim_y - rim_r * math.sin(deg(14.0))
-    glasses.add(*tapered_sweep([(-in_x, in_y, eye_z + 0.01), (0.0, in_y - 0.03, eye_z + 0.045),
-                                (in_x, in_y, eye_z + 0.01)], [0.022, 0.024, 0.022], 6))
+    glasses.add(*tapered_sweep([(-in_x, in_y, eye_z + 0.01 * H), (0.0, in_y - 0.03 * H, eye_z + 0.045 * H),
+                                (in_x, in_y, eye_z + 0.01 * H)], [bar_r, bar_r * 1.1, bar_r], 8))
 
-    wing = ellipsoid(0.11, 0.24, 0.34, 3)
-    wing_l.add(*wing, matrix=place(0.40, 0.02, 0.52, ry=-14.0))
+    # The beak under the eyes, its centre just proud of the face.
+    beak_z = hz - 0.18 * H
+    beak.add(*ellipsoid(0.065 * H, 0.11 * H, 0.075 * H, 2),
+             matrix=place(0.0, ellipsoid_front_y(head_c, head_r, 0.0, beak_z) - 0.03 * H, beak_z, rx=25.0))
+
+    wing = ellipsoid(0.11, 0.24, 0.32, 3)
+    wing_l.add(*wing, matrix=place(0.40, 0.02, 0.46, ry=-14.0))
     # Her right wing comes forward round the book and its tip lies over the
     # book's near edge, so the book is *held* rather than floating in front.
-    wing_r.add(*wing, matrix=place(-0.36, -0.20, 0.50, ry=14.0, rz=35.0))
-    held.add(*rounded_box(0.30, 0.07, 0.36, 0.025, 1), matrix=place(-0.20, -0.38, 0.47, ry=8.0, rz=-16.0))
+    wing_r.add(*wing, matrix=place(-0.36, -0.20, 0.44, ry=14.0, rz=35.0))
+    held.add(*rounded_box(0.30, 0.07, 0.36, 0.025, 1), matrix=place(-0.20, -0.38, 0.41, ry=8.0, rz=-16.0))
 
-    a.mark("neck", 0.0, -0.02, 0.86)
-    a.mark("shoulderL", 0.34, 0.0, 0.80)
-    a.mark("shoulderR", -0.34, 0.0, 0.80)
+    a.mark("neck", 0.0, -0.02, body_top - 0.06)
+    a.mark("shoulderL", 0.34, 0.0, 0.74)
+    a.mark("shoulderR", -0.34, 0.0, 0.74)
     a.pivots = {
         "owl-head": ("neck", "owl-body"),
+        "owl-beak": ("neck", "owl-head"),
+        "owl-glasses": ("neck", "owl-head"),
         "owl-wingL": ("shoulderL", "owl-body"),
         "owl-wingR": ("shoulderR", "owl-body"),
         "owl-heldBook": ("shoulderR", "owl-wingR"),
@@ -1349,52 +1405,83 @@ def build_dragon() -> None:
     """A round baby dragon curled up, tail wrapped round to the front, big
     head up and facing −Y, stubby wings, cream horns and back spines.
 
+    **Head wider than the body** (ART_DIRECTION §4 — "if the body is as wide as
+    the head the character reads as a lump"), asserted as ``headOverBody`` in
+    the contract: the first cut had a 0.54 m head on a 0.74 m body, and from
+    the den camera it was a green lump with a smaller lump on top. Everything
+    on the head — snout, nostrils, eyes, horns — is placed *from* ``head_c`` and
+    ``head_r``, so retuning the skull is one line and nothing gets buried.
+
+    Eyes on the skull's equator, the snout low under them (§4: low = baby,
+    wide = friendly). One horn leans further out than the other — the
+    asymmetric feature every head gets (§4, "break the silhouette").
+
     Pivots: ``-head`` at the neck (it lifts its head when you come in) and
-    ``-tail`` at its root (a sleepy flick). The face is in ``-head``'s UVs.
+    ``-tail`` at its root (a sleepy flick). ``-horns`` are the head's and
+    **ride** ``-head``'s pivot (turn the two together, as the owl's book rides
+    her wing); the back ``-spines`` stay with the body. The face is in
+    ``-head``'s UVs.
     """
     a = register(Asset("dragon"))
     body = a.part("body")
     belly = a.part("belly")
     head = a.part("head")
     horns = a.part("horns")
+    spines = a.part("spines")
     wings = a.part("wings")
     tail = a.part("tail")
 
-    body_c, body_r = (0.0, 0.04, 0.29), (0.34, 0.32, 0.29)
+    # A shorter, narrower body than the head, on oversized paws (§4) — and
+    # the haunches tucked in, because the body *node's* width is set by them,
+    # not by the belly.
+    body_c, body_r = (0.0, 0.04, 0.26), (0.29, 0.28, 0.26)
     body.at(*ellipsoid(*body_r, 3), *body_c)
     for sx in (-1.0, 1.0):
-        body.at(*ellipsoid(0.085, 0.11, 0.055, 2), x=sx * 0.15, y=-0.24, z=0.055)
-        body.at(*ellipsoid(0.15, 0.17, 0.12, 2), x=sx * 0.22, y=0.10, z=0.12)
-        body.at(*ellipsoid(0.08, 0.11, 0.05, 2), x=sx * 0.29, y=-0.04, z=0.05)
-    belly.at(*ellipsoid(0.22, 0.10, 0.22, 2), y=-0.23, z=0.29)
+        body.at(*ellipsoid(0.11, 0.14, 0.07, 2), x=sx * 0.17, y=-0.24, z=0.07)
+        body.at(*ellipsoid(0.15, 0.17, 0.12, 2), x=sx * 0.18, y=0.10, z=0.12)
+        body.at(*ellipsoid(0.10, 0.13, 0.06, 2), x=sx * 0.24, y=-0.04, z=0.06)
+    belly.at(*ellipsoid(0.20, 0.10, 0.20, 2), y=-0.21, z=0.26)
 
-    head_c, head_r = (0.0, -0.16, 0.62), (0.27, 0.23, 0.22)
+    head_c, head_r = (0.0, -0.16, 0.56), (0.38, 0.30, 0.26)
     head.at(*ellipsoid(*head_r, 3), *head_c)
-    head.at(*ellipsoid(0.15, 0.11, 0.10, 2), y=-0.35, z=0.53)
+    # The snout sits low on the face, its centre on the head's front surface,
+    # so its top stays under the eye line at the eyes' x.
+    snout_z = head_c[2] - 0.12
+    snout_c = (0.0, ellipsoid_front_y(head_c, head_r, 0.0, snout_z), snout_z)
+    head.at(*ellipsoid(0.17, 0.12, 0.10, 2), *snout_c)
     for sx in (-1.0, 1.0):
-        head.at(*icosphere(0.025, 1), x=sx * 0.05, y=-0.42, z=0.61)
+        head.at(*icosphere(0.025, 1), x=sx * 0.055, y=snout_c[1] - 0.075, z=snout_c[2] + 0.075)
+    eye_x, eye_z = 0.15, head_c[2]
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
-        a.mark(key, sx * 0.115, ellipsoid_front_y(head_c, head_r, sx * 0.115, 0.67), 0.67)
+        a.mark(key, sx * eye_x, ellipsoid_front_y(head_c, head_r, sx * eye_x, eye_z), eye_z)
 
+    # Stubby, round-ended nubs: a baby's horns, not a bull's. The left one
+    # (+X) is tipped 15° further out about its own root and stands 2 cm
+    # higher; its cap goes through the same matrix as its sweep, so cap and
+    # tip cannot part.
+    crown = head_c[2] + head_r[2]
     for sx in (-1.0, 1.0):
-        # Stubby, round-ended nubs: a baby's horns, not a bull's.
-        horns.add(*tapered_sweep([(sx * 0.12, -0.12, 0.78), (sx * 0.14, -0.08, 0.85),
-                                  (sx * 0.155, -0.03, 0.89)], [0.055, 0.044, 0.032], 8))
-        horns.at(*icosphere(0.032, 2), x=sx * 0.155, y=-0.03, z=0.89)
+        root = Vector((sx * 0.17, -0.12, crown - 0.08))
+        pts = [tuple(root), (sx * 0.20, -0.08, crown + 0.01), (sx * 0.22, -0.03, crown + 0.06)]
+        lean = (Matrix.Translation(root + Vector((0.0, 0.0, 0.02))) @ rot(y=15.0) @ Matrix.Translation(-root)
+                if sx > 0 else Matrix.Identity(4))
+        horns.add(*tapered_sweep(pts, [0.055, 0.044, 0.032], 8), matrix=lean)
+        horns.add(*icosphere(0.032, 2), matrix=lean @ Matrix.Translation(pts[-1]))
     for phi in (40.0, 58.0, 76.0):
         n = Vector((0.0, math.sin(deg(phi)), math.cos(deg(phi))))
         p = Vector(body_c) + Vector((0.0, body_r[1] * n.y, body_r[2] * n.z)) * 0.97
-        horns.add(*cone(0.055, 0.10, 8), matrix=Matrix.Translation(p) @ rot(x=-phi))
-        horns.at(*icosphere(0.022, 1), *(p + n * 0.09))
+        spines.add(*cone(0.055, 0.10, 8), matrix=Matrix.Translation(p) @ rot(x=-phi))
+        spines.at(*icosphere(0.022, 1), *(p + n * 0.09))
 
+    # Wings: fat, soft, scalloped — a plush bat wing. 8 cm thick so the rim's
+    # faces meet under blendkit's 46° smoothing angle and shade round; the
+    # first cut was 3.5 cm and came out as faceted card with stick fingers.
     for sx in (-1.0, 1.0):
         m = place(sx * 0.24, 0.24, 0.50, rx=-20.0, rz=sx * 35.0)
-        wings.add(*ellipsoid(0.20, 0.035, 0.13, 2), matrix=m @ Matrix.Translation((sx * 0.12, 0.0, 0.0)))
+        wings.add(*ellipsoid(0.20, 0.08, 0.13, 2), matrix=m @ Matrix.Translation((sx * 0.12, 0.0, 0.0)))
         for k in range(2):
-            wings.add(*ellipsoid(0.08, 0.03, 0.065, 2),
+            wings.add(*ellipsoid(0.08, 0.055, 0.065, 2),
                       matrix=m @ Matrix.Translation((sx * (0.06 + 0.13 * k), 0.0, -0.10)))
-        wings.add(*tapered_sweep([(0.0, 0.0, 0.0), (sx * 0.17, 0.0, 0.10), (sx * 0.30, 0.0, 0.07)],
-                                 [0.035, 0.03, 0.026], 6), matrix=m)
 
     # The tail is one smooth arc from behind, round its left side (+X) and
     # across the front to rest by its paw, ending in a heart.
@@ -1415,9 +1502,13 @@ def build_dragon() -> None:
         tail.add(*ellipsoid(0.075, 0.045, 0.03, 2),
                  matrix=place(centre.x, centre.y, centre.z, rz=heading - k * 35.0))
 
-    a.mark("neck", 0.0, -0.06, 0.48)
+    a.mark("neck", 0.0, -0.06, 0.44)
     a.mark("tailRoot", *path[0])
-    a.pivots = {"dragon-head": ("neck", "dragon-body"), "dragon-tail": ("tailRoot", "dragon-body")}
+    a.pivots = {
+        "dragon-head": ("neck", "dragon-body"),
+        "dragon-horns": ("neck", "dragon-head"),
+        "dragon-tail": ("tailRoot", "dragon-body"),
+    }
     a.faces = {"dragon-head": ["eyeL", "eyeR"]}
     a.normalise(height=DRAGON_HEIGHT, length=DRAGON_LENGTH)
 
@@ -1461,46 +1552,69 @@ def build_nest() -> None:
 # =============================================================================
 
 
+def soft_ear(rx: float, ry: float, rz: float, taper: float = 0.55):
+    """A rounded triangle of an ear: an ellipsoid whose upper half narrows
+    towards its crown, so the silhouette points without any edge being sharp.
+    Centred on its base — the lower half is buried in the head, as the owl's
+    tufts are."""
+    verts, faces = ellipsoid(rx, ry, rz, 2)
+    out = []
+    for x, y, z in verts:
+        k = 1.0 - taper * max(0.0, z / rz)
+        out.append((x * k, y * k, z))
+    return out, faces
+
+
 def build_cat() -> None:
     """A cat curled asleep, long axis along X, face to −Y, tail wrapped round
     the front. Pivots: ``-head`` (it lifts its head when petted), ``-earL``/
-    ``-earR`` at their bases (the twitch), ``-tail`` at its root."""
+    ``-earR`` at their bases (the twitch), ``-tail`` at its root.
+
+    ``CAT_HEAD`` is ART_DIRECTION §4's ``HEAD``: the skull and everything on it
+    is written ``x * H``. At 1.25 the head reads as the cat's head from the room
+    camera rather than one more orange bump; the loaf is cut shorter and the
+    head sits further out of it to pay for that inside the contract's 0.6 m ×
+    0.35 m. (Asleep and tucked, the head stays a little narrower than the loaf
+    — a literal "wider than the body" would need a longer cat, which is a
+    brief change, not a shape one.)
+    """
     a = register(Asset("cat"))
     body = a.part("body")
     head = a.part("head")
     tail = a.part("tail")
     ear_l = a.part("earL")
     ear_r = a.part("earR")
+    H = CAT_HEAD
 
-    body.at(*ellipsoid(0.25, 0.19, 0.15, 3), x=0.03, y=0.03, z=0.15)
-    body.at(*ellipsoid(0.13, 0.14, 0.11, 2), x=0.15, y=0.05, z=0.15)
+    body.at(*ellipsoid(0.23, 0.18, 0.14, 3), x=0.05, y=0.03, z=0.14)
+    body.at(*ellipsoid(0.13, 0.14, 0.11, 2), x=0.13, y=0.05, z=0.14)
+    # The front paws, out in front of the bigger chin.
     for dx in (-0.06, 0.05):
-        body.at(*ellipsoid(0.05, 0.07, 0.035, 2), x=-0.11 + dx, y=-0.17, z=0.035)
+        body.at(*ellipsoid(0.05, 0.07, 0.035, 2), x=-0.09 + dx, y=-0.22, z=0.035)
 
-    head_c, head_r = (-0.13, -0.09, 0.18), (0.16, 0.135, 0.13)
+    head_c, head_r = (-0.10, -0.11, 0.165), (0.16 * H, 0.135 * H, 0.13 * H)
     head.at(*ellipsoid(*head_r, 3), *head_c)
     for sx in (-1.0, 1.0):
-        head.at(*ellipsoid(0.045, 0.038, 0.038, 2), x=head_c[0] + sx * 0.042, y=head_c[1] - head_r[1] + 0.04,
-                z=head_c[2] - 0.05)
+        head.at(*ellipsoid(0.045 * H, 0.038 * H, 0.038 * H, 2), x=head_c[0] + sx * 0.042 * H,
+                y=head_c[1] - head_r[1] + 0.04 * H, z=head_c[2] - 0.05 * H)
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
-        x, z = head_c[0] + sx * 0.065, head_c[2] + 0.015
+        x, z = head_c[0] + sx * 0.065 * H, head_c[2] + 0.015 * H
         a.mark(key, x, ellipsoid_front_y(head_c, head_r, x, z), z)
 
-    # A flat rounded triangle: a sweep tapering to a soft point, squashed
-    # front-to-back. (A cone with a bead on its tip read as a party hat with a
-    # pompom.)
-    ear = tapered_sweep([(0.0, 0.0, 0.0), (0.0, 0.0, 0.05), (0.0, 0.0, 0.088)],
-                        [0.062, 0.036, 0.008], 8)
+    # Soft rounded triangles, flat front-to-back. The first cut was a sweep
+    # tapering to an 8 mm tip on eight squashed sides: two faceted pyramids
+    # with needle points, the one sharp thing on a soft cat. (A cone with a
+    # bead on its tip, before that, read as a party hat with a pompom.)
+    ear = soft_ear(0.062, 0.034, 0.088)
     # Each ear leans outward; the right one further — the asymmetric feature.
     def ear_base(dx):
         x = head_c[0] + dx
         top = head_c[2] + head_r[2] * math.sqrt(1.0 - (dx / head_r[0]) ** 2)
         return (x, head_c[1] + 0.01, top - 0.022)
 
-    for part, base, tilt, key in ((ear_l, ear_base(0.075), 18.0, "earBaseL"),
-                                  (ear_r, ear_base(-0.075), -26.0, "earBaseR")):
-        m = Matrix.Translation(base) @ rot(y=tilt) @ scaled(1.0, 0.55, 1.0)
-        part.add(*ear, matrix=m)
+    for part, base, tilt, key in ((ear_l, ear_base(0.075 * H), 18.0, "earBaseL"),
+                                  (ear_r, ear_base(-0.075 * H), -26.0, "earBaseR")):
+        part.add(*ear, matrix=Matrix.Translation(base) @ rot(y=tilt))
         a.mark(key, *base)
 
     # Wrapped close round the body's foot from behind its right side to the
@@ -1792,6 +1906,7 @@ MEASURE = {
     ("reader-cover", "boardWidth"): lambda: m_reader_board(0),
     ("reader-cover", "boardHeight"): lambda: m_reader_board(1),
     ("owl", "headOverBody"): lambda: m_head_over_body("owl-head", "owl-body"),
+    ("dragon", "headOverBody"): lambda: m_head_over_body("dragon-head", "dragon-body"),
     ("dragon", "length"): lambda: m_length("dragon"),
     ("dragonNest", "diameter"): lambda: m_length("dragonNest"),
     ("cat", "length"): lambda: m_length("cat"),
@@ -1918,14 +2033,20 @@ def check_faces() -> str:
                 local = obj.matrix_world.inverted() @ hit[0]
                 corners = [(mesh.vertices[mesh.loops[li].vertex_index].co,
                             layer.data[li].uv) for li in poly.loop_indices]
-                uv = None
+                # The fan triangle of the hit polygon nearest the hit point: a
+                # hit that lands exactly on an edge (an eye on the skull's
+                # equator does) is outside both neighbours by a rounding error,
+                # so "nearest" is asked rather than "inside".
+                best = None
                 for i in range(1, len(corners) - 1):
                     (a, ua), (b, ub), (c, uc) = corners[0], corners[i], corners[i + 1]
-                    if mgeom.intersect_point_tri(local, a, b, c) is not None:
-                        uv = mgeom.barycentric_transform(local, a, b, c, ua.to_3d(), ub.to_3d(),
-                                                         uc.to_3d())
-                        break
-                assert uv is not None, f"{node}: could not locate {key}'s hit inside its polygon"
+                    near = mgeom.closest_point_on_tri(local, a, b, c)
+                    if best is None or (near - local).length < best[0]:
+                        best = ((near - local).length, near, (a, b, c), (ua, ub, uc))
+                assert best is not None and best[0] < 1e-5, (
+                    f"{node}: could not locate {key}'s hit inside its polygon")
+                _, near, (a, b, c), (ua, ub, uc) = best
+                uv = mgeom.barycentric_transform(near, a, b, c, ua.to_3d(), ub.to_3d(), uc.to_3d())
                 want = asset.face_uv(node, key)
                 assert abs(uv.x - want[0]) < 0.01 and abs(uv.y - want[1]) < 0.01, (
                     f"{node}: {key} reads uv ({uv.x:.3f}, {uv.y:.3f}) at the hit and the anchor "

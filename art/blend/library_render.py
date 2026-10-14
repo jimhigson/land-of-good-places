@@ -128,6 +128,7 @@ PROPOSED = {
     "dragon-belly": "ART.snakeBelly",
     "dragon-head": "ART.snakeMint",
     "dragon-horns": "ART.miniHorn",
+    "dragon-spines": "ART.miniHorn",
     "dragon-wings": "PALETTE.markerPink",
     "dragon-tail": "ART.snakeMint",
     "dragonNest-pad": "ART.heartPink",
@@ -412,9 +413,11 @@ def main() -> None:
                 if n % 9 == 0:
                     x += 0.25
     made += place_asset("desk", (3.6, 1.2, 0.0))
-    # Behind the desk: the desk's back edge is at +0.5 of its origin and the
-    # owl's glasses reach 0.57 in front of hers.
-    made += place_asset("owl", (3.6, 1.2 + lb.DESK_DEPTH * 0.5 + 0.62, 0.0))
+    # Behind the desk, 5 cm clear of its back edge — both read off the built
+    # geometry, so a bigger beak or fatter glasses move her back on their own.
+    _, desk_hi = lb.asset_bounds("desk")
+    owl_lo, _ = lb.asset_bounds("owl")
+    made += place_asset("owl", (3.6, 1.2 + desk_hi.y - owl_lo.y + 0.05, 0.0))
     made += place_asset("readingLamp", (2.6, 1.2, lb.COUNTER_TOP))
     made += place_asset("floorLamp", (-5.6, 1.6, 0.0))
     made += place_asset("armchair", (-4.4, 1.2, 0.0), yaw=-20.0)
