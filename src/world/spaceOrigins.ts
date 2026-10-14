@@ -12,7 +12,8 @@ import { HOTEL_FLOOR_Y, HOTEL_ORIGIN_X } from '../core/constants';
 import { registerPlanCache } from '../boot/planCaches';
 import { CASTLE_FLOORS } from './building/floors';
 import { BUILDING_BASE_Y } from './building/layout';
-import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, type SpaceId } from './spaces';
+import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, SPACE_LIBRARY, type SpaceId } from './spaces';
+import { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from './library/layout';
 import { REPTILE_HOUSE_FLOOR_Y } from './reptileHouse/layout';
 
 interface SpaceOrigin {
@@ -40,6 +41,8 @@ function originsNow(): Readonly<Record<SpaceId, SpaceOrigin>> {
   ...Object.fromEntries(
     REPTILE_SPACE_ORIGINS.map(([space, x, z]) => [space, { x, y: REPTILE_HOUSE_FLOOR_Y, z }]),
   ),
+  // The Library's reading room (#716): one flat plate at its own origin.
+  [SPACE_LIBRARY]: { x: LIBRARY_ORIGIN_X, y: LIBRARY_FLOOR_Y, z: LIBRARY_ORIGIN_Z },
   };
 }
 let originsMemo: Readonly<Record<SpaceId, SpaceOrigin>> | null = null;

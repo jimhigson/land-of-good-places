@@ -723,6 +723,28 @@ export const HOTEL_PLAY_RADIUS = 30;
 export const INTERIOR_PLAY_RADIUS = 46;
 
 /**
+ * **The Library's reading room (#716) — its own disjoint space, at its own far
+ * origin.** The same trick as the castle's floors and the hotel's rooms: the
+ * door is a teleport, and the room is bigger on the inside (36 x 26 m behind
+ * an 18 x 14 m facade).
+ *
+ * The one quadrant no other space uses. Measured against every origin that
+ * exists, centre to centre: the garden (0, 0) 849 m, the Reptile House's hall
+ * (600, -600) 1200 m and its forecourt (600, -900) 1237 m, the hotel lobby
+ * (-600, 613) 1213 m, castle floor 0 (600, 600) 1697 m. Every one is far past
+ * {@link FOG_FAR} (258 m) plus both spaces' own reach (the park's boundary is
+ * ~120 m out; a space's `spaceAt` radius is 70 m), so nothing of one space is
+ * ever drawn from another, and no light pool, play boundary or `spaceAt`
+ * radius can reach a neighbour. Small enough that single-precision positions
+ * stay exact to a millimetre, which is the same ceiling the castle's 600 was
+ * chosen under.
+ */
+export const LIBRARY_ORIGIN_X = -600;
+export const LIBRARY_ORIGIN_Z = -600;
+/** The reading room's floor level: a flat plate at zero, like every room's. */
+export const LIBRARY_FLOOR_Y = 0;
+
+/**
  * Number of walkable castle floors: **three**, and they are not stacked.
  *
  * Jim, 29 August 2026: *"the castle also has too many floors and the floors

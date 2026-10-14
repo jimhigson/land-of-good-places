@@ -180,7 +180,15 @@ export function tallObstacles(): TallObstacle[] {
     // `rh-coil` or `rh-house-wall`, none with it unplaced. Its bounding
     // radius already holds every drawn vertex (`REPTILE_BOUNDING_RADIUS`).
     reptileTallObstacle(),
+    // The Library (#716): a 12 m pillared building, over the same cruise
+    // floor. Its bounding radius holds every drawn vertex.
+    libraryTallObstacle(),
   ];
+}
+
+function libraryTallObstacle(): TallObstacle {
+  const library = placedEntry('library');
+  return { x: library.x, z: library.z, radius: library.boundingRadius };
 }
 
 function reptileTallObstacle(): TallObstacle {

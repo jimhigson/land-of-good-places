@@ -210,6 +210,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // The Reptile House's Tortoise Ride, boarded: into the hall at its stand
   // spot and straight onto the shell — `ReptileHouse.requestTortoiseRide`.
   '/tortoise-ride': 'reptileTortoiseRide',
+  // The Library's building from outside (#716): on the plot's doormat at the
+  // foot of the steps, facing the door — `Library.requestEnterDoor`. The
+  // reading room itself is `/library`, its own `DeepLink` kind below.
+  '/library-door': 'libraryDoor',
 };
 
 /**
@@ -326,6 +330,21 @@ type DeepLink =
   | {
       readonly kind: 'reptileHouse';
       readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
+    }
+  /**
+   * `/library`, `/library?at=x,z&facing=deg` — inside the Library's reading
+   * room (#716), at that room-local spot, or just in from the door (the
+   * arrival, facing up the central aisle) without one. Its own kind for the
+   * Reptile House's reason: the room is a *space* 849 m from the park, so
+   * `/spawn?pos=` would drop her at the coordinate with the room switched off,
+   * and finding the building on a layout different on every seed is the
+   * hotel's QA problem again. `at` is in the room's own metres
+   * (`world/library/layout.ts`: +X east, +Z towards the camera), so
+   * `?at=-15.8,-4&facing=270` is in front of the secret shelf.
+   */
+  | {
+      readonly kind: 'library';
+      readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
     };
 
 /**
@@ -343,7 +362,29 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   if (pathname === '/arrive') return parseArriveLink(search);
   if (pathname === '/castle') return parseCastleLink(search);
   if (pathname === '/reptile-house') return parseReptileLink(search);
+  if (pathname === '/library') return parseLibraryLink(search);
   return null;
+}
+
+/** `/library?at=x,z&facing=deg` — see the `DeepLink` kind. Built the way `parseReptileLink` is. */
+function parseLibraryLink(search: string): DeepLink {
+  const params = new URLSearchParams(search);
+  const raw = params.get('at');
+  const at = parseSpawnPoint(raw);
+  const facingRaw = params.get('facing');
+  const link: { kind: 'library'; at?: { x: number; z: number; facing?: number } } = { kind: 'library' };
+  if (at) {
+    const spot: { x: number; z: number; facing?: number } = { x: at.x, z: at.z };
+    const facing = facingRaw === null ? Number.NaN : Number(facingRaw);
+    if (Number.isFinite(facing)) spot.facing = facing;
+    link.at = spot;
+  } else if (raw !== null) {
+    console.warn(
+      `Land of Good Places: /library could not read at=${raw} — expected "x,z" in the ` +
+        "reading room's own metres. Standing just in from the door instead.",
+    );
+  }
+  return link;
 }
 
 /** `/reptile-house?at=x,z&facing=deg` — see the `DeepLink` kind. Built the way `parseCastleLink` is. */
@@ -1273,6 +1314,16 @@ async function finishLaunch(
           console.error(
             'Land of Good Places: /reptile-house did not enter the Reptile House — see ' +
               'ReptileHouse.requestEnter (she may be riding, or a change of space is already running).',
+          );
+        }
+        break;
+      case 'library':
+        // Fails loud, like `/reptile-house`: a reading room that will not open
+        // is the thing this link exists to check.
+        if (!game.enterLibrarySpawn(deepLink.at)) {
+          console.error(
+            'Land of Good Places: /library did not enter the Library — see Library.requestEnter ' +
+              '(she may be riding, or a change of space is already running).',
           );
         }
         break;
