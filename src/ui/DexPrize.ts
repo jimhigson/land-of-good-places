@@ -80,13 +80,21 @@ export class DexPrize {
   private readonly confettiPieces: HTMLElement[] = [];
   private readonly fireworkPieces: HTMLElement[] = [];
   private readonly copy: PrizeCopy;
+  /** Told after the celebration closes — see the constructor. */
+  private readonly onClosed: (() => void) | null;
 
   private open = false;
   /** True when we are the reason the park is paused — see `CuteODex.pausedByUs`. */
   private pausedByUs = false;
 
-  constructor(container: HTMLElement, copy: PrizeCopy = DEX_PRIZE_COPY) {
+  /**
+   * `onClosed` runs after every close, however it was closed (its own OK
+   * button, Escape, the Cute-o-dex) — so a second celebration waiting for the
+   * screen can follow without depending on the close un-pausing the park.
+   */
+  constructor(container: HTMLElement, copy: PrizeCopy = DEX_PRIZE_COPY, onClosed?: () => void) {
     this.copy = copy;
+    this.onClosed = onClosed ?? null;
     this.root = document.createElement('div');
     this.root.className = 'dexprize';
     this.root.dataset.open = 'false';
@@ -180,6 +188,7 @@ export class DexPrize {
       this.pausedByUs = false;
       gameStore.setPaused(false);
     }
+    this.onClosed?.();
   }
 
   dispose(): void {

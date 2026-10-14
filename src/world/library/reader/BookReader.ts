@@ -113,6 +113,8 @@ export interface BookReaderOptions {
   readonly container: HTMLElement;
   /** Called once each time a book is read to its last page. */
   readonly onFinished: (book: LibraryBook) => void;
+  /** Called after the book closes, however it was closed. */
+  readonly onClosed?: () => void;
 }
 
 /** The girl in the pictures is the one reading: the player's own look. */
@@ -145,6 +147,7 @@ export class BookReader {
   private readonly vignette: Mesh;
 
   private readonly onFinished: (book: LibraryBook) => void;
+  private readonly onClosed: (() => void) | null;
   private readonly artist: PageArtist;
   /** The game's canvas — what the book is drawn into, so what the buttons are measured against. */
   private readonly canvas: HTMLCanvasElement;
@@ -181,6 +184,7 @@ export class BookReader {
 
   constructor(options: BookReaderOptions) {
     this.onFinished = options.onFinished;
+    this.onClosed = options.onClosed ?? null;
     this.artist = new PageArtist(options.renderer);
     this.canvas = options.renderer.domElement;
 
@@ -328,6 +332,7 @@ export class BookReader {
       this.pausedByUs = false;
       gameStore.setPaused(false);
     }
+    this.onClosed?.();
   }
 
   /** Turns to the next spread — or, mid-turn, asks for it next. */

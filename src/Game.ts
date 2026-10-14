@@ -581,6 +581,8 @@ export class Game {
       renderer: this.engine.renderer,
       container: uiRoot,
       onFinished: (book) => markBookRead(book),
+      // A celebration earned on the last page waits for the book to close.
+      onClosed: () => this.cuteODex.refresh(),
     });
     this.cuteODex.setBookReader({
       open: (bookId) => this.bookReader.openBook(bookId),

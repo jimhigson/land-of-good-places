@@ -38,6 +38,12 @@
  *    book is turned to its last page, the Cute-o-dex is opened, its bookmark
  *    must be there and pressable, and pressing it must open that book again.
  * 7. **Escape closes it** and gives the park and the menu back.
+ * 8. **The celebrations wait for the book.** With every Cute-o-dex entry but
+ *    one book found (driven through the game's own store and the dex's own
+ *    list of entries), that book is read to its end: no celebration may show
+ *    over its last page; closing it must let the Cute-o-dex's out, and closing
+ *    that the library's — one at a time, never two at once. And `C`, the
+ *    dex's own key, must not open the dex over an open book.
  *
  * It does **not** judge whether the pictures look right — a model can cover
  * the picture and still be the wrong model, badly framed. That is visual QA,
@@ -46,7 +52,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { chromium, type Page } from 'playwright-core';
-import { BOOKS, BOOK_MAX_PAGES, BOOK_MIN_PAGES } from '../src/world/library/books.ts';
+import { BOOKS, BOOK_MAX_PAGES, BOOK_MIN_PAGES, bookCollectionId } from '../src/world/library/books.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const BASE = (process.env.CHECK_BOOK_READER_URL ?? process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').replace(
@@ -64,9 +70,10 @@ const TURN_TIMEOUT_MS = 60_000;
 /** Below this fraction of its pixels covered, a picture drew no model. */
 const MIN_COVERAGE = 0.02;
 
-/** The book the deep link opens, and the one read to the end. */
+/** The book the deep link opens, the one read to the end, and the one that completes the dex. */
 const FIRST = BOOKS[0]?.id ?? '';
 const READ_THROUGH = BOOKS[3]?.id ?? FIRST;
+const LAST = BOOKS[BOOKS.length - 1]?.id ?? FIRST;
 
 const VIEWPORTS = [
   { name: 'laptop', width: 1280, height: 800 },
@@ -194,6 +201,13 @@ async function readerState(page: Page): Promise<{ open: boolean; bookId: string 
     const r = (window as unknown as { game: any }).game.bookReader;
     return { open: r.isOpen, bookId: r.bookId, spread: r.spread, spreads: r.spreadCount, turning: r.turning };
   });
+}
+
+/** The celebrations showing now, by their accessible names. */
+async function openPrizes(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('.dexprize[data-open="true"]')].map((prize) => prize.getAttribute('aria-label') ?? '?'),
+  );
 }
 
 async function waitPainted(page: Page): Promise<void> {
@@ -332,6 +346,17 @@ try {
   assert(mode.dt === 0, 'the park is paused under it', `frameContext.dt = ${mode.dt}`);
   assert(mode.menu === 'none', 'the HUD menu is off the screen', `.hud-menu display is "${mode.menu}"`);
   await page.screenshot({ path: `${SHOTS}/${FIRST}-open.png` });
+  await page.keyboard.press('KeyC');
+  await page.waitForTimeout(250);
+  const dexOverBook = await page.evaluate(() => {
+    const g = (window as unknown as { game: any }).game;
+    return { dex: g.cuteODex.isOpen as boolean, book: g.bookReader.isOpen as boolean };
+  });
+  assert(
+    !dexOverBook.dex && dexOverBook.book,
+    'C does not open the Cute-o-dex over the book',
+    `dex open=${dexOverBook.dex}, book open=${dexOverBook.book}`,
+  );
 
   // 2. A tap turns the page — forwards, and back again.
   await turnAndWait(page, 'next');
@@ -500,6 +525,66 @@ try {
   });
   assert(back.dt > 0, 'the park runs again', `frameContext.dt = ${back.dt}`);
   assert(back.menu === '', 'the HUD menu is back', `.hud-menu display is "${back.menu}"`);
+
+  // 8. The celebrations wait for the book, and take turns.
+  said.push(`\nthe celebrations wait for the book (${LAST} completes the dex):`);
+  const primed = await page.evaluate(async (lastId) => {
+    // The game's own store and the dex's own list of what counts: Vite serves
+    // each module at one URL, so these are the instances the page is running
+    // — which the pill's tally below confirms rather than assumes.
+    const { gameStore } = await import('/src/state/index.ts');
+    const { dexEntries } = await import('/src/ui/CuteODex.ts');
+    const entries = dexEntries() as { id: string; name: string; category: string }[];
+    for (const entry of entries) {
+      if (entry.id !== lastId) gameStore.collect(entry.id, entry.name, entry.category, 'backpack');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const pill = (document.querySelector('.pill--dex') as HTMLElement | null)?.textContent ?? '';
+    return { total: entries.length, pill, hasLast: entries.some((entry) => entry.id === lastId) };
+  }, bookCollectionId(LAST));
+  assert(
+    primed.hasLast && primed.pill.endsWith(`${primed.total - 1}/${primed.total}`),
+    'the store the check drives is the game\'s own',
+    `every entry but ${LAST} found; the dex pill reads "${primed.pill}" of ${primed.total} entries`,
+  );
+  await page.evaluate((id) => (window as unknown as { game: any }).game.bookReader.openBook(id), LAST);
+  await waitPainted(page);
+  for (let guard = 0; guard < 10; guard += 1) {
+    const state = await readerState(page);
+    if (state.spread >= state.spreads - 1) break;
+    await turnAndWait(page, 'next');
+  }
+  await page.waitForTimeout(300);
+  const overLastPage = await openPrizes(page);
+  const lastState = await readerState(page);
+  assert(
+    lastState.open && lastState.spread === lastState.spreads - 1 && overLastPage.length === 0,
+    'no celebration bursts out over the open book',
+    `on the last page of ${lastState.bookId} (spread ${lastState.spread} of ${lastState.spreads}): showing ${JSON.stringify(overLastPage)}`,
+  );
+  await page.screenshot({ path: `${SHOTS}/${LAST}-last-page-before-the-prize.png` });
+  await page.click('.book-close');
+  await page.waitForTimeout(400);
+  const afterClose = await openPrizes(page);
+  assert(
+    afterClose.length === 1 && afterClose[0] === 'You found every cute thing!',
+    'closing the book lets the Cute-o-dex celebration out, on its own',
+    `showing ${JSON.stringify(afterClose)}`,
+  );
+  await page.screenshot({ path: `${SHOTS}/prize-dex.png` });
+  if (afterClose.length > 0) await page.click('.dexprize[data-open="true"] .dexprize-ok');
+  await page.waitForTimeout(400);
+  const afterDexPrize = await openPrizes(page);
+  assert(
+    afterDexPrize.length === 1 && afterDexPrize[0] === 'You read every book!',
+    'closing that lets the library celebration out, on its own',
+    `showing ${JSON.stringify(afterDexPrize)}`,
+  );
+  await page.screenshot({ path: `${SHOTS}/prize-books.png` });
+  if (afterDexPrize.length > 0) await page.click('.dexprize[data-open="true"] .dexprize-ok');
+  await page.waitForTimeout(400);
+  const afterBoth = await openPrizes(page);
+  assert(afterBoth.length === 0, 'and then the park is back', `showing ${JSON.stringify(afterBoth)}`);
 } catch (error) {
   fouls.push(`threw — ${String((error as Error)?.stack ?? error).slice(0, 600)}`);
 } finally {

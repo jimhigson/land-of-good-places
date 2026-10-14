@@ -12,9 +12,9 @@ import { EGG_PRIZES, SHOP_ITEMS, type ShopItem } from '../world/building/shops/c
 import { isTouchDevice } from '../core/device';
 import { hexToCss, PALETTE } from '../core/palette';
 import { saveFlags } from '../state/flags';
-import { BOOKS, type LibraryBook } from '../world/library/books';
+import { BOOKS, bookCollectionId, type LibraryBook } from '../world/library/books';
 import { booksRead, isBookRead } from '../world/library/readBooks';
-import { DexPrize, hasSeenDexPrize, markDexPrizeSeen, type PrizeCopy } from './DexPrize';
+import { DEX_PRIZE_COPY, DexPrize, hasSeenDexPrize, markDexPrizeSeen, type PrizeCopy } from './DexPrize';
 
 /**
  * The Cute-o-dex — the collection book.
@@ -101,6 +101,34 @@ const SECTIONS: readonly { category: CuteCategory; title: string; glyph: string 
  * fall out of step with the shops.
  */
 const CATALOGUE: readonly ShopItem[] = [...SHOP_ITEMS, ...EGG_PRIZES];
+
+/** One thing the Cute-o-dex counts towards its 100%. */
+export interface DexEntry {
+  /** Its key in `GameState.collection`. */
+  readonly id: string;
+  readonly name: string;
+  readonly category: CuteCategory;
+}
+
+/**
+ * Every entry the 100% counts: the catalogue, the flowers, the library's books
+ * and the secrets. The one owner of "what is there to find" — the pill's tally
+ * and the celebration both count this list, and `check:book-reader` drives it
+ * (every entry but one book found) to prove the celebration waits for an open
+ * book to be closed.
+ */
+export function dexEntries(): readonly DexEntry[] {
+  return [
+    ...CATALOGUE.map((item) => ({ id: item.id, name: item.displayName, category: item.category })),
+    ...FLOWER_COLOURS.map((colour) => ({
+      id: `flower.${colour}`,
+      name: `${colour.charAt(0).toUpperCase()}${colour.slice(1)} flower`,
+      category: 'flower' as const,
+    })),
+    ...BOOKS.map((book) => ({ id: bookCollectionId(book.id), name: book.title, category: 'book' as const })),
+    ...SECRETS.map((secret) => ({ id: secret.id, name: secret.name, category: 'secret' as const })),
+  ];
+}
 
 /** Kinds that can walk or float behind you. Mirrors the store's rule. */
 const PARADEABLE = new Set(['toy', 'pet', 'balloon']);
@@ -220,8 +248,11 @@ export class CuteODex {
 
     // The full-screen celebration. A separate class (its own confetti,
     // fireworks and parade), but triggered from here — see the class doc.
-    this.prize = new DexPrize(container);
-    this.bookPrize = new DexPrize(container, BOOK_PRIZE_COPY);
+    // Closing either one looks again, because the other may be waiting for
+    // the screen: the two never show at once.
+    const lookAgain = (): void => this.refresh();
+    this.prize = new DexPrize(container, DEX_PRIZE_COPY, lookAgain);
+    this.bookPrize = new DexPrize(container, BOOK_PRIZE_COPY, lookAgain);
 
     window.addEventListener('keydown', this.onKeyDown);
     this.unsubscribe = gameStore.subscribe((state) => this.render(state));
@@ -240,12 +271,25 @@ export class CuteODex {
     this.reader = reader;
   }
 
+  /**
+   * Re-reads the store and redraws. `Game` calls it when a library book
+   * closes: a celebration that was waiting for the book must not depend on the
+   * close happening to un-pause the park (it does not, if the park was already
+   * paused when the book opened).
+   */
+  refresh(): void {
+    this.render(gameStore.get());
+  }
+
   toggle(): void {
     if (this.open) this.close();
     else this.openBook();
   }
 
   openBook(): void {
+    // Never over a library book: the book owns the screen (and its page
+    // buttons would swallow every tap meant for this).
+    if (this.reader?.isOpen()) return;
     // Never open on top of a shop, a surprise egg or the backpack drawer: those
     // paused the park, and closing this would un-pause it out from under them.
     if (gameStore.get().paused && !this.pausedByUs) return;
@@ -310,36 +354,35 @@ export class CuteODex {
   };
 
   private render(state: GameState): void {
-    const flowerFound = FLOWER_COLOURS.filter(
-      (colour) => state.collection[`flower.${colour}`]?.discovered,
-    ).length;
-    const secretFound = SECRETS.filter((secret) => state.collection[secret.id]?.discovered).length;
+    const entries = dexEntries();
+    const found = entries.filter((entry) => state.collection[entry.id]?.discovered).length;
+    const total = entries.length;
     const bookFound = booksRead(state);
-    const found =
-      CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length +
-      flowerFound +
-      secretFound +
-      bookFound;
-    const total = CATALOGUE.length + FLOWER_COLOURS.length + SECRETS.length + BOOKS.length;
     const complete = found === total;
     this.button.innerHTML = `<span class="emoji">📖</span><span>${found}/${total}</span>`;
     this.button.dataset.active = this.open ? 'true' : 'false';
+
+    // Neither celebration ever bursts out over an open library book — its last
+    // page is still being looked at, and the book's full-screen layer would
+    // sit over the prize's OK button, out of reach of a finger. Each waits;
+    // the book's close calls `refresh`, which brings us back here with it
+    // shut. Nor do the two ever show at once: the dex's goes first, and
+    // closing it looks again for the library's.
+    const bookOpen = this.reader?.isOpen() === true;
 
     // The book is full: fire the celebration, exactly once per browser ever
     // (see `hasSeenDexPrize`), and from then on keep the ⭐ button around so it
     // can be shown off again on request.
     this.starButton.hidden = !complete;
-    if (complete && !this.prizeAutoShown) {
+    if (complete && !this.prizeAutoShown && !bookOpen) {
       this.prizeAutoShown = true;
       markDexPrizeSeen();
       this.prize.show(this.paradeItems(state), state.player.name);
     }
 
     // Every library book read: the library's own celebration, once, the same
-    // way. Never over an open book — the last page is still being looked at —
-    // so it waits; closing the book unpauses the park, which notifies, which
-    // brings us back here with the reader shut.
-    if (bookFound === BOOKS.length && !this.bookPrizeAutoShown && !this.reader?.isOpen()) {
+    // way and under the same two waits.
+    if (bookFound === BOOKS.length && !this.bookPrizeAutoShown && !bookOpen && !this.prize.isOpen) {
       this.bookPrizeAutoShown = true;
       saveFlags.markBookPrizeSeen();
       this.bookPrize.show(bookParade(), state.player.name);
