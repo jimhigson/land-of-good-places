@@ -29,18 +29,31 @@ import { describe, expect, it } from 'vitest';
  * old driver's semantics (no per-feature or decision-zero cap) was still
  * solving at 436 s, past vitest's 240 s timeout — which cannot interrupt a
  * synchronous solve, so it had to be killed by hand. With the budget: 21 s,
- * 43 turns, 3 road refusals. Seed 10 restart 0, given explicitly, so no
- * acceptance loop runs: the park the accept loop shipped for seed 10 at
- * 662a1b90's successors, its whole plan searched in 11.5 s on CI — the fastest
- * of the sixteen, so the road is asked with few organic redraws first.
+ * 43 turns, 3 road refusals. Seed 3 restart 7, given explicitly, so no
+ * acceptance loop runs: a park the accept loop ships, whose mutated solve
+ * asks the road on its **first** layout — no organic decision-zero redraw
+ * before the road's refusals end it.
  *
- * **This pin goes stale whenever the park changes**, and has three times on
+ * **This pin goes stale whenever the park changes**, and has four times: on
  * #708 (seed 12 restart 3, then seed 12 restart 2, then seed 1 restart 3,
- * each over vitest's 240 s once the park moved). When it next times out, take
- * the seed with the smallest "plan N ms searched" from the Parks job's log.
+ * each over vitest's 240 s once the park moved), and with the Library's plot
+ * (#716), when seed 10 restart 0 — the pin since #708's band fix — went from
+ * 43 turns to 179 (20 unwinds, 11 decision-zero redraws): 228 s on building's
+ * CI (run 38569170320, under the 240 s by luck) and 398 s on the Library PR's
+ * (run 38580957653, red). Re-picked at that source by **measuring the mutated
+ * solve itself**, not the plain plan's search time, which is only a proxy:
+ * the seven shipped parks with the fastest plans in that run's Parks logs,
+ * run side by side locally — seed 3 restart 7: 61 turns, 0 decision-zero,
+ * 25.2 s; seed 8 restart 1: 100 turns, 4, 31.4 s; seed 2 restart 3 (the
+ * fastest plain plan, 55.2 s on CI): 47 turns, 2, 37.3 s; seed 10 restart 9:
+ * 76 turns, 3, 54.0 s; seed 7 restart 5: 130 turns, 6, 57.7 s; seed 13
+ * restart 6: 111 turns, 3, 67.5 s; seed 10 restart 0 (the control): 179 turns,
+ * 11, 168.3 s. When it next times out, do the same: measure the candidates'
+ * stderr lines below and take the one with the fewest decision-zero redraws.
+ * `railRaceRefusals.test.ts` is pinned to the same park, for the same reason.
  */
-process.env['LGP_SEED'] = '10';
-process.env['LGP_PARK_RESTART'] = '0';
+process.env['LGP_SEED'] = '3';
+process.env['LGP_PARK_RESTART'] = '7';
 // Through a variable, as the other tests reach Node-only scripts (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
 await import(/* @vite-ignore */ HEADLESS_CANVAS);
