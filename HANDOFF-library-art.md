@@ -56,7 +56,8 @@ contract goes on #716 first.
   so its owl and cat eye anchors are stale.
 
 ## Review round (14 Oct) — done
-- [x] renders: one complete run (31 PNGs, all IEND, all RGB). The render
+- [x] renders: one complete run (32 PNGs, all IEND, all RGB — incl.
+      `secretShelf-open.png`, the shelf at −90° seen from behind). The render
       script now clears the folder first, writes each frame to a hidden
       `.part` file, verifies it (signature, IHDR size + colour type, IEND)
       and renames it into place. `check:png-integrity` (gate, shard-1) walks
@@ -64,9 +65,17 @@ contract goes on #716 first.
       and on a flipped byte / appended bytes in a hotel render.
 - [x] face figures travel in the glb as node extras (`face_eyes_uv`,
       `face_window_m`, owl `face_rim_uv`); `export_extras` on, the export
-      asserts nothing else carries a custom property; `readGlbParts` exposes
-      `GlbPart.extras`. #716 told (comment 6164272315), with a correction of
-      the stale anchors in 6155362071.
+      asserts nothing else carries a custom property; `pack:library` copies
+      them verbatim into the typed `LIBRARY_FACES` in `libraryGlb.ts`. #716
+      told (comment 6164272315, edited), correcting the stale anchors in
+      6155362071.
+- [x] **`src/art/style/glb.ts` is NOT touched** (it was, briefly): it is inside
+      the prebuilt parks' source closure (`scripts/lib/park-source-hash.mjs`),
+      so any byte of it changed re-solves all sixteen parks on CI (30–45 min)
+      and runs acceptance loops locally. Branch park hash == main's
+      (e272e0c0…), measured. Its doc's "character-parity reads every authored
+      asset twice" is stale (kid only) — fix it in a PR that is already paying
+      for a park re-solve.
 - [x] face window = the head node's own bounds; `face_window_uvs` asserts
       every front-mapped uv is on the canvas (proved red with the skull-only
       window: owl tuft vertex → v −0.051).
@@ -74,16 +83,19 @@ contract goes on #716 first.
       typed `0.15 - 0.03`.
 - [x] `check:library-glb` (gate, shard-1): module == file, no material or
       texture, names without full stops, translation-only, texcoords iff
-      face figures, dv/dy > 0 on every face, `readGlbParts` and
-      `GLTFLoader` agree on every node incl. extras. Each clause proved red.
+      face figures, `LIBRARY_FACES` == the file's extras, dv/dy > 0 on every
+      face, `readGlbParts` and `GLTFLoader` agree on every node (and
+      GLTFLoader's userData == the extras). Each clause proved red.
 - [x] dragon: head 0.76 m on a 0.67 m body, `headOverBody >= 1.10` in the
       CONTRACT (1.134); features placed from head_c/head_r; eyes on the
       equator, snout low; left horn leans 15° (asymmetric feature); wings
       8 cm thick (0 sharp edges), fingers dropped. Head horns ride the head
       pivot; back spines → new node `dragon-spines`.
-- [x] owl: `OWL_HEAD` 1.18, skull ~56%; eyes on the equator, beak under;
-      glasses torus(20, 8), 8-sided 3.5 cm arms/bridge; beak + glasses ride
-      the head pivot. CONTRACT owl depth 1.00 → 1.10 (1.056).
+- [x] owl: `OWL_HEAD` 1.18, skull 0.556 of her height — now a CONTRACT
+      line, `skullOverHeight >= 0.55` (red at OWL_HEAD 1.0: 0.520); eyes on
+      the equator, beak under; glasses torus(20, 8), 8-sided 3.5 cm
+      arms/bridge; beak + glasses ride the head pivot. CONTRACT owl depth
+      1.00 → 1.10 (1.056).
 - [x] cat: `CAT_HEAD` 1.25, loaf shorter, `soft_ear` rounded triangles.
       Eyes left at +0.115 r_z (inside the house band; the cat is asleep).
 - [x] floor lamp tapered 12 → 9 cm pole, bead, rolled rim (no lean: it
@@ -91,8 +103,13 @@ contract goes on #716 first.
 - [x] dentils removed; book boards one-segment bevel (pile + nest).
 - [x] pack docLine count dropped; pediment comment corrected; ASSET_MANIFEST
       row + §41.
-- [ ] `pnpm run check` / `build` / `test:procgen` on the final head — see
-      the bottom of this file for the result.
+- [ ] gate on the final head: local `tsc`, `typecheck:test`, `build`,
+      `check:assets`, `check:character-parity`, `check:library-glb`,
+      `check:png-integrity`, `check:chain-coverage` all exit 0. The full
+      `check` / `test:procgen` need accepted parks, which a fresh worktree
+      does not have (seed 5 alone is ~20 min of acceptance loops), so the
+      whole of CI was dispatched on the branch instead (no PR needed):
+      `gh workflow run ci.yml --ref art/library-715` → run 38537415092.
 
 ## Not done, on purpose
 - **No part-PR from this branch.** Jim's 13 Oct ruling: one PR for the whole
@@ -107,5 +124,5 @@ contract goes on #716 first.
 
 ## Figures (quote from the build, never by hand)
 `pnpm run blend:library` prints every CONTRACT figure, pivot and face anchor.
-At `0b941d81`: 65 nodes, 18 568 triangles; glb 449 528 B of the 460 800 B
+At `6fbc7560`: 65 nodes, 18 568 triangles; glb 449 528 B of the 460 800 B
 budget (the pack line and `libraryGlb.ts`'s header are the owners).
