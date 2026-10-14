@@ -265,6 +265,14 @@ both accepted **restart 1, digest 9acd3a626f55d35c**. Runner `f714/run-ten.sh`; 
 | check:jitter | 0 / 0 | 31 children, 9000 frames; worst own step 0.166 m (Luca); worst speed 4.983 m/s (Luca) |
 | check:climb-wave | 0 / 0 | 38 climbable trees, all 100.0%; hand 18 px vs head 468; rock 6.5 px; aim 0.00° worst / 7.52° max; body 20 px; OK |
 
+**And the movers' own checks, after only** (this branch, its seed-5 park; logs
+`f714/extra/`), because the Collision fix reaches every mover: check:castle 0 (banquet 117
+seated, worst hip 0.0 mm, floor 4.7 mm), check:castle-towers 0, check:benches 0 (18 benches
+from 16 bearings, 10 planters, the pavilion), check:npc-separation 0 (closest 1.800 m, 865 of
+900 frames corrected, worst 0.042 m), check:rail-race 0 (lap 611.9 m; plays well 24/24, sloppy
+24/24, child pace 15/24), check:slide-rider 0 (611 frames, worst 0.21 m off the chute),
+check:hall-solid 0, check:wall-tunnelling 0 (above).
+
 **Before and after compared line by line** (timings masked, solver chatter dropped): library,
 labels, tap-spacing, assets, hotel, reptile-house, npc-presence, jitter and climb-wave are
 **identical**; brevity differs in exactly its summary line (285 -> 350) and the two new stderr
