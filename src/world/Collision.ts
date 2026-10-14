@@ -115,6 +115,23 @@ interface CircleCollider {
   owner: string;
 }
 
+/**
+ * A filled capsule: the segment `(x1, z1)`-`(x2, z2)` thickened by
+ * `halfThickness` either side and round each end.
+ *
+ * **A zero-length wall — both ends on one point — is a filled disc of radius
+ * `halfThickness`, to every query alike**: the mover ({@link
+ * CollisionWorld.resolve}, {@link CollisionWorld.deepestSolidOverlap}, {@link
+ * CollisionWorld.wouldAutoHopClear}), the planner (`isClearCircle`,
+ * `solidDepthAt`) and the route lattice (`NavGrid`). It is how a solid that
+ * must come and go is registered round (the library owl's capsule, #718,
+ * taken out while she flies and put back as she lands): a wall can be handed
+ * back with {@link CollisionWorld.restoreWall}, the same object, and a circle
+ * cannot. Until 14 Oct 2026 the mover skipped a zero-length wall while the
+ * planner counted it, so a child walked straight through a disc the flood fill
+ * called solid — measured: a march at one stopped at -1.270 m with the fix and
+ * walked on to +3.000 m without it.
+ */
 export interface WallCollider {
   x1: number;
   z1: number;
@@ -1098,8 +1115,8 @@ export class CollisionWorld {
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
-      if (lengthSquared < 1e-8) continue;
-      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      // A zero-length wall is a disc: its nearest point is its one end (see WallCollider).
+      let t = lengthSquared < 1e-8 ? 0 : ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const depth =
         wall.halfThickness + radius -
@@ -1176,8 +1193,9 @@ export class CollisionWorld {
         const ax = wall.x2 - wall.x1;
         const az = wall.z2 - wall.z1;
         const lengthSquared = ax * ax + az * az;
-        if (lengthSquared < 1e-8) continue;
-        let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+        // A zero-length wall is a disc: its nearest point is its one end (see WallCollider).
+        const degenerate = lengthSquared < 1e-8;
+        let t = degenerate ? 0 : ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const closestX = wall.x1 + ax * t;
         const closestZ = wall.z1 + az * t;
@@ -1194,8 +1212,13 @@ export class CollisionWorld {
         }
         const distance = Math.sqrt(distanceSquared);
         if (distance < 1e-5) {
-          const invLength = 1 / Math.sqrt(lengthSquared);
-          applyCorrection(-az * invLength * minimum, ax * invLength * minimum);
+          if (degenerate) {
+            // Exactly on a disc's centre: the circles' arbitrary but stable direction.
+            applyCorrection(minimum, 0);
+          } else {
+            const invLength = 1 / Math.sqrt(lengthSquared);
+            applyCorrection(-az * invLength * minimum, ax * invLength * minimum);
+          }
           moved = true;
           continue;
         }
@@ -1272,8 +1295,8 @@ export class CollisionWorld {
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
-      if (lengthSquared < 1e-8) continue;
-      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      // A zero-length wall is a disc: its nearest point is its one end (see WallCollider).
+      let t = lengthSquared < 1e-8 ? 0 : ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const dx = position.x - (wall.x1 + ax * t);
       const dz = position.z - (wall.z1 + az * t);
