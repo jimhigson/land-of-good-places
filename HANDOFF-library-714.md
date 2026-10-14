@@ -284,8 +284,18 @@ dividing by a zero length. Documented on `WallCollider`.
   195 shapes / 299520 runs, 0 tunnelled with sub-stepping, "zero-length capsules (the owl's kind
   of solid): 36864 runs — held 36864, flew over 0, tunnelled 0, walked round 0"; HOPPABLE 65
   shapes / 99840 runs, "12288 runs — held 0, flew over 12288". Red below.
-- **Does it move anything that exists?** Only if a park already registers a zero-length wall:
-  ZERO_LENGTH_PLACEHOLDER
+- **Does it move anything that exists?** Only if a park already registers a zero-length wall.
+  Instrument `f714/scratch/degenerate-walls.mts` (builds the World, counts its walls by length;
+  CONTROL: one zero-length wall added afterwards must be counted, and is). Seed 5 at this
+  branch (dee13412, park hydrated from its own `.parks`): **walls 1289, circles 1793;
+  zero-length 0; under 1 cm 0; under 10 cm 0; shortest 0.11963 m; CONTROL counted 1.** The
+  count covers the interiors (walls by owner: (none) 382, boundary wall 284, hotel 199,
+  library 157, castle 129, reptile house 106, booth 32). Other seeds: ZERO_LENGTH_SEEDS_PLACEHOLDER
+- **Seed 5's park at this branch's source** (`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run
+  build:parks`, dee134126611…): restart 0 rejected by check:coplanar (236 s), **restart 1
+  accepted (134 measures), digest 9acd3a626f55d35c**, proven by hydration, exit 0 in 523 s —
+  the restart building's CI accepted for seed 5. `.parks/` in this worktree now holds it, so
+  World-building checks here hydrate instead of solving (until the next closure edit).
 
 ### Step 2's remainder (9f650da1)
 - `src/world/library/libraryLines.ts`: `LIBRARY_LINES` and `LIBRARY_CHIPS` exactly as the plan
