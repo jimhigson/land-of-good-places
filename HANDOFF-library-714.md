@@ -180,8 +180,15 @@ reader/BookReader.ts. Inside: state/types.ts, library/Library.ts, art/models/lib
 ## Foundation, first half (14 Oct): plan Step 0, Step 1 change 5, Step 2's remainder
 This file replaces the plan's `HANDOFF-library-owl-den.md`. Worktree `.claude/worktrees/library-714`;
 a detached **baseline worktree** `.claude/worktrees/library-714-baseline` at 009dea3e (the
-foundation's code) holds the Step 0 baselines (remove it when they are read). Scratch
-instruments and logs: the orchestrator scratchpad's `f714/` (`scratch/*.mts`, `*.log`).
+foundation's code) held the Step 0 baselines and was removed once they were read. Scratch
+instruments and logs: the orchestrator scratchpad's `f714/` (`scratch/*.mts`, `*.log`;
+`ciparks/` is the PR's CI parks for the foundation, 6b86bf43…).
+
+**The PR's preview is live for the foundation (parts 1-3)**: the newest "Deploy PR preview"
+comment on #720 names `https://pr-720-8f0cb8c-land-of-good-places.blockstack.workers.dev`
+(built from 8f0cb8c; its `version.txt` is ab3603a9, the PR's merge commit). Checked with curl
+only, not rendered: `/library-door`, `/library` and `/book?id=ripikaBalloon` answer 200 with
+the app shell, and `/parks/5.json` serves seed 5 restart 1.
 
 ### Step 0 facts (read off 009dea3e, whose code is 36b32b64's)
 - `src/art/assets/libraryGlb.ts` exports `LIBRARY_GLB_BASE64` (449528 bytes) and `LIBRARY_FACES`
