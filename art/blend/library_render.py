@@ -27,11 +27,29 @@ closest a background render gets to that in a second.
 
 Framing, colour conversion and the stand-in boxes are ``castle_render``'s
 functions, imported (the reptile kits do the same).
+
+## A run is all or nothing
+
+The first render round on this branch died part-way, and what got committed
+was one truncated picture (``exterior.png``, 80 KiB of a PNG cut mid-IDAT)
+beside four compositions left over from an older version of this script. So:
+
+* **A run starts by deleting every PNG in** ``art/renders/library/``. A run
+  that dies shows up in ``git status`` as deletions, and can never pass for a
+  complete set.
+* **Each frame is written to a hidden** ``.<stem>.png.part`` **file, checked,
+  and only then renamed onto** ``<stem>.png`` — the rename is atomic, so the
+  committed path never holds a half-written file. The check reads the file
+  back: the PNG signature, an ``IHDR`` of exactly the size and colour type
+  this frame asked for, and the ``IEND`` trailer at the very end.
+* ``check:png-integrity`` walks every committed PNG in the repo for the same
+  trailer, so a corpse that got past all of that still cannot reach ``main``.
 """
 
 import math
 import os
 import re
+import struct
 import sys
 import traceback
 
@@ -194,19 +212,59 @@ def place_asset(asset: str, location, yaw: float = 0.0):
     return out
 
 
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# The whole IEND chunk: zero length, the type, and its fixed CRC.
+PNG_TRAILER = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+PNG_COLOUR_TYPE = {"BW": 0, "RGB": 2, "RGBA": 6}
+
+
+def verify_png(path: str, size, colour_mode: str) -> None:
+    """The file at ``path`` is a whole PNG of ``size`` in ``colour_mode``.
+
+    A render killed mid-write leaves a file that opens as a broken picture;
+    this reads it back rather than trusting that ``save_render`` returned."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    assert data[:8] == PNG_SIGNATURE and data[12:16] == b"IHDR", f"{path}: not a PNG"
+    width, height = struct.unpack(">II", data[16:24])
+    colour = data[25]
+    assert (width, height) == tuple(size), f"{path}: {width}×{height}, asked for {size[0]}×{size[1]}"
+    assert colour == PNG_COLOUR_TYPE[colour_mode], (
+        f"{path}: PNG colour type {colour}, asked for {colour_mode} ({PNG_COLOUR_TYPE[colour_mode]})"
+    )
+    assert data.endswith(PNG_TRAILER), f"{path}: {len(data)} bytes and no IEND at the end — truncated"
+
+
+def clear_renders() -> int:
+    """Delete every picture (and any leftover part-file) before a run, so the
+    set on disk is only ever one run's output."""
+    gone = 0
+    for name in os.listdir(OUT):
+        if name.endswith(".png") or name.endswith(".png.part"):
+            os.remove(os.path.join(OUT, name))
+            gone += 1
+    return gone
+
+
 def shoot(stem: str, objects, azimuth: float, elevation: float, camera, pad: float = 1.25,
           size=(900, 700)) -> None:
-    """Render, framing ``objects`` (which need not be everything visible)."""
+    """Render, framing ``objects`` (which need not be everything visible), to
+    ``<stem>.png`` — via a checked part-file and an atomic rename."""
     scene = bpy.context.scene
     scene.render.resolution_x, scene.render.resolution_y = size
+    scene.render.resolution_percentage = 100
     # RGB, not castle_render's RGBA: the background is opaque anyway and the
     # alpha channel was a quarter of 17 MB of committed pictures.
     scene.render.image_settings.color_mode = "RGB"
     bpy.context.view_layer.update()
     frame(objects, azimuth, elevation, camera, pad)
-    scene.render.filepath = os.path.join(OUT, f"{stem}.png")
-    bpy.ops.render.render(write_still=True)
-    print(f"  wrote {stem}.png")
+    bpy.ops.render.render(write_still=False)
+    final = os.path.join(OUT, f"{stem}.png")
+    part = os.path.join(OUT, f".{stem}.png.part")
+    bpy.data.images["Render Result"].save_render(filepath=part, scene=scene)
+    verify_png(part, size, scene.render.image_settings.color_mode)
+    os.replace(part, final)
+    print(f"  wrote {stem}.png ({os.path.getsize(final)} bytes, checked)")
 
 
 def remove(objs) -> None:
@@ -262,6 +320,7 @@ def main() -> None:
     configure(colours)
     os.makedirs(OUT, exist_ok=True)
     print("\nlibrary_render")
+    print(f"  cleared {clear_renders()} old file(s) from {OUT}")
     print(f"  colours from: {source}")
     undressed = sorted(o.name for o in meshes() if o.name not in styles)
     assert not undressed, f"nodes with no colour (would render magenta): {undressed}"
