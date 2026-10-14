@@ -78,6 +78,17 @@ the integration branch later without conflicts.
   lowest drawn vertex 0.0035 m (shoe sole). CONTROL (arms hanging, rotation.x 0): hand lowest
   y 0.2797 at z 0.0000 → outside the window, so the instrument can tell them apart.
 
+- **Behaviour of the new seams, exercised directly** (scratch `exercise-seams.mts`, not committed;
+  run with `LGP_PARK_RESTART=3` so importing CollisionWorld never starts an acceptance loop):
+  SpritePuffs vs main's HeartPuffs (copied verbatim from origin/main) over 40 frames with the
+  same seeded Rng → worst difference 0, both streams left at the same point; restoreWall →
+  probe z 0.800 blocked / 0.100 free after removeWall / 0.800 again, colliders 1→1, revision
+  1→2→3 and unchanged on a second restore, owner 'library' kept; a seated NpcCharacter whose
+  driver says "walk" stays exactly at (5, 0, 5) for 120 frames, legs 0/0, arm −0.964, facing
+  1.2; separateFrom: sitter moved 0, walker stepped 1.200 m; two sitters 0.3 m apart both left
+  alone; after endSeated she walks off (x 7.39) with the walk cycle back. CONTROLS: the same
+  driver walks an unseated child to x 9.94; two unseated children each move 0.600 m.
+
 ## Red proofs
 - **vitest library-card, `'card'` deleted from INVENTORY_KINDS** (src/state/types.ts, the
   `'card',` line under its doc block), `pnpm exec vitest run test/store/library-card.test.ts`
