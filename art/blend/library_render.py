@@ -350,6 +350,20 @@ def main() -> None:
         remove([post, floor])
     print(f"    each beside a {child_h:.2f} m post (KID_HEIGHT, kid.ts via library_build)")
 
+    # --- the secret shelf swung fully open, seen from behind ----------------
+    # Its back panel and its hinge end are what a child walking into the den
+    # sees, and no other picture shows them square on. The game's
+    # `rotation.y` −π/2 is −90° about Blender Z, about the asset's origin —
+    # which is the hinge.
+    hide_all()
+    made = place_asset("secretShelf", (0.0, 0.0, 0.0), yaw=-90.0)
+    made.append(standin("open-floor", (6.0, 6.0, 0.1), (0.3, -2.0, -0.05), values[FLOOR]))
+    made.append(standin("open-child", (0.42, 0.42, child_h), (1.6, -1.0, child_h * 0.5), values[POST]))
+    for o in made:
+        o.hide_render = False
+    shoot("secretShelf-open", made, 115.0, GAME_ELEVATION, cam, 1.1)
+    remove(made)
+
     # --- faces: eye dots at the stored anchors, through the head's UVs -------
     scene = bpy.context.scene
     scene.display.shading.color_type = "TEXTURE"

@@ -77,8 +77,9 @@ the canvas's top-left corner.
 
 **The numbers a painter needs travel in the asset, not in a comment.** Each
 faced head node carries custom properties that ``library_export.py`` ships as
-glTF node ``extras`` (``readGlbParts``' ``extras``, ``GLTFLoader``'s
-``userData``): ``face_eyes_uv`` — the two eye centres ``[uL, vL, uR, vR]``,
+glTF node ``extras`` (``GLTFLoader``'s ``userData``), and ``pack:library``
+copies them verbatim into the typed ``LIBRARY_FACES`` beside the bytes in
+``libraryGlb.ts``: ``face_eyes_uv`` — the two eye centres ``[uL, vL, uR, vR]``,
 ``L`` being the creature's own left (+X here, the canvas's right half) —
 ``face_window_m`` — the canvas's ``[width, height]`` in metres, for painting a
 round eye round — and, on the owl, ``face_rim_uv`` — the inner radius of her
@@ -663,7 +664,11 @@ CONTRACT = {
                      "height": (AT_MOST, 0.05)},
     # Depth allows 1.10: a toy-sized head with a beak and glasses in front of
     # it is deeper than the first cut's 0.99 (which sat at the old 1.00 limit).
+    # skullOverHeight is ART_DIRECTION §4's ratio — the bare skull over the
+    # whole height, ears and all — held at the bottom of the 55–67% band every
+    # character sits in after the cartoon pass (the first cut was 49%).
     "owl": {"height": (EXACT, OWL_HEIGHT), "headOverBody": (AT_LEAST, 1.10),
+            "skullOverHeight": (AT_LEAST, 0.55),
             "width": (AT_MOST, 1.30), "depth": (AT_MOST, 1.10)},
     # Head wider than the body (ART_DIRECTION §4). Measured against the body
     # *node*, paws and haunches included, which is stricter than the torso.
@@ -1331,6 +1336,10 @@ def build_owl() -> None:
     head_c = (0.0, -0.02, body_top - 0.19 + head_r[2])
     hz = head_c[2]
     head.at(*ellipsoid(*head_r, 3), *head_c)
+    # The bare skull's top and bottom, for §4's skull-over-height ratio: they
+    # go through normalise() with the mesh, so the ratio is the built one.
+    a.mark("skullLo", 0.0, head_c[1], hz - head_r[2])
+    a.mark("skullHi", 0.0, head_c[1], hz + head_r[2])
     # Ear tufts, the left one tipped further out — the asymmetric feature.
     head.add(*ellipsoid(0.085 * H, 0.07 * H, 0.17 * H, 2), matrix=place(0.30 * H, 0.0, hz + 0.33 * H, ry=22.0))
     head.add(*ellipsoid(0.085 * H, 0.07 * H, 0.17 * H, 2), matrix=place(-0.30 * H, 0.0, hz + 0.32 * H, ry=-32.0))
@@ -1882,6 +1891,14 @@ def m_reader_board(axis: int) -> float:
     return max(w[axis] for w in boards[0]) - min(w[axis] for w in boards[0])
 
 
+def m_skull_over_height(asset: str) -> float:
+    """ART_DIRECTION §4's ratio: the bare skull (between its two landmarks,
+    which went through every transform the mesh did) over the asset's whole
+    measured height."""
+    marks = ASSETS[asset].marks
+    return (marks["skullHi"].z - marks["skullLo"].z) / m_size(asset, 2)
+
+
 def m_head_over_body(head: str, body: str) -> float:
     hlo, hhi = node_bounds(head)
     blo, bhi = node_bounds(body)
@@ -1906,6 +1923,7 @@ MEASURE = {
     ("reader-cover", "boardWidth"): lambda: m_reader_board(0),
     ("reader-cover", "boardHeight"): lambda: m_reader_board(1),
     ("owl", "headOverBody"): lambda: m_head_over_body("owl-head", "owl-body"),
+    ("owl", "skullOverHeight"): lambda: m_skull_over_height("owl"),
     ("dragon", "headOverBody"): lambda: m_head_over_body("dragon-head", "dragon-body"),
     ("dragon", "length"): lambda: m_length("dragon"),
     ("dragonNest", "diameter"): lambda: m_length("dragonNest"),

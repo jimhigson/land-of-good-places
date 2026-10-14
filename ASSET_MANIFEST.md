@@ -561,18 +561,20 @@ librarian), `dragon` and `dragonNest`, and `cat`. Node names are hyphenated —
 `library_export.py` → `src/art/assets/library.glb` →
 `scripts/pack-library-asset.mts` → `libraryGlb.ts`; `pnpm run blend:library`
 runs all three, and `pnpm run render:library` writes
-`art/renders/library/*.png` (31 pictures: one per asset beside a child-height
-post, the three faces with eye dots at the shipped anchors, the exterior with
-children at the door, a corner of the reading room, the secret shelf swung
-open onto the den, and every interior asset in elevation against the rig's
-hip and reach lines). Budget 450 KB, a hard gate in the pack step; the size on
+`art/renders/library/*.png` (32 pictures: one per asset beside a child-height
+post, the secret shelf swung fully open seen from behind, the three faces with
+eye dots at the shipped anchors, the exterior with children at the door, a
+corner of the reading room, the secret shelf swung open onto the den, and
+every interior asset in elevation against the rig's hip and reach lines). A
+run clears the folder first and writes each picture through a checked
+part-file, so the set on disk is always one run's. Budget 450 KB, a hard gate in the pack step; the size on
 the day is in `libraryGlb.ts`'s header. Shape only: no colour, no material.
 
 - **Every CONTRACT figure is asserted against the emitted vertices on every
   build** — sizes, the step rise, the door opening (found by rays), every shelf
   row's clear height (by rays, with a control), the seats, the secret shelf's
-  hinge and its sameness to the shelf, and `headOverBody` for the owl and the
-  dragon (ART_DIRECTION §4). The build also asserts every origin family
+  hinge and its sameness to the shelf, `headOverBody` for the owl and the
+  dragon, and the owl's `skullOverHeight` (ART_DIRECTION §4). The build also asserts every origin family
   (FLOOR, HINGE, PIVOT), every pivot sits inside the parts it joins, every
   closed piece faces outward, and no creature had to be stretched more than 8%
   to fit its brief.
@@ -587,11 +589,13 @@ the day is in `libraryGlb.ts`'s header. Shape only: no colour, no material.
   reptile kit's way, so paint them through `planarUvCanvasTexture`. The
   figures a painter needs **travel in the asset** as node extras —
   `face_eyes_uv`, `face_window_m`, and the owl's `face_rim_uv` (the room inside
-  her glasses) — measured off the geometry by the build, read with
-  `readGlbParts(...).get(node).extras`. Nobody types them.
+  her glasses) — measured off the geometry by the build, and copied by the
+  packer into the typed `LIBRARY_FACES` in `libraryGlb.ts`, which is what the
+  game imports. Nobody types them.
 - **`pnpm run check:library-glb`** (in the gate) reads the shipped bytes: the
   module is the file, the export's rules hold, texcoords appear exactly where
-  face figures do, `v` climbs with height on every face, and `readGlbParts`
-  and `GLTFLoader` agree on every node, extras included. The CONTRACT is the
+  face figures do, `LIBRARY_FACES` is exactly the file's extras, `v` climbs
+  with height on every face, and `readGlbParts` and `GLTFLoader` agree on
+  every node. The CONTRACT is the
   build's to assert; the Engineer's `check:library` (#716) re-measures what the
   game builds against with `visibleBounds()`.
