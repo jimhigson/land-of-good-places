@@ -1,16 +1,20 @@
 import {
   BufferAttribute,
   Color,
+  DataTexture,
   DirectionalLight,
   FrontSide,
   BackSide,
   Group,
   HemisphereLight,
+  type Material,
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
   PlaneGeometry,
   Scene,
+  SRGBColorSpace,
+  type Texture,
   Vector3,
   type MeshToonMaterial,
   type WebGLRenderer,
@@ -19,7 +23,7 @@ import { PALETTE } from '../../../core/palette';
 import { gameStore, type GameState } from '../../../state';
 import { isFacePaintDesign } from '../../../entities/kidDressing';
 import { minTextPx, uiUnitPx } from '../../../core/uiScale';
-import { disposeTree, toonMaterial } from '../../../art/style/materials';
+import { disposeTree, isShared, markShared, toonMaterial } from '../../../art/style/materials';
 import {
   createReaderCover,
   READER_BLOCK_THICKNESS,
@@ -31,7 +35,7 @@ import {
 import { bookById, type LibraryBook } from '../books';
 import { TURN_SECONDS, writeLeaf, type LeafGrid } from './pageCurl';
 import { bookFaces, PAGE_CANVAS_HEIGHT, PageArtist, type PageFace, type PaintedFace } from './pageFaces';
-import type { ReaderLook } from './pagePictures';
+import { pictureWarmSteps, pinPrograms, type ReaderLook } from './pagePictures';
 
 /**
  * **The library's book reader: a real book, open in front of you** (#717).
@@ -91,6 +95,39 @@ const BOOK_WIDTH = (READER_PAGE_WIDTH + READER_BOARD_OVERHANG) * 2;
 const BOOK_HEIGHT = READER_PAGE_HEIGHT + READER_BOARD_OVERHANG * 2;
 /** Room kept clear for the close button, in UI units (rem): its size plus a gap either side. */
 const CLOSE_BAND_UNITS = 4.6;
+
+let paper: Texture | null = null;
+
+/**
+ * The paper a face shows until its own canvas is painted: one cream texel,
+ * shared. Every page material starts with it, so a page always has a map and
+ * only ever needs the one shader program — never a map-less one first and a
+ * mapped one the moment its picture lands.
+ */
+function paperPlaceholder(): Texture {
+  if (!paper) {
+    const cream = PALETTE.signBoard;
+    const texel = new Uint8Array([(cream >> 16) & 0xff, (cream >> 8) & 0xff, cream & 0xff, 0xff]);
+    const texture = new DataTexture(texel, 1, 1);
+    texture.colorSpace = SRGBColorSpace;
+    texture.needsUpdate = true;
+    paper = markShared(texture);
+  }
+  return paper;
+}
+
+/** A turning leaf's two materials: its front drawn front-side-only, its back back-side-only. */
+function leafMaterials(): [MeshToonMaterial, MeshToonMaterial] {
+  return [
+    toonMaterial(0xffffff, { side: FrontSide, map: paperPlaceholder() }),
+    toonMaterial(0xffffff, { side: BackSide, map: paperPlaceholder() }),
+  ];
+}
+
+/** A fixed page's material. */
+function pageMaterial(): MeshToonMaterial {
+  return toonMaterial(0xffffff, { map: paperPlaceholder() });
+}
 
 /** A leaf of paper: one geometry, a front face and a back face. */
 interface Leaf {
@@ -159,7 +196,16 @@ export class BookReader {
 
   private readonly onFinished: (book: LibraryBook) => void;
   private readonly onClosed: (() => void) | null;
+  private readonly renderer: WebGLRenderer;
   private readonly artist: PageArtist;
+  /**
+   * One material for every shader program the reader draws with, kept for
+   * good: three destroys a program when the last material using it is
+   * disposed, and every book's own materials are disposed when it closes.
+   */
+  private readonly pinned: Material[] = [];
+  /** The warm-up still to run, or null before it is first asked for — see {@link warmStep}. */
+  private warmQueue: (() => void)[] | null = null;
   /** The game's canvas — what the book is drawn into, so what the buttons are measured against. */
   private readonly canvas: HTMLCanvasElement;
   /** Leans the book back; the book's own frame (spine base at the origin) hangs off it. */
@@ -196,6 +242,7 @@ export class BookReader {
   constructor(options: BookReaderOptions) {
     this.onFinished = options.onFinished;
     this.onClosed = options.onClosed ?? null;
+    this.renderer = options.renderer;
     this.artist = new PageArtist(options.renderer);
     this.canvas = options.renderer.domElement;
 
@@ -306,6 +353,9 @@ export class BookReader {
   openBook(bookId: string): boolean {
     const book = bookById(bookId);
     if (!book) return false;
+    // Already done behind the bus ride, normally; a deep link straight into a
+    // book pays it here, once.
+    this.ensureWarm();
     if (this.open) this.teardown();
     this.book = book;
     this.faces = bookFaces(book);
@@ -327,8 +377,12 @@ export class BookReader {
     this.root.dataset.open = 'true';
     this.build(book);
     this.layout();
-    // The first two spreads straight away; the rest a face a frame (`update`).
-    for (let face = 0; face < Math.min(4, this.faces.length); face += 1) this.ensurePainted(face);
+    // The two faces on show straight away; the rest a face a frame (`update`)
+    // — a picture is a render and a readback, and four in the opening frame
+    // was a hitch you could feel.
+    const { left, right } = this.visibleFaces();
+    this.ensurePainted(left);
+    this.ensurePainted(right);
     this.refreshButtons();
     this.nextButton.focus({ preventScroll: true });
     return true;
@@ -405,10 +459,56 @@ export class BookReader {
         else if (queued === -1) this.previous();
       }
     }
-    // One face a frame, never more: a picture is a render and a readback, and
-    // the rest of the book can wait the few frames it takes to be read.
-    const pending = this.painted.findIndex((face) => face === null);
-    if (pending >= 0) this.ensurePainted(pending);
+    // One face a frame, never more, and never while a page is turning: a
+    // picture is a render and a readback, and the rest of the book can wait
+    // the few frames it takes to be read. A turn paints the faces it needs
+    // itself, before it starts.
+    if (!this.turn) {
+      const pending = this.painted.findIndex((face) => face === null);
+      if (pending >= 0) this.ensurePainted(pending);
+    }
+  }
+
+  // ------------------------------------------------------------- warm-up
+
+  /**
+   * Runs one step of compiling every shader program the reader draws with,
+   * and returns whether any are left — for a warm-up that slices its work
+   * across frames (the bus ride does, after the park's own; see
+   * `boot/shaderWarmup.ts` for why it matters). The steps: the book itself,
+   * under the reader's lamp, and every picture model under both picture rigs
+   * (`pagePictures.ts`'s `pictureWarmSteps`). One material per program is
+   * pinned for good, so no book ever links a program again.
+   */
+  warmStep(): boolean {
+    if (!this.warmQueue) {
+      this.warmQueue = [
+        () => this.warmBook(),
+        ...pictureWarmSteps(this.renderer, readerLookFromPlayer(gameStore.get()), this.pinned),
+      ];
+    }
+    this.warmQueue.shift()?.();
+    return this.warmQueue.length > 0;
+  }
+
+  /** Whatever of the warm-up has not run yet, all at once. */
+  private ensureWarm(): void {
+    while (this.warmStep()) {
+      // Each call runs one step.
+    }
+  }
+
+  /** The book's own programs: a cover, a leaf front and back and a fixed page, under the reader's lights. */
+  private warmBook(): void {
+    const set = new Group();
+    set.add(createReaderCover(PALETTE.blossomPink).root);
+    const [front, back] = leafMaterials();
+    const leaf = new PlaneGeometry(READER_PAGE_WIDTH, READER_PAGE_HEIGHT);
+    set.add(new Mesh(leaf, front), new Mesh(leaf, back));
+    set.add(new Mesh(new PlaneGeometry(READER_PAGE_WIDTH, READER_PAGE_HEIGHT), pageMaterial()));
+    this.renderer.compile(set, this.camera, this.scene);
+    this.renderer.compile(this.backdrop, this.camera);
+    pinPrograms(this.renderer, set, this.pinned, new Set());
   }
 
   /** Draws the book over whatever has already been drawn this frame. */
@@ -497,8 +597,9 @@ export class BookReader {
     for (let index = 0; index < leafCount; index += 1) {
       const geometry = new PlaneGeometry(READER_PAGE_WIDTH, READER_PAGE_HEIGHT, LEAF_GRID.columns, LEAF_GRID.rows);
       const positions = geometry.getAttribute('position').array as Float32Array;
-      const front = new Mesh(geometry, toonMaterial(0xffffff, { side: FrontSide }));
-      const back = new Mesh(geometry, toonMaterial(0xffffff, { side: BackSide }));
+      const [frontMaterial, backMaterial] = leafMaterials();
+      const front = new Mesh(geometry, frontMaterial);
+      const back = new Mesh(geometry, backMaterial);
       front.name = `reader.leaf${index}.front`;
       back.name = `reader.leaf${index}.back`;
       // The leaf moves; its bounds are not worth keeping in step for a culling
@@ -513,10 +614,7 @@ export class BookReader {
 
   /** A fixed page lying on the paper block: −1 the left, +1 the right. */
   private flatPage(side: -1 | 1, z: number): Mesh {
-    const mesh = new Mesh(
-      new PlaneGeometry(READER_PAGE_WIDTH, READER_PAGE_HEIGHT),
-      toonMaterial(0xffffff),
-    );
+    const mesh = new Mesh(new PlaneGeometry(READER_PAGE_WIDTH, READER_PAGE_HEIGHT), pageMaterial());
     mesh.position.set((side * READER_PAGE_WIDTH) / 2, READER_PAGE_HEIGHT / 2, z);
     mesh.name = side < 0 ? 'reader.page.left' : 'reader.page.right';
     this.bookRoot.add(mesh);
@@ -568,7 +666,8 @@ export class BookReader {
         painted.texture.repeat.set(-1, 1);
         painted.texture.offset.set(1, 0);
       }
-      material.map?.dispose();
+      // The paper placeholder is shared; only a face's own canvas is this one's to free.
+      if (material.map && !isShared(material.map)) material.map.dispose();
       material.map = painted.texture;
       material.needsUpdate = true;
     } else {
@@ -631,7 +730,7 @@ export class BookReader {
           if (this.paintedFloor[i] !== this.minFontPx && this.painted[i]) {
             this.painted[i]?.texture.dispose();
             const mesh = this.faceMesh(i);
-            if (mesh) (mesh.material as MeshToonMaterial).map = null;
+            if (mesh) (mesh.material as MeshToonMaterial).map = paperPlaceholder();
             this.painted[i] = null;
           }
         }

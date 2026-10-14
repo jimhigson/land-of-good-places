@@ -1178,9 +1178,23 @@ function rideInThenPlay(
     // costs a child nothing. Without this, 64 of the park's 116 programs
     // compiled while she was walking about, one of them freezing a frame for
     // 1.29 s. See `boot/shaderWarmup.ts`.
+    //
+    // Then the library's book reader (#717), behind the same bus and on the
+    // same budget: it draws in its own scene, under its own lamp, and its
+    // pictures into render targets under their own light rigs, so not one of
+    // the park's programs serves it — a first book opened cold would link a
+    // dozen mid-frame. Whole steps only, like the park's slices.
     if (warmup && director.shouldWarmShaders()) {
-      warmup.advance(director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS));
-      if (warmup.ready) director.noteWarmupReady();
+      const budget = director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS);
+      if (!warmup.ready) {
+        warmup.advance(budget);
+      } else if (handOverGame) {
+        const reader = handOverGame.bookReader;
+        const started = performance.now();
+        let more = true;
+        while (more && performance.now() - started < budget) more = reader.warmStep();
+        if (!more) director.noteWarmupReady();
+      }
     }
 
     if (director.readyToHandOver) finish();

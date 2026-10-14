@@ -33,7 +33,11 @@
  * 5. **All twelve books resolve.** Each is opened in turn and every face
  *    painted: 4–6 pages, an even number of faces, every texture a real canvas,
  *    every picture's model coverage — read off the rendered *pixels* — above
- *    nothing, and every face with words at or above the floor.
+ *    nothing, and every face with words at or above the floor. And **no book
+ *    links a shader program**: after the first book (which warms them all —
+ *    the bus ride does it in a real arrival), opening and painting each of the
+ *    others must call `linkProgram` exactly zero times. A link count is the
+ *    same on every machine, unlike the milliseconds a link costs.
  * 6. **Reading to the end files a bookmark, and the bookmark reopens it.** One
  *    book is turned to its last page, the Cute-o-dex is opened, its bookmark
  *    must be there and pressable, and pressing it must open that book again.
@@ -329,6 +333,18 @@ try {
   const first = VIEWPORTS[0];
   const page = await browser.newPage({ viewport: { width: first.width, height: first.height } });
   page.on('pageerror', (error) => pageErrors.push(String((error as Error)?.stack ?? error)));
+  // Every program link the page makes, counted from before its first script.
+  await page.addInitScript(() => {
+    const counter = { links: 0 };
+    (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks = counter;
+    for (const proto of [WebGL2RenderingContext.prototype, WebGLRenderingContext.prototype]) {
+      const link = proto.linkProgram;
+      proto.linkProgram = function (this: WebGLRenderingContext, program: WebGLProgram): void {
+        counter.links += 1;
+        link.call(this, program);
+      };
+    }
+  });
 
   // 1. The deep link opens the reader, as a mode.
   said.push(`\n/book?id=${FIRST}&seed=${SEED}:`);
@@ -458,8 +474,19 @@ try {
   // 5. All twelve books.
   said.push('\nall twelve books:');
   for (const book of BOOKS) {
-    await page.evaluate((id) => (window as unknown as { game: any }).game.bookReader.openBook(id), book.id);
+    const linksBefore = await page.evaluate((id) => {
+      const before = (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links;
+      (window as unknown as { game: any }).game.bookReader.openBook(id);
+      return before;
+    }, book.id);
     await waitPainted(page);
+    await page.waitForTimeout(200);
+    const linksAfter = await page.evaluate(() => (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links);
+    assert(
+      linksAfter === linksBefore,
+      `${book.id} opens without linking a shader program`,
+      `${linksAfter - linksBefore} program link(s) while it opened and painted`,
+    );
     const measured = await measureFaces(page);
     const pages = book.pages.length;
     assert(pages >= BOOK_MIN_PAGES && pages <= BOOK_MAX_PAGES, `${book.id} page count`, `${pages} pages`);

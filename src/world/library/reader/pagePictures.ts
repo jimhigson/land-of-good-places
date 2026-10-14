@@ -3,10 +3,12 @@ import {
   DirectionalLight,
   Group,
   HemisphereLight,
+  type Material,
   Mesh,
   type Object3D,
   PerspectiveCamera,
   Scene,
+  type Texture,
   Vector3,
   WebGLRenderTarget,
   type WebGLRenderer,
@@ -14,7 +16,7 @@ import {
 import { PALETTE } from '../../../core/palette';
 import { ART } from '../../../art/style/artPalette';
 import { blob, type AssetHandle, type CreatureHandle } from '../../../art/style/asset';
-import { disposeTree, solid, toonMaterial } from '../../../art/style/materials';
+import { disposeTree, isShared, solid, toonMaterial } from '../../../art/style/materials';
 import { visiblePoints } from '../../../art/style/measure';
 import { createPet } from '../../../art/models/pets';
 import { createBiscuit } from '../../../art/models/biscuit';
@@ -35,7 +37,7 @@ import { RIDE_SCALE } from '../../railRace/dimensions';
 import { poseRailRaceRider, riderLegsShow, SEATED, setRiderLegsVisible } from '../../railRace/duckPose';
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../../railRace/hazards';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../../../state';
-import type { PagePicture, PictureActor } from '../books';
+import { BOOKS, PICTURE_MODELS, type PagePicture, type PictureActor } from '../books';
 
 /**
  * **A page's picture: the park's own models, rendered to a texture** (#717).
@@ -76,6 +78,18 @@ import type { PagePicture, PictureActor } from '../books';
  * small canvas (`pageFaces.ts`) for as long as the book is open. Everything
  * built for a picture — the models and the hill under them — is disposed
  * straight after the render.
+ *
+ * ## Shader programs: not the park's
+ *
+ * A picture is drawn into a render target, which three draws with no tone
+ * mapping and a linear output, under this file's own light rigs — every one
+ * of those is in a program's cache key, so not one of the park's compiled
+ * programs serves a picture. Left alone, the first picture of each model would
+ * link its programs mid-frame, and disposing a picture's materials straight
+ * after would hand those programs back to be destroyed and linked again for
+ * the next book. {@link pictureWarmSteps} compiles every model under both
+ * rigs, into a bound render target, a step at a time behind the bus ride, and
+ * pins one material per program so three never destroys them.
  */
 
 /** Width and height of a rendered picture, in pixels. 7:6 — the shape of the picture box on a page. */
@@ -396,6 +410,107 @@ function addLights(scene: Scene, picture: PagePicture): void {
   const rim = new DirectionalLight(ART.cream, 1.1);
   rim.position.set(-1, 2.2, -3.4);
   scene.add(rim);
+}
+
+/**
+ * **The steps that compile every program a picture can need**, to be run a
+ * few at a time (the bus ride's warm-up does; the reader runs whatever is left
+ * before the first book opens).
+ *
+ * Every model in `PICTURE_MODELS` as `buildActor` builds it, every variant a
+ * book actually asks for (a balloon, keyring or breakfast of its own kind),
+ * and the hill — each compiled under the day rig and the night rig with a
+ * render target bound, so the variants linked are exactly the ones a picture
+ * asks for (`renderer.compile` reads the bound target). Then one material per
+ * program is kept in `pins` for good, and everything else is let go. Nothing
+ * here is ever drawn, so no texture or buffer is ever uploaded.
+ */
+export function pictureWarmSteps(renderer: WebGLRenderer, look: ReaderLook, pins: Material[]): (() => void)[] {
+  const actors = new Map<string, PictureActor>();
+  for (const model of PICTURE_MODELS) actors.set(model, { model });
+  for (const book of BOOKS) {
+    for (const picture of [book.titlePicture, ...book.pages.map((page) => page.picture)]) {
+      for (const actor of picture.cast) {
+        if (actor.variant !== undefined) actors.set(`${actor.model}:${actor.variant}`, { model: actor.model, variant: actor.variant });
+      }
+    }
+  }
+  const built: Object3D[] = [];
+  const camera = new PerspectiveCamera(PICTURE_FOV, PICTURE_WIDTH / PICTURE_HEIGHT, 0.05, 100);
+  const rigs = [false, true].map((night) => {
+    const scene = new Scene();
+    addLights(scene, { cast: [], sky: 'skyDayBottom', night });
+    return scene;
+  });
+  const steps: (() => void)[] = [];
+  for (const actor of actors.values()) {
+    steps.push(() => built.push(buildActor(actor, look).root));
+  }
+  // The hill under every grounded picture: a plain toon dome.
+  steps.push(() => built.push(blob(6, toonMaterial(PALETTE.grass), [1, 0.15, 1], 64)));
+  for (let index = 0; index <= actors.size; index += 1) {
+    for (const rig of rigs) {
+      steps.push(() => {
+        const actor = built[index];
+        if (actor) compileIntoTarget(renderer, actor, camera, rig);
+      });
+    }
+  }
+  steps.push(() => {
+    const held = new Set<unknown>();
+    for (const actor of built) pinPrograms(renderer, actor, pins, held);
+    built.length = 0;
+  });
+  return steps;
+}
+
+/** `renderer.compile`, with a render target bound the way `renderPicture` binds one. */
+function compileIntoTarget(renderer: WebGLRenderer, subject: Object3D, camera: PerspectiveCamera, rig: Scene): void {
+  const target = new WebGLRenderTarget(1, 1);
+  const previous = renderer.getRenderTarget();
+  try {
+    renderer.setRenderTarget(target);
+    renderer.compile(subject, camera, rig);
+  } finally {
+    renderer.setRenderTarget(previous);
+    target.dispose();
+  }
+}
+
+/**
+ * Keeps, in `pins`, one material for every shader program `root`'s materials
+ * were compiled to that no pin holds yet — a program lives exactly as long as
+ * some material using it does — and lets everything else go: the other
+ * materials are disposed, every geometry the tree owns too, and a kept
+ * material drops its own textures (a program needs none of them, and a
+ * creature's face is five 512² canvases).
+ */
+export function pinPrograms(renderer: WebGLRenderer, root: Object3D, pins: Material[], held: Set<unknown>): void {
+  root.traverse((object) => {
+    const mesh = object as Partial<Mesh>;
+    const materials: Material[] = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+    for (const material of materials) {
+      if (isShared(material) || pins.includes(material)) continue;
+      const programs = (renderer.properties.get(material) as { programs?: Map<string, unknown> }).programs;
+      const fresh = programs ? [...programs.values()].filter((program) => !held.has(program)) : [];
+      if (fresh.length === 0) {
+        material.dispose();
+        continue;
+      }
+      for (const program of fresh) held.add(program);
+      pins.push(material);
+      const slots = material as unknown as Record<string, unknown>;
+      for (const [key, value] of Object.entries(slots)) {
+        if ((value as Partial<Texture> | null)?.isTexture === true && !isShared(value as Texture)) slots[key] = null;
+      }
+      for (const [key, value] of Object.entries(material.userData)) {
+        if (Array.isArray(value) && value.some((item) => (item as Partial<Texture>)?.isTexture === true)) {
+          material.userData[key] = [];
+        }
+      }
+    }
+    if (mesh.geometry && !isShared(mesh.geometry)) mesh.geometry.dispose();
+  });
 }
 
 /** linear 0..1 → sRGB 0..255, the standard transfer curve. */
