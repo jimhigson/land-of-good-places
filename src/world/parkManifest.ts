@@ -330,9 +330,10 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
   // The Library (#714/#716, Jim, 13 Oct 2026): a classic pillared library —
   // steps, six fat columns, a pediment with a book carved in it — whose door
   // leads to a dim one-floor reading room that is its own space
-  // (`world/library/`). The plinth is 18 x 14 m; plots are axis-aligned and
-  // the camera-facing door turns it 45 degrees, so the plot is the circle that
-  // holds the plinth at that turn (`LIBRARY_FOOTPRINT_RADIUS`). The doormat
+  // (`world/library/`). Every size here is the drawn shell's own, measured off
+  // `library.glb` (`art/models/libraryKit.ts`); plots are axis-aligned and the
+  // camera-facing door turns the building 45 degrees, so the plot is the circle
+  // that holds the plinth at any turn (`LIBRARY_FOOTPRINT_RADIUS`). The doormat
   // stands a spur's paved half-width (plus the router's margin) out past the
   // foot of the steps, and the paving runs on across the forecourt to the
   // steps and `DOOR_PAVING_OVERLAP` in under the lower tread — lawn she walks,

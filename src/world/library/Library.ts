@@ -57,7 +57,7 @@ import {
  * `bandCrossed` against `Player.previousPosition`, so a long frame cannot skip
  * it) changes space through `SpaceManager` into the reading room, a disjoint
  * flat space at (-600, -600) — a hotel room in shape, open-topped for the
- * camera, 36 x 26 m behind an 18 x 14 m facade. Walking out of the room's
+ * camera, 36 x 26 m behind a facade half its width. Walking out of the room's
  * doorway puts her back on the plot's doormat. `Hotel.ts` and
  * `ReptileHouse.ts` are the precedent for every one of those moves.
  *

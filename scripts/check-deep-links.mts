@@ -222,6 +222,9 @@ function libraryCheck(path: string, spot: { readonly x: number; readonly z: numb
   };
 }
 
+/** Where `/library?at=` is asked to stand: the secret shelf's stand spot, to the centimetre a URL carries. */
+const LIBRARY_AT = { x: Number(LIBRARY_SECRET_STAND.x.toFixed(2)), z: Number(LIBRARY_SECRET_STAND.z.toFixed(2)) };
+
 /** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
 const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
 
@@ -232,7 +235,7 @@ const CHECKS: DeepLinkCheck[] = [
   // Primed inside the room (the plain link lands at the arrival), so the
   // returning-save run is the case that must still move her: restored inside,
   // then asked for a spot in it.
-  { ...libraryCheck(`/library?at=${LIBRARY_SECRET_STAND.x},${LIBRARY_SECRET_STAND.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_SECRET_STAND, LIBRARY_SECRET_STAND.what), primerPath: '/library' },
+  { ...libraryCheck(`/library?at=${LIBRARY_AT.x},${LIBRARY_AT.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_AT, LIBRARY_SECRET_STAND.what), primerPath: '/library' },
   {
     // Outside the Library's door, in the park, on the plot's own doormat.
     path: '/library-door',
