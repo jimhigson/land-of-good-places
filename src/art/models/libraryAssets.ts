@@ -91,11 +91,16 @@ const STYLES: Readonly<Record<string, PartStyle>> = {
   'shell-steps': { colour: PALETTE.stoneGrey, outline: 0.03 },
   'shell-walls': { colour: PALETTE.stonePink, outline: 0.03 },
   'shell-windows': { colour: PALETTE.buildingWindowWarm, glow: true },
-  'shell-door': { colour: PALETTE.woodDark, outline: 0.02 },
+  // The door and the carved book draw no outline: neither is part of the
+  // building's silhouette (ART_DIRECTION §4 — outline what defines the shape),
+  // and each hull lands exactly on a face of the Artist's (the door's centre
+  // strip on the plinth's top, the book's raised lines on its own page block),
+  // which check:coplanar rightly calls a seam.
+  'shell-door': { colour: PALETTE.woodDark },
   'shell-columns': { colour: ART.cream, outline: 0.03 },
   'shell-entablature': { colour: ART.cream, outline: 0.03 },
   'shell-pediment': { colour: ART.creamDark, outline: 0.03 },
-  'shell-pedimentBook': { colour: PALETTE.liftFrame, outline: 0.02 },
+  'shell-pedimentBook': { colour: PALETTE.liftFrame },
   'shell-roof': { colour: PALETTE.buildingRoofDeep, outline: 0.03 },
 
   // --- the bookcases ----------------------------------------------------------
@@ -107,7 +112,9 @@ const STYLES: Readonly<Record<string, PartStyle>> = {
   // --- furniture --------------------------------------------------------------
   'desk-body': { colour: PALETTE.woodDark, outline: 0.02 },
   'desk-top': { colour: PALETTE.woodLight, outline: 0.018 },
-  'readingLamp-stem': { colour: PALETTE.liftFrame, outline: 0.01 },
+  // No outline on the lamp's brass: a hair-thin stem needs none, and its
+  // hull's foot would lie in the plane of the desk or table it stands on.
+  'readingLamp-stem': { colour: PALETTE.liftFrame },
   'readingLamp-shade': { colour: PALETTE.buildingWindowWarm, glow: true },
   'floorLamp-base': { colour: PALETTE.woodDark, outline: 0.016 },
   'floorLamp-stem': { colour: PALETTE.liftFrame, outline: 0.01 },

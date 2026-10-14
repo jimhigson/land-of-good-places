@@ -37,8 +37,17 @@ export const LIBRARY_POOL_DISTANCE = 11;
 /** The point lights a room in this park may spend. */
 export const LIBRARY_LIGHT_BUDGET = 8;
 
-const FILL_INTENSITY = 0.7;
-const KEY_INTENSITY = 0.45;
+/**
+ * The fill and the key: low, and exactly high enough that the room's darkest
+ * floor — the aisles between the stacks, out of every lamp's reach, lit by
+ * these two alone — renders brighter than `PALETTE.ink` **without** the
+ * interior materials' own lift (`check:library`'s LIGHT clause: 0.0536 there
+ * against ink's 0.0509, measured). The lift then carries it on to about twice
+ * ink, so the shadows are plum, never black, while the hotel's fill (1.05 of
+ * full daylight) and key (1.55) keep this room far the dimmest in the park.
+ */
+const FILL_INTENSITY = 1.05;
+const KEY_INTENSITY = 0.675;
 
 export interface PoolSpot {
   readonly id: string;

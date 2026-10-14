@@ -2,29 +2,30 @@
  * **The Library's layout — where everything stands, and the one owner of
  * every shared position** (#716, part 2 of epic #714).
  *
- * A leaf module: it imports `core/constants` and nothing else, so the park
- * manifest, the path router, the colliders, the checks and the procgen
+ * Light on purpose: it imports `core/constants` and the kit's bare geometry
+ * (`art/models/libraryKit.ts` — the glb, read, with no materials), so the
+ * park manifest, the path router, the colliders, the checks and the procgen
  * invariants can all read the same figure without dragging the building in.
  * `hotel/towerDimensions.ts` and `reptileHouse/layout.ts` are the precedent.
  *
  * **What this file owns, and what it does not.** It owns *where* things go:
  * the reading room's plate, the door, the arrival, every bookcase's spot and
  * facing, every piece of furniture's spot, every place a child must be able
- * to stand ({@link LIBRARY_STAND_SPOTS}, read by `props.ts`'s
- * `libraryKeepOuts`). It does **not** own how big a bookcase or a desk is:
- * that is the mesh's own size, measured off the model by
- * `art/models/libraryAssets.ts` (primitives built to the art contract today,
- * `library.glb` measured with `visibleBounds()` once the 3D Artist's #715
- * lands). A wall bookcase is therefore placed by the point on the wall its
- * **back** stands against, and the builder adds half the measured depth —
- * so the day the glb's shelf is 0.62 deep instead of 0.6, nothing here moves
- * and nothing is typed twice.
+ * to stand ({@link libraryStandSpots}, read by `props.ts`'s
+ * `libraryKeepOuts`). It does **not** own how big anything drawn is: that is
+ * `library.glb`'s (#715), measured off the loaded mesh — the bookcase's
+ * footprint here through `libraryKit.ts`, every other size by
+ * `art/models/libraryAssets.ts`. A wall bookcase is therefore placed by the
+ * point on the wall its **back** stands against, and the builder adds the
+ * measured depth — so the day the Artist's shelf is 0.62 deep instead of 0.6,
+ * nothing here moves and nothing is typed twice. Where a child stands in front
+ * of a case is worked out from that same measured depth.
  *
- * The exterior's plan-time numbers ({@link LIBRARY_FOOTPRINT_RADIUS},
- * {@link LIBRARY_BOUNDING_RADIUS}, the door's reach) have to be literals here,
- * because the park is solved before any mesh exists; `Library.ts` measures
- * the model at load and throws if it reaches past any of them — the Reptile
- * House's `REPTILE_LIPS_REACH` rule.
+ * The exterior's plan-time numbers — the plot's radius, its bounding radius,
+ * where the doormat stands — are derived here from the drawn shell's own
+ * vertices (`LIBRARY_EXTERIOR_PLAN`), because the park is solved before any
+ * dressed mesh exists; `Library.ts` measures the dressed model, outlines and
+ * all, and throws if it reaches past the plot.
  *
  * ## Frames
  *

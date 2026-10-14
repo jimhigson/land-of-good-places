@@ -80,6 +80,14 @@ const BOOK_SEED = 0x11b7a7;
 
 /** How far a book's spine stands back from the front edge of the board it stands on. */
 const SPINE_INSET = 0.01;
+/**
+ * The gap at each end of a row of books, between the last spine and the side
+ * panel: a finger's width, and clear of the panel's ink outline by more than
+ * `check:coplanar`'s near-plane centimetre, so no book's side shares a plane
+ * with the case's hull.
+ */
+const ROW_END_GAP = 0.05;
+
 /** The gap left on a shelf for a readable book's slot (#718), either side of its middle. */
 const SLOT_HALF = 0.1;
 
@@ -144,8 +152,8 @@ function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonl
     const fits = shapes.map((shape, index) => ({ shape, index })).filter(({ shape }) => shape.height <= clear - 0.04);
     if (fits.length === 0) return;
     const gaps = slots.filter((slot) => slot.shelf === shelf).map((slot) => [slot.along - SLOT_HALF, slot.along + SLOT_HALF] as const);
-    let x = -size.innerHalf + 0.03;
-    const end = size.innerHalf - 0.03;
+    let x = -size.innerHalf + ROW_END_GAP;
+    const end = size.innerHalf - ROW_END_GAP;
     while (x < end) {
       // Now and then a short gap, so a shelf reads as books rather than a wall of colour.
       if (rng.chance(0.06)) {
