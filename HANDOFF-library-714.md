@@ -35,7 +35,8 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
         773efb7c, guarded by check:wall-tunnelling — 4d747841.
   - [x] Step 2's remainder: libraryLines.ts + libraryCopyForBrevity + check:brevity's library
         and SECRETS loops — 9f650da1. Both reds proved (below). Groundwork state slice verified.
-  - [ ] Step 0 baselines (foundation code, CI's parks) and the same ten after these edits.
+  - [x] Step 0 baselines (foundation code) and the same ten after these edits: all 0, identical
+        but for brevity's intended +65 (table below).
   - [ ] The PR's CI (run 38580957653 on 8f0cb8c3) read, every job.
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
@@ -244,8 +245,32 @@ instruments and logs: the orchestrator scratchpad's `f714/` (`scratch/*.mts`, `*
   `PARADE_KINDS`; `gameStore.grantKeepsakeOnce`; `world/library/libraryCard.ts`;
   `test/store/library-card.test.ts` in procgen shard 6.
 
-### Step 0 baselines
-BASELINES_PLACEHOLDER
+### Step 0 baselines, and the same ten after this half (Step 1's "identical counts" proof)
+Both trees on **their own seed-5 park**, each built at its own source with `LGP_SEEDS=5
+LGP_RESTART_LANES=4 pnpm run build:parks` (the PR's CI parks were still searching seeds 10 and
+14): the foundation (baseline worktree, 009dea3e, source 6b86bf43…) and this branch (dee13412…)
+both accepted **restart 1, digest 9acd3a626f55d35c**. Runner `f714/run-ten.sh`; logs
+`f714/before/*.log` and `f714/after/*.log`; exit codes read from the files. Counts off the screen:
+
+| check | exit before / after | the counts (foundation; after is identical unless shown) |
+|---|---|---|
+| check:library | 0 / 0 | 55 ✓, 0 ✗, "All clauses passed."; 137 solids; keep-outs 64 of 64 reached; 8785 clear cells, no pocket |
+| check:labels | 0 / 0 | 12570 frames (plaza 4224, castle shops 1278, hotel lobby 708, reptile house 6360); 54 labels registered, up to 8 at once; no overlap |
+| check:tap-spacing | 0 / 0 | 10 spaces, 131 zones, 27 portal bands; 231 zone-band and 20 close zone-zone pairs; 20 same-action overlaps (warnings); OK |
+| check:brevity | 0 / 0 | **285** pieces, 6 recorded exceptions -> after **350** (+45 library lines, +10 library titles, +10 SECRETS rows) |
+| check:assets | 0 / 0 | 130 assets, 47 creatures (32 posed), 28 recorded drift (worst balloon.corgi +0.077 m) |
+| check:hotel | 0 / 0 | 31 children (7 residents), lowest foot y -15.55 after 8 s; 13 props solid, 3 beds soft; 41/41 panes; 3685 lobby spots; 230 doorway marches 0 short; 3893 furniture-wall pairs 0 embedded 9 grazed; 128 portal walk-throughs 0 never arrived; OK |
+| check:reptile-house | 0 / 0 | 129 ✓, 0 ✗, "All clauses passed."; 286 solids; 879 stations on 14 paths, 0 blocked |
+| check:npc-presence | 0 / 0 | 31 NPCs, 18000 frames; crossings 15 in / 12 out; 0 movement elsewhere; 0 disagreements; OK |
+| check:jitter | 0 / 0 | 31 children, 9000 frames; worst own step 0.166 m (Luca); worst speed 4.983 m/s (Luca) |
+| check:climb-wave | 0 / 0 | 38 climbable trees, all 100.0%; hand 18 px vs head 468; rock 6.5 px; aim 0.00° worst / 7.52° max; body 20 px; OK |
+
+**Before and after compared line by line** (timings masked, solver chatter dropped): library,
+labels, tap-spacing, assets, hotel, reptile-house, npc-presence, jitter and climb-wave are
+**identical**; brevity differs in exactly its summary line (285 -> 350) and the two new stderr
+notes. Nothing moved but what this half added. (The shared slice's own baselines were on
+main's park — 49 trees, lowest foot -14.91 — and are not comparable: the library plot moved the
+park.)
 
 ### Step 1 change 5 (d2a7f00e)
 - `LibraryProps.box` returns `BoxWalls` = `[body, leftEnd, rightEnd]`, registered in the same
@@ -290,7 +315,8 @@ dividing by a zero length. Documented on `WallCollider`.
   branch (dee13412, park hydrated from its own `.parks`): **walls 1289, circles 1793;
   zero-length 0; under 1 cm 0; under 10 cm 0; shortest 0.11963 m; CONTROL counted 1.** The
   count covers the interiors (walls by owner: (none) 382, boundary wall 284, hotel 199,
-  library 157, castle 129, reptile house 106, booth 32). Other seeds: ZERO_LENGTH_SEEDS_PLACEHOLDER
+  library 157, castle 129, reptile house 106, booth 32). Other seeds: pending the PR's CI parks
+  artifact (`parks-6b86bf43…`), which was still searching seeds 10 and 14 at 16:30 BST.
 - **Seed 5's park at this branch's source** (`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run
   build:parks`, dee134126611…): restart 0 rejected by check:coplanar (236 s), **restart 1
   accepted (134 measures), digest 9acd3a626f55d35c**, proven by hydration, exit 0 in 523 s —
