@@ -5059,8 +5059,7 @@ kbd {
 }
 
 /* A Cute-o-dex bookmark: a ribbon in the book's own cover colour with a
-   notched tail and a cream stripe. Unread, the shared `.dex-icon--hidden`
-   crushes it to the same silhouette every other `???` card shows. */
+   notched tail and a cream stripe. */
 .dex-bookmark {
   display: block;
   width: 1.5rem;
@@ -5071,4 +5070,13 @@ kbd {
     var(--book-colour, var(--lgp-pink));
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%);
   filter: drop-shadow(0 0.125rem 0 rgba(74, 58, 82, 0.2));
+}
+
+/* Unread, it is the same crushed-out silhouette every other `???` card shows.
+   Its own rule, because the drop shadow above is a `filter` too and, coming
+   later at the same specificity, would otherwise replace `.dex-icon--hidden`'s
+   — leaving each unread ribbon in its real cover colour, which also gives away
+   which book is which. */
+.dex-bookmark.dex-icon--hidden {
+  filter: brightness(0) saturate(0) drop-shadow(0 0.125rem 0 rgba(74, 58, 82, 0.2));
 }
