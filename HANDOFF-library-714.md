@@ -26,6 +26,17 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
       to the PR's CI, as the task says.
 - [x] Draft **PR #720** opened from `feat/library` at 8f0cb8c3 (`gh pr create --draft`); body in
       the orchestrator scratchpad `merge714/pr-body.md`. Not waited for: its CI.
+- [ ] **Foundation, first half** (plan Step 0, Step 1 change 5, Step 2's remainder; Engineer,
+      14 Oct; section "Foundation, first half" below). In parallel, Steps 3-4 on
+      `feat/library-714-assets` (another engineer; its files are not touched here).
+  - [x] Step 0 facts (below).
+  - [x] Step 1 change 5 (props.ts, layout.ts types) — d2a7f00e; **plus a Collision.ts fix the
+        plan did not know it needed** (the zero-length capsule was a ghost to the mover) —
+        773efb7c, guarded by check:wall-tunnelling — 4d747841.
+  - [x] Step 2's remainder: libraryLines.ts + libraryCopyForBrevity + check:brevity's library
+        and SECRETS loops — 9f650da1. Both reds proved (below). Groundwork state slice verified.
+  - [ ] Step 0 baselines (foundation code, CI's parks) and the same ten after these edits.
+  - [ ] The PR's CI (run 38580957653 on 8f0cb8c3) read, every job.
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
       foundation head; then Step 9, Step 10's labels/tap spacing, Step 14 and the cross-part
@@ -165,7 +176,193 @@ World-building checks locally at this source without solving. Any closure edit m
 hash. Outside the closure (measured): check-deep-links.mts, main.ts, Game.ts,
 reader/BookReader.ts. Inside: state/types.ts, library/Library.ts, art/models/libraryAssets.ts.
 
+## Foundation, first half (14 Oct): plan Step 0, Step 1 change 5, Step 2's remainder
+This file replaces the plan's `HANDOFF-library-owl-den.md`. Worktree `.claude/worktrees/library-714`;
+a detached **baseline worktree** `.claude/worktrees/library-714-baseline` at 009dea3e (the
+foundation's code) holds the Step 0 baselines (remove it when they are read). Scratch
+instruments and logs: the orchestrator scratchpad's `f714/` (`scratch/*.mts`, `*.log`).
+
+### Step 0 facts (read off 009dea3e, whose code is 36b32b64's)
+- `src/art/assets/libraryGlb.ts` exports `LIBRARY_GLB_BASE64` (449528 bytes) and `LIBRARY_FACES`
+  with all three heads (cat, dragon, owl), equal to the plan's figures (owl eyes
+  [0.6827, 0.5494, 0.3173, 0.5494], window 1.2272 x 0.9873, rim [0.1073, 0.1296]; dragon eyes
+  v 0.5, window 0.7579 x 0.5125; cat eyes v 0.4423, window 0.3835 x 0.3055).
+- **The glb** (`f714/scratch/glb-facts.mts`, `readGlbParts`): 65 mesh nodes, none rotated or
+  scaled. Every pivot and bound in the plan's "What changed" list holds:
+  - owl: head, beak, glasses at t(0, 0.735, 0.020); wingL t(0.340, 0.698, 0); wingR and
+    heldBook t(-0.340, 0.698, 0); the rest at the origin. Plan reach 0.645 (head +-0.614,
+    glasses front z 0.616); body, bib, buttons and feet alone 0.413 (body x +-0.400); top 1.600.
+  - dragon: head and horns t(-0.044, 0.434, 0.060); tail t(-0.070, 0.128, -0.339); body, belly,
+    spines, wings at the origin; top 0.900 (horns); plan reach 0.682.
+  - nest: pad top 0.145, covers top 0.190, x and z +-0.800, plan reach 0.823.
+  - cat: head t(-0.051, 0.124, 0.040); earL t(-0.018, 0.271, 0.100), earR t(-0.198, 0.271,
+    0.100), siblings of the head; tail t(0.125, 0.058, -0.143); top 0.350.
+  - bookPile: top 0.900, x -0.444..0.444, z -0.309..0.346.
+  - secretShelf-carcass x 0..4, y 0..3.2, z -0.6..0 (origin on its front-left vertical edge);
+    shelf-carcass the same case centred (x +-2, z +-0.3). armchair-seat top 0.36; cushion-body
+    top 0.36, x and z +-0.45.
+- `BOOKS.length` 12 === `LIBRARY_READABLE_SLOTS.length` 12. Two titles carry their own
+  punctuation ("Duck, Duck, Duck!", "Goodnight, Park"), which is why templates quote titles.
+- **What libraryAssets.ts draws from** (`f714/scratch/asset-facts.mts`): wall cases from the glb
+  (`kitShelf()` = `shelf-carcass` + `shelf-shelves`); stacks are two glb shelves back to back;
+  low bins are libraryAssets' own primitives (length and depth from the glb shelf, height 1);
+  cushions are the glb's `cushion-body`; armchairs and the story chair are the glb's
+  `armchair-*` (the story chair is the same chair in tapestry cloth).
+  - `libraryCushionSize()` = { top 0.36000001430511475, radius 0.44999998807907104 }:
+    `KID_HIP_HEIGHT` is 0.36, so Decision 14's cut is not needed.
+  - `libraryArmchairSize()` **takes no argument** (the plan's `libraryArmchairSize(true)` does
+    not exist) = { seat 0.36000001430511475, width 1.4000000953674316, depth 1.0464898943901062,
+    height 1.159999966621399, centreX 0, centreZ -0.033244937658309937 }; no `seatCentre` yet.
+  - `libraryBookcaseSize('wall')` = { length 4, depth 0.6000000238418579, height
+    3.200000047683716, shelfTops [0.18, 0.756, 1.332, 1.908, 2.484], shelfClear 0.516 x5,
+    innerHalf 1.84, boardFront 0.25 }; 'stack' the same with depth 1.2, boardFront 0.55; 'low'
+    { length 4, depth 0.6, height 1.0, shelfTops [0.1, 0.52], shelfClear [0.36, 0.38], innerHalf
+    1.88, boardFront 0.28 }.
+- **The glb is decoded once, in `src/art/models/libraryKit.ts`** (`readGlbParts` at module
+  load; `libraryPart`, `kitBounds`, `kitTreads`). `libraryAssets.ts` does **not** import
+  `LIBRARY_GLB_BASE64`. Its private `STYLES` already dresses all 65 nodes, the creatures
+  included, and throws on an undressed node or a stale row: Step 3's `LIBRARY_GLB_STYLES` is
+  that table, exported. Where it differs from the plan's Step 3 list (Step 3's call):
+  `dragon-wings` is `PALETTE.markerPink` (plan `ART.miniLilac`); outlines `owl-head` 0.02
+  (plan 0.016), `owl-glasses` 0.01 (plan 0.012), `cat-*` 0.012 and 0.01 (plan 0.016).
+- `/library?at=x,z&facing=deg` **is already a parsed `DeepLink`** (building's
+  `parseLibraryLink`, `Game.enterLibrarySpawn`); `/library` is not in `RIDE_DEEP_LINKS`,
+  `/library-door` is.
+- **The check chain** (parsed, 173 scripts; `f714/step0-shards.json`) is the foundation merge's
+  table above, step for step: shard-1 26 (brevity, assets, library-glb, png-integrity in it),
+  shard-2 4, shard-3 14 (jitter), shard-4 15 (hotel, reptile-house, library, labels,
+  tap-spacing), shard-5 8 (wall-tunnelling, served-deep-links), shard-6 4 (climb-wave),
+  shard-7 6, shard-8 2 (served-book-reader). `check:npc-presence` is in no shard. Nothing in
+  this half touches package.json.
+- **The groundwork is present after the merge** (read, not assumed): `lineSeconds` in
+  `ui/speechTiming.ts`, imported by Hotel.ts; `Player.isRunning` (`DUST_SPEED` private;
+  `spawnRunningDust` starts `if (!this.isRunning) return;`); `'listening'` and
+  `applyListeningPose` (LISTEN_ARM_X -0.95, LISTEN_CHIN -0.08); `CollisionWorld.restoreWall`
+  and the exported `JUMP_CLEARANCE_GRACE` 0.15, the library's toggles named in both docs;
+  `SpritePuffs` (ReptileHouse builds `new SpritePuffs(this.hallRoot, 12)`); `visibleReachXZ`.
+  State: `'card'` in `INVENTORY_KINDS` and in `CUTE_CATEGORIES` after `'book'`, not in
+  `PARADE_KINDS`; `gameStore.grantKeepsakeOnce`; `world/library/libraryCard.ts`;
+  `test/store/library-card.test.ts` in procgen shard 6.
+
+### Step 0 baselines
+BASELINES_PLACEHOLDER
+
+### Step 1 change 5 (d2a7f00e)
+- `LibraryProps.box` returns `BoxWalls` = `[body, leftEnd, rightEnd]`, registered in the same
+  order as before (so no collider moves).
+- `detach(walls)` / `attach(walls)`: `removeWall` / `restoreWall` on each, the same objects.
+  Colliders only: a plate a box laid stays (nothing toggled has one).
+- `KeepOut.den?: true` and `StandSpot.den?: true` (layout.ts, types only); `libraryKeepOuts`
+  copies the tag and omits it when absent.
+- `wall(what, a, a, half, top)` documented as the zero-length capsule (a filled disc that can be
+  detached and attached, which an `addCircle` disc cannot).
+
+### The zero-length capsule was a ghost to the mover: fixed in Collision.ts (773efb7c)
+**A deviation from the plan, which says "the collision world already handles length 0".
+Read, it did not.** `resolve()`, `deepestSolidOverlap()` and `wouldAutoHopClear()` each had
+`if (lengthSquared < 1e-8) continue;`, while `isClearCircle()`, `solidDepthAt()` and
+`NavGrid` treat a zero-length wall as a disc. So the owl's capsule would have been walked
+straight through by a real child **while the flood fill called her solid**: the check would
+have passed and the game been wrong. Measured (`f714/scratch/zero-capsule.mts`; mover radius
+`PLAYER_RADIUS` 0.62 walking +z at 0.05 m a frame from z -3; capsule half 0.65 at the origin):
+
+| collider | before: march ends | after | isClearCircle(centre) | deepestSolidOverlap at (0.3, 0) before / after | resolve from the exact centre, before / after |
+|---|---|---|---|---|---|
+| CONTROL 1 m capsule | -1.270 | -1.270 | false | 1.270 / 1.270 | (0, 1.270) / same |
+| CONTROL addCircle disc | -1.270 | -1.270 | false | 0.970 / 0.970 | (1.270, 0) / same |
+| zero-length capsule | **+3.000 (walked through)** | -1.270 | false | **0.000** / 0.970 | **(0, 0)** / (1.270, 0) |
+| zero-length, top 0.9 abs | **+3.000** | -1.270 | false | **0.000** / 0.970 | **(0, 0)** / (1.270, 0) |
+
+Auto-hop (top 0.3, apex 1.0, hoppable): disc true; zero-length capsule **false** before, true
+after. The fix: those three paths take t = 0 for a zero-length wall (NavGrid's own idiom), and
+`resolve`'s exactly-on-the-centre shove uses the circles' stable (+x) direction instead of
+dividing by a zero length. Documented on `WallCollider`.
+- **Guarded** (4d747841): `check:wall-tunnelling` (shard 5) walks a zero-length capsule at
+  head-on at every half-thickness up to 0.65 in both suites, and fails unless every such run is
+  held or flown (never tunnelled, never walked round), with the counts on stderr. Green
+  (`LGP_PARK_RESTART=3`, the check builds no park, only the boundary module): exit 0, SOLID
+  195 shapes / 299520 runs, 0 tunnelled with sub-stepping, "zero-length capsules (the owl's kind
+  of solid): 36864 runs — held 36864, flew over 0, tunnelled 0, walked round 0"; HOPPABLE 65
+  shapes / 99840 runs, "12288 runs — held 0, flew over 12288". Red below.
+- **Does it move anything that exists?** Only if a park already registers a zero-length wall:
+  ZERO_LENGTH_PLACEHOLDER
+
+### Step 2's remainder (9f650da1)
+- `src/world/library/libraryLines.ts`: `LIBRARY_LINES` and `LIBRARY_CHIPS` exactly as the plan
+  gives them, and `libraryCopyForBrevity()`, which **walks** the two tables (no list kept in
+  step; anything that is not words, a template, a list or a table throws; the number
+  `cardCheerAt` is skipped). Keys: `libraryLine:owl.welcome`, `libraryLine:owl.card#3` (lists,
+  1-based like `bookPage:`), `libraryLine:owl.recommend:<bookId>` (each template x every BOOKS
+  title), `libraryChip:<name>`, `libraryCard:displayName` (whose `where` is libraryCard.ts).
+- `check-copy-brevity.mts` measures them and every `SECRETS` row (`secretName:<id>` title,
+  `secretDone:<id>` line), with a vacuity guard (throws if the library walk is empty or any
+  BOOKS title was never rendered into a template, or SECRETS is empty) and stderr notes.
+  Green (`LGP_PARK_RESTART=3 pnpm run check:brevity -- --verbose`): **exit 0, "BREVITY RULE:
+  350 pieces of copy are short enough; 6 still carry a recorded exception"** (285 before):
+  45 `libraryLine:` rows (21 fixed lines and list entries, 24 template renders), 9
+  `libraryChip:`, 1 `libraryCard:`, 5 `secretName:`, 5 `secretDone:`; stderr "the Library —
+  45 lines (24 of them templates rendered with each of the 12 titles), 10 titles (the chips and
+  the card)" and "the secrets — 5 names and 5 lines". Longest library line
+  `owl.storyBegin:catBusDay` 42; `owl.recommend:duckBars` 29 and one sentence (the title's "!"
+  sits before the closing quote). Longest SECRETS line `secretDone:secret.metTheReptiles` 41.
+- The groundwork's vitest: `pnpm exec vitest run test/store/library-card.test.ts
+  --reporter=verbose` exit 0, **Test Files 1 passed (1), Tests 4 passed (4)**, all four named
+  cases ticked, none skipped. `check:seed-coverage` exit 0 ("procgen shards: 46 suite files
+  over 6 shards (5/5/5/8/8/15 files), each exactly once"). `tsc --noEmit` 0, `typecheck:test` 0.
+
+### Red transcripts (each with what it was proved against)
+- **check:wall-tunnelling, the zero-length clause.** Mutation: Collision.ts's three
+  `if (lengthSquared < 1e-8) continue;` put back (resolve, deepestSolidOverlap,
+  wouldAutoHopClear), restored with `git checkout` after. Geometry: a zero-length capsule at the
+  origin, halves 0.15/0.18/0.22/0.28/0.34/0.45/0.6/0.65, tops 0.7/2.0/Infinity (and 0.7
+  hoppable), walked +z from (0, -6), 8 frame rates x 2 gaits x 96 phases. Exit 1:
+  ```
+  zero-length capsules (the owl's kind of solid): 36864 runs — held 0, flew over 0, tunnelled 36864, walked round 0
+  zero-length capsules (the owl's kind of solid): 12288 runs — held 0, flew over 0, tunnelled 12288, walked round 0
+  check:wall-tunnelling FAILED — 4 problem(s)
+  - SOLID walls (...): 36864 of 299520 runs TUNNELLED through a wall with sub-stepping on — e.g. zero-length capsule half=0.15 top=0.70 at 12 fps, walk, phase 0.000; ...
+  - HOPPABLE 0.7 m walls (...): 12288 of 99840 runs TUNNELLED through a wall with sub-stepping on — e.g. zero-length capsule half=0.15 top=0.70 at 12 fps, walk, phase 0.000; ...
+  ```
+  (plus the two "not all held or flown" guard lines; that run printed the guard's earlier
+  wording, "were not all scored (held 0, flew 0, walked round 0)", since sharpened to name the
+  tunnelled count.)
+- **check:brevity, Step 2 red 1.** Mutation: `owl.welcome = 'Welcome! Come to my desk.'`
+  (25 characters, two sentences); reverted. `LGP_PARK_RESTART=3 pnpm run check:brevity`: exit 1,
+  ```
+  libraryLine:owl.welcome                 line    25   2  SENTENCES
+  BREVITY RULE (GAME_DESIGN.md): 1 problem across 350 pieces of copy.
+    libraryLine:owl.welcome  (src/world/library/libraryLines.ts)
+      2 sentences; a line is one
+  ```
+- **vitest library-card, Step 2 red 2.** Mutation: the `'card',` line deleted from
+  `INVENTORY_KINDS` (src/state/types.ts); reverted with `git checkout`. Input: the test's own
+  fixtures (a fresh store; LIBRARY_CARD granted twice). Exit 1, `Tests  2 failed | 2 passed (4)`:
+  ```
+  × the library card > is granted once, however often the owl is asked, and keeps the day she first got it
+  × the library card > survives writeSave and loadSave, item and Cute-o-dex entry both
+  ✓ the library card > is absent from a save written before the library existed
+  ✓ the library card > drops an item of an unknown kind ('cardz') and keeps the rest of the inventory
+  AssertionError: 'card' is not an inventory kind the save knows: expected [ 'toy', 'balloon', 'treat', …(7) ] to include 'card'
+  AssertionError: the card was dropped on load: expected [] to have a length of 1 but got +0
+  ```
+
 ## Decisions (made here, with reasons)
+- **The zero-length capsule is fixed in `Collision.ts`, not worked round in props.ts**
+  (first half, 773efb7c). Alternatives weighed: register the owl as an `addCircle` disc (but
+  `CollisionWorld` cannot restore a circle, and the plan's detach/attach of "the same object"
+  needs one), or give her capsule a 1 mm length (a ghost-shaped hole hidden behind a number,
+  and the next zero-length wall would be a ghost again). The defect was the collision world
+  disagreeing with itself — its planner and NavGrid counted the disc, its mover skipped it — so
+  it is fixed where it lives, guarded by check:wall-tunnelling, and measured to move no existing
+  collider (the park-wide count of zero-length walls, below the transcript).
+- **Brevity keys** follow the existing `<field>:<id>` convention: `libraryLine:` for every line
+  (the plan's own `libraryLine:owl.recommend:<bookId>`), `#n` for a list entry (as
+  `bookPage:<id>#n`), `libraryChip:` for chips, `libraryCard:displayName` for the card.
+  `libraryCopyForBrevity` keeps the plan's exact signature (no `where`), so the check maps
+  `libraryCard:` to libraryCard.ts and the rest to libraryLines.ts.
+- **Baselines on a separate detached worktree** at the foundation's code, hydrated from the
+  PR's CI parks, so no edit here can leak into them and no edit there can start an acceptance
+  loop under a running check (the building handoff's hash trap).
 - **The deep-links race: the combination of both fixes** (above). The task asked for the
   version that removes the root cause, waiting for the change of space to finish and for her to
   be on the spot; each fix alone covers one half.
@@ -177,6 +374,27 @@ reader/BookReader.ts. Inside: state/types.ts, library/Library.ts, art/models/lib
   literal line would have closed #714 alone on merge.
 
 ## For the join (and the tracks)
+- **Track A (the owl): march at her with a real mover, not only the flood fill.** The flood
+  fill asks `isClearCircle`, which always counted a zero-length wall as solid; the mover did
+  not until 773efb7c. OWL's "her middle is not flood-reached" alone would have passed with a
+  ghost owl. Add her capsule to MARCHED (a player-sized body walked at her through
+  `resolveMovement`), as the plan already says.
+- **`libraryArmchairSize()` takes no argument** at the integration (no "big" chair; the story
+  chair is the same glb chair). Steps 7 and 9 read `libraryArmchairSize(true).seatCentre`: add
+  `seatCentre` to the one-argument-less function (Step 3/7's owner), do not invent a `big`.
+- **Cushions are already 0.36 = `KID_HIP_HEIGHT`** (the glb's): Decision 14's cut is a no-op;
+  Step 7's constructor assertion still applies.
+- **`libraryLines.ts` imports `BOOKS` and `LIBRARY_CARD`.** Both files are outside the park
+  source closure today; the first closure file to import `libraryLines.ts` (Library.ts, Step 6)
+  brings them in. Step 5's `shelfBooks.ts` brings `BOOKS` in anyway.
+- **Words go in `LIBRARY_LINES`/`LIBRARY_CHIPS` only**: check:brevity walks the tables, so a new
+  entry is measured with no list to update; a new kind of entry (not a string, list, template or
+  table) throws in `libraryCopyForBrevity` until the walk is taught it.
+- **`props.box` returns `[body, leftEnd, rightEnd]`; `detach`/`attach` take any list of walls.**
+  The leaf (Step 12): `const open = props.box(...); props.detach(open);`. The owl (Step 6):
+  `props.wall('the owl', spot, spot, OWL_RADIUS, 'wall')` then `detach([capsule])` /
+  `attach([capsule])`. Detached walls stay in `library.solids`: a check that walks `solids`
+  must skip the detached set (the plan's open-state swap).
 - The plan's SIT red must rotate BOTH legs (`HANDOFF-library-shared.md`, Decisions:
   seatedErrors' one-foot blind spot).
 - `/library` is already a parsed `DeepLink` kind (building), so the plan's Step 4 extends
