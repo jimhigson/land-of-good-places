@@ -166,6 +166,24 @@ Unless the grown-ups turn on **Mayhem mode**…
   shortening one means deleting its entry. Sign text written inline at a
   builder call site is the one blind spot; if a future one grows, move it into
   a table the script already walks.*
+
+  **The one written exception: the library's chapter books (14 October
+  2026).** Jim, asking for them: *"we also need some more grown-up books,
+  these are ok for a 3 year old, so keep them, but add more that have ~30
+  words per page and more involved story lines with jokes, adventure,
+  adversaries, conflict, but resolve well. A 6 year old advanced reader needs
+  a bit more."* So a page of a **chapter book** (`LibraryBook.kind`
+  `'chapter'`, `world/library/chapterBooks/`) is a paragraph: **20 to 40
+  words, each sentence at most 120 characters**, its title still at most 24.
+  Everything else keeps the rule above, the twelve picture books' pages
+  included. *`check:brevity` holds chapter pages to these limits, choosing the
+  page's shape by the book's kind and nothing else, and its CONTROL proves a
+  two-sentence picture-book page still goes red, so the exception cannot
+  leak. `check:book-reader` then holds every chapter page to the TEXT RULE as
+  painted: on a laptop's open spread and on a phone held upright each page
+  fits, a picture and its paragraph, never below the floor; a phone held on
+  its side, too short for a paragraph at the floor, shows a "Turn your phone
+  upright to read!" card instead of smaller words.*
 - **TEXT RULE — absolute, applies everywhere (27 July 2026):** set a
   **minimum font size and apply it throughout the whole game**, with no
   exceptions. It should be **generously large** — this is a game for a
