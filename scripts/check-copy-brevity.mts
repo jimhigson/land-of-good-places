@@ -16,6 +16,17 @@
  *  - a **line** — a what's-new line, a shop blurb, a sign's subtitle — **one
  *    sentence**, at most {@link LINE_LIMIT} characters.
  *
+ * And one written exception, Jim's own (14 October 2026: *"add more that have
+ * ~30 words per page and more involved story lines … A 6 year old advanced
+ * reader needs a bit more"*):
+ *
+ *  - a **chapter page** — a page of a chapter book (`LibraryBook.kind`
+ *    `'chapter'`) — a paragraph of {@link CHAPTER_WORDS} words, each sentence
+ *    at most {@link CHAPTER_SENTENCE_LIMIT} characters. **Keyed by the book's
+ *    kind and nothing else**: a picture book's page is a `line` whatever it
+ *    says, and the CONTROL below proves a two-sentence picture-book page still
+ *    goes red, so the carve-out cannot leak into the little books.
+ *
  * It is checked, and the check runs in `npm run build`, because this codebase
  * has been bitten four separate times by a rule that lived only in prose. Copy
  * is the easiest thing in a repo to grow by accident: nobody reviews a string
@@ -64,8 +75,9 @@ import '../scripts/headless-canvas.mjs';
 import { SHOP_ITEMS, EGG_PRIZES } from '../src/world/building/shops/catalogue.ts';
 import { ANCHORS } from '../src/world/anchors.ts';
 import { EXHIBITS } from '../src/world/reptileHouse/exhibits.ts';
-import { BOOKS } from '../src/world/library/books.ts';
+import { BOOKS, type LibraryBook } from '../src/world/library/books.ts';
 import { libraryCopyForBrevity } from '../src/world/library/libraryLines.ts';
+import { READER_WORDS } from '../src/world/library/reader/readerWords.ts';
 import { SECRETS } from '../src/state/secrets.ts';
 
 /**
@@ -81,6 +93,12 @@ const LINE_LIMIT = 50;
 
 /** How many sentences a line may be. The rule's answer is one. */
 const SENTENCE_LIMIT = 1;
+
+/** A chapter page's paragraph: about thirty words, never fewer than twenty or more than forty. */
+const CHAPTER_WORDS = { min: 20, max: 40 } as const;
+
+/** The longest one sentence of a chapter page may be, in characters. */
+const CHAPTER_SENTENCE_LIMIT = 120;
 
 /** Copy that was already over the line when this check landed. */
 interface Recorded {
@@ -128,7 +146,7 @@ const KNOWN_LONG: Readonly<Record<string, Recorded>> = {
   },
 };
 
-type Shape = 'title' | 'line';
+type Shape = 'title' | 'line' | 'chapterPage';
 
 interface Copy {
   /** Stable key, and the {@link KNOWN_LONG} key: `<field>:<id>`. */
@@ -207,25 +225,23 @@ function collect(): Copy[] {
     });
   }
 
-  // The library's twelve picture books (#717): every title and every page.
-  // A page is the whole of what a child reads at once, so it is a `line` —
-  // one sentence, at most fifty characters, the same as a shop blurb.
-  for (const book of BOOKS) {
-    copy.push({
-      key: `bookTitle:${book.id}`,
-      where: 'src/world/library/books.ts',
-      shape: 'title',
-      text: book.title,
-    });
-    book.pages.forEach((page, index) => {
-      copy.push({
-        key: `bookPage:${book.id}#${index + 1}`,
-        where: 'src/world/library/books.ts',
-        shape: 'line',
-        text: page.text,
-      });
-    });
-  }
+  // The library's books (#717 and track D): every title and every page. A
+  // picture book's page is the whole of what a child reads at once, so it is
+  // a `line` — one sentence, at most fifty characters, the same as a shop
+  // blurb; a chapter book's page is a `chapterPage` ({@link bookCopy}).
+  for (const book of BOOKS) copy.push(...bookCopy(book));
+  const chapterBooks = BOOKS.filter((book) => book.kind === 'chapter');
+  process.stderr.write(
+    `check:brevity: the library's books — ${BOOKS.length - chapterBooks.length} picture books, ` +
+      `${chapterBooks.length} chapter books (${chapterBooks.reduce((pages, book) => pages + book.pages.length, 0)} chapter pages)` +
+      (chapterBooks.length === 0 ? ' — no chapter book is on the shelf yet, so the chapter-page shape is held to its CONTROL fixtures only' : '') +
+      '\n',
+  );
+
+  // The reader's own words: "The End" on every last page, and the card over a
+  // chapter book on a screen too short for it.
+  copy.push({ key: 'readerWords:theEnd', where: 'src/world/library/reader/readerWords.ts', shape: 'title', text: READER_WORDS.theEnd });
+  copy.push({ key: 'readerWords:turnUpright', where: 'src/world/library/reader/readerWords.ts', shape: 'line', text: READER_WORDS.turnUpright });
 
   // The Library's own words (#718, #719): every line the owl, the story, the
   // dragon and the cat say, every template rendered with every book's title,
@@ -283,6 +299,29 @@ function collect(): Copy[] {
 }
 
 /**
+ * **A book's copy, and the shape each piece is held to** — the title a
+ * `title`; every page a `line` for a picture book and a `chapterPage` for a
+ * chapter book. The page's shape is chosen by `book.kind` and by nothing
+ * else (not its id, not its length, not a list of names), which is what keeps
+ * the chapter books' allowance out of the little books — proved by the
+ * CONTROL below, which runs a picture-book fixture through this very function.
+ */
+function bookCopy(book: LibraryBook): Copy[] {
+  const where = book.kind === 'chapter' ? `src/world/library/chapterBooks/${book.id}.ts` : 'src/world/library/books.ts';
+  return [
+    { key: `bookTitle:${book.id}`, where, shape: 'title', text: book.title },
+    ...book.pages.map(
+      (page, index): Copy => ({
+        key: `bookPage:${book.id}#${index + 1}`,
+        where,
+        shape: book.kind === 'chapter' ? 'chapterPage' : 'line',
+        text: page.text,
+      }),
+    ),
+  ];
+}
+
+/**
  * Length in characters as a reader counts them.
  *
  * Spread, not `.length`: an emoji is one thing on the screen and several UTF-16
@@ -303,9 +342,47 @@ function characters(text: string): number {
  * complete thoughts a child has to hold, not about punctuation.
  */
 function sentences(text: string): number {
+  return sentenceTexts(text).length;
+}
+
+/** The sentences themselves, split exactly as {@link sentences} counts them. */
+function sentenceTexts(text: string): string[] {
   return text
     .split(/[.!?…]+(?=\s|$)/)
-    .filter((part) => part.trim().length > 0).length;
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+/** Words as a reader counts them: runs of characters between spaces. */
+function words(text: string): number {
+  return text.split(/\s+/).filter((word) => word.length > 0).length;
+}
+
+/**
+ * Everything wrong with one piece of copy, ignoring `KNOWN_LONG` — the pure
+ * half of {@link check}, which the CONTROL below also asks of its fixtures.
+ */
+function problemsOf(copy: Copy): string[] {
+  const { shape, text } = copy;
+  const problems: string[] = [];
+  if (shape === 'chapterPage') {
+    const count = words(text);
+    if (count < CHAPTER_WORDS.min || count > CHAPTER_WORDS.max) {
+      problems.push(`${count} words; a chapter page is ${CHAPTER_WORDS.min}-${CHAPTER_WORDS.max}`);
+    }
+    for (const sentence of sentenceTexts(text)) {
+      const length = characters(sentence);
+      if (length > CHAPTER_SENTENCE_LIMIT) {
+        problems.push(`a ${length}-character sentence, ${length - CHAPTER_SENTENCE_LIMIT} over the chapter page's ${CHAPTER_SENTENCE_LIMIT}: "${sentence.slice(0, 60)}…"`);
+      }
+    }
+    return problems;
+  }
+  const limit = shape === 'title' ? TITLE_LIMIT : LINE_LIMIT;
+  const length = characters(text);
+  if (length > limit) problems.push(`${length} characters, ${length - limit} over the ${shape} limit of ${limit}`);
+  if (shape === 'line' && sentences(text) > SENTENCE_LIMIT) problems.push(`${sentences(text)} sentences; a line is one`);
+  return problems;
 }
 
 interface Failure {
@@ -323,6 +400,17 @@ function check(copy: Copy): void {
   const { key, where, shape, text } = copy;
   const recorded = KNOWN_LONG[key];
   if (recorded) seenRecords.add(key);
+
+  if (shape === 'chapterPage') {
+    // A chapter page has no recorded allowance to apply: it is held to its
+    // own limits, whole.
+    const problems = problemsOf(copy);
+    for (const problem of problems) failures.push({ key, where, problem });
+    rows.push(
+      [key.padEnd(38), 'chap.', String(words(text)).padStart(3) + 'w', String(sentences(text)).padStart(2), problems.length > 0 ? 'CHAPTER' : ''].join('  '),
+    );
+    return;
+  }
 
   const limit = shape === 'title' ? TITLE_LIMIT : LINE_LIMIT;
   const length = characters(text);
@@ -375,6 +463,69 @@ function check(copy: Copy): void {
   );
 }
 
+// CONTROL — the instrument can say no, and the chapter books' allowance stays
+// theirs. Fixtures that live here and nowhere in the game, run through the
+// same `bookCopy` and `problemsOf` the real books go through.
+{
+  const picture = (id: string, pageText: string, title = 'A Fixture'): LibraryBook => ({
+    id,
+    kind: 'picture',
+    title,
+    cover: 'markerPink',
+    titlePicture: { cast: [], sky: 'skyDayBottom' },
+    pages: [{ text: pageText, picture: { cast: [], sky: 'skyDayBottom' } }],
+  });
+  const chapter = (id: string, pageText: string, title = 'A Fixture'): LibraryBook => ({ ...picture(id, pageText, title), kind: 'chapter' });
+  // Thirty words in two sentences; the others are cut from it or added to it,
+  // and every count is asserted below rather than trusted.
+  const thirtyWords =
+    'Biscuit packed a picnic for everybody in the park. Then the wind blew his hat away, so RiPika ran after it all the way to the fountain and back again.';
+  const nineteenWords = 'Biscuit packed a picnic for everybody in the park. Then the wind blew his hat away, so RiPika ran.';
+  const twentyWords = 'Biscuit packed a picnic for everybody in the park. Then the wind blew his hat away, so RiPika ran fast.';
+  const fortyWords = `${thirtyWords} RiPika laughed until her ears flapped like two big flags.`;
+  const fortyOneWords = `${thirtyWords} RiPika laughed and laughed until her ears flapped like two flags.`;
+  /** One sentence of exactly `n` characters, ending on a letter. */
+  const sentenceOf = (n: number): string => 'hopped '.repeat(40).slice(0, n);
+  const withSentence = (n: number): string => `${sentenceOf(n)}. RiPika waved and waved at him.`;
+  const sizes: [string, number, number][] = [
+    ['thirtyWords', words(thirtyWords), 30],
+    ['nineteenWords', words(nineteenWords), 19],
+    ['twentyWords', words(twentyWords), 20],
+    ['fortyWords', words(fortyWords), 40],
+    ['fortyOneWords', words(fortyOneWords), 41],
+    ['sentenceOf(120)', characters(sentenceOf(120)), 120],
+    ['sentenceOf(121)', characters(sentenceOf(121)), 121],
+  ];
+  // `because`: the problem a red case must be red FOR — a fixture that goes
+  // red for some other reason has not shown what it is here to show.
+  const cases: { what: string; book: LibraryBook; pieces: 'title' | 'page'; because?: string }[] = [
+    { what: 'a picture-book page with two sentences goes red (the carve-out does not leak)', book: picture('fixturePictureTwo', 'RiPika has a balloon. It floats away.'), pieces: 'page', because: 'sentences; a line is one' },
+    { what: "a picture-book page of a chapter page's thirty words goes red", book: picture('fixturePictureLong', thirtyWords), pieces: 'page', because: 'over the line limit of 50' },
+    { what: 'a chapter page of thirty words in two sentences passes', book: chapter('fixtureChapterGood', thirtyWords), pieces: 'page' },
+    { what: 'a chapter page of exactly twenty words passes', book: chapter('fixtureChapterTwenty', twentyWords), pieces: 'page' },
+    { what: 'a chapter page of exactly forty words passes', book: chapter('fixtureChapterForty', fortyWords), pieces: 'page' },
+    { what: 'a chapter page of nineteen words goes red', book: chapter('fixtureChapterShort', nineteenWords), pieces: 'page', because: '19 words; a chapter page is' },
+    { what: 'a chapter page of forty-one words goes red', book: chapter('fixtureChapterLong', fortyOneWords), pieces: 'page', because: '41 words; a chapter page is' },
+    { what: `a chapter sentence of exactly ${CHAPTER_SENTENCE_LIMIT} characters passes`, book: chapter('fixtureChapterSentenceOk', withSentence(CHAPTER_SENTENCE_LIMIT)), pieces: 'page' },
+    { what: `a chapter sentence of ${CHAPTER_SENTENCE_LIMIT + 1} characters goes red`, book: chapter('fixtureChapterSentence', withSentence(CHAPTER_SENTENCE_LIMIT + 1)), pieces: 'page', because: `a ${CHAPTER_SENTENCE_LIMIT + 1}-character sentence` },
+    { what: 'a chapter book title over 24 characters goes red', book: chapter('fixtureChapterTitle', thirtyWords, 'The Very Long Fixture Book'), pieces: 'title', because: 'over the title limit of 24' },
+  ];
+  const controlFailures: string[] = [];
+  for (const control of cases) {
+    const [title, ...pages] = bookCopy(control.book);
+    const pieces = control.pieces === 'title' ? [title!] : pages;
+    const problems = pieces.flatMap((piece) => problemsOf(piece));
+    const because = control.because;
+    const right = because === undefined ? problems.length === 0 : problems.some((problem) => problem.includes(because));
+    process.stderr.write(`check:brevity CONTROL ${right ? 'ok  ' : 'FAIL'} ${control.what}${problems.length > 0 ? ` — ${problems.join('; ')}` : ''}\n`);
+    if (!right) controlFailures.push(because === undefined ? control.what : `${control.what} (wanted "${because}")`);
+  }
+  for (const [name, measured, meant] of sizes) {
+    if (measured !== meant) controlFailures.push(`the fixture ${name} measures ${measured}, not the ${meant} it is meant to`);
+  }
+  for (const what of controlFailures) failures.push({ key: 'CONTROL', where: 'scripts/check-copy-brevity.mts', problem: `the instrument got its own fixture wrong: ${what}` });
+}
+
 const everything = collect();
 for (const copy of everything) check(copy);
 
@@ -420,7 +571,8 @@ if (failures.length > 0) {
   for (const failure of failures) console.error(`  ${failure.key}  (${failure.where})\n    ${failure.problem}\n`);
   console.error(
     'A title is at most ' +
-      `${TITLE_LIMIT} characters; a line is ONE sentence of at most ${LINE_LIMIT}.\n` +
+      `${TITLE_LIMIT} characters; a line is ONE sentence of at most ${LINE_LIMIT};\n` +
+      `a chapter book's page is ${CHAPTER_WORDS.min}-${CHAPTER_WORDS.max} words, each sentence at most ${CHAPTER_SENTENCE_LIMIT} characters.\n` +
       'Say what the child can now do, never how it works. Cut the words rather\n' +
       'than growing the panel. Do not silence this by adding to KNOWN_LONG.\n',
   );
