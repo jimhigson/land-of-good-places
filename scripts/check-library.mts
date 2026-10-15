@@ -1363,10 +1363,13 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
 
   // While she sits: no Read chip, 'Get up' on her cushion, nothing on the other.
   const readSeated = readChips();
-  if (drawnReadable > 0) {
+  if (drawnReadable > 0 || readStanding > 0) {
+    // Armed by either sign that the shelves are readable: books drawn, or Read chips offered. Drawn
+    // books with no chip while she stands is a red too — the control could not have said no.
     say(
-      readStanding === drawnReadable && readSeated === 0,
-      `no Read chip while she sits: ${readSeated} offered (CONTROL: standing, ${readStanding} were — one for each of the ${drawnReadable} readable books drawn)`,
+      readStanding > 0 && readSeated === 0 && (drawnReadable === 0 || readStanding === drawnReadable),
+      `no Read chip while she sits: ${readSeated} offered (CONTROL: standing, ${readStanding} were, ` +
+        `for ${drawnReadable} readable books drawn as 'library.book.*')`,
     );
   } else {
     note(
