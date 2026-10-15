@@ -586,10 +586,15 @@ export class Game {
       // A celebration earned on the last page waits for the book to close.
       onClosed: () => this.cuteODex.refresh(),
     });
-    this.cuteODex.setBookReader({
-      open: (bookId) => this.bookReader.openBook(bookId),
+    // One opener for every road to a book: a bookmark in the Cute-o-dex, and
+    // a book taken down off the Library's shelves (#718) — the same object, so
+    // the two can never open a book two ways.
+    const bookOpener = {
+      open: (bookId: string) => this.bookReader.openBook(bookId),
       isOpen: () => this.bookReader.isOpen,
-    });
+    };
+    this.cuteODex.setBookReader(bookOpener);
+    this.world.library.attachBookReader(bookOpener);
     // "What's new": checks `whatsnew.json` against localStorage and shows
     // itself, synchronously, if there is anything the player has not seen —
     // see `ui/WhatsNew.ts`. Built here so the check happens before the first

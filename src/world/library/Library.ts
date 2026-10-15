@@ -6,7 +6,8 @@ import { SpaceManager } from '../SpaceManager';
 import { bandCrossed, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { SPACE_LIBRARY, spaceAt } from '../spaces';
-import type { InteractZone } from '../interact';
+import { pressAction, type InteractZone } from '../interact';
+import { highlightObject } from '../highlight';
 import type { PlacedEntry } from '../parkLayout';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { terrainHeight } from '../terrain';
@@ -21,7 +22,9 @@ import { createLibraryExterior, createLibrarySkirt, dressedReach, type LibraryEx
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
 import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
-import { furnishReadingRoom, type StackFader } from './furnish';
+import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './furnish';
+import { LIBRARY_CHIPS } from './libraryLines';
+import { shelfBookZoneId } from './shelfBooks';
 import {
   buildReadingRoomShell,
   libraryEntryBand,
@@ -102,11 +105,30 @@ export interface LibraryDeps {
   readonly camera: IsoCamera;
 }
 
+/**
+ * **What opens a library book** (#718): `Game`'s one opener, the same object
+ * the Cute-o-dex's bookmarks press (`CuteODex.setBookReader`, whose
+ * `DexBookReader` is this shape), so a book taken off the shelf and a book
+ * reopened from its bookmark open the one way.
+ */
+export interface LibraryBookOpener {
+  /** Opens a book at its title page; false for an id that is not a book. */
+  open(bookId: string): boolean;
+  isOpen(): boolean;
+}
+
 /** The exterior's tap zone's id — and its band's own zone. */
 const ENTRANCE_ZONE = 'library-entrance';
 
 /** How translucent a stack goes while it hides her: never gone, just out of the way. */
 const STACK_FADED_ALPHA = 0.28;
+
+/**
+ * How close (XZ metres) a tap must land to a readable book to count as that
+ * book: a book's width and a finger's slack. `check:tap-spacing` measures how
+ * near any two picks come.
+ */
+const SHELF_BOOK_PICK_RADIUS = 0.7;
 
 export class Library implements GameSystem {
   readonly name = 'library';
@@ -129,6 +151,12 @@ export class Library implements GameSystem {
   readonly stacks: readonly StackFader[];
   /** How many decorative books the shelves hold. */
   readonly bookCount: number;
+  /**
+   * **The readable books on their shelves** (#718), one per `BOOKS` entry, in
+   * `SHELF_BOOKS`' order: each one's book, slot, mesh, own paint and room-local
+   * spot — for their zones, the checks, and the recommendation's glow (Step 6).
+   */
+  readonly shelfBooks: readonly FurnishedShelfBook[];
   /** The room's light rig — for the checks (no black light, the darkest floor). */
   readonly lighting: LibraryLighting;
   /** How far the building is moved along its up from the ground at its centre (`libraryBaseSink`). */
@@ -146,6 +174,10 @@ export class Library implements GameSystem {
   private inside = false;
   private readonly from = new Vector3();
   private readonly cameraLocal = new Vector3();
+  /** One "Read it!" zone per readable book, built once: the books never move. */
+  private readonly bookZones: readonly InteractZone[];
+  /** What a Read chip opens a book with ({@link attachBookReader}); null until `Game` attaches it, and headless. */
+  private bookOpener: LibraryBookOpener | null = null;
 
   constructor(collision: CollisionWorld, controls: InteriorControls, surfaces: WalkSurfaces, deps: LibraryDeps) {
     this.collision = collision;
@@ -163,6 +195,8 @@ export class Library implements GameSystem {
     const furnished = furnishReadingRoom(this.roomRoot, this.props);
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;
+    this.shelfBooks = furnished.shelfBooks;
+    this.bookZones = this.shelfBooks.map((placed) => this.shelfBookZone(placed));
     this.lighting = new LibraryLighting(furnished.pools);
     this.roomRoot.add(this.lighting.group);
     this.props.assertClear();
@@ -259,6 +293,17 @@ export class Library implements GameSystem {
   }
 
   /**
+   * **The book reader the shelves open** (#718): `Game`'s one
+   * {@link LibraryBookOpener}, the object the Cute-o-dex's bookmarks use too.
+   * Late-bound, because the reader is DOM and WebGL built after the world; with
+   * none attached — headless, or a check's own stub swapped back out — a Read
+   * chip is offered and does nothing.
+   */
+  attachBookReader(opener: LibraryBookOpener | null): void {
+    this.bookOpener = opener;
+  }
+
+  /**
    * Adopt a player restored into the reading room — being there is a position
    * plus the room switched on and the bounds bound, none of which a
    * constructor can do. A no-op for a park spawn.
@@ -302,8 +347,13 @@ export class Library implements GameSystem {
     return [libraryEntryBand(this.frame, this.plan), libraryExitBand()];
   }
 
+  /**
+   * Inside, a "Read it!" zone on every readable book — unless she is riding
+   * (sitting, #718 Step 7), when the room offers her nothing to walk to.
+   * Outside, the building's entrance.
+   */
   interactZones(): InteractZone[] {
-    if (this.inside) return [];
+    if (this.inside) return this.player?.riding ? [] : [...this.bookZones];
     return [this.exteriorEntranceZone()];
   }
 
@@ -406,6 +456,37 @@ export class Library implements GameSystem {
 
   private boundToRoom(): void {
     this.collision.setPlayBounds(circleBoundary(LIBRARY_PLAY_RADIUS, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z));
+  }
+
+  /**
+   * **A readable book's zone** (#718): on the book itself, a metre over the
+   * floor (where a tap on a book on a low shelf lands); stood at its slot's
+   * stand, in front of the case, facing it; the rainbow round the book's own
+   * mesh; and one chip, "Read it!", which opens that book through the attached
+   * opener — the paper book over the paused park.
+   */
+  private shelfBookZone(placed: FurnishedShelfBook): InteractZone {
+    const { book, slot, mesh, local } = placed;
+    return {
+      id: shelfBookZoneId(book.id),
+      label: book.title,
+      x: LIBRARY_ORIGIN_X + local.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + local.z,
+      pickRadius: SHELF_BOOK_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + slot.stand.x,
+      standZ: LIBRARY_ORIGIN_Z + slot.stand.z,
+      verb: 'Read',
+      highlight: highlightObject(mesh),
+      actions: () =>
+        pressAction(
+          LIBRARY_CHIPS.read,
+          () => {
+            this.bookOpener?.open(book.id);
+          },
+          '📖',
+        ),
+    };
   }
 
   /**
