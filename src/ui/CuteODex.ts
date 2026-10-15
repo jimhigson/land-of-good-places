@@ -12,8 +12,8 @@ import { EGG_PRIZES, SHOP_ITEMS, type ShopItem } from '../world/building/shops/c
 import { isTouchDevice } from '../core/device';
 import { hexToCss, PALETTE } from '../core/palette';
 import { saveFlags } from '../state/flags';
-import { BOOKS, bookCollectionId, type LibraryBook } from '../world/library/books';
-import { booksRead, isBookRead } from '../world/library/readBooks';
+import { BOOKS, PICTURE_BOOKS, bookCollectionId, type LibraryBook } from '../world/library/books';
+import { booksRead, everyPictureBookRead, isBookRead } from '../world/library/readBooks';
 import { DEX_PRIZE_COPY, DexPrize, hasSeenDexPrize, markDexPrizeSeen, type PrizeCopy } from './DexPrize';
 
 /**
@@ -45,14 +45,21 @@ import { DEX_PRIZE_COPY, DexPrize, hasSeenDexPrize, markDexPrizeSeen, type Prize
  */
 
 /**
- * The library's prize (#717): every one of the twelve books read. The Cute-o-dex
- * prize's celebration with its own words — see `DexPrize`'s `PrizeCopy`.
+ * The library's prize (#717): every picture book read. The Cute-o-dex prize's
+ * celebration with its own words — see `DexPrize`'s `PrizeCopy`.
+ *
+ * Tied to the picture books alone ({@link everyPictureBookRead}), so the
+ * littlest reader's road to it is exactly what it was before the chapter books
+ * came; reading every chapter book is the Big reader card instead
+ * (`readBooks.ts`). Its words say "picture book" because she may well have
+ * chapter books still unread when it bursts out — "every book" would be a fib
+ * a six-year-old would catch.
  */
 const BOOK_PRIZE_COPY: PrizeCopy = {
-  label: 'You read every book!',
-  title: '📚 YOU READ EVERY BOOK! 📚',
+  label: 'You read every picture book!',
+  title: '📚 YOU READ EVERY PICTURE BOOK! 📚',
   note: (name) =>
-    `Dear Mummy or Daddy: <strong>${name}</strong> read every book in the ` +
+    `Dear Mummy or Daddy: <strong>${name}</strong> read every picture book in the ` +
     'library. Please award one extra bedtime story. 📖<br>' +
     '<span class="dexprize-sign">— The Library</span>',
 };
@@ -357,7 +364,7 @@ export class CuteODex {
     const entries = dexEntries();
     const found = entries.filter((entry) => state.collection[entry.id]?.discovered).length;
     const total = entries.length;
-    const bookFound = booksRead(state);
+    const pictureBooksAllRead = everyPictureBookRead(state);
     const complete = found === total;
     this.button.innerHTML = `<span class="emoji">📖</span><span>${found}/${total}</span>`;
     this.button.dataset.active = this.open ? 'true' : 'false';
@@ -380,9 +387,9 @@ export class CuteODex {
       this.prize.show(this.paradeItems(state), state.player.name);
     }
 
-    // Every library book read: the library's own celebration, once, the same
+    // Every picture book read: the library's own celebration, once, the same
     // way and under the same two waits.
-    if (bookFound === BOOKS.length && !this.bookPrizeAutoShown && !bookOpen && !this.prize.isOpen) {
+    if (pictureBooksAllRead && !this.bookPrizeAutoShown && !bookOpen && !this.prize.isOpen) {
       this.bookPrizeAutoShown = true;
       saveFlags.markBookPrizeSeen();
       this.bookPrize.show(bookParade(), state.player.name);
@@ -542,11 +549,12 @@ export class CuteODex {
   }
 
   /**
-   * The library's bookmarks (#717): one per book, read ones in the book's own
-   * cover colour with its title, unread ones as a crushed-out silhouette over
-   * `???` — the same promise every other section makes. A read bookmark is a
-   * button that opens its book again; the book is closed over to the reader.
-   * When all twelve are read the heading grows a ⭐ that replays the library's
+   * The library's bookmarks (#717): one per book, picture books and chapter
+   * books alike, in shelf order — read ones in the book's own cover colour with
+   * its title, unread ones as a crushed-out silhouette over `???`, the same
+   * promise every other section makes. A read bookmark is a button that opens
+   * its book again; the book is closed over to the reader. When every picture
+   * book is read the heading grows a ⭐ that replays the library's
    * celebration, the way the book's own ⭐ replays the dex's.
    */
   private renderBookSection(title: string, glyph: string, state: GameState): HTMLElement {
@@ -559,11 +567,11 @@ export class CuteODex {
     heading.innerHTML =
       `<span class="emoji">${glyph}</span><span>${escapeHtml(title)}</span>` +
       `<span class="dex-tally">${read}/${BOOKS.length}</span>`;
-    if (read === BOOKS.length) {
+    if (everyPictureBookRead(state)) {
       const again = document.createElement('button');
       again.type = 'button';
       again.className = 'dex-star';
-      again.setAttribute('aria-label', 'Show the every-book celebration again');
+      again.setAttribute('aria-label', 'Show the every-picture-book celebration again');
       again.textContent = '⭐';
       again.addEventListener('click', () => {
         again.blur();
@@ -747,9 +755,9 @@ export class CuteODex {
   }
 }
 
-/** Every library book as a parade item, in shelf order. */
+/** Every picture book as a parade item, in shelf order — the books the library's prize is for. */
 function bookParade(): { icon: string; displayName: string }[] {
-  return BOOKS.map((book, index) => ({
+  return PICTURE_BOOKS.map((book, index) => ({
     icon: BOOK_PARADE_ICONS[index % BOOK_PARADE_ICONS.length] ?? '📖',
     displayName: book.title,
   }));
