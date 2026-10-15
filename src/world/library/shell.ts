@@ -1,5 +1,5 @@
-import { BoxGeometry, Group, Matrix4, Mesh, Quaternion, Vector3 } from 'three';
-import type { CollisionWorld, WallCollider } from '../Collision';
+import { BoxGeometry, Group, Matrix4, Mesh, Quaternion, Vector3, type MeshToonMaterial } from 'three';
+import { JUMP_CLEARANCE_GRACE, type CollisionWorld, type WallCollider } from '../Collision';
 import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { Plate } from '../hotel/place';
 import { segmentsMinusGaps, cornerClosedSpans } from '../wallRuns';
@@ -7,9 +7,12 @@ import type { PortalBand } from '../tapSpacing';
 import { placeOnSphere } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { solid, toonMaterial } from '../../art/style/materials';
+import { libraryBookcaseSize } from '../../art/models/libraryAssets';
 import { LIBRARY_INTERIOR_LIFT } from './lighting';
-import { END_HALF } from './props';
+import { END_HALF, type LibraryProps } from './props';
 import {
+  LIBRARY_DEN_DOOR_HALF,
+  LIBRARY_DEN_INNER,
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
   LIBRARY_ENTRY_BAND_INNER_INSET,
@@ -18,8 +21,10 @@ import {
   LIBRARY_FLOOR_Y,
   LIBRARY_HALF_X,
   LIBRARY_HALF_Z,
+  LIBRARY_INNER_X,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
+  LIBRARY_SECRET_BOOKCASE,
   LIBRARY_WALL_HALF,
   LIBRARY_WALL_HEIGHT,
   type LibraryExteriorPlan,
@@ -334,33 +339,117 @@ export function libraryExitBand(): PortalBand {
 }
 
 /**
+ * How far the reading room's floor slab runs on past each wall's centre line:
+ * the wall's whole thickness, so the doorway's threshold has floor under it
+ * and the slab's edge is the wall's outer face. The den's floor (#719) abuts
+ * that edge, so the two slabs meet at a line and share no face.
+ */
+const FLOOR_APRON = LIBRARY_WALL_HALF * 2;
+/** The floor slab's thickness, its top on the floor. */
+const FLOOR_THICKNESS = 0.5;
+
+/**
+ * **The lintel's band reaches this far below `JUMP_CLEARANCE_GRACE` under the
+ * secret shelf's top**, so the band of height in which a flier would clear the
+ * shut shelf and the band in which the lintel exists overlap: there is no
+ * height at which she slips through between the two (`check:library`'s LINTEL
+ * sweeps every height to prove it).
+ */
+const LINTEL_OVERLAP = 0.05;
+
+/**
+ * **The secret den's doorway** (#719): the gap in the reading room's west
+ * wall, room-local z — the secret shelf's middle, half the drawn case's length
+ * either way, so the shut shelf fills it exactly. Measured off the drawn case,
+ * and held to `layout.ts`'s {@link LIBRARY_DEN_DOOR_HALF} — the figure the
+ * den's walls are laid out from — within 2 cm: a case of another width throws
+ * here rather than leaving a slit beside the shut shelf, or a shelf
+ * overhanging the hole it is meant to fill.
+ */
+export function libraryDenGap(): readonly [number, number] {
+  const half = libraryBookcaseSize(LIBRARY_SECRET_BOOKCASE.kind).length / 2;
+  if (Math.abs(half - LIBRARY_DEN_DOOR_HALF) > 0.02) {
+    throw new Error(
+      `Library: the secret shelf measures ${(half * 2).toFixed(3)} m long, but the den's doorway is laid out for ` +
+        `${(LIBRARY_DEN_DOOR_HALF * 2).toFixed(3)} m (layout.ts's LIBRARY_DEN_DOOR_HALF): move the den's walls with the shelf`,
+    );
+  }
+  const z = LIBRARY_SECRET_BOOKCASE.at.z;
+  return [z - half, z + half];
+}
+
+/** The reading room's own paint, for anything built of the same stuff — the secret den (#719). */
+export interface ReadingRoomFabric {
+  /** The floor's boards. */
+  readonly floor: MeshToonMaterial;
+  /** The walls' green — the north, south and east walls' own material (never the west wall's, which fades). */
+  readonly wall: MeshToonMaterial;
+}
+
+/** What {@link buildReadingRoomShell} built. */
+export interface ReadingRoomShell {
+  /** Every room wall's collider, in registration order, the west wall's two spans either side of the den's doorway among them. */
+  readonly walls: readonly WallCollider[];
+  /**
+   * **The west wall, as one group**: its two spans either side of the den's
+   * doorway and the lintel over the doorway (#719). One group with one
+   * material of its own ({@link westMaterial}), so it can fade while she is in
+   * the den (plan Step 12) without fading the north wall.
+   */
+  readonly westWall: Group;
+  /** The west wall's material: the walls' green, cloned, so fading it fades nothing else. */
+  readonly westMaterial: MeshToonMaterial;
+  /**
+   * **The lintel's collider** — banded: absent to anything whose feet are
+   * below its base (`baseHeight`), so a walker and a jump pass under it and the
+   * ground fill sees a doorway, and solid above (a jet pack flies 12 m up
+   * indoors). Registered raw, like the room's walls: `LibraryProps`' keep-out
+   * test is two-dimensional and would misread a collider that is only there
+   * above the case's top.
+   */
+  readonly lintel: WallCollider;
+  readonly fabric: ReadingRoomFabric;
+}
+
+/**
  * The reading room's floor plate and walls, in `root` (which stands at the
  * room's origin), registered with the collision world in world metres.
- * Returns the wall colliders, for a check to open one deliberately.
+ *
+ * **The west wall has a doorway into the secret den** (#719,
+ * {@link libraryDenGap}), so it is two spans, with a lintel from the secret
+ * shelf's top to the wall's top over the gap. The shelf itself is still an
+ * ordinary case with its own collider (`furnish.ts`), so the doorway is shut:
+ * the den beyond is a sealed pocket until the shelf swings (plan Step 12).
+ *
+ * Returns the colliders and the west wall's group, for a check to open one
+ * deliberately and for the west wall's fade.
  */
-export function buildReadingRoomShell(root: Group, collision: CollisionWorld, surfaces: WalkSurfaces): WallCollider[] {
+export function buildReadingRoomShell(root: Group, collision: CollisionWorld, surfaces: WalkSurfaces): ReadingRoomShell {
   const originX = LIBRARY_ORIGIN_X;
   const originZ = LIBRARY_ORIGIN_Z;
 
   // The floor: warm boards under the dim light, one slab with a little apron
   // past the walls so the doorway's threshold has floor under it.
+  const floorMaterial = roomMaterial(PALETTE.wood);
   const floor = solid(
-    new Mesh(new BoxGeometry(LIBRARY_HALF_X * 2 + 1.2, 0.5, LIBRARY_HALF_Z * 2 + 1.2), roomMaterial(PALETTE.wood)),
+    new Mesh(new BoxGeometry(LIBRARY_HALF_X * 2 + FLOOR_APRON * 2, FLOOR_THICKNESS, LIBRARY_HALF_Z * 2 + FLOOR_APRON * 2), floorMaterial),
   );
-  floor.position.set(0, -0.25, 0);
+  floor.position.set(0, -FLOOR_THICKNESS / 2, 0);
   floor.name = 'library.floor';
   root.add(floor);
   surfaces.addPlatform(
     new Plate(
       LIBRARY_FLOOR_Y,
-      originX - LIBRARY_HALF_X - 0.6,
-      originX + LIBRARY_HALF_X + 0.6,
-      originZ - LIBRARY_HALF_Z - 0.6,
-      originZ + LIBRARY_HALF_Z + 0.6,
+      originX - LIBRARY_HALF_X - FLOOR_APRON,
+      originX + LIBRARY_HALF_X + FLOOR_APRON,
+      originZ - LIBRARY_HALF_Z - FLOOR_APRON,
+      originZ + LIBRARY_HALF_Z + FLOOR_APRON,
     ),
   );
 
-  // The walls: the classic reading-room green.
+  // The walls: the classic reading-room green. The west wall's spans and its
+  // lintel are one group in a material of their own, so they can fade together
+  // while she is in the den behind them.
   const sides = [
     { side: 'north', x1: -LIBRARY_HALF_X, z1: -LIBRARY_HALF_Z, x2: LIBRARY_HALF_X, z2: -LIBRARY_HALF_Z, hidden: false },
     { side: 'south', x1: -LIBRARY_HALF_X, z1: LIBRARY_HALF_Z, x2: LIBRARY_HALF_X, z2: LIBRARY_HALF_Z, hidden: true },
@@ -368,12 +457,17 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
     { side: 'east', x1: LIBRARY_HALF_X, z1: -LIBRARY_HALF_Z, x2: LIBRARY_HALF_X, z2: LIBRARY_HALF_Z, hidden: true },
   ] as const;
   const material = roomMaterial(PALETTE.buildingTrimDeep);
+  const westMaterial = material.clone();
+  const westWall = new Group();
+  westWall.name = 'library.westWall';
+  root.add(westWall);
+  const denGap = libraryDenGap();
   const walls: WallCollider[] = [];
   for (const { side, x1, z1, x2, z2, hidden } of sides) {
     const along = side === 'north' || side === 'south' ? 'x' : 'z';
     const from = along === 'x' ? x1 : z1;
     const to = along === 'x' ? x2 : z2;
-    const gaps: (readonly [number, number])[] = side === 'south' ? [libraryDoorGap()] : [];
+    const gaps: (readonly [number, number])[] = side === 'south' ? [libraryDoorGap()] : side === 'west' ? [denGap] : [];
     const spans = segmentsMinusGaps(from, to, gaps);
     // North and south take the corners; east and west stop short of them by
     // the wall's depth, so no two boxes share a corner column (the reptile
@@ -382,6 +476,7 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
       along === 'x'
         ? cornerClosedSpans(spans, from, to, LIBRARY_WALL_HALF)
         : spans.map(([a, b]): [number, number] => [a <= from + 1e-6 ? a + LIBRARY_WALL_HALF : a, b >= to - 1e-6 ? b - LIBRARY_WALL_HALF : b]);
+    const west = side === 'west';
     for (const [index, [a, b]] of spans.entries()) {
       if (b - a < 0.05) continue;
       const [drawnA, drawnB] = drawn[index] ?? [a, b];
@@ -392,14 +487,14 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
           along === 'x'
             ? new BoxGeometry(length, LIBRARY_WALL_HEIGHT, LIBRARY_WALL_HALF * 2)
             : new BoxGeometry(LIBRARY_WALL_HALF * 2, LIBRARY_WALL_HEIGHT, length),
-          material,
+          west ? westMaterial : material,
         ),
       );
       box.name = `library.wall.${side}`;
       box.position.set(along === 'x' ? mid : x1, LIBRARY_WALL_HEIGHT / 2, along === 'x' ? z1 : mid);
       // Hidden, not shortened: the collider below is the same either way.
       if (hidden) box.visible = false;
-      root.add(box);
+      (west ? westWall : root).add(box);
       walls.push(
         collision.addWall(
           originX + (along === 'x' ? a : x1),
@@ -411,7 +506,97 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
       );
     }
   }
-  return walls;
+
+  // The lintel over the den's doorway: from the secret shelf's top (measured,
+  // never typed) to the wall's top, the wall's own depth — so the shut shelf
+  // and the lintel read as the wall. Its collider is the band above
+  // `JUMP_CLEARANCE_GRACE` + `LINTEL_OVERLAP` under the shelf's top: a flier
+  // high enough to clear the shut shelf meets it, a walker and a jump never do.
+  const [gapNorth, gapSouth] = denGap;
+  const shelfTop = libraryBookcaseSize(LIBRARY_SECRET_BOOKCASE.kind).height;
+  const lintelMesh = solid(new Mesh(new BoxGeometry(LIBRARY_WALL_HALF * 2, LIBRARY_WALL_HEIGHT - shelfTop, gapSouth - gapNorth), westMaterial));
+  lintelMesh.name = 'library.lintel';
+  lintelMesh.position.set(-LIBRARY_HALF_X, (shelfTop + LIBRARY_WALL_HEIGHT) / 2, (gapNorth + gapSouth) / 2);
+  westWall.add(lintelMesh);
+  const lintel = collision.addWall(
+    originX - LIBRARY_HALF_X,
+    originZ + gapNorth,
+    originX - LIBRARY_HALF_X,
+    originZ + gapSouth,
+    LIBRARY_WALL_HALF,
+    Infinity,
+    false,
+    false,
+    LIBRARY_FLOOR_Y + shelfTop - JUMP_CLEARANCE_GRACE - LINTEL_OVERLAP,
+  );
+  return { walls, westWall, westMaterial, lintel, fabric: { floor: floorMaterial, wall: material } };
+}
+
+/** What {@link buildLibraryDenShell} built. */
+export interface LibraryDenShell {
+  /** The den's three walls' colliders — west, north, south — registered through `LibraryProps` as `den wall (west|north|south)`. */
+  readonly walls: readonly [west: WallCollider, north: WallCollider, south: WallCollider];
+}
+
+/**
+ * **The secret den's floor and walls** (#719): a walled pocket of the reading
+ * room behind its west wall — not a space of its own, so no iris, no
+ * boundary and no save plumbing (plan Decision 20). Built in `denRoot`, which
+ * stands at the room's origin, in the room's own paint ({@link ReadingRoomFabric}).
+ *
+ * - **The floor**: a slab of the room's boards from the den's west wall's
+ *   outer face to the room floor's apron edge, which it abuts — so no top face
+ *   of one lies over the other's — and a walkable plate from the den's west
+ *   edge to the room's inner wall face, so the doorway has floor under it from
+ *   both sides.
+ * - **Three walls**, each one box and one capsule through `LibraryProps`, so
+ *   each is held clear of every stand spot and a check can take one out by
+ *   name. The west wall's box takes both corners; the north and south walls'
+ *   run from it to the room's west wall's outer face, abutting it rather than
+ *   buried in it, so no two top faces share a plane. The south wall is on the
+ *   camera's near side, so it is hidden, not shortened — the room's own rule:
+ *   its collider is the same either way.
+ *
+ * Their east side is the reading room's west wall, with the doorway in it.
+ */
+export function buildLibraryDenShell(denRoot: Group, props: LibraryProps, surfaces: WalkSurfaces, fabric: ReadingRoomFabric): LibraryDenShell {
+  const t = LIBRARY_WALL_HALF;
+  const inner = LIBRARY_DEN_INNER;
+  // The walls' centre lines, and the room's west wall's centre line and outer face.
+  const westX = inner.west - t;
+  const northZ = inner.north - t;
+  const southZ = inner.south + t;
+  const roomWallX = -LIBRARY_HALF_X;
+  const roomWallOuter = -LIBRARY_HALF_X - t;
+  // The den's outer extent, walls included.
+  const outerWest = westX - t;
+  const outerNorth = northZ - t;
+  const outerSouth = southZ + t;
+
+  const floorEast = -LIBRARY_HALF_X - FLOOR_APRON;
+  const floor = solid(new Mesh(new BoxGeometry(floorEast - outerWest, FLOOR_THICKNESS, outerSouth - outerNorth), fabric.floor));
+  floor.name = 'library.den.floor';
+  floor.position.set((outerWest + floorEast) / 2, -FLOOR_THICKNESS / 2, (outerNorth + outerSouth) / 2);
+  denRoot.add(floor);
+  surfaces.addPlatform(
+    new Plate(LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X + outerWest, LIBRARY_ORIGIN_X - LIBRARY_INNER_X, LIBRARY_ORIGIN_Z + outerNorth, LIBRARY_ORIGIN_Z + outerSouth),
+  );
+
+  const wallBox = (name: string, minX: number, maxX: number, minZ: number, maxZ: number, hidden: boolean): void => {
+    const box = solid(new Mesh(new BoxGeometry(maxX - minX, LIBRARY_WALL_HEIGHT, maxZ - minZ), fabric.wall));
+    box.name = `library.den.wall.${name}`;
+    box.position.set((minX + maxX) / 2, LIBRARY_WALL_HEIGHT / 2, (minZ + maxZ) / 2);
+    // Hidden, not shortened: the collider is the same either way.
+    if (hidden) box.visible = false;
+    denRoot.add(box);
+  };
+  wallBox('west', outerWest, inner.west, outerNorth, outerSouth, false);
+  wallBox('north', inner.west, roomWallOuter, outerNorth, inner.north, false);
+  wallBox('south', inner.west, roomWallOuter, inner.south, outerSouth, true);
+  const west = props.wall('den wall (west)', { x: westX, z: northZ }, { x: westX, z: southZ }, t, 'wall');
+  const north = props.wall('den wall (north)', { x: westX, z: northZ }, { x: roomWallX, z: northZ }, t, 'wall');
+  const south = props.wall('den wall (south)', { x: westX, z: southZ }, { x: roomWallX, z: southZ }, t, 'wall');
+  return { walls: [west, north, south] };
 }
 
 /**
