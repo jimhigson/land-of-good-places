@@ -88,6 +88,7 @@ do Y". Load the link yourself first. See CLAUDE.md "The browser" and "PRs".
   588c413b, and that check on its own shard 9, c136443b). **First job on resume: read that run's
   every job** (`gh run view 38600489442 --json jobs`); if anything is red, root-cause and fix it
   on `feat/library-714` before anything else (zero tolerance; a flake is a failure).
+  **Read 16 Oct: success, 88 jobs success and 1 skipped (Deploy, main only); nothing red.**
 - **Why the PR head is a separate branch:** every push to a PR head starts a CI run that
   re-solves all 16 parks (30-45 minutes) and cancels the run before it, so pushing work in
   progress there would mean no run ever finishes and no preview ever deploys. Work goes to
@@ -130,6 +131,9 @@ The empty track-D branch made just before the pause was deleted (it had no commi
    the scripts typecheck instrument described in `HANDOFF-library-714.md` ("tsc does not see
    `scripts/`"). The park source hash after this merge is `d283ffaa…` (same section): seed 5
    was being built for it.
+   **Done 16 Oct, on 5d524193: every check exit 0 (seed 5 hydrated, nothing red, no code
+   changed); the foundation is complete. Results: `HANDOFF-library-714.md`, "Checks at the
+   merged source".**
 2. **The chapter books' editor.** Not run. Run `docs/library-build/workflows/chapter-editor.js`
    (Workflow tool) or give its prompt to one agent: it applies the judge's notes and writes the
    final JSON to `.claude/library-build-scratch/chapter-books.json`. **Commit that file to
@@ -147,7 +151,8 @@ changes 1-4, 6, 7, Step 2's state slice, Step 7's `seatedPose.mts` and 'listenin
 Step 8's NPC seams (verify, never rebuild); the harness exists; the PR is already open.
 
 0. **CI first** (§2), then **finish §4.1** on `feat/library-714`. Its head is then the
-   *foundation head* every track cuts from.
+   *foundation head* every track cuts from. **Both done 16 Oct** (CI green; §4.1 all exit 0):
+   the foundation head is the commit that recorded §4.1 in `HANDOFF-library-714.md`.
 1. **Two foundation reviews**, in parallel with the tracks: one proves nothing from the four
    source branches was lost in the merges (file by file, and the check-chain step sets parsed,
    never grepped); one reviews Steps 0-4 against the plan and breaks their checks deliberately.
@@ -207,7 +212,7 @@ is this branch's committed copy). It skips any stage whose result is passed in
 | F1A | the merge and the draft PR | done | 009dea3e (base d2cdb1f2) |
 | F1B | Steps 0, 1 change 5, 2 | done | 9e49816b |
 | F2 | Steps 3-4 + harness | done | 88ac6218 |
-| FM | merging F2 in | **checks cut off (§4.1)**: finish by hand and pass it cached with the verified head, or let it run (its prompt resumes) | 6ab4b8a2 |
+| FM | merging F2 in | done: its checks finished by hand on 16 Oct, all exit 0 (§4.1) | the commit recording them, on 5d524193 |
 | Dw1-Dw3, Dj | chapter writers, judge | done (committed files) | — |
 | De | chapter editor | **not run (§4.2)** | — |
 | everything else | | not started | |

@@ -57,8 +57,29 @@ The preview link comes from the PR's newest "Deploy PR preview" comment, never b
 - [x] **The Steps 3-4 merge** (14 Oct; section "The Steps 3-4 merge" below):
       `git merge --no-ff origin/feat/library-714-assets` onto 9e49816b, rerere off, no conflict
       (the halves touch disjoint files; every merged file is byte-identical to the side that
-      changed it). Seed 5's park built for the merged source, and the checks the task names run
-      on it (results in that section).
+      changed it; re-audited blob by blob on 16 Oct). Seed 5's park built for the merged source
+      (d283ffaa…, restart 1, digest 9acd3a626f55d35c).
+  - [x] **Its checks** (cut off by the 14 Oct pause; run on 16 Oct on the head 5d524193, whose
+        code is the merge's: the handover commit added docs only, and the park source hash is
+        the same d283ffaa…). **Every one exit 0**: tsc 0, typecheck:test 0, vitest
+        library-card 0 (4 passed of 4), check:brevity 0 (350 pieces), check:library 0 (60 ✓,
+        0 ✗), check:assets 0 (135 assets, 48 creatures), check:served-deep-links 0 (20 OK of
+        20), check:served-book-reader 0 (372 ok, 0 FAIL); and the scripts instrument names no
+        library type (its 56 errors: 52 environmental, 4 already on origin/main's
+        check-castle.mts). Table in "Checks at the merged source" below. Nothing was red, so no
+        code changed.
+- [x] **The foundation is complete**: parts 1-3, the groundwork, plan Steps 0-4 and the WITH A
+      REAL CHILD harness, all on this branch and green locally, at the commit that adds this
+      line (on 5d524193). It is the head every track cuts from. PR #720's CI on 9e49816b (run
+      **38600489442**, read 16 Oct): **success, 88 jobs success and 1 skipped** (Deploy: main
+      only). Checks shards 1-9, Checks build, Procgen invariants shards 1-6, Coplanar faces,
+      Swept bus, Walk reach, Entrance road, Every seed builds and Deploy PR preview: all
+      success. So both reds of run 38580957653 are proved fixed on CI. That run predates the
+      Steps 3-4 merge, which no CI run has seen yet: the next milestone push of `feat/library`
+      gives it its first CI run. The newest preview comment names 9e49816
+      (`https://pr-720-9e49816-land-of-good-places.blockstack.workers.dev`); curl on 16 Oct:
+      `/`, `/library` and `/version.txt` all HTTP 200, and `version.txt` names ea9be3a8, GitHub's
+      test merge of 9e49816b into d2cdb1f2 (origin/main, unmoved since the branch was cut).
 - [ ] Next: tracks A (owl, Steps 5-6, `feat/library-714-owl`), B (kids, Steps 7-8,
       `feat/library-714-kids`), C (den, Steps 11-13, `feat/library-714-den`), each cut from the
       head after this merge (the whole foundation). Track D (six chapter books,
@@ -625,8 +646,40 @@ the base, this branch changed 11 files and the assets branch 9, and no file is i
   reported — `Type 'OwlHandle' is not assignable to type 'number'` and `Type 'BoxWalls' is not
   assignable to type 'undefined'` — so the instrument reads both halves' types.
 
-### Checks at the merged source (logs: the orchestrator scratchpad's `m714b/`)
-Running when the merge commit was made; the next commit fills this in.
+### Checks at the merged source (run 16 Oct on 5d524193; logs: `.claude/library-build-scratch/foundation-checks/`)
+The pause (14 Oct) stopped this merge's engineer after seed 5's park was built for d283ffaa…
+(`m714b/build-parks-5.log`: restart 0 rejected by check:coplanar, restart 1 accepted with 134
+measures, digest 9acd3a626f55d35c, the same digest as at 94225e98) and after tsc 0,
+typecheck:test 0 and the vitest 0 at 17:50, but before the World-building checks started
+(`m714b/` holds no log of them). All nine were run again on 16 Oct on the head, which carries
+the merge's code unchanged: 5d524193 added `HANDOFF-library-resume.md` and
+`docs/library-build/` only, and `node scripts/lib/park-source-hash.mjs` prints d283ffaa… at the
+head, equal to `.parks/manifest.json`, so every World-building check hydrated seed 5 restart 1
+and none solved a park. Each exit code is the command's own status, written into its log (no
+pipes); the counts are copied off the logs.
+
+| check | exit | off the screen |
+|---|---|---|
+| `pnpm exec tsc --noEmit` | 0 | no diagnostics; the program is 1141 files (`--listFilesOnly`) |
+| `pnpm run typecheck:test` | 0 | no diagnostics |
+| `pnpm exec vitest run test/store/library-card.test.ts` | 0 | `Test Files 1 passed (1)`, `Tests 4 passed (4)` |
+| `pnpm run check:brevity -- --verbose` | 0 | "350 pieces of copy are short enough; 6 still carry a recorded exception"; "the Library — 45 lines (24 of them templates rendered with each of the 12 titles), 10 titles (the chips and the card)"; "the secrets — 5 names and 5 lines"; rows: 45 `libraryLine:`, 9 `libraryChip:`, 1 `libraryCard:` |
+| `pnpm run check:library` | 0 | **60 ✓, 0 ✗**, "All clauses passed."; seed 5 (restart 1) hydrated. The foundation's 55, PAINTED FACES' 3 and the harness's 2, as at 88ac6218. REACHABILITY 64 of 64 keep-outs and 8785 of 8785 cells; the real child travelled 14.26 m with her feet 0.000 m off the floor |
+| `pnpm run check:assets` | 0 | "135 assets check out, 48 of them creatures that stand still as built (32 also posed through update()); 28 still carry recorded drift (worst: balloon.corgi +0.077 m)" |
+| `pnpm run check:served-deep-links` (`SERVED_CHECKS_PORT=6253`) | 0 | 10 links x 2 starts: **20 OK, 0 FAILED**, "check:deep-links passed", seed 5 pinned on every URL; the four library links 0.00 m off, and both `at=` cases' facing 0.000 rad round; 138 s |
+| `pnpm run check:served-book-reader` (`SERVED_CHECKS_PORT=6259`) | 0 | **372 `ok`, 0 `FAIL`**, "check:book-reader passed"; all twelve books; the smallest page text 33.3 / 26.2 / 32.3 CSS px (laptop / phone landscape / phone portrait); 36 s |
+| scripts instrument (`foundation-checks/tsconfig.scripts.json`) | 2, as expected | 56 errors over the **14** scripts changed since origin/main (the merge's six and the other eight): **52 environmental** (this project has no `@types/node`, by design: `node:*` modules and their members, `process.argv/exit/execPath/kill/on/stdout`, `Buffer`, one implicit-any `code` on the untyped `ChildProcess`, and 3 browser-side `/src/...` imports inside `page.evaluate`) and **4 already on origin/main** in check-castle.mts (see "Findings outside this task"; main's own file text, mirrored beside this src, gives the same four). **None names a library type.** CONTROL (`foundation-checks/control-api.mts`): `Type 'OwlHandle' is not assignable to type 'number'` and `Type 'BoxWalls' is not assignable to type 'undefined'` both reported, and the other 56 lines are identical with and without it |
+
+- **The merge re-audited, blob by blob** (16 Oct; the 14 Oct line was not trusted): of the
+  files changed since 009dea3e, this branch's 11 and the assets branch's 9 (none in both), each
+  equals the changing side's blob in 6ab4b8a2, except the two the fold meant to change:
+  `HANDOFF-library-714.md` (takes the second half's facts) and `HANDOFF-library-assets.md`
+  (deleted). Nothing else in 6ab4b8a2 differs from the merge base.
+- **The deep-links probe solved a park again** (the finding at the end of this file): its
+  bare-root page asked the dev middleware for seed 10, which started `build:parks` into
+  `.parks/dev/d283ffaa1e89b40e/10/`; it died with the server's process group when the check
+  finished, wrote no manifest, and the empty attempt directory was removed by hand. Every
+  measured page was seed 5. It cost one core for 138 s and changed no result.
 
 ## Decisions (made here, with reasons)
 - **The zero-length capsule is fixed in `Collision.ts`, not worked round in props.ts**
@@ -756,10 +809,15 @@ Running when the merge commit was made; the next commit fills this in.
   D edit there merges against that.
 - **Type-check a check script yourself.** Neither tsc project includes `scripts/` (see "The
   Steps 3-4 merge"), so `tsc` exit 0 says nothing about a clause you add to check-library.mts.
-  Copy `m714b/tsconfig.scripts.json` from the orchestrator scratchpad (it points at this
-  worktree; change the paths to yours) and expect only the environmental errors listed there.
+  The instrument over the 14 scripts this branch changed is
+  `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/foundation-checks/tsconfig.scripts.json`
+  (absolute paths into this worktree: copy it, replace `worktrees/library-714/` with your
+  worktree, and add any script you create). At the foundation head it gives exactly the 56
+  errors in `foundation-checks/tsc-scripts.log` (52 environmental, 4 on main's
+  check-castle.mts). Diff your run's error lines against that file (line numbers move when you
+  edit a file, so compare the messages): any new message is yours.
 
-## Findings outside this task (reported, not changed; from the second half)
+## Findings outside this task (reported, not changed; from the second half, and 16 Oct)
 - **check-reptile-house's PAINTED FACES skips the wrong corner.** It skips parked UVs with
   `u < 0.05 && v < 0.05`, but the kits park at Blender (0.02, 0.02) = glTF (0.020, 0.980) once
   exported: measured on `rr-snake-head`, 0 vertices match its skip and 155 sit at (0.020, 0.980). So
@@ -769,3 +827,10 @@ Running when the merge commit was made; the next commit fills this in.
   built parks the dev middleware starts solving a pooled seed in the background (seed 6 and 10
   here). Under `with-dev-server` the process group dies with the server; on a hand-started server,
   killing vite's PID leaves those builds orphaned — I killed mine by PID (5 processes).
+- **check-castle.mts carries four type errors on origin/main that no gate sees** (neither tsc
+  project includes `scripts/`, and Node strips types without checking them):
+  `BUILDING_FLOOR_HEIGHT` and `regionContains` are imported and never read (TS6133, lines 31
+  and 43), and `FOOTPRINT_SAMPLES === 1` is compared twice against a `FOOTPRINT_SAMPLES` of
+  literal 5 (TS2367, main's lines 233-234; the `=== 1` arm is dead). Measured with the scripts
+  instrument on main's own file text (16 Oct). The foundation's hunks in that file (the
+  `seatedPose.mts` import) touch none of them. Not changed here.
