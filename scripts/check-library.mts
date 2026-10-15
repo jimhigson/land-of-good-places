@@ -1057,9 +1057,10 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
     `${placedOk} of ${BOOKS.length} readable books stand in their own slots: inside their case's drawn box, every drawn point of them (drawn implies solid — ` +
       'the case\'s capsules cover it), at their slot\'s place along the shelf, the base within 0.02 m of the board, under the board above, in their cover\'s paint',
   );
+  const nearest = Math.abs(worstOut.by) <= 1e-6 ? 'flush with it' : worstOut.by < 0 ? `${(-worstOut.by).toFixed(4)} m inside it` : `${worstOut.by.toFixed(4)} m PAST it`;
   note(
-    `the readable books lean ${READABLE_LEAN} rad and stand up to ${READABLE_PROUD} m proud of their rows, as far as their case's front allows; the nearest any comes to ` +
-      `leaving its case's drawn box: ${worstOut.by <= 0 ? `${(-worstOut.by).toFixed(4)} m inside` : `${worstOut.by.toFixed(4)} m past`} ('${worstOut.what}')`,
+    `the readable books lean ${READABLE_LEAN} rad and stand up to ${READABLE_PROUD} m proud of their rows, as far as their case's front allows; ` +
+      `the nearest any drawn point of one comes to leaving its case's drawn box: ${nearest} ('${worstOut.what}')`,
   );
 
   // The Read zones, with a probe standing in the room the way DOORS stood one.
