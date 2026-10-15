@@ -45,6 +45,8 @@ export interface SeatedBody {
   readonly root: Object3D;
   /** Her left hip pivot: the joint the leg hangs from, the one a seat height is chosen for. */
   readonly leftLeg: Object3D;
+  /** Her right hip pivot. With the left, what {@link seatedErrors} reads each sole from. */
+  readonly rightLeg: Object3D;
 }
 
 /** One seated child, measured — every value world-space, in metres. */
@@ -57,6 +59,14 @@ export interface SeatedErrors {
   readonly floor: number;
   /** `|hipY − seatTop|` — held to {@link SEAT_TOLERANCE}. */
   readonly seat: number;
+  /** World y of the lowest drawn vertex under each hip pivot: her left sole and her right. */
+  readonly soleY: { readonly left: number; readonly right: number };
+  /**
+   * The worse of her two soles against `floorY` — held to
+   * {@link FLOOR_TOLERANCE} too. It sees what {@link floor} cannot: **one**
+   * lifted foot (see {@link seatedErrors}).
+   */
+  readonly soles: number;
 }
 
 /** An ink outline — the inverted hull `addOutline` draws round a shape — rather than the shape. */
@@ -66,40 +76,20 @@ function isOutline(mesh: Mesh): boolean {
 }
 
 /**
- * **How far a seated child is from sitting properly**: her lowest drawn vertex
- * against `floorY`, and her hip pivot against `seatTop`.
- *
- * "Lowest drawn vertex" is the `measurePlan` rule (`art/models/libraryAssets.ts`, #716):
- * every visible vertex of every painted part, walked one by one — never a
- * bounding box, which a rotated part inflates — and **never an outline**, whose
- * hull sits a centimetre and a half outside the shape it inks. A mesh counts
- * only if it and every ancestor up to `root` are visible (a hidden hair style
- * is not her), and an `InstancedMesh` is expanded per instance.
- *
- * Measured in world space, from a fresh `updateWorldMatrix`, so a child seated
- * anywhere in any space can be asked about directly. A model with nothing
- * drawn reads `lowestY = Infinity`, and so a `floor` error of Infinity: a
- * check that measured nobody fails rather than passing.
- *
- * **What `floor` cannot see: one foot.** It is the lowest vertex of the whole
- * child, so a pose that lifts *one* leg leaves the other sole on the floor and
- * reads the same. Measured on a `CharacterModel` posed `'listening'` at y 3.0
- * with a 3.36 seat: as built, floor 3.5 mm, seat 0.0 mm; left leg alone at
- * −0.7, floor still 3.5 mm (passes); both legs at −0.7, floor 44.5 mm (fails).
- * So a red proof of a clause built on this rotates **both** legs. The
- * fairground `'seated'` pose fails here on the hip instead (seat 16.1 mm:
- * its 0.3 rad body lean lowers the hip pivot), floor 0.9 mm.
+ * The world y of the lowest drawn vertex under `from`: every visible vertex of
+ * every painted mesh in its subtree, walked one by one (an `InstancedMesh`
+ * per instance), never an outline, and a mesh counts only if it and every
+ * ancestor up to `root` are visible. `Infinity` when nothing is drawn there.
+ * World matrices must be fresh.
  */
-export function seatedErrors(model: SeatedBody, floorY: number, seatTop: number): SeatedErrors {
-  model.root.updateWorldMatrix(true, true);
+function lowestDrawnY(from: Object3D, root: Object3D): number {
   const point = new Vector3();
   const instance = new Matrix4();
   const combined = new Matrix4();
   let lowestY = Infinity;
-
-  model.root.traverse((node) => {
+  from.traverse((node) => {
     if (!(node instanceof Mesh) || isOutline(node)) return;
-    for (let up: Object3D | null = node; up && up !== model.root; up = up.parent) if (!up.visible) return;
+    for (let up: Object3D | null = node; up && up !== root; up = up.parent) if (!up.visible) return;
     const position = node.geometry.getAttribute('position') as BufferAttribute | undefined;
     if (!position) return;
     const instances = node instanceof InstancedMesh ? node.count : 1;
@@ -116,12 +106,50 @@ export function seatedErrors(model: SeatedBody, floorY: number, seatTop: number)
       }
     }
   });
+  return lowestY;
+}
 
-  const hipY = model.leftLeg.getWorldPosition(point).y;
+/**
+ * **How far a seated child is from sitting properly**: her lowest drawn vertex
+ * against `floorY`, each sole against it too, and her hip pivot against
+ * `seatTop`.
+ *
+ * "Lowest drawn vertex" is the `measurePlan` rule (`art/models/libraryAssets.ts`, #716):
+ * every visible vertex of every painted part, walked one by one — never a
+ * bounding box, which a rotated part inflates — and **never an outline**, whose
+ * hull sits a centimetre and a half outside the shape it inks. A mesh counts
+ * only if it and every ancestor up to `root` are visible (a hidden hair style
+ * is not her), and an `InstancedMesh` is expanded per instance.
+ *
+ * Measured in world space, from a fresh `updateWorldMatrix`, so a child seated
+ * anywhere in any space can be asked about directly. A model with nothing
+ * drawn reads `lowestY = Infinity`, and so a `floor` error of Infinity: a
+ * check that measured nobody fails rather than passing.
+ *
+ * **What `floor` cannot see: one foot — so `soles` reads each leg on its
+ * own.** `floor` is the lowest vertex of the whole child, so a pose that lifts
+ * *one* leg leaves the other sole on the floor and reads the same. Measured on
+ * a `CharacterModel` posed `'listening'` at y 3.0 with a 3.36 seat: as built,
+ * floor 3.5 mm, seat 0.0 mm; left leg alone at −0.7, floor still 3.5 mm
+ * (passes); both legs at −0.7, floor 44.5 mm (fails). `soles` takes the
+ * lowest drawn vertex under each hip pivot (each shoe hangs from its own leg's
+ * pivot, `kid.ts`) and keeps the worse, so one lifted foot fails there — on
+ * the real player on a library cushion, check:library's SIT measured the left
+ * leg alone at −0.7 as 3.5 mm on `floor` and 44.5 mm on `soles` (#718). The
+ * fairground `'seated'` pose fails here on the hip instead (seat 16.1 mm: its
+ * 0.3 rad body lean lowers the hip pivot), floor 0.9 mm.
+ */
+export function seatedErrors(model: SeatedBody, floorY: number, seatTop: number): SeatedErrors {
+  model.root.updateWorldMatrix(true, true);
+  const lowestY = lowestDrawnY(model.root, model.root);
+  const soleY = { left: lowestDrawnY(model.leftLeg, model.root), right: lowestDrawnY(model.rightLeg, model.root) };
+  const hipY = model.leftLeg.getWorldPosition(new Vector3()).y;
   return {
     lowestY,
     hipY,
     floor: Math.abs(lowestY - floorY),
     seat: Math.abs(hipY - seatTop),
+    soleY,
+    soles: Math.max(Math.abs(soleY.left - floorY), Math.abs(soleY.right - floorY)),
   };
 }

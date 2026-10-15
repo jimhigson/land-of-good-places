@@ -1228,15 +1228,17 @@ console.log('\nWITH A REAL CHILD — a real Player, from the arrival, walks up t
  * riding, posture `'listening'`, on the cushion's middle with her root on the
  * floor, facing the storyteller's chair. Then, measured on her drawn body on
  * every frame of two seconds' sitting (the pose sways, so one frame could pass
- * by luck of phase): her lowest drawn point on the floor and her hip pivot on
- * the cushion's top, to `scripts/lib/seatedPose.mts`'s tolerances. While she
+ * by luck of phase): her lowest drawn point and each of her soles on the
+ * floor, and her hip pivot on the cushion's top, to `scripts/lib/seatedPose.mts`'s
+ * tolerances. While she
  * sits no Read chip is offered, her cushion offers 'Get up' and the other
  * offers nothing. 'Get up' stands her on clear floor and she walks off; sat
  * down again, a jump stands her up, with no hop in it.
  *
- * Proved red by hand: **both** legs rotated in `applyListeningPose`. One leg
- * alone cannot turn it red — `seatedErrors` reads the whole child's lowest
- * point, so the other sole still touches the floor (its doc has the numbers).
+ * Proved red by hand: a leg rotated in `applyListeningPose` — one leg (its
+ * sole, `seatedErrors`' `soles`) or both (her lowest point too). The whole
+ * child's lowest point alone could not see one leg lifted: the other sole
+ * still touches the floor (`seatedPose.mts` has the numbers).
  */
 console.log('\nSIT — the real child walks onto a story cushion, sits down to listen, and gets up again:');
 {
@@ -1311,8 +1313,10 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
   let worstSlide = 0;
   let worstRoot = 0;
   let worstFloor = 0;
+  let worstSoles = 0;
   let worstSeat = 0;
   let lowestAtWorst = Number.NaN;
+  let solesAtWorst = { left: Number.NaN, right: Number.NaN };
   let hipAtWorst = Number.NaN;
   for (let i = 0; i < seatedFrames; i += 1) {
     child.step();
@@ -1325,6 +1329,10 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
     if (!(errors.floor <= worstFloor)) {
       worstFloor = errors.floor;
       lowestAtWorst = errors.lowestY;
+    }
+    if (!(errors.soles <= worstSoles)) {
+      worstSoles = errors.soles;
+      solesAtWorst = errors.soleY;
     }
     if (!(errors.seat <= worstSeat)) {
       worstSeat = errors.seat;
@@ -1342,9 +1350,10 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
   );
   say(turn <= 0.01, `facing the storyteller's chair: ${player.facing.toFixed(3)} rad, the chair's bearing ${facingChair.toFixed(3)} (${turn.toFixed(4)} rad round)`);
   say(
-    worstFloor <= FLOOR_TOLERANCE,
-    `her feet on the floor: her lowest drawn point at worst ${(worstFloor * 1000).toFixed(1)} mm off it over ${seatedFrames} frames ` +
-      `(y ${lowestAtWorst.toFixed(4)}; ${(FLOOR_TOLERANCE * 1000).toFixed(0)} mm allowed)`,
+    worstFloor <= FLOOR_TOLERANCE && worstSoles <= FLOOR_TOLERANCE,
+    `her feet on the floor: her lowest drawn point at worst ${(worstFloor * 1000).toFixed(1)} mm off it, and the worse sole ` +
+      `${(worstSoles * 1000).toFixed(1)} mm (left y ${solesAtWorst.left.toFixed(4)}, right y ${solesAtWorst.right.toFixed(4)}), over ${seatedFrames} frames ` +
+      `(y ${lowestAtWorst.toFixed(4)}; ${(FLOOR_TOLERANCE * 1000).toFixed(0)} mm allowed, each)`,
   );
   say(
     worstSeat <= SEAT_TOLERANCE,
@@ -1418,7 +1427,8 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
   );
   note(
     `SIT on ${seatId} at (${cushion.at.x}, ${cushion.at.z}), top ${cushionTop.toFixed(3)}; ${seatedFrames} seated frames measured; ` +
-      `worst feet ${(worstFloor * 1000).toFixed(1)} mm, worst hip ${(worstSeat * 1000).toFixed(1)} mm; ${child.frames} frames stepped so far`,
+      `worst lowest point ${(worstFloor * 1000).toFixed(1)} mm, worst sole ${(worstSoles * 1000).toFixed(1)} mm, worst hip ${(worstSeat * 1000).toFixed(1)} mm; ` +
+      `${child.frames} frames stepped so far`,
   );
 }
 
