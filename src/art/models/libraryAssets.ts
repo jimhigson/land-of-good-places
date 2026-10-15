@@ -20,7 +20,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
-import { addOutline, decal, markShared, solid, toonMaterial, type ToonOptions } from '../style/materials';
+import { addOutline, addSmoothOutline, decal, markShared, solid, toonMaterial, type ToonOptions } from '../style/materials';
 import { visibleBounds, visiblePoints } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
 import { kitBounds, kitTreads, libraryPart, libraryPartNames, LIBRARY_SHELF_FOOTPRINT, LIBRARY_SHELL_NODES } from './libraryKit';
@@ -657,6 +657,48 @@ export const LIBRARY_BOOK_COLOURS: readonly number[] = [
  */
 export function libraryBookMaterial(): Material {
   return paint({ colour: 0xffffff });
+}
+
+/**
+ * **The shape a readable book is drawn in** (#718): the tallest of the kit's
+ * books, and of the tallest the thickest — chosen by measuring them, never by
+ * where a shape sits in {@link libraryBookShapes}' list, so the day the Artist
+ * adds a taller book the readable ones grow with it. The biggest spine on the
+ * shelf is the one a child can open.
+ */
+export function libraryShelfBookShape(): BookShape {
+  const shapes = libraryBookShapes();
+  const first = shapes[0];
+  if (!first) throw new Error('libraryAssets: the kit has no book shapes to draw a readable book from');
+  return shapes.reduce((best, shape) =>
+    shape.height > best.height || (shape.height === best.height && shape.thickness > best.thickness) ? shape : best,
+  first);
+}
+
+/**
+ * A readable book's ink outline, metres: a small prop's (ART_DIRECTION §2).
+ * The decorative books on the shelves draw none, so it is part of what makes
+ * a readable one stand out.
+ */
+const SHELF_BOOK_OUTLINE = 0.012;
+
+/**
+ * **One readable book** (#718), its cover in `colour`: the
+ * {@link libraryShelfBookShape}, standing on the middle of its base with its
+ * spine facing +Z, like every book on the shelves.
+ *
+ * Unlike them it is a mesh of its own rather than an instance, in a paint of
+ * its own whose emissive is its own colour at intensity 0 — so the owl's
+ * recommendation can make exactly this book glow (#718, Step 6) and a stack can
+ * fade it with itself — and with an ink outline. The outline is
+ * `addSmoothOutline`'s: the kit's book has a hard edge at every corner (14 of
+ * its 16 corners carry more than one normal, measured), and a plain inverted
+ * hull pushed along split normals comes apart into separate flaps there.
+ */
+export function createShelfBook(colour: number): Mesh {
+  const mesh = solid(new Mesh(libraryShelfBookShape().geometry, toonMaterial(colour, { emissive: colour, emissiveIntensity: 0 })));
+  addSmoothOutline(mesh, SHELF_BOOK_OUTLINE);
+  return mesh;
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import {
   Mesh,
   Quaternion,
   Vector3,
+  type BufferAttribute,
   type Material,
   type MeshBasicMaterial,
   type MeshToonMaterial,
@@ -28,6 +29,7 @@ import {
   createLibrarySconce,
   createLibrarySecretBookcase,
   createLibrarySideTable,
+  createShelfBook,
   libraryArmchairSize,
   libraryBookcaseBaked,
   libraryBookcaseSize,
@@ -37,6 +39,7 @@ import {
   libraryDeskSize,
   libraryFloorLampSize,
   libraryReadingLampSize,
+  libraryShelfBookShape,
   librarySideTableSize,
   LIBRARY_BOOK_COLOURS,
   type BakedModel,
@@ -47,6 +50,7 @@ import {
 import { KID_REACH_HEIGHT } from '../../art/models/kid';
 import type { LibraryProps } from './props';
 import type { PoolSpot } from './lighting';
+import { SHELF_BOOKS, type ShelfBook } from './shelfBooks';
 import {
   LIBRARY_BOOKCASES,
   LIBRARY_DOOR_HALF,
@@ -91,6 +95,23 @@ const ROW_END_GAP = 0.05;
 
 /** The gap left on a shelf for a readable book's slot (#718), either side of its middle. */
 const SLOT_HALF = 0.1;
+
+/**
+ * **How far a readable book (#718) stands proud of its row, at most**, metres:
+ * its spine this far in front of the row's spines, so a child spots it. "At
+ * most" because the whole book stays inside its case's drawn front
+ * ({@link readableProud}): drawn implies solid, and the case's collider stops
+ * at that face.
+ */
+export const READABLE_PROUD = 0.03;
+
+/**
+ * **How far a readable book leans out of its row**, radians, about the middle
+ * of its base: its top towards her — the plainest "this one is different" a
+ * shelf can say — and the front edge of its base a centimetre down into the
+ * board, where nobody can see it.
+ */
+export const READABLE_LEAN = 0.1;
 
 /** Room-local: a case's or a piece's transform. */
 function placement(x: number, y: number, z: number, facingDegrees: number): Matrix4 {
@@ -179,6 +200,84 @@ function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonl
     }
   });
   return books;
+}
+
+/**
+ * How far the leaning readable book reaches from the middle of its base,
+ * measured off the shape's own vertices turned by {@link READABLE_LEAN}:
+ * forward (+Z, out of the case), up, and down (negative: into the board).
+ */
+function leaningReach(): { readonly forward: number; readonly top: number; readonly bottom: number } {
+  const shape = libraryShelfBookShape();
+  const lean = new Matrix4().makeRotationX(READABLE_LEAN);
+  const position = shape.geometry.getAttribute('position') as BufferAttribute;
+  const point = new Vector3();
+  let forward = -Infinity;
+  let top = -Infinity;
+  let bottom = Infinity;
+  for (let i = 0; i < position.count; i += 1) {
+    point.fromBufferAttribute(position, i).applyMatrix4(lean);
+    forward = Math.max(forward, point.z);
+    top = Math.max(top, point.y);
+    bottom = Math.min(bottom, point.y);
+  }
+  return { forward, top, bottom };
+}
+
+/**
+ * **How far a readable book stands proud of its row on a case of this kind**:
+ * {@link READABLE_PROUD}, or less if the lean would carry its top past the
+ * case's drawn front — the face the case's collider stops at — so no part of a
+ * book she can see stands where she could walk. Measured: the row's spines,
+ * the book's depth, the case's front, the lean's reach.
+ *
+ * Measured on 16 Oct 2026 off the kit's wall case and stack alike: the case's
+ * front stands 6 cm in front of the row's spines and the lean carries the
+ * book's top 4.1 cm forward, so a book stands 1.9 cm proud at its base and its
+ * top meets the case's front face. Throws if a case leaves no room at all: a
+ * readable book must stand at least as far out as its row.
+ */
+function readableProud(kind: BookcaseKind): number {
+  const size = libraryBookcaseSize(kind);
+  const shape = libraryShelfBookShape();
+  const spine = size.boardFront - SPINE_INSET;
+  const room = size.depth / 2 - (spine - shape.depth / 2) - leaningReach().forward;
+  if (room < 0) {
+    throw new Error(
+      `Library: a readable book leaning ${READABLE_LEAN} rad cannot stay inside a ${kind} case: its top would stand ${(-room).toFixed(3)} m past the case's front even level with its row`,
+    );
+  }
+  return Math.min(READABLE_PROUD, room);
+}
+
+/**
+ * **A readable book on its shelf** (#718), in its case's own frame (front
+ * +Z): `slot.along` across, its base on the slot's board, its spine
+ * {@link readableProud} in front of the row's, leaning {@link READABLE_LEAN}.
+ * `shelveFace` left the gap for it ({@link SLOT_HALF} either side), and the
+ * build throws if the book does not fit there — through a side panel, or
+ * through the board above.
+ */
+function shelfBookMesh(entry: ShelfBook, spec: BookcaseSpec): Mesh {
+  const size = libraryBookcaseSize(spec.kind);
+  const shape = libraryShelfBookShape();
+  const shelfY = size.shelfTops[entry.slot.shelf];
+  const clear = size.shelfClear[entry.slot.shelf];
+  const where = `'${entry.book.id}' (readable slot ${entry.slot.index + 1}, ${spec.id} shelf ${entry.slot.shelf})`;
+  if (shelfY === undefined || clear === undefined) throw new Error(`Library: ${where} names a shelf the case does not have`);
+  const reach = leaningReach();
+  if (reach.top >= clear) throw new Error(`Library: ${where} stands ${reach.top.toFixed(3)} m tall leaning, but the board above is ${clear.toFixed(3)} m over it`);
+  if (Math.abs(entry.slot.along) + shape.thickness / 2 > size.innerHalf) {
+    throw new Error(`Library: ${where} is ${entry.slot.along} m along, through the case's side (${size.innerHalf.toFixed(3)} m from its middle)`);
+  }
+  if (shape.thickness / 2 >= SLOT_HALF) throw new Error(`Library: ${where} is ${shape.thickness.toFixed(3)} m thick, wider than the gap its row leaves (${(SLOT_HALF * 2).toFixed(2)} m)`);
+  const mesh = createShelfBook(PALETTE[entry.book.cover]);
+  mesh.name = `library.book.${entry.book.id}`;
+  const outline = mesh.children[0];
+  if (outline) outline.name = `${mesh.name}.outline`;
+  mesh.position.set(entry.slot.along, shelfY, size.boardFront - SPINE_INSET - shape.depth / 2 + readableProud(spec.kind));
+  mesh.rotation.x = READABLE_LEAN;
+  return mesh;
 }
 
 /**
@@ -294,6 +393,20 @@ export class StackFader {
   }
 }
 
+/** One readable book (#718) as furnished: its book and slot (`shelfBooks.ts`'s pairing), and what was drawn. */
+export interface FurnishedShelfBook extends ShelfBook {
+  /**
+   * `library.book.<bookId>`, its outline `library.book.<bookId>.outline`: in a
+   * stack, under the stack's group (it fades with the stack); on a wall case,
+   * under the room with its case's transform composed.
+   */
+  readonly mesh: Mesh;
+  /** Its own paint, nobody else's — the recommendation's glow (#718, Step 6) lights exactly this book. */
+  readonly material: MeshToonMaterial;
+  /** Where the mesh's origin — the middle of the book's base — stands, room-local. */
+  readonly local: LocalPoint;
+}
+
 /** What furnishing the room hands back. */
 export interface Furnished {
   readonly stacks: readonly StackFader[];
@@ -301,6 +414,8 @@ export interface Furnished {
   readonly bookCount: number;
   /** Every placed piece's drawn group, by layout id — for the checks to measure against its collider. */
   readonly pieces: ReadonlyMap<string, Object3D>;
+  /** The readable books (#718), in `SHELF_BOOKS`' order: one per `BOOKS` entry. */
+  readonly shelfBooks: readonly FurnishedShelfBook[];
 }
 
 /** The cloth of each chair's frame and each cushion — the park's own bright colours, a different one each; the storyteller's chair the castle's tapestry red. */
@@ -349,6 +464,7 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
   const fixedMatrices = new Map<BookcaseKind, Matrix4[]>();
   const fixedBooks: { shape: number; colour: number; matrix: Matrix4 }[] = [];
   const stacks: StackFader[] = [];
+  const shelved = new Map<number, FurnishedShelfBook>();
   let bookCount = 0;
   for (const spec of LIBRARY_BOOKCASES) {
     const size = libraryBookcaseSize(spec.kind);
@@ -357,6 +473,22 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     props.box(`bookcase ${spec.id}`, { x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2 }, size.height);
     const books = [...shelveFace(spec, false, rng, shapes), ...(spec.kind === 'stack' ? shelveFace(spec, true, rng, shapes) : [])];
     bookCount += books.length;
+    // The readable books standing in this case's gaps (#718), each in its own
+    // case-local place; where each goes in the scene is the case kind's own.
+    const readable = SHELF_BOOKS.filter((entry) => entry.slot.bookcase === spec.id).map((entry) => {
+      const mesh = shelfBookMesh(entry, spec);
+      const at = mesh.position.clone().applyMatrix4(transform);
+      const placed: FurnishedShelfBook = { ...entry, mesh, material: mesh.material as MeshToonMaterial, local: { x: at.x, z: at.z } };
+      shelved.set(entry.slot.index, placed);
+      return placed;
+    });
+    if (spec.secret && readable.length > 0) {
+      // The secret shelf swings open (#719), so a book on it would have to
+      // ride its door; and the gold book a child pulls there is the one book
+      // on that case that does something. Neither is decided for a readable
+      // book, so one is never quietly put there.
+      throw new Error(`Library: readable book(s) ${readable.map((placed) => `'${placed.book.id}'`).join(', ')} stand on the secret shelf ${spec.id}, which swings open`);
+    }
     if (spec.secret) {
       // The secret shelf (#719) is drawn from the kit's hinge-origin twin, its
       // books on its own door so they swing with it. Closed, it stands exactly
@@ -376,6 +508,11 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       list.push(transform);
       fixedMatrices.set(spec.kind, list);
       for (const book of books) fixedBooks.push({ ...book, matrix: new Matrix4().multiplyMatrices(transform, book.matrix) });
+      // A wall case never fades: its readable books stand in the room itself.
+      for (const placed of readable) {
+        placed.mesh.applyMatrix4(transform);
+        root.add(placed.mesh);
+      }
       continue;
     }
     // A stack: its own materials, so it can fade on its own.
@@ -389,9 +526,18 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     const instanced = bookInstances(books, shapes, bookMaterial);
     instanced.name = `${group.name}.books`;
     group.add(instanced);
+    // Its readable books ride its group and fade with it, ink outlines and all:
+    // a book left solid in a stack gone glassy would float in the air.
+    const fading: Material[] = [body, outline, bookMaterial];
+    for (const placed of readable) {
+      group.add(placed.mesh);
+      placed.mesh.traverse((part) => {
+        if (part instanceof Mesh) fading.push(part.material as Material);
+      });
+    }
     root.add(group);
     pieces.set(spec.id, group);
-    stacks.push(new StackFader(spec.id, group, centre, spec.facing, size, [body, outline, bookMaterial]));
+    stacks.push(new StackFader(spec.id, group, centre, spec.facing, size, fading));
   }
   for (const [kind, matrices] of fixedMatrices) {
     const baked = libraryBookcaseBaked(kind);
@@ -529,6 +675,11 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       }
     }
   }
-  return { stacks, pools, bookCount, pieces };
+  const shelfBooks = SHELF_BOOKS.map((entry) => {
+    const placed = shelved.get(entry.slot.index);
+    if (!placed) throw new Error(`Library: readable book '${entry.book.id}' names case '${entry.slot.bookcase}', which the room does not build`);
+    return placed;
+  });
+  return { stacks, pools, bookCount, pieces, shelfBooks };
 }
 
