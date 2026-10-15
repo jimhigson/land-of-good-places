@@ -349,11 +349,11 @@ const FLOOR_APRON = LIBRARY_WALL_HALF * 2;
 const FLOOR_THICKNESS = 0.5;
 
 /**
- * **The lintel's band reaches this far below `JUMP_CLEARANCE_GRACE` under the
- * secret shelf's top**, so the band of height in which a flier would clear the
- * shut shelf and the band in which the lintel exists overlap: there is no
- * height at which she slips through between the two (`check:library`'s LINTEL
- * sweeps every height to prove it).
+ * **How far the lintel's base sits below the height at which a flier clears
+ * the shut shelf** (the shelf's top less `JUMP_CLEARANCE_GRACE`), so the band
+ * the shelf holds and the band the lintel holds overlap: there is no height at
+ * which she slips through between the two (`check:library`'s LINTEL sweeps
+ * every height to prove it).
  */
 const LINTEL_OVERLAP = 0.05;
 
