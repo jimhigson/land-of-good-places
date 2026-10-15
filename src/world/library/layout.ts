@@ -343,6 +343,46 @@ export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
 ];
 
 // ===========================================================================
+// The story corner — who sits where (#718)
+// ===========================================================================
+
+/**
+ * **The two cushions she is offered** — a Sit chip on each, whether a story
+ * is on or not. The library's three children take the other three at story
+ * time (cushions 2, 4 and 5: the build plan's Decision 13), so these two are
+ * always free for her, and a chip on them never has to refuse.
+ */
+export const LIBRARY_PLAYER_SEATS = ['cushion-1', 'cushion-3'] as const;
+export type LibraryPlayerSeat = (typeof LIBRARY_PLAYER_SEATS)[number];
+
+/** A cushion's spot, looked up in {@link LIBRARY_FURNITURE} — the one table of where furniture stands. */
+export function libraryCushion(id: string): FurnitureSpec {
+  const piece = LIBRARY_FURNITURE.find((candidate) => candidate.id === id);
+  if (!piece || piece.kind !== 'cushion') throw new Error(`library layout: '${id}' is not a cushion in LIBRARY_FURNITURE`);
+  return piece;
+}
+
+/** The storyteller's chair: the one `storyChair` in {@link LIBRARY_FURNITURE}. */
+export const LIBRARY_STORY_CHAIR: FurnitureSpec = (() => {
+  const chairs = LIBRARY_FURNITURE.filter((piece) => piece.kind === 'storyChair');
+  if (chairs.length !== 1 || !chairs[0]) {
+    throw new Error(`library layout: ${chairs.length} story chairs in LIBRARY_FURNITURE, where the story corner needs exactly one`);
+  }
+  return chairs[0];
+})();
+
+/**
+ * **Which way a listener at `from` looks to see the storyteller**:
+ * `Player.facing` degrees (0 along +Z, 90 along +X) from `from` to the story
+ * chair's spot. The one bearing a cushion's sitter is turned to — the
+ * cushion's stand spot and her seated facing both read it.
+ */
+export function libraryFacingStoryChair(from: LocalPoint): number {
+  const degrees = (Math.atan2(LIBRARY_STORY_CHAIR.at.x - from.x, LIBRARY_STORY_CHAIR.at.z - from.z) * 180) / Math.PI;
+  return (degrees + 360) % 360;
+}
+
+// ===========================================================================
 // Where a child must be able to stand
 // ===========================================================================
 
@@ -479,10 +519,11 @@ export const LIBRARY_SEAT_FRONT = 1.5;
 /**
  * **Every spot a child must be able to stand on, room-local** — the arrival,
  * the doorway, the desk's front, the librarian's spot, the rug, every seat's
- * front, the secret shelf's stand, the twelve readable books' stands, and
- * every aisle node. `props.ts`'s `libraryKeepOuts` turns these into keep-out
- * discs and refuses any collider inside one; `check:library` floods the floor
- * from the arrival and asserts every one is reached.
+ * front, every story cushion's seat, the secret shelf's stand, the twelve
+ * readable books' stands, and every aisle node. `props.ts`'s
+ * `libraryKeepOuts` turns these into keep-out discs and refuses any collider
+ * inside one; `check:library` floods the floor from the arrival and asserts
+ * every one is reached.
  */
 export function libraryStandSpots(): StandSpot[] {
   const spots: StandSpot[] = [
@@ -502,6 +543,14 @@ export function libraryStandSpots(): StandSpot[] {
       z: piece.at.z + Math.cos(yaw) * LIBRARY_SEAT_FRONT,
       facing: (piece.facing + 180) % 360,
     });
+  }
+  // Every story cushion's own middle (#718): **the seat is the stand**. She
+  // walks onto the soft cushion and sits where she stands, so nothing has to
+  // step her back off it; and a keep-out on each is what stops a collider
+  // landing on a seat she, or one of the library's children, is invited to.
+  for (const piece of LIBRARY_FURNITURE) {
+    if (piece.kind !== 'cushion') continue;
+    spots.push({ what: `${piece.id}'s seat`, x: piece.at.x, z: piece.at.z, facing: libraryFacingStoryChair(piece.at) });
   }
   for (const slot of LIBRARY_READABLE_SLOTS) spots.push(slot.stand);
   for (const aisle of LIBRARY_AISLES) {

@@ -466,6 +466,12 @@ export class Game {
           this.world.reptileHouse.dismountTortoise();
           return;
         }
+        // On a story cushion in the Library, the same (#718): a tap anywhere
+        // gets her up — the nap's rule, and the 'Get up' chip says it too.
+        if (this.world.library.playerIsSeated) {
+          this.world.library.standUp();
+          return;
+        }
         if (this.parade.handleTap(point)) return;
         // GAME_DESIGN.md's SELECTION RULE, step 1: a tap that lands on a thing
         // *selects* it and goes no further. Selection is free — it costs no
