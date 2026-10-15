@@ -11,6 +11,9 @@
  * LIBRARY_CHECK_DARK=1 pnpm run check:library                # the room's fill and key turned off: must go red
  * LIBRARY_CHECK_MUTATE=faces-upside-down pnpm run check:library  # the creatures' faces flipped: must go red
  * LIBRARY_CHECK_MUTATE=block-walk pnpm run check:library      # a wall across the real child's way in: must go red
+ * LIBRARY_CHECK_REMOVE='den wall (west)' pnpm run check:library  # a wall of the secret den out: DEN WALLS must go red
+ * LIBRARY_CHECK_REMOVE='bookcase west-2' pnpm run check:library  # the shut secret shelf out: the den is reachable, must go red
+ * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -25,19 +28,28 @@
  * fills that were measuring the wrong thing):
  *
  *  1. CONTROL — the fill instrument sees a sealed pocket (a hollow rectangle in
- *     an empty room of its own) and floods an empty room.
+ *     an empty room of its own) and floods an empty room; built with both
+ *     shells, the room's and the secret den's (#719), and nothing in the den's
+ *     doorway, it walks into the den — so the den is in its domain, and a den
+ *     spot it does not reach later is one it looked for.
  *  2. CONTROL on the real room — a disc dropped on the desk's front stand makes
  *     the fill call that keep-out unreachable; taken back out, reachable again.
  *  3. REACHABILITY — from the arrival, at her radius: every keep-out
  *     (`libraryKeepOuts`), the exit band, and no clear cell on the plate left
  *     unreached (a pocket she could be stuck in). Every stack's and the desk's
- *     middle is NOT reached (they are solid).
+ *     middle is NOT reached (they are solid). With the secret shelf shut, every
+ *     `den` keep-out is NOT reached, and the one pocket is the den
+ *     (`libraryDenContains`): any other is a child stuck.
  *  4. AISLES — a player disc swept along every `LIBRARY_AISLES` polyline.
  *  5. MARCHED — a player-sized body marched at every bookcase, the desk and
  *     every chair from sixteen bearings, at 5 cm and at the sprint stride, and
  *     at the room's four walls: the body's edge never gets into a drawn box
  *     past the corner rounding its capsules leave. Every box is the **model's**
- *     drawn footprint (`libraryAssets.ts`), never the collider's own.
+ *     drawn footprint (`libraryAssets.ts`), never the collider's own. Then
+ *     DEN WALLS — bodies in the den marched at its three walls never leave it
+ *     but by its doorway — and LINTEL — a flier over the shut secret shelf
+ *     stops at the lintel, at every height, and with the shelf's colliders out
+ *     a walker passes under it.
  *  6. LANDING — a jump landed on every top she may stand on (the chairs, the
  *     desk, the bins, the cushions) finds it under her feet everywhere across
  *     its drawn footprint; the control: just outside the footprint, the floor.
@@ -59,8 +71,9 @@
  * 11. LIGHT — no light is black or off, the pools are within the budget, the
  *     floor's own small lift is asserted to be under `PALETTE.ink` (so it
  *     cannot pass the room by itself), and the darkest patch of floor — the
- *     room's lights plus that lift — renders brighter than ink; with a control
- *     — the same floor under a near-dark rig goes below it.
+ *     room's lights plus that lift — renders brighter than ink, the secret
+ *     den's floor too; with a control — the same floor under a near-dark rig
+ *     goes below it.
  * 12. READABLE — the twelve readable slots' shelves, measured, within her reach.
  * 13. PAINTED FACES — the owl's, the dragon's and the cat's faces (#718, #719),
  *     on freshly built creatures: each head's UVs read against its own
@@ -94,9 +107,10 @@ import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
-import { END_HALF, libraryKeepOuts, type BoxFootprint } from '../src/world/library/props.ts';
+import { END_HALF, LibraryProps, libraryKeepOuts, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
 import { bookcaseCentre } from '../src/world/library/furnish.ts';
-import { buildReadingRoomShell } from '../src/world/library/shell.ts';
+import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
+import { JUMP_CLEARANCE_GRACE, type WallCollider } from '../src/world/Collision.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
 import {
@@ -116,9 +130,12 @@ import {
   type LibraryFacedHead,
 } from '../src/art/models/libraryFaces.ts';
 import {
+  bookcaseFrontOut,
+  libraryDenContains,
   LIBRARY_AISLES,
   LIBRARY_ARRIVAL,
   LIBRARY_BOOKCASES,
+  LIBRARY_DEN_INNER,
   LIBRARY_DESK_STAND,
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
@@ -131,6 +148,9 @@ import {
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_READABLE_SLOTS,
+  LIBRARY_SECRET_BOOKCASE,
+  LIBRARY_WALL_HALF,
+  LIBRARY_WALL_HEIGHT,
   type FurnitureSpec,
   type LocalPoint,
 } from '../src/world/library/layout.ts';
@@ -231,15 +251,34 @@ function onPlate(localX: number, localZ: number): boolean {
   return Math.abs(localX - LIBRARY_DOOR_X) <= LIBRARY_DOOR_HALF && localZ > LIBRARY_INNER_Z && localZ <= LIBRARY_HALF_Z + 0.55;
 }
 
+/**
+ * **The fill's floor: the plate, and the secret den** (#719) — asked of
+ * `libraryDenContains`, the one owner of where the den is, never a rectangle
+ * of this check's own. The den is in the domain whether its doorway is open or
+ * shut, so a den spot the fill does not reach is one it looked for and could
+ * not get to; CONTROL 1 proves it does get there when the doorway is empty.
+ */
+function onFloor(localX: number, localZ: number): boolean {
+  return onPlate(localX, localZ) || libraryDenContains(localX, localZ);
+}
+
+/** A fill cell's room-local centre. */
+function cellCentre(k: string): LocalPoint {
+  const [cx, cz] = k.split(',').map(Number) as [number, number];
+  return { x: cx * CELL, z: cz * CELL };
+}
+
 function fill(collision: CollisionWorld, fromX: number, fromZ: number, radius = PLAYER_RADIUS): Fill {
   const clear = new Set<string>();
-  const reachX = Math.ceil((LIBRARY_HALF_X + 1) / CELL);
+  // West as far as the den's west wall and a metre past it; the rest the plate's own reach.
+  const fromCX = Math.floor((LIBRARY_DEN_INNER.west - 1) / CELL);
+  const toCX = Math.ceil((LIBRARY_HALF_X + 1) / CELL);
   const reachZ = Math.ceil((LIBRARY_HALF_Z + 1) / CELL);
-  for (let cx = -reachX; cx <= reachX; cx += 1) {
+  for (let cx = fromCX; cx <= toCX; cx += 1) {
     for (let cz = -reachZ; cz <= reachZ; cz += 1) {
       const x = OX + cx * CELL;
       const z = OZ + cz * CELL;
-      if (!onPlate(x - OX, z - OZ)) continue;
+      if (!onFloor(x - OX, z - OZ)) continue;
       if (collision.isClearCircle(x, z, radius)) clear.add(key(cx, cz));
     }
   }
@@ -337,14 +376,27 @@ function drawnBoxes(): DrawnBox[] {
 // ---------------------------------------------------------------------------
 console.log('CONTROL — the fill instrument:');
 {
+  // Both shells, the room's and the secret den's (#719), and no furniture —
+  // so nothing in the den's doorway: no secret shelf to shut it.
   const control = new CollisionWorld();
-  buildReadingRoomShell(new Group(), control, new WalkSurfaces());
+  const controlSurfaces = new WalkSurfaces();
+  const shell = buildReadingRoomShell(new Group(), control, controlSurfaces);
+  buildLibraryDenShell(new Group(), new LibraryProps(control, controlSurfaces, OX, OZ), controlSurfaces, shell.fabric);
   control.addRectangle(OX - 6, OZ, 2.5, 2.5, 0.3);
   const seen = fill(control, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
   say(seen.reached.size > 10000, `the fill floods the empty room: ${seen.reached.size} cells reached`);
   say(pockets.length > 30 && !reachedAt(seen, OX - 6, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a hollow rectangle are unreachable`);
   say(!seen.clear.has(key(...cellOf(OX, OZ + LIBRARY_HALF_Z + 4))), 'nothing off the plate counts as floor');
+  // The den is in the fill's domain: with its doorway empty, the fill walks in.
+  const denSpots = libraryKeepOuts().filter((spot) => spot.den);
+  const denSpotsReached = denSpots.filter((spot) => reachedAt(seen, OX + spot.x, OZ + spot.z)).length;
+  const denCells = [...seen.reached].filter((k) => libraryDenContains(cellCentre(k).x, cellCentre(k).z)).length;
+  say(
+    denSpots.length > 0 && denSpotsReached === denSpots.length && denCells > 50,
+    `with nothing in the den's doorway the fill walks into the den: ${denSpotsReached} of ${denSpots.length} den spots and ${denCells} den cells reached ` +
+      '— so the den is in its domain, and a den spot it does not reach later is one it looked for',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -363,12 +415,15 @@ const library = world.library;
 const collision = world.collision;
 const surfaces = world.building.surfaces;
 const remove = process.env['LIBRARY_CHECK_REMOVE'];
+/** The solids `LIBRARY_CHECK_REMOVE` took out: a clause that takes a solid out and puts it back leaves these out. */
+const removedOnPurpose = new Set<LibrarySolid>();
 if (remove) {
   const victims = library.solids.filter((solid) => solid.what.includes(remove));
   if (victims.length === 0) throw new Error(`LIBRARY_CHECK_REMOVE=${remove} names no solid`);
   for (const victim of victims) {
     if (typeof victim.handle === 'number') collision.removeCircle(victim.handle);
     else collision.removeWall(victim.handle);
+    removedOnPurpose.add(victim);
   }
   note(`REMOVED ${victims.map((v) => v.what).join(', ')} on purpose — this run must go red`);
 }
@@ -405,35 +460,49 @@ console.log(`\nCONTROL on the real room — a disc on ${LIBRARY_DESK_STAND.what}
   say(reachedAt(open, OX + LIBRARY_DESK_STAND.x, OZ + LIBRARY_DESK_STAND.z), `taken back out, it is reachable again (and can say yes)`);
 }
 
-console.log(`\nREACHABILITY — ${library.solids.length} solids registered by the reading room:`);
+console.log(`\nREACHABILITY — ${library.solids.length} solids registered by the reading room and the den, the secret shelf shut:`);
 {
   const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   say(seen.reached.size > 5000, `the fill leaves the arrival: ${seen.reached.size} cells reached of ${seen.clear.size} clear`);
   const keepOuts = libraryKeepOuts();
+  const roomSpots = keepOuts.filter((spot) => !spot.den);
+  const denSpots = keepOuts.filter((spot) => spot.den);
   let unreachable = 0;
-  for (const spot of keepOuts) {
+  for (const spot of roomSpots) {
     if (!reachedAt(seen, OX + spot.x, OZ + spot.z)) {
       unreachable += 1;
       say(false, `${spot.what} at (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) is not reachable from the arrival`);
     }
   }
-  say(unreachable === 0, `every keep-out is reachable: ${keepOuts.length - unreachable} of ${keepOuts.length}`);
+  say(unreachable === 0, `every keep-out in the reading room is reachable: ${roomSpots.length - unreachable} of ${roomSpots.length}`);
+  // The den's (#719): the shut secret shelf seals its doorway, so the fill —
+  // whose domain holds the den, as CONTROL 1 showed — must not get there.
+  const leaked = denSpots.filter((spot) => reachedAt(seen, OX + spot.x, OZ + spot.z));
+  for (const spot of leaked) say(false, `${spot.what} at (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) IS reachable with the secret shelf shut — the den's doorway is open`);
+  say(denSpots.length > 0 && leaked.length === 0, `no keep-out in the secret den is reachable while the secret shelf is shut: ${denSpots.length - leaked.length} of ${denSpots.length} sealed off`);
   say(reachedAt(seen, OX + LIBRARY_DOOR_X, OZ + LIBRARY_HALF_Z), "the exit band's centre is reachable");
   for (const box of drawnBoxes()) {
     if (box.halfDepth * 2 < 0.5) continue;
     if (reachedAt(seen, OX + box.x, OZ + box.z)) say(false, `${box.what}'s middle IS reachable — it is not solid`);
   }
+  // The unreached clear cells must be the den's — the one pocket the room is
+  // meant to have, while the shelf is shut — and nobody else's.
   const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
-  if (pockets.length > 0) {
-    const sample = pockets.slice(0, 6).map((k) => {
-      const [cx, cz] = k.split(',').map(Number) as [number, number];
-      return `(${(cx * CELL).toFixed(2)}, ${(cz * CELL).toFixed(2)})`;
-    });
-    say(false, `${pockets.length} clear cell(s) on the plate are unreachable — a pocket a child could be stuck in: ${sample.join(' ')}…`);
-  } else {
-    say(true, `no pockets: every one of the ${seen.clear.size} clear cells on the plate is reachable`);
+  const strays = pockets.filter((k) => !libraryDenContains(cellCentre(k).x, cellCentre(k).z));
+  if (strays.length > 0) {
+    const sample = strays.slice(0, 6).map((k) => `(${cellCentre(k).x.toFixed(2)}, ${cellCentre(k).z.toFixed(2)})`);
+    say(false, `${strays.length} clear cell(s) outside the secret den are unreachable — a pocket a child could be stuck in: ${sample.join(' ')}…`);
   }
-  note(`${keepOuts.length} keep-outs (arrival, doorway, desk, librarian, rug, seats, secret shelf, 12 readable slots, every aisle node)`);
+  const inDen = pockets.length - strays.length;
+  say(
+    strays.length === 0 && inDen > 50,
+    `the one pocket is the secret den: ${pockets.length} clear cells are unreached, ${inDen} of them inside libraryDenContains (more than 50 wanted) and ${strays.length} anywhere else; ` +
+      `the other ${seen.clear.size - pockets.length} clear cells are all reached`,
+  );
+  note(
+    `${keepOuts.length} keep-outs: ${roomSpots.length} in the reading room (arrival, doorway, desk, librarian, rug, seats, secret shelf, ` +
+      `${LIBRARY_READABLE_SLOTS.length} readable slots, every aisle node) and ${denSpots.length} in the secret den (${denSpots.map((spot) => spot.what).join(', ')})`,
+  );
 }
 
 console.log('\nAISLES — a player disc swept along every aisle:');
@@ -505,6 +574,133 @@ console.log('\nMARCHED at every case, the desk and every chair — 16 bearings, 
     }
   }
   say(escaped === 0, `the walls hold: ${escaped} of 48 marches left the room other than through the door`);
+}
+
+/** March a body from `from` along (dx, dz) in `step`s at a clearance over the floor (a flier's); returns where it ended. */
+function marchAt(from: Vector3, dx: number, dz: number, step: number, clearance: number, travel = 12): Vector3 {
+  const p = from.clone();
+  const length = Math.hypot(dx, dz);
+  for (let t = 0; t < travel; t += step) collision.resolveMovement(p, (dx / length) * step, (dz / length) * step, PLAYER_RADIUS, clearance, MAX_FRAME_DELTA);
+  return p;
+}
+
+console.log("\nDEN WALLS — bodies in the secret den, marched at its three walls, never leave it but by its doorway:");
+{
+  // Twelve bodies over the den's floor, a hand's breadth clear of every wall,
+  // from the den's own inner faces (layout.ts) — never typed here.
+  const inner = LIBRARY_DEN_INNER;
+  const x0 = inner.west + PLAYER_RADIUS + 0.2;
+  const x1 = -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - PLAYER_RADIUS - 0.2;
+  const z0 = inner.north + PLAYER_RADIUS + 0.2;
+  const z1 = inner.south - PLAYER_RADIUS - 0.2;
+  const bodies: LocalPoint[] = [];
+  for (let i = 0; i < 4; i += 1) for (let j = 0; j < 3; j += 1) bodies.push({ x: x0 + ((x1 - x0) * i) / 3, z: z0 + ((z1 - z0) * j) / 2 });
+  /** Each heading, and how far a body's edge has got past that wall's drawn inner face (negative: short of it). */
+  const headings = [
+    { name: 'west (−X)', dx: -1, dz: 0, past: (p: LocalPoint): number => inner.west - (p.x - PLAYER_RADIUS) },
+    { name: 'north (−Z)', dx: 0, dz: -1, past: (p: LocalPoint): number => inner.north - (p.z - PLAYER_RADIUS) },
+    { name: 'south (+Z)', dx: 0, dz: 1, past: (p: LocalPoint): number => p.z + PLAYER_RADIUS - inner.south },
+  ] as const;
+  let placed = 0;
+  let marches = 0;
+  let escaped = 0;
+  const deepest = headings.map(() => -Infinity);
+  for (const body of bodies) {
+    if (!libraryDenContains(body.x, body.z) || !collision.isClearCircle(OX + body.x, OZ + body.z, PLAYER_RADIUS)) {
+      say(false, `a body could not be stood in the den at (${body.x.toFixed(2)}, ${body.z.toFixed(2)}) — nothing is measured from there`);
+      continue;
+    }
+    placed += 1;
+    for (const [h, heading] of headings.entries()) {
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        const end = marchAt(new Vector3(OX + body.x, LIBRARY_FLOOR_Y, OZ + body.z), heading.dx, heading.dz, step, 0);
+        const at = { x: end.x - OX, z: end.z - OZ };
+        deepest[h] = Math.max(deepest[h]!, heading.past(at));
+        if (!libraryDenContains(at.x, at.z) && !onPlate(at.x, at.z)) {
+          escaped += 1;
+          if (escaped <= 4) {
+            say(false, `a body marched ${heading.name} from (${body.x.toFixed(2)}, ${body.z.toFixed(2)}) at ${step.toFixed(2)} m a step ended at (${at.x.toFixed(2)}, ${at.z.toFixed(2)}), outside the den and the room`);
+          }
+        }
+      }
+    }
+  }
+  say(
+    placed === bodies.length && escaped === 0,
+    `${placed} of ${bodies.length} bodies stood in the den, ${marches} marches (${headings.length} headings, 5 cm and the sprint stride): ${escaped} ended outside the den and the room`,
+  );
+  // Against each wall's drawn inner face: no deeper than the resolver's slack,
+  // and some body got within 5 cm of it — so each heading measured its wall,
+  // not something stood in front of it.
+  say(
+    deepest.every((d) => d <= RESOLVER_SLACK && d >= -0.05),
+    `each wall stopped them at its drawn face — deepest a body's edge got past it: ${headings.map((heading, h) => `${heading.name} ${deepest[h]!.toFixed(3)} m`).join(', ')} ` +
+      `(at most ${RESOLVER_SLACK}, and some body within 0.05 of every face)`,
+  );
+  note(`the den's floor x ${x0.toFixed(2)}..${x1.toFixed(2)}, z ${z0.toFixed(2)}..${z1.toFixed(2)} (body centres); its walls' inner faces x ${inner.west.toFixed(2)}, z ${inner.north.toFixed(2)} and ${inner.south.toFixed(2)}`);
+}
+
+console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every height nobody slips between it and the shut shelf, and a walker passes under it:");
+{
+  if (mutating('no-lintel')) {
+    collision.removeWall(library.lintel);
+    note("REMOVED the lintel over the den's doorway on purpose — this run must go red");
+  }
+  const caseTop = libraryBookcaseSize(LIBRARY_SECRET_BOOKCASE.kind).height;
+  const throughZ = OZ + LIBRARY_SECRET_BOOKCASE.at.z;
+  const start = (feet: number): Vector3 => new Vector3(OX - 16, LIBRARY_FLOOR_Y + feet, throughZ);
+  /** Marched west through the doorway's middle at a height (its clearance over the floor); where it ended, room-local x. */
+  const westAt = (feet: number, step: number): number => marchAt(start(feet), -1, 0, step, feet).x - OX;
+  /** Stopped with her edge on the lintel's (the wall's) inner face, less the resolver's slack. */
+  const atLintel = -LIBRARY_INNER_X + PLAYER_RADIUS - RESOLVER_SLACK;
+  /** Where the shut shelf's front stops a walker, less the slack: a flier ending west of this cleared the shelf. */
+  const atShelf = LIBRARY_SECRET_BOOKCASE.at.x + bookcaseFrontOut(LIBRARY_SECRET_BOOKCASE) + PLAYER_RADIUS - RESOLVER_SLACK;
+  const flier = caseTop + 0.8;
+  for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+    const end = westAt(flier, step);
+    say(
+      end >= atLintel && end < atShelf,
+      `a flier at ${flier.toFixed(2)} m (the shut shelf's top + 0.8), marched west at ${step.toFixed(2)} m a step from x −16, stops at x ${end.toFixed(2)}: ` +
+        `at the lintel (at least ${atLintel.toFixed(2)}), and past where the shut shelf stops a walker (${atShelf.toFixed(2)}) — so she cleared the shelf and met the lintel`,
+    );
+  }
+  // Every height, floor to a metre over the wall's top: the shut shelf holds
+  // whoever is below its top less the jump grace, the lintel whoever is above
+  // its base, and the two bands overlap — no height slips between them.
+  const heights = Math.round((LIBRARY_WALL_HEIGHT + 1) / 0.05);
+  let furthest = { x: Infinity, feet: 0 };
+  let swept = 0;
+  for (let i = 0; i <= heights; i += 1) {
+    const feet = i * 0.05;
+    for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+      swept += 1;
+      const end = westAt(feet, step);
+      if (end < furthest.x) furthest = { x: end, feet };
+    }
+  }
+  say(
+    furthest.x >= atLintel,
+    `${swept} marches at every height from the floor to ${(LIBRARY_WALL_HEIGHT + 1).toFixed(1)} m, 5 cm apart, both strides: the furthest west any got is x ${furthest.x.toFixed(2)} ` +
+      `(at ${furthest.feet.toFixed(2)} m), at least ${atLintel.toFixed(2)} — the shut shelf holds her below ${(caseTop - JUMP_CLEARANCE_GRACE).toFixed(2)} m, the lintel from ${library.lintel.baseHeight.toFixed(2)} m`,
+  );
+  // CONTROL — the shut shelf's colliders out, the doorway as the open shelf
+  // will leave it (plan Step 12): a walker passes under the lintel into the
+  // den, and the flier still stops at it. So the lintel is a band, not a wall,
+  // and what stopped the flier above was the lintel, not the shelf.
+  const shelf = library.solids.filter((solid) => solid.what.startsWith(`bookcase ${LIBRARY_SECRET_BOOKCASE.id} (`) && !removedOnPurpose.has(solid));
+  for (const solid of shelf) collision.removeWall(solid.handle as WallCollider);
+  try {
+    const walker = westAt(0, 0.05);
+    const alone = westAt(flier, 0.05);
+    say(
+      libraryDenContains(walker, LIBRARY_SECRET_BOOKCASE.at.z) && walker < -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - PLAYER_RADIUS && alone >= atLintel,
+      `CONTROL, the shut shelf's ${shelf.length} colliders out: a walker on the floor passes under the lintel into the den (to x ${walker.toFixed(2)}), ` +
+        `and the flier at ${flier.toFixed(2)} m still stops at x ${alone.toFixed(2)} — the lintel alone holds her`,
+    );
+  } finally {
+    for (const solid of shelf) collision.restoreWall(solid.handle as WallCollider);
+  }
 }
 
 console.log('\nLANDING — a jump landed on every top she may stand on:');
@@ -932,8 +1128,35 @@ console.log('\nLIGHT — dim, warm, never black:');
       brightest + lift > (darkest.value + lift) * 2,
       `the pools read as pools: brightest ${(brightest + lift).toFixed(4)}, ${((brightest + lift) / (darkest.value + lift)).toFixed(1)}x the darkest`,
     );
+    // The secret den (#719), behind the west wall and out of every lamp's
+    // reach: the fill and the key light it, and no PointLight is added for it
+    // (the budget is spent). Its floor is the room floor's own material, so the
+    // same albedo and lift are measured. Every whole metre a half-metre in from
+    // its walls' inner faces.
+    const den = LIBRARY_DEN_INNER;
+    let denDarkest = { at: [0, 0], value: Infinity };
+    let denCells = 0;
+    for (let x = Math.ceil(den.west + 0.5); x <= Math.floor(-(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - 0.5); x += 1) {
+      for (let z = Math.ceil(den.north + 0.5); z <= Math.floor(den.south - 0.5); z += 1) {
+        if (!libraryDenContains(x, z)) continue;
+        denCells += 1;
+        const value = lit(x, z, lights);
+        if (value < denDarkest.value) denDarkest = { at: [x, z], value };
+      }
+    }
+    say(
+      denCells > 0 && denDarkest.value + lift > ink,
+      `the darkest patch of the secret den's floor, (${denDarkest.at[0]!.toFixed(1)}, ${denDarkest.at[1]!.toFixed(1)}), renders at ${(denDarkest.value + lift).toFixed(4)} linear, ` +
+        `brighter than PALETTE.ink's ${ink.toFixed(4)} (${denCells} den cells measured)`,
+    );
+    note(
+      `the den's darkest cell (${denDarkest.at[0]!.toFixed(1)}, ${denDarkest.at[1]!.toFixed(1)}): ${denDarkest.value.toFixed(4)} from the room's lights + ${lift.toFixed(4)} lift, ` +
+        `over ${denCells} cells x ${Math.ceil(den.west + 0.5)}..${Math.floor(-(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - 0.5)}, z ${Math.ceil(den.north + 0.5)}..${Math.floor(den.south - 0.5)}; ` +
+        `lit by the fill and the key, ${pools} pools in the room and none added for the den`,
+    );
+    const darkestOfAll = denDarkest.value < darkest.value ? denDarkest : darkest;
     const dark = [new HemisphereLight(PALETTE.ink, PALETTE.ink, 0.05)];
-    const control = lit(darkest.at[0]!, darkest.at[1]!, dark) + lift;
+    const control = lit(darkestOfAll.at[0]!, darkestOfAll.at[1]!, dark) + lift;
     say(control < ink, `CONTROL: the same floor under a near-dark rig renders ${control.toFixed(4)}, below ink — the measure can fail`);
   }
 }
@@ -1228,6 +1451,13 @@ console.log('\nHOUSEKEEPING:');
   say(library.bookCount >= 300, `${library.bookCount} decorative books on the shelves`);
   say(library.stacks.length === LIBRARY_BOOKCASES.filter((spec) => spec.kind === 'stack').length, `${library.stacks.length} stacks, each able to fade`);
   say(library.screenLabels.includes(library.nameLabel), `the building names itself over its door ('${library.nameLabel.identity.id}')`);
+  say(
+    library.denRoot.parent === library.roomRoot && !library.denRoot.visible,
+    `the secret den is built in the reading room ('${library.denRoot.parent?.name ?? 'nowhere'}'), so it leaves the park's drawn reach with it, and is hidden while the shelf is shut`,
+  );
+  note(
+    `the secret den: ${library.denWalls.length} walls; the lintel's band from ${library.lintel.baseHeight.toFixed(2)} m over its doorway z ${(library.lintel.z1 - OZ).toFixed(2)}..${(library.lintel.z2 - OZ).toFixed(2)}`,
+  );
   note(
     `seed's library at (${library.frame.x.toFixed(1)}, ${library.frame.z.toFixed(1)}), ${library.solids.length} room solids, ` +
       `${library.shellSolids.walls.length} ring walls, ${library.shellSolids.corners.length} corner squares, ${library.shellSolids.edges.length} plinth edges, ${library.shellSolids.columns.length} columns`,
