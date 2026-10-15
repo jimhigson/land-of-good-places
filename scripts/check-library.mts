@@ -1229,11 +1229,11 @@ console.log('\nWITH A REAL CHILD — a real Player, from the arrival, walks up t
  * floor, facing the storyteller's chair. Then, measured on her drawn body on
  * every frame of two seconds' sitting (the pose sways, so one frame could pass
  * by luck of phase): her lowest drawn point and each of her soles on the
- * floor, and her hip pivot on the cushion's top, to `scripts/lib/seatedPose.mts`'s
- * tolerances. While she
- * sits no Read chip is offered, her cushion offers 'Get up' and the other
- * offers nothing. 'Get up' stands her on clear floor and she walks off; sat
- * down again, a jump stands her up, with no hop in it.
+ * floor, and her hip pivot on the cushion's top, to the tolerances of
+ * `scripts/lib/seatedPose.mts`. While she sits no Read chip is offered, her
+ * cushion offers 'Get up' and the other offers nothing. 'Get up' stands her on
+ * clear floor and she walks off; sat down again, a jump stands her up, with no
+ * hop in it.
  *
  * Proved red by hand: a leg rotated in `applyListeningPose` — one leg (its
  * sole, `seatedErrors`' `soles`) or both (her lowest point too). The whole
