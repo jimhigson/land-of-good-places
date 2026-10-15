@@ -38,6 +38,7 @@ import { poseRailRaceRider, riderLegsShow, SEATED, setRiderLegsVisible } from '.
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../../railRace/hazards';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../../../state';
 import { BOOKS, PICTURE_MODELS, type PagePicture, type PictureActor } from '../books';
+import { PICTURE_HEIGHT, PICTURE_WIDTH } from './pageGeometry';
 
 /**
  * **A page's picture: the park's own models, rendered to a texture** (#717).
@@ -92,9 +93,8 @@ import { BOOKS, PICTURE_MODELS, type PagePicture, type PictureActor } from '../b
  * pins one material per program so three never destroys them.
  */
 
-/** Width and height of a rendered picture, in pixels. 7:6 — the shape of the picture box on a page. */
-export const PICTURE_WIDTH = 672;
-export const PICTURE_HEIGHT = 576;
+/** Width and height of a rendered picture, in pixels — `pageGeometry.ts`'s, the picture box on a page. */
+export { PICTURE_HEIGHT, PICTURE_WIDTH };
 
 /**
  * How the reader's girl looks — `gameStore`'s player, reduced to what the kid

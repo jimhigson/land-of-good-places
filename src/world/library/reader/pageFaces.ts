@@ -2,8 +2,26 @@ import { CanvasTexture, LinearMipmapLinearFilter, SRGBColorSpace, type WebGLRend
 import { hexToCss, PALETTE } from '../../../core/palette';
 import { Rng } from '../../../core/mathUtils';
 import { BOOK_MOST_PAGES, type LibraryBook, type PagePicture, type PictureDecor } from '../books';
-import { lookKey, PICTURE_HEIGHT, PICTURE_WIDTH, renderPicture, type ReaderLook, type RenderedPicture } from './pagePictures';
+import { lookKey, renderPicture, type ReaderLook, type RenderedPicture } from './pagePictures';
+import {
+  CHAPTER_DESIGN_SCALE,
+  CHAPTER_LINE_HEIGHT,
+  CHAPTER_MIN_PICTURE_SCALE,
+  MIN_PICTURE_SCALE,
+  PAGE_CANVAS_HEIGHT,
+  PAGE_CANVAS_WIDTH,
+  PAGE_FRAME_INSET,
+  PAGE_FRAME_STROKE,
+  PAGE_GAP,
+  PAGE_MARGIN_BOTTOM,
+  PAGE_MARGIN_TOP,
+  PAGE_MARGIN_X,
+  PICTURE_HEIGHT,
+  PICTURE_WIDTH,
+} from './pageGeometry';
 import { READER_WORDS } from './readerWords';
+
+export { CHAPTER_DESIGN_SCALE, CHAPTER_LINE_HEIGHT, CHAPTER_MIN_PICTURE_SCALE, MIN_PICTURE_SCALE, PAGE_CANVAS_HEIGHT, PAGE_CANVAS_WIDTH };
 
 /**
  * **One canvas per page face: the paper, the picture and the sentence** (#717).
@@ -55,10 +73,9 @@ import { READER_WORDS } from './readerWords';
  * - the words start a little above the floor ({@link CHAPTER_DESIGN_SCALE})
  *   and come down to it before anything else gives;
  * - then the picture gives way, never the words — down to
- *   {@link MIN_PICTURE_SCALE} of its size, the same least picture a picture
- *   book's page keeps;
- * - left-aligned and ragged, the way a paragraph is set in a book, with a
- *   little more leading than a picture book's line ({@link CHAPTER_LINE_HEIGHT}).
+ *   {@link CHAPTER_MIN_PICTURE_SCALE} of its size;
+ * - left-aligned and ragged, the way a paragraph is set in a book, at the
+ *   picture books' own leading ({@link CHAPTER_LINE_HEIGHT}).
  *
  * If a page still does not fit — a screen too short for a paragraph and a
  * picture at the floor, which is a phone held on its side — it is said so
@@ -67,10 +84,6 @@ import { READER_WORDS } from './readerWords';
  * face reports where its words went ({@link PaintedWords}), so
  * `check:book-reader` can hold every page to its box from outside.
  */
-
-/** The page canvas. 3:4, the shape of a page (`READER_PAGE_WIDTH` × `READER_PAGE_HEIGHT`). */
-export const PAGE_CANVAS_WIDTH = 768;
-export const PAGE_CANVAS_HEIGHT = 1024;
 
 /** The words "The End", painted on every book's last page — `readerWords.ts`'s, walked by `check:brevity`. */
 export const THE_END = READER_WORDS.theEnd;
@@ -163,37 +176,12 @@ const PICTURE_CACHE_SIZE = 1 + BOOK_MOST_PAGES;
 /** Line height, as a multiple of the font size. */
 const LINE_HEIGHT = 1.2;
 
-/**
- * **A chapter page's paragraph**, against the floor: it starts this much
- * bigger and comes down to the floor before the picture gives way. A
- * picture book's one sentence starts at 1.55; a paragraph is many lines, and
- * every line it saves is picture kept.
- */
-export const CHAPTER_DESIGN_SCALE = 1.2;
 
-/** A chapter page's leading: a touch more air than a picture book's single line, for a paragraph a child follows line to line. */
-export const CHAPTER_LINE_HEIGHT = 1.25;
-
-/**
- * **The least a page's picture is ever drawn**, against its full size: below
- * this a picture stops reading as one. A picture book's page and title keep
- * it; a chapter page that would need less is a page that does not fit
- * ({@link chapterLayout}).
- */
-export const MIN_PICTURE_SCALE = 0.4;
-
-/** The page's margins and the gap between picture and words, in canvas pixels. */
-export const PAGE_MARGIN_X = (PAGE_CANVAS_WIDTH - PICTURE_WIDTH) / 2;
-export const PAGE_MARGIN_TOP = 56;
-export const PAGE_MARGIN_BOTTOM = 52;
+/** The page's margins and the gap between picture and words, in canvas pixels — `pageGeometry.ts`'s. */
 const MARGIN_X = PAGE_MARGIN_X;
 const MARGIN_TOP = PAGE_MARGIN_TOP;
 const MARGIN_BOTTOM = PAGE_MARGIN_BOTTOM;
-const GAP = 34;
-
-/** Where the paper's cover-coloured frame is drawn: inset from the edge, and its stroke's width. */
-export const PAGE_FRAME_INSET = 22;
-export const PAGE_FRAME_STROKE = 6;
+const GAP = PAGE_GAP;
 
 /**
  * Paints page faces, remembering the expensive part — the rendered pictures —
@@ -454,7 +442,7 @@ function paintStory(
  *    times the floor down to the floor, whole canvas pixels.
  * 2. If even the floor does not fit there, the picture gives way: as big as
  *    the words at the floor leave room for.
- * 3. If that is under {@link MIN_PICTURE_SCALE}, the page does not fit
+ * 3. If that is under {@link CHAPTER_MIN_PICTURE_SCALE}, the page does not fit
  *    (`fits` false): painted anyway at the floor with the least picture, its
  *    words run off the bottom — which `check:book-reader` sees, and which the
  *    reader never shows her (it asks her to turn the phone upright instead).
@@ -477,8 +465,8 @@ export function chapterLayout(
   const lines = wrap(ctx, text, maxWidth);
   const needed = lines.length * floor * CHAPTER_LINE_HEIGHT;
   const scale = Math.min(1, (PAGE_CANVAS_HEIGHT - MARGIN_TOP - GAP - MARGIN_BOTTOM - needed) / PICTURE_HEIGHT);
-  if (scale >= MIN_PICTURE_SCALE) return { px: floor, lines, scale, fits: true };
-  return { px: floor, lines, scale: MIN_PICTURE_SCALE, fits: false };
+  if (scale >= CHAPTER_MIN_PICTURE_SCALE) return { px: floor, lines, scale, fits: true };
+  return { px: floor, lines, scale: CHAPTER_MIN_PICTURE_SCALE, fits: false };
 }
 
 let measuring: CanvasRenderingContext2D | null = null;
