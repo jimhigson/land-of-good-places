@@ -348,8 +348,9 @@ type DeepLink =
       readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
     }
   /**
-   * `/book?id=<bookId>` — **one of the library's twelve picture books, open in
-   * the reader** (#717), on the paused park, from the first frame.
+   * `/book?id=<bookId>` — **one of the library's books, open in the reader**
+   * (#717: a picture book or a chapter book), on the paused park, from the
+   * first frame.
    *
    * It exists so a book can be judged standalone before the library's shelves
    * do: reaching one otherwise means a walk to the library, a shelf and a tap,
@@ -416,7 +417,7 @@ function parseBookLink(search: string): DeepLink {
   if (raw !== null && bookById(raw)) return { kind: 'book', bookId: raw };
   console.warn(
     `Land of Good Places: /book ${raw === null ? 'has no ?id=' : `has no book called "${raw}"`} — ` +
-      `opening "${first}" instead. The twelve are: ${BOOKS.map((book) => book.id).join(', ')}.`,
+      `opening "${first}" instead. The ${BOOKS.length} books are: ${BOOKS.map((book) => book.id).join(', ')}.`,
   );
   return { kind: 'book', bookId: first };
 }
