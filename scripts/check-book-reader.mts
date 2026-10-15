@@ -70,6 +70,13 @@
  *    over its last page; closing it must let the Cute-o-dex's out, and closing
  *    that the library's — one at a time, never two at once. And `C`, the
  *    dex's own key, must not open the dex over an open book.
+ * 9. **A book straight off the shelf** (#718). In a fresh profile, the real
+ *    `/library?at=` link stands her at the first readable book's stand
+ *    (`SHELF_BOOKS[0]`), facing its case: the game's own selection must hold
+ *    that book's zone (so its chip shows over it), and running the zone's
+ *    primary action — what the chip and E run — must open that very book as
+ *    a mode: the reader on its id, the park paused under it, the menu off the
+ *    screen.
  *
  * It does **not** judge whether the pictures look right — a model can cover
  * the picture and still be the wrong model, badly framed. That is visual QA,
@@ -80,6 +87,9 @@ import { mkdirSync } from 'node:fs';
 import { chromium, type Page } from 'playwright-core';
 import { BOOKS, BOOK_MAX_PAGES, BOOK_MIN_PAGES, bookCollectionId } from '../src/world/library/books.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
+import { SHELF_BOOKS, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
+import { LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
+import { PRIMARY_ACTION } from '../src/world/interact.ts';
 
 const BASE = (process.env.CHECK_BOOK_READER_URL ?? process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').replace(
   /\/$/,
@@ -95,6 +105,12 @@ const PAINT_TIMEOUT_MS = 120_000;
 const TURN_TIMEOUT_MS = 60_000;
 /** Below this fraction of its pixels covered, a picture drew no model. */
 const MIN_COVERAGE = 0.02;
+/**
+ * How near the asked-for spot `/library?at=` must stand her (section 9): the
+ * link carries centimetres and a book's stand is clear floor (a keep-out), so
+ * she lands on it — this is the URL's rounding and float slack, not leeway.
+ */
+const SHELF_STAND_TOLERANCE = 0.1;
 
 /** The book the deep link opens, the one read to the end, and the one that completes the dex. */
 const FIRST = BOOKS[0]?.id ?? '';
@@ -893,6 +909,72 @@ try {
   await nextFrames(page);
   const afterBoth = await openPrizes(page);
   assert(afterBoth.length === 0, 'and then the park is back', `showing ${JSON.stringify(afterBoth)}`);
+
+  // 9. A book straight off the shelf (#718; plan Step 5's served item).
+  const shelf = SHELF_BOOKS[0];
+  if (!shelf) throw new Error('check:book-reader: SHELF_BOOKS is empty — no readable book stands on a shelf to take down');
+  const stand = { x: Number(shelf.slot.stand.x.toFixed(2)), z: Number(shelf.slot.stand.z.toFixed(2)) };
+  const shelfPath = `/library?at=${stand.x},${stand.z}&facing=${shelf.slot.stand.facing}&seed=${SEED}`;
+  const zoneId = shelfBookZoneId(shelf.book.id);
+  said.push(`\n${shelfPath} — '${shelf.book.id}' taken down off ${shelf.slot.bookcase}:`);
+  // The sections above are done with their page. This one gets a fresh
+  // profile, so nothing they saved (every entry found, both prizes seen) rides in.
+  await page.close();
+  const shelfContext = await browser.newContext({ viewport: { width: first.width, height: first.height } });
+  try {
+    const shelfPage = await shelfContext.newPage();
+    shelfPage.on('pageerror', (error) => pageErrors.push(String((error as Error)?.stack ?? error)));
+    await shelfPage.goto(`${BASE}${shelfPath}`, { waitUntil: 'domcontentloaded' });
+    await shelfPage.waitForFunction(
+      ({ x, z, tolerance }) => {
+        const g = (window as unknown as { game?: any }).game;
+        const p = g?.player?.position;
+        return g?.world?.library?.playerIsInside === true && !!p && Math.hypot(p.x - x, p.z - z) <= tolerance;
+      },
+      { x: LIBRARY_ORIGIN_X + stand.x, z: LIBRARY_ORIGIN_Z + stand.z, tolerance: SHELF_STAND_TOLERANCE },
+      { timeout: BOOT_TIMEOUT_MS },
+    );
+    // Stood at the book's stand, the game's own selection must hold it: that is
+    // what puts its chip over the book for a child to press.
+    const held = await shelfPage
+      .waitForFunction((id) => (window as unknown as { game: any }).game.selection?.selected?.id === id, zoneId, { timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    const holding = await shelfPage.evaluate(() => ((window as unknown as { game: any }).game.selection?.selected?.id as string | undefined) ?? null);
+    assert(held, `off the shelf: standing at ${shelf.slot.stand.what}, the selection holds '${shelf.book.id}'`, `selected: ${holding ?? 'nothing'}`);
+    await shelfPage.screenshot({ path: `${SHOTS}/shelf-${shelf.book.id}-chip.png` });
+    // The zone's primary action — what its chip, or E, runs.
+    const pressed = await shelfPage.evaluate(
+      ({ id, primary }) => {
+        const g = (window as unknown as { game: any }).game;
+        const zone = (g.world.library.interactZones() as any[]).find((candidate) => candidate.id === id);
+        const action = zone?.actions?.().find((candidate: any) => candidate.id === primary);
+        action?.run();
+        return { zone: !!zone, action: !!action };
+      },
+      { id: zoneId, primary: PRIMARY_ACTION },
+    );
+    assert(pressed.zone && pressed.action, `off the shelf: '${zoneId}' is offered, with a chip`, `zone ${pressed.zone ? 'found' : 'MISSING'}, primary action ${pressed.action ? 'run' : 'MISSING'}`);
+    await shelfPage
+      .waitForFunction(() => (window as unknown as { game: any }).game.bookReader.isOpen === true, undefined, { timeout: 10_000 })
+      .catch(() => {});
+    if ((await readerState(shelfPage)).open) await waitPainted(shelfPage);
+    await nextFrames(shelfPage);
+    const read = await readerState(shelfPage);
+    const shelfMode = await shelfPage.evaluate(() => {
+      const g = (window as unknown as { game: any }).game;
+      return {
+        dt: g.frameContext.dt as number,
+        menu: (document.querySelector('.hud-menu') as HTMLElement | null)?.style.display ?? 'missing',
+      };
+    });
+    assert(read.open && read.bookId === shelf.book.id, "off the shelf: the book's chip opens that book", `open=${read.open}, book=${read.bookId} (the shelf's book: ${shelf.book.id})`);
+    assert(shelfMode.dt === 0, 'off the shelf: the park is paused under it', `frameContext.dt = ${shelfMode.dt}`);
+    assert(shelfMode.menu === 'none', 'off the shelf: the HUD menu is off the screen', `.hud-menu display is "${shelfMode.menu}"`);
+    await shelfPage.screenshot({ path: `${SHOTS}/shelf-${shelf.book.id}-open.png` });
+  } finally {
+    await shelfContext.close();
+  }
 } catch (error) {
   fouls.push(`threw — ${String((error as Error)?.stack ?? error).slice(0, 600)}`);
 } finally {

@@ -10,6 +10,8 @@
  * LIBRARY_CHECK_OPEN_EDGE=1 pnpm run check:library           # open one of the plinth's edges (1 east, 2 back, 3 west): must go red
  * LIBRARY_CHECK_DARK=1 pnpm run check:library                # the room's fill and key turned off: must go red
  * LIBRARY_CHECK_MUTATE=faces-upside-down pnpm run check:library  # the creatures' faces flipped: must go red
+ * LIBRARY_CHECK_MUTATE=shift-books pnpm run check:library   # expect slot i to hold BOOKS[i+1]: must go red, naming the books
+ * LIBRARY_CHECK_REMOVE='bookcase north-2' pnpm run check:library  # a readable book's case not solid: REACHABILITY must go red
  * LIBRARY_CHECK_MUTATE=block-walk pnpm run check:library      # a wall across the real child's way in: must go red
  * ```
  *
@@ -61,7 +63,13 @@
  *     cannot pass the room by itself), and the darkest patch of floor — the
  *     room's lights plus that lift — renders brighter than ink; with a control
  *     — the same floor under a near-dark rig goes below it.
- * 12. READABLE — the twelve readable slots' shelves, measured, within her reach.
+ * 12. READABLE — the readable books (#718), one per `BOOKS` entry: their
+ *     slots' shelves within her reach; one `library.book.<id>` mesh each, in
+ *     its own slot (by index), wholly inside its case's drawn box, on its
+ *     board, in its cover's paint; a Read zone each, inside only and never
+ *     while she rides, stood at its slot's stand, whose chip opens its own
+ *     book through the attached opener; and a stack's book fading with it.
+ *     REACHABILITY also asserts every readable book is out of her walk.
  * 13. PAINTED FACES — the owl's, the dragon's and the cat's faces (#718, #719),
  *     on freshly built creatures: each head's UVs read against its own
  *     texture's flip, the canvas row falling as the head rises, and the eyes
@@ -95,7 +103,11 @@ import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { END_HALF, libraryKeepOuts, type BoxFootprint } from '../src/world/library/props.ts';
-import { bookcaseCentre } from '../src/world/library/furnish.ts';
+import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/library/furnish.ts';
+import { BOOKS } from '../src/world/library/books.ts';
+import { SHELF_BOOK_ZONE_PREFIX, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
+import { LIBRARY_CHIPS } from '../src/world/library/libraryLines.ts';
+import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
 import { buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
@@ -423,6 +435,18 @@ console.log(`\nREACHABILITY — ${library.solids.length} solids registered by th
     if (box.halfDepth * 2 < 0.5) continue;
     if (reachedAt(seen, OX + box.x, OZ + box.z)) say(false, `${box.what}'s middle IS reachable — it is not solid`);
   }
+  // Drawn implies solid: every readable book (#718) stands where she cannot
+  // walk — inside its case's solid, never a mesh in the open a child strolls through.
+  let walkable = 0;
+  for (const placed of library.shelfBooks) {
+    if (!reachedAt(seen, OX + placed.local.x, OZ + placed.local.z)) continue;
+    walkable += 1;
+    say(false, `readable book '${placed.book.id}' on ${placed.slot.bookcase}, at (${placed.local.x.toFixed(2)}, ${placed.local.z.toFixed(2)}), IS reachable — drawn, and not solid`);
+  }
+  say(
+    library.shelfBooks.length === BOOKS.length && walkable === 0,
+    `every readable book stands inside solid shelving, out of her walk: ${library.shelfBooks.length - walkable} of ${library.shelfBooks.length} (${BOOKS.length} books)`,
+  );
   const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
   if (pockets.length > 0) {
     const sample = pockets.slice(0, 6).map((k) => {
@@ -433,7 +457,7 @@ console.log(`\nREACHABILITY — ${library.solids.length} solids registered by th
   } else {
     say(true, `no pockets: every one of the ${seen.clear.size} clear cells on the plate is reachable`);
   }
-  note(`${keepOuts.length} keep-outs (arrival, doorway, desk, librarian, rug, seats, secret shelf, 12 readable slots, every aisle node)`);
+  note(`${keepOuts.length} keep-outs (arrival, doorway, desk, librarian, rug, seats, secret shelf, ${LIBRARY_READABLE_SLOTS.length} readable slots, every aisle node)`);
 }
 
 console.log('\nAISLES — a player disc swept along every aisle:');
@@ -938,16 +962,236 @@ console.log('\nLIGHT — dim, warm, never black:');
   }
 }
 
-console.log('\nREADABLE — the twelve readable books within her reach:');
+console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach, in their own slots, inside their cases, each opening its own book:`);
 {
   const heights = LIBRARY_READABLE_SLOTS.map((slot) => {
     const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
     return spec ? (libraryBookcaseSize(spec.kind).shelfTops[slot.shelf] ?? Infinity) : Infinity;
   });
   const highest = Math.max(...heights);
-  say(LIBRARY_READABLE_SLOTS.length === 12 && highest <= KID_REACH_HEIGHT, `${LIBRARY_READABLE_SLOTS.length} slots, the highest shelf ${highest.toFixed(3)} m, her reach ${KID_REACH_HEIGHT} m`);
+  say(
+    LIBRARY_READABLE_SLOTS.length === BOOKS.length && highest <= KID_REACH_HEIGHT,
+    `${LIBRARY_READABLE_SLOTS.length} slots for ${BOOKS.length} books, the highest shelf ${highest.toFixed(3)} m, her reach ${KID_REACH_HEIGHT} m`,
+  );
   const shelves = libraryBookcaseSize('wall').shelfTops;
   say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
+
+  // Which book the check expects in which slot: `shelfBooks.ts`'s pairing, by
+  // index — read back here from the two lists, never from the pairing itself.
+  // `shift-books` expects the next book along instead, which must go red,
+  // naming the books.
+  const shift = mutating('shift-books') ? 1 : 0;
+  if (shift > 0) note('SHIFTED the pairing this check expects by one on purpose (slot i must hold BOOKS[i+1]) — this run must go red, naming the books');
+  const expected = LIBRARY_READABLE_SLOTS.map((slot, i) => ({ slot, book: BOOKS[(i + shift) % BOOKS.length]! }));
+
+  // Every `library.book.<id>` mesh in the room (an outline is `<…>.outline`).
+  const named = new Map<string, Mesh[]>();
+  library.roomRoot.traverse((object) => {
+    const match = object instanceof Mesh ? /^library\.book\.([^.]+)$/.exec(object.name) : null;
+    if (match) named.set(match[1]!, [...(named.get(match[1]!) ?? []), object as Mesh]);
+  });
+  const ids = BOOKS.map((book) => book.id);
+  const meshCount = [...named.values()].reduce((sum, list) => sum + list.length, 0);
+  const missing = ids.filter((id) => !named.has(id));
+  const strays = [...named.keys()].filter((id) => !ids.includes(id));
+  const twice = [...named.entries()].filter(([, list]) => list.length > 1).map(([id]) => id);
+  say(
+    meshCount === BOOKS.length && missing.length === 0 && strays.length === 0 && twice.length === 0,
+    `${meshCount} library.book.* meshes for ${BOOKS.length} books — missing: ${missing.join(', ') || 'none'}; not a book: ${strays.join(', ') || 'none'}; drawn twice: ${twice.join(', ') || 'none'}`,
+  );
+
+  // Each in its slot: inside its case's drawn box, at its place along the
+  // shelf, its base on its board, under the board above, in its cover's paint.
+  const boxes = new Map(drawnBoxes().map((box) => [box.what, box]));
+  const vertex = new Vector3();
+  const at = new Vector3();
+  let worstOut = { what: 'none', by: -Infinity };
+  let placedOk = 0;
+  for (const { slot, book } of expected) {
+    const mesh = named.get(book.id)?.[0];
+    const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
+    const box = boxes.get(`bookcase ${slot.bookcase}`);
+    const where = `slot ${slot.index + 1} (${slot.bookcase}, shelf ${slot.shelf}, ${slot.along} m along)`;
+    if (!mesh || !spec || !box) {
+      say(false, `${where} should hold '${book.id}', but there is ${!mesh ? 'no such book mesh' : 'no such case'}`);
+      continue;
+    }
+    const size = libraryBookcaseSize(spec.kind);
+    const shelfTop = size.shelfTops[slot.shelf] ?? Number.NaN;
+    const boardAbove = shelfTop + (size.shelfClear[slot.shelf] ?? Number.NaN);
+    mesh.getWorldPosition(at);
+    const lx = at.x - OX;
+    const lz = at.z - OZ;
+    const inside = outsideBox(box, lx, lz);
+    const yaw = (box.facing * Math.PI) / 180;
+    const along = (lx - box.x) * Math.cos(yaw) - (lz - box.z) * Math.sin(yaw);
+    // Every drawn vertex of the book itself — never its ink outline, which is
+    // a child and as far past the paper as the case's own ink is past its wood.
+    mesh.updateWorldMatrix(true, false);
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    let base = Infinity;
+    let top = -Infinity;
+    let out = -Infinity;
+    for (let i = 0; i < position.count; i += 1) {
+      vertex.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      base = Math.min(base, vertex.y - LIBRARY_FLOOR_Y); // flat-ok: heights over the reading room's own flat floor, off the sphere
+      top = Math.max(top, vertex.y - LIBRARY_FLOOR_Y); // flat-ok: as above
+      out = Math.max(out, outsideBox(box, vertex.x - OX, vertex.z - OZ));
+    }
+    if (out > worstOut.by) worstOut = { what: book.id, by: out };
+    const painted = (mesh.material as MeshToonMaterial).color.equals(new Color(PALETTE[book.cover]));
+    const ok = inside < 0 && Math.abs(along - slot.along) < 0.005 && Math.abs(base - shelfTop) <= 0.02 && top < boardAbove && out <= 1e-6 && painted;
+    if (ok) {
+      placedOk += 1;
+      continue;
+    }
+    say(
+      false,
+      `${where} should hold '${book.id}': its mesh stands ${inside < 0 ? `${(-inside).toFixed(3)} m inside` : `${inside.toFixed(3)} m OUTSIDE`} ${slot.bookcase}'s drawn box, ` +
+        `${along.toFixed(3)} m along it (the slot: ${slot.along}); its base at ${base.toFixed(3)} m (the shelf: ${shelfTop.toFixed(3)}), its top at ${top.toFixed(3)} m (the board above: ${boardAbove.toFixed(3)}); ` +
+        `its furthest drawn point ${out <= 1e-6 ? 'inside' : `${out.toFixed(3)} m PAST`} the case's drawn box; painted ${painted ? 'its cover' : 'NOT its cover'}`,
+    );
+  }
+  say(
+    placedOk === BOOKS.length,
+    `${placedOk} of ${BOOKS.length} readable books stand in their own slots: inside their case's drawn box, every drawn point of them (drawn implies solid — ` +
+      'the case\'s capsules cover it), at their slot\'s place along the shelf, the base within 0.02 m of the board, under the board above, in their cover\'s paint',
+  );
+  note(
+    `the readable books lean ${READABLE_LEAN} rad and stand up to ${READABLE_PROUD} m proud of their rows, as far as their case's front allows; the nearest any comes to ` +
+      `leaving its case's drawn box: ${worstOut.by <= 0 ? `${(-worstOut.by).toFixed(4)} m inside` : `${worstOut.by.toFixed(4)} m past`} ('${worstOut.what}')`,
+  );
+
+  // The Read zones, with a probe standing in the room the way DOORS stood one.
+  const probe = {
+    position: new Vector3(0, 0, 0),
+    previousPosition: new Vector3(0, 0, 0),
+    riding: false,
+    model: { height: 2.12 },
+    topHeight: 2.12,
+    teleportTo(x: number, y: number, z: number) {
+      probe.position.set(x, y, z);
+      probe.previousPosition.set(x, y, z);
+    },
+  };
+  library.attachPlayer(probe as never);
+  const context = { dt: 1 / 60, elapsed: 1, playerPosition: probe.position, frame: 1 } as unknown as FrameContext;
+  const settle = (): void => {
+    for (let i = 0; i < 70; i += 1) library.update(context);
+  };
+  const bookZones = (): InteractZone[] => library.interactZones().filter((zone) => zone.id.startsWith(SHELF_BOOK_ZONE_PREFIX));
+  library.requestEnter();
+  settle();
+  const zones = bookZones();
+  const zoneIds = zones.map((zone) => zone.id);
+  const wanted = ids.map((id) => shelfBookZoneId(id));
+  say(
+    library.playerIsInside && zones.length === BOOKS.length && wanted.every((id) => zoneIds.includes(id)),
+    `inside, standing in the room: ${zones.length} Read zones for ${BOOKS.length} books, ${wanted.filter((id) => !zoneIds.includes(id)).length} book(s) without one`,
+  );
+  probe.riding = true;
+  const whileRiding = bookZones().length;
+  probe.riding = false;
+  say(whileRiding === 0, `while she is riding (sat down), the room offers ${whileRiding} Read zones`);
+  library.requestEnterDoor();
+  settle();
+  const outside = bookZones().length;
+  say(!library.playerIsInside && outside === 0, `outside on the doormat: ${outside} Read zones (inside: ${library.playerIsInside})`);
+  library.requestEnter();
+  settle();
+
+  // Each zone in its slot, read against the expected pairing.
+  let zonesOk = 0;
+  for (const { slot, book } of expected) {
+    const zone = zones.find((candidate) => candidate.id === shelfBookZoneId(book.id));
+    const mesh = named.get(book.id)?.[0];
+    if (!zone || !mesh) {
+      say(false, `slot ${slot.index + 1} (${slot.bookcase}): no Read zone, or no mesh, for '${book.id}'`);
+      continue;
+    }
+    mesh.getWorldPosition(at);
+    const standOff = Math.hypot(zone.standX - (OX + slot.stand.x), zone.standZ - (OZ + slot.stand.z));
+    const offBook = Math.hypot(zone.x - at.x, zone.z - at.z);
+    const ringed = zone.highlight?.object === mesh;
+    if (standOff < 1e-9 && offBook < 1e-6 && ringed && zone.label === book.title) {
+      zonesOk += 1;
+      continue;
+    }
+    say(
+      false,
+      `'${zone.id}' should be stood at slot ${slot.index + 1}'s stand (${slot.stand.what}, (${slot.stand.x.toFixed(2)}, ${slot.stand.z.toFixed(2)})): it is ${standOff.toFixed(3)} m off it; ` +
+        `it is ${offBook.toFixed(3)} m off its book; the rainbow ${ringed ? 'rings' : 'does NOT ring'} its book; labelled '${zone.label}'`,
+    );
+  }
+  say(zonesOk === BOOKS.length, `${zonesOk} of ${BOOKS.length} Read zones stand her at their slot's stand, sit on their own book, ring it in the rainbow and carry its title`);
+
+  // A stub opener: pressing every zone's primary action opens that zone's book.
+  const opened: string[] = [];
+  library.attachBookReader({
+    open: (bookId) => {
+      opened.push(bookId);
+      return true;
+    },
+    isOpen: () => false,
+  });
+  const chips: string[] = [];
+  for (const zone of zones) {
+    const primary = zone.actions?.().find((action) => action.id === PRIMARY_ACTION);
+    chips.push(primary?.label ?? '(no chip)');
+    primary?.run();
+  }
+  const pressed = opened.map((bookId) => shelfBookZoneId(bookId));
+  const wrong = zoneIds.filter((id, i) => pressed[i] !== id);
+  say(
+    pressed.length === zones.length && zones.length > 0 && wrong.length === 0,
+    `a stub opener, pressed through all ${zones.length} zones' primary actions, recorded ${opened.length} opens — each the zone's own book (${wrong.length === 0 ? 'none wrong' : `wrong: ${wrong.join(', ')}`})`,
+  );
+  say(chips.length > 0 && chips.every((chip) => chip === LIBRARY_CHIPS.read), `every zone's chip says "${LIBRARY_CHIPS.read}" (${[...new Set(chips)].map((chip) => `"${chip}"`).join(', ')})`);
+  library.attachBookReader(null);
+  let threw = '';
+  try {
+    for (const zone of zones) zone.actions?.().find((action) => action.id === PRIMARY_ACTION)?.run();
+  } catch (error) {
+    threw = String(error);
+  }
+  say(threw === '', `with no reader attached (headless), pressing every chip is harmless${threw ? ` — it threw ${threw}` : ''}`);
+
+  // A book in a stack fades with its stack, outline and all; one on a wall case never does.
+  const stacked = library.shelfBooks.find((placed) => library.stacks.some((stack) => stack.id === placed.slot.bookcase));
+  const walled = library.shelfBooks.find((placed) => !library.stacks.some((stack) => stack.id === placed.slot.bookcase));
+  const stack = stacked ? library.stacks.find((candidate) => candidate.id === stacked.slot.bookcase) : undefined;
+  if (!stacked || !stack || !walled) {
+    say(false, `the fade clause measures nothing: a readable book in a stack ${stacked ? 'found' : 'NOT found'}, one on a wall case ${walled ? 'found' : 'NOT found'}`);
+  } else {
+    const alphas = (placed: typeof stacked): number[] => {
+      const out: number[] = [];
+      placed.mesh.traverse((part) => {
+        if (part instanceof Mesh) out.push((part.material as MeshToonMaterial).opacity);
+      });
+      return out;
+    };
+    // Behind it from the camera, which looks in from the south-east: on its
+    // north side, a body's width clear of it, in the aisle FADE stands in.
+    const behind = { x: stack.centre.x, z: stack.centre.z - stack.halfDepth - PLAYER_RADIUS - 0.5 };
+    probe.teleportTo(OX + behind.x, 0, OZ + behind.z);
+    camera.snapTo(probe.position);
+    for (let i = 0; i < 60; i += 1) library.update(context);
+    const faded = alphas(stacked);
+    const solidStill = alphas(walled);
+    say(
+      stack.alpha < 0.5 && faded.length >= 2 && faded.every((alpha) => alpha < 0.5),
+      `standing behind ${stack.id} at (${behind.x.toFixed(2)}, ${behind.z.toFixed(2)}), the stack fades to ${stack.alpha.toFixed(2)} and its readable book '${stacked.book.id}' with it (book and outline: ${faded.map((alpha) => alpha.toFixed(2)).join(', ')})`,
+    );
+    say(
+      solidStill.length >= 2 && solidStill.every((alpha) => alpha === 1),
+      `CONTROL: '${walled.book.id}', on ${walled.slot.bookcase} (a wall case, which never fades), stays solid (${solidStill.map((alpha) => alpha.toFixed(2)).join(', ')})`,
+    );
+    // Back into the open central aisle, so every stack is solid again for what follows.
+    probe.teleportTo(OX + 0.6, 0, OZ + 1.2);
+    camera.snapTo(probe.position);
+    for (let i = 0; i < 90; i += 1) library.update(context);
+  }
+  note(`READABLE: ${BOOKS.length} books (BOOKS.length), ${LIBRARY_READABLE_SLOTS.length} slots, ${zones.length} zones pressed through a stub opener; the pairing read from books.ts and layout.ts by index`);
 }
 
 console.log('\nPAINTED FACES — the owl, the dragon and the cat wear their faces the right way up:');
