@@ -62,6 +62,15 @@ export const SECRETS: readonly Secret[] = [
     icon: '🐍',
     done: 'You found all five hiding baby snakes!',
   },
+  // The Library's big readers' shelf (track D of #714): every chapter book
+  // read to its end. Awarded by `world/library/readBooks.ts`'s `markBookRead`,
+  // the one owner of that rule. The picture books keep their own prize.
+  {
+    id: 'secret.bigReader',
+    name: 'Big reader',
+    icon: '📚',
+    done: 'You read every chapter book!',
+  },
 ];
 
 const BY_ID = new Map<string, Secret>(SECRETS.map((secret) => [secret.id, secret]));

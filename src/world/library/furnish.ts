@@ -110,7 +110,7 @@ export function bookcaseCentre(spec: BookcaseSpec): LocalPoint {
 }
 
 /**
- * **Every readable book within her reach** (#718's twelve): the slot's shelf
+ * **Every readable book within her reach** (#718's, the big readers' too): the slot's shelf
  * top, measured off the drawn case, at or under `KID_REACH_HEIGHT` — how far a
  * child's hand reaches above the floor — or the build throws. A shelf the
  * Artist moves up cannot quietly put a book out of her hand.

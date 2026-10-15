@@ -21,8 +21,8 @@ import { LIBRARY_ARRIVAL, LIBRARY_STAND_KEEP_OUT, libraryStandSpots, type LocalP
  *
  * {@link libraryKeepOuts} is the single owner of where a child has to be able
  * to stand — the arrival, the doorway, the desk's front, the librarian's spot,
- * the story rug, every seat's front, the secret shelf, the twelve readable
- * books' stands and every aisle node — read from `layout.ts`'s
+ * the story rug, every seat's front, the secret shelf, every readable book's
+ * stand (the picture books' and the big readers') and every aisle node — read from `layout.ts`'s
  * `libraryStandSpots`. Every placement is asserted clear of all of them as it
  * goes down, and {@link LibraryProps.assertClear} throws once at the end with
  * every violation named: a collider that walls off a stand spot is a hard
