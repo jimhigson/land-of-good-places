@@ -99,7 +99,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { chromium, type Page } from 'playwright-core';
-import { BOOKS, BOOK_PAGE_COUNTS, bookCollectionId, type LibraryBook } from '../src/world/library/books.ts';
+import { BOOKS, BOOK_PAGE_COUNTS, PICTURE_MODELS, bookCollectionId, type LibraryBook, type PictureActor } from '../src/world/library/books.ts';
 import {
   CHAPTER_MIN_PICTURE_SCALE,
   PAGE_CANVAS_HEIGHT,
@@ -720,6 +720,223 @@ async function uprightCard(page: Page): Promise<{ fits: boolean; shown: boolean;
   });
 }
 
+
+/**
+ * **The picture models' sheet** — a book that lives here, one page per few of
+ * the models the chapter books brought (`books.ts`'s `PICTURE_MODELS`, the
+ * mini to the `prop`), posed the ways their pages ask for: the mini's grab,
+ * Grandpa Tock asleep, stretched and tucked in, the owl's shush, a jet pack
+ * on the reader and on Trilla, the primitive props. Item 9b opens it and
+ * holds every picture to having drawn its models, and asserts every model in
+ * the list is on it, so a model no book uses yet is still drawn on every run;
+ * its screenshots are the book engineers' sheet to compose from.
+ */
+const MAGNIFYING_GLASS: PictureActor = {
+  model: 'prop',
+  at: [0.55, 0.9, 0.3],
+  parts: [
+    { shape: 'ring', size: [0.26, 0.035, 0], at: [0, 0.2, 0], colour: 'woodDark' },
+    { shape: 'cylinder', size: [0.21, 0.01, 0.21], at: [0, 0.2, 0], tilt: [90, 0], colour: 'skyDayBottom', outline: false },
+    { shape: 'cylinder', size: [0.045, 0.2, 0.045], at: [0, 0, 0], colour: 'woodDark' },
+  ],
+};
+const BENCH: PictureActor = {
+  model: 'prop',
+  at: [-1.2, 0, -0.4],
+  parts: [
+    { shape: 'box', size: [1.3, 0.08, 0.42], at: [0, 0.46, 0], colour: 'woodLight' },
+    { shape: 'box', size: [1.3, 0.3, 0.06], at: [0, 0.72, -0.19], colour: 'woodLight' },
+    { shape: 'box', size: [0.08, 0.44, 0.38], at: [-0.55, 0.22, 0], colour: 'woodDark' },
+    { shape: 'box', size: [0.08, 0.44, 0.38], at: [0.55, 0.22, 0], colour: 'woodDark' },
+  ],
+};
+const FOOTPRINTS: PictureActor = {
+  model: 'prop',
+  at: [0, 0, 0.6],
+  parts: [0, 1, 2, 3].flatMap((i): NonNullable<PictureActor['parts']> => [
+    { shape: 'ball', size: [0.42, 0.03, 0.48], at: [-1.2 + i * 0.8, 0.01, (i % 2) * 0.35], colour: 'pathSandDark', outline: false },
+    ...[-0.13, -0.045, 0.045, 0.13].map((dx) => ({ shape: 'ball' as const, size: [0.08, 0.03, 0.08] as const, at: [-1.2 + i * 0.8 + dx, 0.012, (i % 2) * 0.35 - 0.3] as const, colour: 'pathSandDark' as const, outline: false })),
+  ]),
+};
+const RUBBER_DUCK: PictureActor = {
+  model: 'prop',
+  at: [0.9, 0, 0.3],
+  parts: [
+    { shape: 'ball', size: [0.3, 0.22, 0.38], at: [0, 0.11, 0], colour: 'flowerYellow' },
+    { shape: 'ball', size: [0.17, 0.17, 0.17], at: [0, 0.29, 0.1], colour: 'flowerYellow' },
+    { shape: 'cone', size: [0.07, 0.1, 0.07], at: [0, 0.27, 0.22], tilt: [90, 0], colour: 'markerLemon' },
+  ],
+};
+const RAINBOW_ARCH: PictureActor = {
+  model: 'prop',
+  at: [0, 0, -1.6],
+  parts: (['markerPink', 'slideChute', 'markerLemon', 'markerMint', 'markerSky', 'markerLilac'] as const).map((colour, band) => ({
+    shape: 'ring' as const,
+    size: [3.2 - band * 0.22, 0.12, 0] as const,
+    colour,
+    arc: 180,
+  })),
+};
+const PICNIC: PictureActor = {
+  model: 'prop',
+  at: [0, 0, 0.2],
+  parts: [
+    { shape: 'box', size: [1.4, 0.02, 1], at: [0, 0.01, 0], colour: 'flowerRed', outline: false },
+    { shape: 'cylinder', size: [0.26, 0.1, 0.26], at: [-0.35, 0.07, 0.1], sides: 3, colour: 'signBoard' },
+    { shape: 'cylinder', size: [0.26, 0.1, 0.26], at: [-0.1, 0.07, -0.15], sides: 3, turn: 40, colour: 'signBoard' },
+    { shape: 'cylinder', size: [0.36, 0.14, 0.36], at: [0.35, 0.09, 0], colour: 'blossomPink' },
+    { shape: 'cylinder', size: [0.3, 0.1, 0.3], at: [0.35, 0.21, 0], colour: 'blossomWhite' },
+  ],
+};
+const UMBRELLA: PictureActor = {
+  model: 'prop',
+  at: [-0.9, 0, 0],
+  parts: [
+    { shape: 'cylinder', size: [0.04, 1.2, 0.04], at: [0, 0.6, 0], colour: 'woodDark' },
+    { shape: 'cone', size: [0.9, 0.4, 0.9], at: [0, 1.25, 0], tilt: [180, 0], colour: 'markerSky' },
+  ],
+};
+const FERRIS_STAND_IN: PictureActor = {
+  model: 'prop',
+  at: [0, 0, -2],
+  parts: [
+    { shape: 'ring', size: [4, 0.14, 0], at: [0, 2.3, 0], colour: 'markerLilac' },
+    ...[0, 30, 60, 90, 120, 150].map((angle) => ({ shape: 'cylinder' as const, size: [0.06, 3.8, 0.06] as const, at: [0, 2.3, 0] as const, tilt: [0, angle] as const, colour: 'stoneGrey' as const })),
+    ...[0, 60, 120, 180, 240, 300].map((angle) => ({
+      shape: 'box' as const,
+      size: [0.4, 0.34, 0.34] as const,
+      at: [Math.cos((angle * Math.PI) / 180) * 1.95, 2.3 + Math.sin((angle * Math.PI) / 180) * 1.95 - 0.25, 0.1] as const,
+      colour: 'markerSky' as const,
+    })),
+    ...[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => ({
+      shape: 'ball' as const,
+      size: [0.12, 0.12, 0.12] as const,
+      at: [Math.cos((angle * Math.PI) / 180) * 2.05, 2.3 + Math.sin((angle * Math.PI) / 180) * 2.05, 0.08] as const,
+      colour: 'flowerYellow' as const,
+      glow: true,
+      outline: false,
+    })),
+    { shape: 'cylinder', size: [0.16, 2.3, 0.16], at: [-0.7, 1.15, -0.1], tilt: [0, -17], colour: 'stoneGrey' },
+    { shape: 'cylinder', size: [0.16, 2.3, 0.16], at: [0.7, 1.15, -0.1], tilt: [0, 17], colour: 'stoneGrey' },
+  ],
+};
+const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
+  {
+    text: 'A mini grabs a star by the pink wall.',
+    picture: {
+      cast: [{ model: 'pinkWall', at: [0, 0, -1] }, { model: 'mini', mood: 'surprised', grab: 1, at: [-0.4, 0, 0.2] }, { model: 'star', colour: 'flowerYellow', size: 1.2, at: [0.7, 0, 0.3] }],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'Grandpa Tock sleeps, and wakes, and hides.',
+    picture: {
+      cast: [
+        { model: 'tortoise', mood: 'blink', at: [-1.4, 0, 0] },
+        { model: 'tortoise', mood: 'happy', pose: 'stretch', at: [0, 0, 0.2] },
+        { model: 'tortoise', pose: 'tuck', at: [1.4, 0, 0] },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'The owl says shush to Mrs Crumpet.',
+    picture: {
+      cast: [
+        { model: 'owl', mood: 'surprised', at: [-0.6, 0, -0.2], turn: 25 },
+        { model: 'book', colour: 'markerMint', size: 3, at: [0.8, 0, 0] },
+        { model: 'kitten', mood: 'blink', at: [0.8, 0.3, 0] },
+      ],
+      sky: 'buildingFloor',
+      ground: 'woodLight',
+    },
+  },
+  {
+    text: 'Pink, blue and rainbow candy floss!',
+    picture: {
+      cast: [
+        { model: 'candyFloss', variant: 'pink', at: [-0.5, 0, 0], size: 2 },
+        { model: 'candyFloss', variant: 'blue', at: [0, 0, 0.1], size: 2 },
+        { model: 'candyFloss', variant: 'rainbow', at: [0.5, 0, 0], size: 2 },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'Up you zoom with Trilla, jet packs on!',
+    picture: {
+      cast: [{ model: 'kid', mood: 'happy', pose: 'armsUp', jetpack: 'on', at: [-0.6, 0.4, 0], turn: 30 }, { model: 'trilla', mood: 'happy', jetpack: 'on', at: [0.8, 0.6, 0], turn: 30 }],
+      sky: 'skySunsetBottom',
+      decor: ['clouds', 'speed'],
+    },
+  },
+  {
+    text: 'A disco ball, a tree and a surprise egg.',
+    picture: {
+      cast: [
+        { model: 'lollipopTree', at: [-1.5, 0, -1] },
+        { model: 'discoBall', at: [0.2, 0, 0] },
+        { model: 'surpriseEgg', colour: 'blossomPink', accent: 'markerSky', size: 3, at: [1.2, 0, 0.3] },
+        { model: 'jetpack', at: [-0.6, 0, 0.6] },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'A cloud frowns and an alien waves.',
+    picture: {
+      cast: [{ model: 'stormCloud', mood: 'frown', at: [-0.8, 1, 0] }, { model: 'stormCloud', colour: 'blossomWhite', mood: 'happy', at: [1.4, 1.2, -0.5] }, { model: 'alienSaucer', size: 0.3, at: [0.4, 0, 0.5] }],
+      sky: 'skyDayBottom',
+    },
+  },
+  {
+    text: 'Detective Biscuit finds some footprints.',
+    picture: { cast: [{ model: 'biscuit', mood: 'frown', pose: 'wave' }, MAGNIFYING_GLASS, BENCH, FOOTPRINTS], sky: 'skyDayBottom', ground: 'grassLight' },
+  },
+  {
+    text: 'RiPika has a duck, a picnic and a rainbow.',
+    picture: { cast: [RAINBOW_ARCH, { model: 'ripika', mood: 'happy', pose: 'wave' }, RUBBER_DUCK, PICNIC, UMBRELLA], sky: 'skyDayBottom', ground: 'grassLight' },
+  },
+  {
+    text: 'The great wheel lights up for the night.',
+    picture: { cast: [FERRIS_STAND_IN, { model: 'kid', mood: 'surprised', keyring: false, turn: 150, at: [0.8, 0, 1] }], sky: 'skyNightBottom', night: true, ground: 'grassDark', decor: ['stars'] },
+  },
+];
+const MODEL_SHEET: LibraryBook = {
+  id: 'checkModelSheet',
+  kind: 'picture',
+  title: 'The Model Sheet',
+  cover: 'markerLilac',
+  titlePicture: { cast: [{ model: 'owl', mood: 'happy' }], sky: 'buildingFloor', ground: 'woodLight' },
+  pages: SHEET_PAGES,
+};
+
+/** Every colour a check fixture names must be the palette's (the check is not type-checked against it). */
+function fixtureColourProblems(books: readonly LibraryBook[]): string[] {
+  const problems: string[] = [];
+  const known = new Set(Object.keys(PALETTE));
+  const check = (where: string, key: string | undefined): void => {
+    if (key !== undefined && !known.has(key)) problems.push(`${where}: '${key}' is not a PALETTE key`);
+  };
+  for (const book of books) {
+    check(`${book.id} cover`, book.cover);
+    for (const [index, picture] of [book.titlePicture, ...book.pages.map((page) => page.picture)].entries()) {
+      check(`${book.id} picture ${index} sky`, picture.sky);
+      check(`${book.id} picture ${index} ground`, picture.ground);
+      for (const actor of picture.cast) {
+        check(`${book.id} picture ${index} ${actor.model}`, actor.colour);
+        check(`${book.id} picture ${index} ${actor.model} accent`, actor.accent);
+        for (const part of actor.parts ?? []) check(`${book.id} picture ${index} prop ${part.shape}`, part.colour);
+      }
+    }
+  }
+  return problems;
+}
+
 /** Opens a book (by id when it is on the shelf, else the object itself) and waits for every face to paint. */
 async function openAndPaint(page: Page, book: LibraryBook): Promise<void> {
   const onShelf = BOOKS.some((candidate) => candidate.id === book.id);
@@ -1173,6 +1390,45 @@ try {
     );
     await page.screenshot({ path: `${SHOTS}/chapter-control-overlong.png` });
   }
+  // 9b. The picture models' sheet: every model in the list draws, and none links a program.
+  said.push("\nthe picture models' sheet:");
+  {
+    const colourProblems = fixtureColourProblems([CHAPTER_FIXTURE, OVERLONG_FIXTURE, MODEL_SHEET]);
+    assert(colourProblems.length === 0, "every colour the check's own books name is the palette's", colourProblems.join('; ') || 'all are');
+    const modelsOf = (books: readonly LibraryBook[]): Set<string> =>
+      new Set(books.flatMap((book) => [book.titlePicture, ...book.pages.map((entry) => entry.picture)].flatMap((picture) => picture.cast.map((actor) => actor.model))));
+    const drawn = new Set([...modelsOf(BOOKS), ...modelsOf([MODEL_SHEET])]);
+    const undrawn = PICTURE_MODELS.filter((model) => !drawn.has(model));
+    assert(undrawn.length === 0, 'every picture model is drawn on a page this check opens', undrawn.length === 0 ? `all ${PICTURE_MODELS.length}` : `never drawn: ${undrawn.join(', ')}`);
+    const linksBefore = await page.evaluate(() => (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links);
+    await openAndPaint(page, MODEL_SHEET);
+    await page.waitForTimeout(200);
+    const linksAfter = await page.evaluate(() => (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links);
+    assert(
+      linksAfter === linksBefore,
+      "the model sheet opens without linking a shader program (the warm-up compiles every model's)",
+      `${linksAfter - linksBefore} program link(s) while it opened and painted`,
+    );
+    const sheet = await measureFaces(page);
+    const pictures = sheet.faces.filter((face) => face.coverage !== null);
+    const thin = pictures.filter((face) => (face.coverage ?? 0) <= MIN_COVERAGE);
+    assert(
+      pictures.length === MODEL_SHEET.pages.length + 1 && thin.length === 0,
+      "every picture on the model sheet drew its models",
+      `${pictures.length} pictures, the thinnest covering ${(Math.min(...pictures.map((face) => face.coverage ?? 0)) * 100).toFixed(1)}% of its pixels` +
+        (thin.length > 0 ? `; drew nothing on face(s) ${thin.map((face) => face.index).join(', ')}` : ''),
+    );
+    for (let guard = 0; guard < 10; guard += 1) {
+      const state = await readerState(page);
+      await page.screenshot({ path: `${SHOTS}/model-sheet-spread-${state.spread}.png` });
+      if (state.spread >= state.spreads - 1) break;
+      await turnAndWait(page, 'next');
+    }
+  }
+  process.stderr.write(
+    `check:book-reader: the picture models' sheet is in ${SHOTS}/model-sheet-spread-*.png — what every model a chapter book may name looks like\n`,
+  );
+
   process.stderr.write(
     `check:book-reader: chapter pages — ${realChapterBooks.length} real chapter book(s) measured` +
       (realChapterBooks.length === 0 ? ' (none is on the shelf yet; the fixture stands in)' : '') +

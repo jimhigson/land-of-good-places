@@ -3,6 +3,8 @@ import type { Expression } from '../../art/style/faces';
 import type { BalloonKind } from '../../art/models/balloons';
 import type { KeychainKind } from '../../art/models/keychains';
 import type { BreakfastKind } from '../../art/models/hotelAssets';
+import type { FlossFlavour } from '../../art/models/shopItems';
+import type { TreeVariant } from '../../art/models/props';
 import type { BookKind } from './bookKinds';
 import { CHAPTER_BOOKS } from './chapterBooks';
 
@@ -75,6 +77,35 @@ export type { BookKind } from './bookKinds';
  * beside a child on foot; `raceCart` is the cart **with the reader riding in
  * it**, both at park scale exactly as the race seats a rider, under duck bars
  * (`duckBar`) hung at the race's own height for them.
+ *
+ * **The chapter books' additions** (track D of #714, the editor's list for
+ * the six), each one of the park's own factories, at its park size, standing
+ * on the ground at the origin like every model here:
+ *
+ * - `mini` — the lilac mini (`createMini`); {@link PictureActor.grab} lifts its
+ *   grabby arms;
+ * - `pinkWall` — two segments of the park's pink stone wall (`createPinkWall`);
+ * - `tortoise` — a Reptile House tortoise, Grandpa Tock (`createTortoise`):
+ *   mood `blink` is asleep, `neutral` drowsy (eyes half shut), any other wide
+ *   awake; pose `stretch` pushes his head right out (his poke), `tuck` pulls
+ *   it into his shell;
+ * - `owl` — the owl librarian (`createLibraryOwl`): her faces are neutral,
+ *   blink, happy and her shush, which mood `surprised` shows;
+ * - `candyFloss` — on its stick (`createCandyFloss`), `variant` its flavour;
+ * - `jetpack` — a jet pack on its own (`createJetpack`); to put one on the
+ *   reader or a pet, give that actor {@link PictureActor.jetpack} instead;
+ * - `discoBall` — the hotel's (`createDiscoBall`), set down to stand on its
+ *   lowest point rather than hanging from its chain;
+ * - `lollipopTree` — a park tree (`createLollipopTree`), `variant` its kind;
+ * - `surpriseEgg` — a surprise egg (`createSurpriseEgg`): `colour` its shell,
+ *   {@link PictureActor.accent} its spots;
+ * - `alienSaucer` — the friendly alien from the Space Ferris Wheel's sky
+ *   (`createAlienSaucer`), fully arrived; it is 5 m across, so give it a `size`;
+ * - `stormCloud` — a book-only cloud with a face (`reader/readerAssets.ts`'s
+ *   `createStoryCloud`), in `colour` (grey for a storm, white for a fair
+ *   weather cloud), its moods the house five;
+ * - `prop` — anything no factory builds, made of primitive shapes: give its
+ *   {@link PictureActor.parts}.
  */
 export const PICTURE_MODELS = [
   'kid',
@@ -96,6 +127,18 @@ export const PICTURE_MODELS = [
   'dragon',
   'book',
   'duckBar',
+  'mini',
+  'pinkWall',
+  'tortoise',
+  'owl',
+  'candyFloss',
+  'jetpack',
+  'discoBall',
+  'lollipopTree',
+  'surpriseEgg',
+  'alienSaucer',
+  'stormCloud',
+  'prop',
 ] as const;
 
 /** A model the reader knows how to build for a picture — see {@link PICTURE_MODELS}. */
@@ -105,9 +148,51 @@ export type PictureModel = (typeof PICTURE_MODELS)[number];
  * How a creature with arms and legs holds them. Anything without limbs ignores
  * it. `duck` is a rider's: the reader in a `raceCart`, folded under a bar by
  * the Rail Race's own pose (`railRace/duckPose.ts`); a `raceCart` with any
- * other pose has her sitting up.
+ * other pose has her sitting up. `stretch` and `tuck` are the tortoise's: his
+ * head pushed right out, or pulled into his shell.
  */
-export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit' | 'duck';
+export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit' | 'duck' | 'stretch' | 'tuck';
+
+/** A primitive's shape, for a {@link PropPart}. */
+export type PropShape = 'box' | 'ball' | 'cylinder' | 'cone' | 'ring';
+
+/**
+ * **One primitive piece of a `prop`** — a picnic blanket is one `box`, a
+ * magnifying glass a `ring`, a flat `cylinder` for its lens and another for
+ * its handle. Built by `reader/pictureProps.ts` in the house toon look with
+ * an ink outline, so a prop sits in a picture like the park's own models.
+ */
+export interface PropPart {
+  readonly shape: PropShape;
+  /**
+   * Its size in metres, before it is turned or tilted:
+   * - `box` — width, height, depth;
+   * - `ball` — the box it fills: a sphere squashed or stretched to it (a cloud
+   *   puff, a pancake footprint, a feather);
+   * - `cylinder` — width and depth are its diameters, height its height
+   *   ({@link PropPart.sides} `3` makes it a wedge, a sandwich);
+   * - `cone` — its base's diameters, and its height, point up;
+   * - `ring` — its outer diameter, the thickness of its tube, and (unused) a
+   *   third number: a torus standing upright facing the reader, tilt it to lay
+   *   it down; {@link PropPart.arc} draws part of it (180 is an arch).
+   */
+  readonly size: readonly [number, number, number];
+  /** Where its middle is, in the prop's own metres. Default the origin. */
+  readonly at?: readonly [number, number, number];
+  /** Degrees about the vertical. */
+  readonly turn?: number;
+  /** Degrees about x (tipping it towards the reader), then about z (leaning it right). */
+  readonly tilt?: readonly [number, number];
+  readonly colour: PaletteKey;
+  /** `ring` only: how much of it, in degrees, from its right-hand side round over the top. Default 360. */
+  readonly arc?: number;
+  /** `cylinder` and `cone` only: how many sides. Default round. */
+  readonly sides?: number;
+  /** Glowing, as if lit from inside — a fairground bulb. */
+  readonly glow?: boolean;
+  /** `false` for no ink outline: confetti, raindrops, anything too small to carry one. */
+  readonly outline?: boolean;
+}
 
 /** One model on a page, and how it stands. Everything optional has a sensible default. */
 export interface PictureActor {
@@ -120,10 +205,24 @@ export interface PictureActor {
   readonly size?: number;
   readonly mood?: Expression;
   readonly pose?: PicturePose;
-  /** Which balloon, keychain or breakfast — only read for those three models. */
-  readonly variant?: BalloonKind | KeychainKind | BreakfastKind;
-  /** A colour for models that take one (the cart, the star, a book). */
+  /** Which balloon, keychain, breakfast, candy floss or tree — only read for those models. */
+  readonly variant?: BalloonKind | KeychainKind | BreakfastKind | FlossFlavour | TreeVariant;
+  /** A colour for models that take one (the cart, the star, a book, the egg's shell, the cloud). */
   readonly colour?: PaletteKey;
+  /** A second colour, for a model that takes two: the surprise egg's spots. */
+  readonly accent?: PaletteKey;
+  /** The mini's grabby arms, 0 down to 1 a full "MINI ATTACK!". Only read for the mini. Default 0. */
+  readonly grab?: number;
+  /**
+   * A jet pack on her back, firing (`on`) or not (`off`) — the reader (on her
+   * own `jetpackAnchor`, as she wears one in the park) or a pet (a smaller one,
+   * on the middle of its back). Omitted for none.
+   */
+  readonly jetpack?: 'on' | 'off';
+  /** `false` takes the keyring off the reader's bag for this picture (she wears whatever she has on today otherwise). Only read for `kid`. */
+  readonly keyring?: false;
+  /** A `prop`'s pieces. Only read for `prop`. */
+  readonly parts?: readonly PropPart[];
 }
 
 /** Little things painted over the picture, the way an illustrator would. */
