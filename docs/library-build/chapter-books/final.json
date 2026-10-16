@@ -1,0 +1,1046 @@
+{
+  "books": [
+    {
+      "id": "sirHopsalot",
+      "title": "Duck, Sir Hopsalot!",
+      "blurb": "Sir Hopsalot, the most boastful bunny in the park, pushes in at the Rail Race and challenges RiPika, then bonks every striped bar because he thinks ‘duck’ means a duck, until RiPika slows down to teach him, wins anyway, and wins a friend.",
+      "adversary": "Sir Hopsalot, a pompous white bunny (the bunny model) with the tallest ears in the park: a rival and a real show-off. He pushes in at the Rail Race queue, calls RiPika ‘small yellow person’ and challenges her to a race, then bonks bar after bar because nobody ever told him that ‘duck’ means get down low. Resolved by sportsmanship, not by a secret sorrow: RiPika could win easily but slows down to teach him; they duck the last bar side by side; she still wins, by the tip of her nose; he keeps his promise to call her magnificent (and they argue happily about which of them is more magnificent); and the next day he says sorry for pushing in, gives her a rubber duck and hops to the back of the queue. A rival beaten fair and square and won over. He is not misunderstood: he really was rude, and he changes.",
+      "jokes": [
+        "p1: the boasting: tallest ears, fluffiest tail, never stops telling everybody about it, and ‘He even told the trees.’",
+        "p3: caught pushing in, he sniffs ‘Nonsense’ and challenges the ‘small yellow person’ to a race",
+        "p4: ‘DUCK!’ / ‘A duck? Where?’ / BONK! His ears go wibble-wobble (the running gag starts)",
+        "p5: He peered left. He peered right. He peered up. BONK! ‘Still no duck,’ he grumbled.",
+        "p6: ‘Everybody keeps shouting about ducks, and there are no ducks anywhere!’",
+        "p9: an argument made entirely of compliments, ‘You are magnificent.’ ‘So are you!’ ‘No, YOU are!’, all the way to the ice cream parlour",
+        "p10: the payoff, a rubber duck: ‘At last,’ laughed RiPika, ‘a duck!’",
+        "throughout: his name (Sir Hopsalot hops a lot)"
+      ],
+      "pages": [
+        {
+          "text": "Sir Hopsalot was the grandest bunny in the Land of Good Places. His ears were the tallest, his tail was the fluffiest, and he never stopped telling everybody about it. He even told the trees.",
+          "words": 35,
+          "picture": {
+            "setting": "A sunny lawn beside the Rail Race. sky skyDayBottom, ground grassLight, decor sparkles (round Sir Hopsalot).",
+            "models": [
+              "bunny: Sir Hopsalot, mood happy, centre front, turned about 60 degrees towards the tree so his tall ears and his puff tail both show",
+              "lollipopTree (NEW picture model: createLollipopTree, art/models/props.ts): one tree at the right, the audience for his boasting",
+              "ripika: mood blink (bored, eyes shut), at the left, turned towards him",
+              "mouse: mood blink (bored, eyes shut), beside RiPika, turned towards him"
+            ],
+            "action": "Sir Hopsalot boasts about his tall ears and fluffy tail, so pleased with himself that he is telling a tree all about it, while RiPika and a mouse listen with their eyes shut, bored.",
+            "mood": "sunny and smug"
+          }
+        },
+        {
+          "text": "One sunny morning, RiPika was waiting in the queue for the Rail Race. Sir Hopsalot hopped straight past everybody. ‘Make way for the magnificent Sir Hopsalot!’ he announced.",
+          "words": 28,
+          "picture": {
+            "setting": "The Rail Race queue on a sandy path, one sunny morning. sky skyDayBottom, ground pathSand, decor speed.",
+            "models": [
+              "mouse: mood surprised, first in the line",
+              "biscuit: mood frown, second in the line",
+              "ripika: mood surprised, third in the line; all three face the same way, towards the ride",
+              "bunny: Sir Hopsalot, mood happy, raised off the path mid-hop (at y about 0.3), out in front of the whole line",
+              "prop: two queue posts with a rope swagged between them, beside the line (primitive: two cylinders and a thin curved tube)"
+            ],
+            "action": "RiPika, Biscuit and a mouse wait their turn in the queue for the Rail Race; Sir Hopsalot hops straight past all of them to the front, announcing himself as magnificent.",
+            "mood": "indignant"
+          }
+        },
+        {
+          "text": "RiPika frowned. ‘That’s pushing in!’ ‘Nonsense,’ sniffed Sir Hopsalot. ‘I challenge you to a race, small yellow person. Whoever loses must say the winner is magnificent.’ ‘Deal,’ said RiPika, climbing into her cart.",
+          "words": 33,
+          "picture": {
+            "setting": "The Rail Race start: two carts side by side on the twin tracks. sky skyDayBottom, ground grassLight.",
+            "models": [
+              "cart: colour markerPink, size 0.4, the park scale a raceCart is drawn at, so its seat is at SEAT_HEIGHT 0.958 m; on the left",
+              "ripika: mood frown, at the pink cart’s seat (y about 0.958), turned towards Sir Hopsalot as she climbs in",
+              "cart: colour markerSky, size 0.4, on the right, side by side with hers",
+              "bunny: Sir Hopsalot, mood happy (smug), at the blue cart’s seat (y about 0.958), facing front"
+            ],
+            "action": "RiPika climbs into her pink cart, frowning at Sir Hopsalot for pushing in, while he sits smugly in the blue cart beside her: the race is on, and the loser must call the winner magnificent.",
+            "mood": "a challenge"
+          }
+        },
+        {
+          "text": "The carts whooshed off. ‘DUCK!’ called RiPika, ducking under the first striped bar. ‘A duck? Where?’ said Sir Hopsalot. BONK! His ears went wibble-wobble. It didn’t hurt, but his cart slowed down.",
+          "words": 32,
+          "picture": {
+            "setting": "On the Rail Race track, rushing along. sky skyDayBottom, ground grassLight, decor speed.",
+            "models": [
+              "cart: colour markerPink, size 0.4, in the left lane",
+              "ripika: mood happy, ducking: sunk low into the pink cart’s tub (about 0.5 m below the seat) so only her ears and the top of her head show, just passing under the left bar",
+              "duckBar: over the left lane, brought down (a negative y, about 0.3 m) so the bar hangs where a pet’s ear tips reach; seated pets otherwise pass under a bar hung for the kid, so RiPika clears it only because she has ducked",
+              "cart: colour markerSky, size 0.4, in the right lane, level with hers",
+              "bunny: Sir Hopsalot, mood surprised, sitting up at the seat (y about 0.958), looking about for a duck, the tips of his tall ears right against the bar",
+              "duckBar: over the right lane, level with the first and brought down the same, its bar touching his ear tips"
+            ],
+            "action": "RiPika ducks under the first striped bar, calling ‘DUCK!’; Sir Hopsalot, sitting up and looking round for a duck, bonks the bar with his tall ears. It doesn’t hurt, but his cart slows down.",
+            "mood": "slapstick"
+          }
+        },
+        {
+          "text": "At the second bar, Sir Hopsalot was ready. ‘This time I shall spot that duck!’ He peered left. He peered right. He peered up. BONK! ‘Still no duck,’ he grumbled.",
+          "words": 30,
+          "picture": {
+            "setting": "Further along the Rail Race track, at the second bar. sky skyDayBottom, ground grassLight, decor speed.",
+            "models": [
+              "duckBar: the second bar, brought down until it meets Sir Hopsalot’s ear tips (as page 4)",
+              "cart: colour markerSky, size 0.4, at the bar",
+              "bunny: Sir Hopsalot, mood frown, sitting up at the seat, his ear tips bonking the bar",
+              "cart: colour markerPink, size 0.4, far ahead down the track and small",
+              "ripika: mood happy, ducked low in the pink cart"
+            ],
+            "action": "Busy peering about for a duck, Sir Hopsalot bonks the second bar with his ears and grumbles that there is still no duck; RiPika is far ahead.",
+            "mood": "slapstick"
+          }
+        },
+        {
+          "text": "Sir Hopsalot’s ears drooped. ‘Everybody keeps shouting about ducks,’ he wailed, ‘and there are no ducks anywhere!’ RiPika gasped. He didn’t know! Nobody had ever told him what ducking was.",
+          "words": 30,
+          "picture": {
+            "setting": "The Rail Race track, the two carts close together. sky skyDayBottom, ground grassLight.",
+            "models": [
+              "cart: colour markerSky, size 0.4, a little behind",
+              "bunny: Sir Hopsalot, mood sad, at the blue cart’s seat, wailing",
+              "cart: colour markerPink, size 0.4, a little ahead",
+              "ripika: mood surprised, at the pink cart’s seat, turned right round to look back at him (turn about 150)"
+            ],
+            "action": "Sir Hopsalot wails, sad-faced, that everybody keeps shouting about ducks and there are none anywhere; RiPika looks back and gasps as she realises nobody ever told him what ducking means.",
+            "mood": "a sad little moment"
+          }
+        },
+        {
+          "text": "The biggest bar of all was next, right before the finish. RiPika could win easily, but she slowed down beside him. ‘Duck means get down low, like this! Fold your ears!’",
+          "words": 31,
+          "picture": {
+            "setting": "The last stretch of the Rail Race, the finish just beyond the biggest bar of all. sky skyDayBottom, ground grassLight.",
+            "models": [
+              "duckBar: the biggest bar of all, at its own size (scaling it would lift the bar out of everyone’s reach), turned to match the carts, standing ahead of them and nearer the camera than they are, so it looms largest",
+              "cart: colour markerPink, size 0.4, both carts turned about 35 degrees, heading towards the bar",
+              "ripika: mood happy, ducked low in the pink cart to show him how",
+              "cart: colour markerSky, size 0.4, right beside hers",
+              "bunny: Sir Hopsalot, mood surprised, sitting up at the seat, watching her",
+              "prop: the Rail Race’s finish line, a rainbow arching over the track (primitive: six stacked half-torus bands in the park’s rainbow colours, as track.ts draws it), beyond the bar"
+            ],
+            "action": "RiPika could win easily, but she has slowed right down beside Sir Hopsalot and ducks low to show him what ‘duck’ means, just before the biggest bar and the finish.",
+            "mood": "kind"
+          }
+        },
+        {
+          "text": "Sir Hopsalot folded his magnificent ears and bent down low. WHOOSH! Under the bar they went, side by side, and over the finish line in a shower of confetti.",
+          "words": 29,
+          "picture": {
+            "setting": "The finish of the Rail Race. sky skyDayBottom, ground grassLight, decor speed, sparkles.",
+            "models": [
+              "duckBar: the biggest bar, at its own size and turned to match the carts, just behind them now",
+              "cart: colour markerPink, size 0.4",
+              "ripika: mood happy, ducked low in the pink cart",
+              "cart: colour markerSky, size 0.4, side by side with hers",
+              "bunny: Sir Hopsalot, mood happy, sunk low in the blue cart the way RiPika is, his ear tips just under the bar (the model’s ears cannot fold, so sinking him is the fold)",
+              "prop: the Rail Race’s finish line, a rainbow arching over the track (primitive: six stacked half-torus bands in the park’s rainbow colours, as track.ts draws it), overhead",
+              "prop: confetti, a shower of tiny flat squares in park colours (primitive)"
+            ],
+            "action": "Both riders ducked low, the two carts whoosh under the biggest bar side by side and over the finish line beneath the rainbow, in a shower of confetti.",
+            "mood": "triumphant"
+          }
+        },
+        {
+          "text": "RiPika won by the tip of her nose! ‘You are magnificent,’ said Sir Hopsalot. ‘So are you!’ said RiPika. ‘No, YOU are!’ They argued about it all the way to the ice cream parlour.",
+          "words": 34,
+          "picture": {
+            "setting": "Beside the finish, confetti on the grass. sky skyDayBottom, ground grassLight, decor hearts.",
+            "models": [
+              "ripika: mood happy, pose armsUp, the winner",
+              "bunny: Sir Hopsalot, mood happy, turned to face her",
+              "prop: confetti scattered on the grass (primitive)",
+              "prop: the Rail Race’s finish line, a rainbow arching over the track (primitive: six stacked half-torus bands in the park’s rainbow colours, as track.ts draws it), behind them"
+            ],
+            "action": "RiPika has won by the tip of her nose; she and Sir Hopsalot face each other, each insisting that the other is the magnificent one.",
+            "mood": "warm and silly"
+          }
+        },
+        {
+          "text": "The next day, Sir Hopsalot said sorry for pushing in and gave RiPika a yellow rubber duck. ‘At last,’ laughed RiPika, ‘a duck!’ Then he hopped to the back of the queue, like everybody else.",
+          "words": 35,
+          "picture": {
+            "setting": "The Rail Race queue on the sandy path, the next day. sky skyDayBottom, ground pathSand, decor hearts.",
+            "models": [
+              "mouse: mood happy, first in the line",
+              "biscuit: mood happy, second in the line",
+              "ripika: mood happy, pose wave, third in the line, her raised paw holding up the rubber duck",
+              "prop: a yellow rubber duck in RiPika’s raised paw (primitive: a squashed flowerYellow sphere body, a smaller sphere head, an orange cone beak)",
+              "bunny: Sir Hopsalot, mood happy, at the very back of the line",
+              "prop: the queue posts and rope (primitive, as page 2)"
+            ],
+            "action": "RiPika laughs and holds up the rubber duck Sir Hopsalot gave her with his sorry, while he waits at the back of the queue like everybody else.",
+            "mood": "a happy ending"
+          }
+        }
+      ]
+    },
+    {
+      "id": "detectiveBiscuit",
+      "title": "Detective Biscuit",
+      "blurb": "When a balloon, a keyring and a breakfast bowl vanish, Detective Biscuit follows pancake-shaped footprints, sets a trap and catches a naughty-looking mini, who turns out to have been keeping everyone’s lost things safe.",
+      "adversary": "A mini (createMini: the ‘MINI ATTACK!’ creature from Mayhem mode), a tiny lilac creature with grabby arms and eyebrows that look naughty even when it is asleep. RiPika’s balloon comes untied, your keyring falls off your bag and Biscuit forgets his bowl by the pink wall; all three vanish and its pancake footprints turn up everywhere, so Biscuit baits a trap with a gold star and catches it. The one adversary on the shelf who is purely misunderstood, and the trap turns round on the detective: it didn’t take the star, it found it. It never stole anything. It found what people lost and kept it safe behind the pink wall, and could never give anything back, because whenever it ran up shouting ‘MINI ATTACK!’ everybody took one look at its eyebrows and ran. Biscuit lets it keep the star as its Finder of Lost Things badge, and a mini attack turns out to be a knee-high hug.",
+      "jokes": [
+        "p3: ‘Our thief,’ he said, ‘has very funny feet.’",
+        "p4: Biscuit’s three clues (small, funny feet, loves breakfast) describe Biscuit himself. ‘My feet aren’t funny!’ Everyone looks at his feet. They were, a bit.",
+        "p5: hiding behind the fountain, Biscuit’s tummy rumbles: ‘I can’t shush a tummy!’",
+        "p7: the trap turns round: the mini didn’t TAKE the star, it FOUND it, lying on the path all alone, and Biscuit, who left it there, has to admit that is perfectly true",
+        "p9: its eyebrows look naughty even when it is asleep",
+        "p10: a mini attack is really a hug, a very small one, round your knees"
+      ],
+      "pages": [
+        {
+          "text": "On Monday, RiPika’s spotty balloon came untied from a bench and vanished. On Tuesday, the strawberry keyring fell off your bag and vanished too. Somebody in the Land of Good Places was taking things!",
+          "words": 34,
+          "picture": {
+            "setting": "Beside a park bench near the fountain, a sunny morning. sky skyDayBottom, ground pathSand, decor sun.",
+            "models": [
+              "ripika: mood sad, beside the empty bench, turn 20, looking at where her balloon was tied",
+              "prop: park bench, empty (primitive: a woodLight box seat on two woodDark box legs)",
+              "kid: mood surprised, turn 150 so her bag faces the reader, looking back over her shoulder at it with nothing hanging from it (needs a no-keyring option on the kid actor: dressKid hangs whatever keyring she is wearing today)",
+              "statue: the fountain’s RiPika statue, size 0.45, behind them"
+            ],
+            "action": "RiPika looks sadly at the empty bench where her spotty balloon came untied, and you twist round to look at your bag, where the strawberry keyring used to hang.",
+            "mood": "puzzled, a little sad: the mystery begins"
+          }
+        },
+        {
+          "text": "On Wednesday, Biscuit put his breakfast bowl down by the pink wall and forgot it. It vanished, spoon and all! So he picked up a magnifying glass. ‘Detective Biscuit,’ he announced, ‘is on the case!’",
+          "words": 35,
+          "picture": {
+            "setting": "On the path beside the pink wall. sky skyDayBottom, ground pathSand, decor sparkles.",
+            "models": [
+              "pinkWall (NEW picture model: createPinkWall({ length: 2 }), art/models/props.ts): the park’s pink stone wall, behind him, nothing at its foot where the bowl was",
+              "biscuit: mood frown (his serious detective face), pose wave so his raised paw holds the glass up to his eye",
+              "prop: magnifying glass in Biscuit’s raised paw (primitive: a torus rim, a pale blue flat disc lens, a short cylinder handle)"
+            ],
+            "action": "Biscuit stands by the pink wall, where he put his breakfast bowl down and forgot it, and holds a magnifying glass up to his eye: Detective Biscuit is on the case.",
+            "mood": "determined and funny"
+          }
+        },
+        {
+          "text": "Biscuit searched the whole park. By the fountain he found tiny footprints, flat and wide like pancakes. By the ice cream parlour he found more. ‘Our thief,’ he said, ‘has very funny feet.’",
+          "words": 33,
+          "picture": {
+            "setting": "A sandy park path. sky skyDayBottom, ground pathSand.",
+            "models": [
+              "biscuit: mood surprised, turn 60, leaning over the trail with the magnifying glass held low",
+              "prop: magnifying glass (as page 2)",
+              "prop: footprints, a trail of eight tiny prints, each a flat wide oval like a pancake (primitive: flattened discs in pathSandDark), crossing the path in front of him"
+            ],
+            "action": "Biscuit peers through his magnifying glass at a trail of tiny footprints, flat and wide like pancakes, and decides that the thief has very funny feet.",
+            "mood": "curious"
+          }
+        },
+        {
+          "text": "‘The thief is small,’ said Biscuit, ‘has funny feet and loves breakfast.’ Everyone looked at Biscuit. ‘Not me!’ he cried. ‘My feet aren’t funny!’ Everyone looked at his feet. They were, a bit.",
+          "words": 33,
+          "picture": {
+            "setting": "The path by the fountain. sky skyDayBottom, ground pathSand.",
+            "models": [
+              "biscuit: mood surprised, pose armsUp (protesting), centre, facing the reader so both feet show",
+              "ripika: mood frown (a suspicious squint), turn 40, looking down at Biscuit’s feet",
+              "kid: mood neutral, turn -40, looking down at Biscuit’s feet",
+              "prop: two pancake footprints (as page 3) on the path beside Biscuit’s feet"
+            ],
+            "action": "RiPika and you stare at Biscuit, because his clues (small, funny feet, loves breakfast) describe him perfectly; he throws up his paws in protest while everyone looks at his feet, which are, a bit, funny.",
+            "mood": "comic"
+          }
+        },
+        {
+          "text": "So Biscuit set a trap. He left a shiny gold star on the path, and everyone hid behind the fountain. Biscuit’s tummy rumbled. ‘Shh!’ said RiPika. ‘I can’t shush a tummy!’ whispered Biscuit.",
+          "words": 33,
+          "picture": {
+            "setting": "The fountain, seen from the path. sky skyDayBottom, ground pathSand.",
+            "models": [
+              "star: colour flowerYellow, size 1.6, alone on the path in the foreground (the bait)",
+              "statue: size 0.5, centre back (the fountain they hide behind)",
+              "biscuit: mood surprised (his tummy has just rumbled), peeping out round the left of the statue",
+              "ripika: mood frown (shushing him), peeping out round the right of the statue",
+              "kid: mood happy, pose sit, crouched behind the statue’s base"
+            ],
+            "action": "A shiny gold star lies alone on the path as bait. Biscuit, RiPika and you hide behind the fountain; Biscuit’s tummy has just rumbled, RiPika is shushing it, and Biscuit whispers that he can’t shush a tummy.",
+            "mood": "giggly suspense"
+          }
+        },
+        {
+          "text": "Out from behind the pink wall tiptoed a mini: a tiny lilac creature with grabby arms and very naughty eyebrows. It grabbed the star. ‘Gotcha!’ shouted Biscuit, and everybody jumped out.",
+          "words": 31,
+          "picture": {
+            "setting": "The path beside the pink wall. sky skyDayBottom, ground pathSand, decor speed.",
+            "models": [
+              "mini (NEW picture model: createMini, art/models/mini.ts): mood surprised, setGrab(1) so its grabby arms are up, centre, just out from behind the wall",
+              "star: colour flowerYellow, size 1.2, clutched in the mini’s raised hands",
+              "pinkWall: createPinkWall({ length: 2 }), behind the mini",
+              "biscuit: mood surprised, pose armsUp, leaping out from the left",
+              "ripika: mood surprised, pose armsUp, leaping out from the right",
+              "kid: mood surprised, pose armsUp, just behind them"
+            ],
+            "action": "A mini, a tiny lilac creature with grabby arms and very naughty eyebrows, has tiptoed out from behind the pink wall and grabbed the star; Biscuit, RiPika and you jump out, and Biscuit shouts ‘Gotcha!’",
+            "mood": "exciting slapstick"
+          }
+        },
+        {
+          "text": "‘You took our star!’ cried RiPika. ‘I didn’t TAKE it,’ squeaked the mini. ‘I FOUND it, lying on the path, all alone.’ Biscuit had to admit that was perfectly true.",
+          "words": 30,
+          "picture": {
+            "setting": "The same spot by the pink wall. sky skyDayBottom, ground pathSand.",
+            "models": [
+              "mini: mood sad, a half grab, setGrab(0.4) (needs a grab amount on the actor: pose armsUp gives only the full grab), holding the star to its chest",
+              "star: colour flowerYellow, size 1.2",
+              "ripika: mood frown, pose wave (pointing at the star)",
+              "biscuit: mood blink (sheepish), turn 20, magnifying glass lowered",
+              "prop: magnifying glass (as page 2)",
+              "pinkWall: behind them"
+            ],
+            "action": "RiPika accuses the mini of taking the star; the mini squeaks that it didn’t take it, it found it lying on the path all alone, and Biscuit, who put it there, has to admit that is perfectly true.",
+            "mood": "a funny turnabout"
+          }
+        },
+        {
+          "text": "The mini led everyone behind the wall. There, safe and sound, were the balloon, the keyring and the bowl. ‘People lose things,’ it said, ‘and nobody looks down. But I’m small, so I always do.’",
+          "words": 35,
+          "picture": {
+            "setting": "Behind the pink wall, a tidy hidey-hole on the grass. sky skyDayBottom, ground grassLight, decor sparkles.",
+            "models": [
+              "balloon: variant dalmatian, RiPika’s spotty balloon, its string tied to a little stick (prop: a thin wood cylinder planted in the grass)",
+              "keychain: variant strawberry, size 5, laid on a flat stone (prop: a squashed sphere in stoneGreyLight)",
+              "bowl: variant yoghurt, size 2.2, Biscuit’s breakfast bowl, with a little spoon in it (prop: a thin cylinder)",
+              "mini: mood happy, setGrab(0.6) (the same grab amount), showing them off",
+              "biscuit: mood surprised",
+              "ripika: mood surprised",
+              "kid: mood surprised",
+              "pinkWall: along the back"
+            ],
+            "action": "Behind the wall the lost things stand in a neat row, safe and sound: RiPika’s spotty balloon, your strawberry keyring and Biscuit’s breakfast bowl. The mini explains that people lose things and nobody looks down, but it is small, so it always does.",
+            "mood": "surprise turning to warmth"
+          }
+        },
+        {
+          "text": "‘Then why didn’t you give them back?’ asked Biscuit. The mini sighed. ‘Because of my eyebrows. They look naughty even when I’m asleep. When I run up shouting “MINI ATTACK!”, everybody runs away.’",
+          "words": 33,
+          "picture": {
+            "setting": "Behind the pink wall. sky skyDayBottom, ground grassLight.",
+            "models": [
+              "mini: mood sad, setGrab(0), arms down",
+              "biscuit: mood sad, pose sit, sitting on the grass so he is nearer the mini’s height",
+              "ripika: mood sad, beside Biscuit",
+              "pinkWall: behind them"
+            ],
+            "action": "Biscuit sits down and asks why the mini never gave the things back; the mini sighs that its eyebrows look naughty even when it is asleep, and whenever it runs up shouting ‘MINI ATTACK!’, everybody runs away.",
+            "mood": "tender, a little sad"
+          }
+        },
+        {
+          "text": "So Biscuit let the mini keep the gold star, as a badge: Finder of Lost Things. And now everybody knows a mini attack is really a hug, a very small one, round your knees.",
+          "words": 34,
+          "picture": {
+            "setting": "The park on a sunny afternoon. sky skyDayBottom, ground grassLight, decor hearts, sparkles.",
+            "models": [
+              "kid: mood happy, standing, facing the reader",
+              "mini: mood happy, setGrab(1), set against the kid’s shins so its arms wrap round her knees",
+              "star: colour flowerYellow, size 0.5, on the mini’s chest as its Finder of Lost Things badge",
+              "biscuit: mood happy, pose wave",
+              "ripika: mood happy"
+            ],
+            "action": "Wearing the gold star as its Finder of Lost Things badge, the mini gives you a mini attack: a very small hug round your knees. Biscuit waves and RiPika smiles.",
+            "mood": "warm, happy ending"
+          }
+        }
+      ]
+    },
+    {
+      "id": "loudestShush",
+      "title": "The Loudest Shush",
+      "blurb": "Trilla the singing puff cannot stop singing in the library, and grumpy Mrs Crumpet, the library cat left in charge, shushes louder every time, until Trilla spots a yawn and finds a clever, kind way round the rule.",
+      "adversary": "Mrs Crumpet, the grumpy ginger library cat (the kitten model, always on her pile of books), left in charge while the owl librarian is out. A grump whose every SHHHH is louder than the singing, humming or hiccupping it is meant to stop. Outwitted kindly, not misunderstood: when her biggest shush comes out as a yawn, Trilla works out that this grumpy cat is a sleepy cat, and finds a loophole: ‘I’m not singing, I’m lullabying.’ Mrs Crumpet can find no rule against that, and every shush she tries turns into another yawn until she is fast asleep, purring like a tractor, and the shusher gets shushed. Nothing about her turns out secretly sweet; she simply gets the naps she needed, Trilla gets to sing, and Trilla lullabies her to sleep every nap time after.",
+      "jokes": [
+        "p1: she even sings in her sleep, ‘which is very tricky indeed’ (the picture: notes and zzzs floating up together)",
+        "p3: Mrs Crumpet is in charge and takes it very seriously, with her eyes shut",
+        "p4: her SHHHHHH is so loud that every page flutters: the shush is always louder than the noise (the running gag)",
+        "p5: the shush wobbles a lamp and makes a mouse drop his book; ‘I can hear you THINKING about humming.’",
+        "p6: Trilla holds her song in until she puffs up round, rounder, the roundest puff there is, then hiccups out notes: ‘HIC!’",
+        "p7: her biggest shush yet comes out as an enormous YAWN",
+        "p8: the loophole: ‘I’m not singing, I’m lullabying. It’s much quieter.’ She could not find a rule against that.",
+        "p9: every shush she tries turns into a yawn",
+        "p10: she purrs like a tractor and the bookshelves rattle, so Trilla shushes the shusher: ‘Shhh, Mrs Crumpet!’"
+      ],
+      "pages": [
+        {
+          "text": "Trilla the singing puff sang everywhere she went. She sang on the big wheel. She sang in the bath. She even sang in her sleep, which is very tricky indeed.",
+          "words": 30,
+          "picture": {
+            "setting": "Trilla’s cosy bed out in the park at night. sky skyNightBottom, ground grassDark, night, decor zzz, notes, moon.",
+            "models": [
+              "trilla: mood blink (fast asleep), sitting in the bed",
+              "petBed: under her"
+            ],
+            "action": "Trilla is fast asleep in her bed and still singing: little musical notes float up among the zzzs.",
+            "mood": "cosy and silly"
+          }
+        },
+        {
+          "text": "One afternoon, Trilla bounced into the library to find a book of songs. It was dim and cosy and as quiet as a whisper. Everybody was reading without a sound.",
+          "words": 30,
+          "picture": {
+            "setting": "Inside the library: dim and cosy, warm lamplight, plum shadows, never black. sky buildingFloor, ground woodLight, night (the library’s own dim light).",
+            "models": [
+              "trilla: mood happy, raised off the floor mid-bounce (at y about 0.4), coming in at one side",
+              "bunny: Sir Hopsalot in a silent cameo, mood blink, reading",
+              "mouse: mood blink, reading",
+              "prop: an open book in front of the bunny and another in front of the mouse (primitive: two pale slabs in a shallow V)",
+              "prop: a tall bookshelf with rows of coloured spines (primitive: a wooden box and thin coloured slabs)",
+              "prop: a reading lamp (primitive: a cylinder stand and a cone shade)"
+            ],
+            "action": "Trilla bounces into the hushed library, where everybody, a bunny and a mouse among them, is reading without a sound.",
+            "mood": "hushed and cosy"
+          }
+        },
+        {
+          "text": "On a pile of books slept Mrs Crumpet, the grumpy ginger library cat. The owl librarian was out, so Mrs Crumpet was in charge. She took it very seriously, with her eyes shut.",
+          "words": 33,
+          "picture": {
+            "setting": "The library, dim and cosy. sky buildingFloor, ground woodLight, night, decor zzz.",
+            "models": [
+              "book: colour markerMint, size 3, the bottom of Mrs Crumpet’s pile (three book models, about 0.9 m high like the library’s own pile, wide enough to hold her)",
+              "book: colour markerLilac, size 3, on top of it, turned 15 degrees",
+              "book: colour markerPink, size 3, on top again, turned -10 degrees",
+              "kitten: Mrs Crumpet, mood blink (asleep), on top of the pile",
+              "prop: the librarian’s desk behind, with nobody at it (primitive: a wooden box)"
+            ],
+            "action": "Mrs Crumpet, the grumpy ginger library cat, sleeps on top of her pile of books, in charge with her eyes shut; the librarian’s desk behind her is empty because the owl is out.",
+            "mood": "sleepy"
+          }
+        },
+        {
+          "text": "Trilla found the song book and opened it. Out of Trilla popped a song, all by itself. ‘La la LAAA!’ Mrs Crumpet’s eyes snapped open. ‘SHHHHHH!’ she hissed, so loudly that every page fluttered.",
+          "words": 34,
+          "picture": {
+            "setting": "The library. sky buildingFloor, ground woodLight, night, decor notes, speed.",
+            "models": [
+              "trilla: mood surprised, a song bursting out of her",
+              "prop: the open song book on the floor in front of her (primitive: two pale slabs in a shallow V), two loose pages fluttering up from it (primitive: thin pale slabs, tilted)",
+              "book (x3): Mrs Crumpet’s pile (as page 3), across the picture from Trilla",
+              "kitten: Mrs Crumpet, mood frown, wide awake on top of the pile, facing Trilla"
+            ],
+            "action": "A song pops out of Trilla as she opens the song book, and Mrs Crumpet, her eyes snapped open, shushes so loudly that every page flutters.",
+            "mood": "noisy"
+          }
+        },
+        {
+          "text": "Trilla tried humming instead. ‘Hmm-hmm-hmmm.’ ‘SHHHHHHHH!’ went Mrs Crumpet. A lamp wobbled and a mouse dropped his book. ‘I can hear you humming,’ she grumbled. ‘I can hear you THINKING about humming.’",
+          "words": 32,
+          "picture": {
+            "setting": "The library. sky buildingFloor, ground woodLight, night, decor notes (small), speed.",
+            "models": [
+              "trilla: mood sad, humming",
+              "kitten: Mrs Crumpet, mood frown, close beside Trilla, facing her",
+              "mouse: mood surprised, behind them",
+              "book: colour markerMint, lying on the floor at the mouse’s feet where he dropped it",
+              "prop: a reading lamp, tipped at an angle mid-wobble (primitive: a cylinder stand and a cone shade)"
+            ],
+            "action": "Mrs Crumpet’s shush has wobbled a lamp and made a mouse drop his book, and she grumbles at Trilla that she can hear her THINKING about humming.",
+            "mood": "grumpy"
+          }
+        },
+        {
+          "text": "So Trilla held her song in. She held it in until she puffed up round, then rounder, then the roundest puff there is. ‘HIC!’ A little note popped out. ‘HIC!’ And another!",
+          "words": 32,
+          "picture": {
+            "setting": "The library. sky buildingFloor, ground woodLight, night, decor notes (just two).",
+            "models": [
+              "trilla: size 1.3, puffed up as round as round can be, mood surprised (holding it all in), centre",
+              "book (x3): Mrs Crumpet’s pile (as page 3), behind her",
+              "kitten: Mrs Crumpet, mood frown, on top of the pile, watching"
+            ],
+            "action": "Holding her song in, Trilla has puffed up into the roundest puff there is, and hiccups: one little note pops out of her, then another.",
+            "mood": "fit to burst"
+          }
+        },
+        {
+          "text": "Mrs Crumpet stomped over, crosser than ever. She opened her mouth for her biggest shush yet, and out came an enormous YAWN. Aha, thought Trilla. Grumpy cats are often just sleepy cats.",
+          "words": 32,
+          "picture": {
+            "setting": "The library. sky buildingFloor, ground woodLight, night, decor zzz.",
+            "models": [
+              "kitten: Mrs Crumpet, mood surprised, right up close to Trilla (there is no yawn face: the house surprised face, wide eyes and an ‘oh’ mouth, stands in for the yawn, and the zzz decor sells it)",
+              "trilla: mood happy (an idea dawning), facing her"
+            ],
+            "action": "Mrs Crumpet has stomped up to Trilla for her biggest shush yet, and out comes an enormous yawn instead; Trilla, watching, has worked out that this grumpy cat is a sleepy cat.",
+            "mood": "a surprise, and an idea"
+          }
+        },
+        {
+          "text": "‘No singing in my library!’ huffed Mrs Crumpet. ‘I’m not singing,’ said Trilla sweetly. ‘I’m lullabying. It’s much quieter.’ Mrs Crumpet frowned. She could not find a rule against that.",
+          "words": 30,
+          "picture": {
+            "setting": "The library, the lamplight low. sky buildingFloor, ground woodLight, night, decor sparkles (small, round Trilla).",
+            "models": [
+              "book (x3): Mrs Crumpet’s pile (as page 3)",
+              "kitten: Mrs Crumpet, mood frown, back on top of the pile, thinking hard",
+              "trilla: mood happy (as sweet as can be), close beside the pile, looking up at her"
+            ],
+            "action": "Mrs Crumpet huffs that there is no singing in her library; Trilla sweetly explains that she is not singing, she is lullabying, and Mrs Crumpet frowns, unable to find a rule against that.",
+            "mood": "cheeky and clever"
+          }
+        },
+        {
+          "text": "So Trilla began her lullaby, as softly and slowly as she could. ‘Shhh…’ started Mrs Crumpet, but it turned into a yawn. ‘Sh…’ Another yawn. Her eyes went droopy, then droopier, then shut.",
+          "words": 33,
+          "picture": {
+            "setting": "The library, the lamplight low. sky buildingFloor, ground woodLight, night, decor notes (small and few), zzz.",
+            "models": [
+              "book (x3): Mrs Crumpet’s pile (as page 3)",
+              "kitten: Mrs Crumpet, mood blink (her eyes drooping shut), on top of the pile",
+              "trilla: mood blink, singing softly right beside the pile"
+            ],
+            "action": "Trilla sings her lullaby as softly and slowly as she can; every shush Mrs Crumpet tries turns into a yawn, and her eyes droop shut.",
+            "mood": "soft and sleepy"
+          }
+        },
+        {
+          "text": "Soon Mrs Crumpet was fast asleep, purring like a tractor. ‘PRRRRRRR!’ The bookshelves rattled. Trilla smiled and whispered, ‘Shhh, Mrs Crumpet!’ And every nap time after that, Trilla lullabied her to sleep.",
+          "words": 32,
+          "picture": {
+            "setting": "The library, dim and cosy. sky buildingFloor, ground woodLight, night, decor zzz, hearts.",
+            "models": [
+              "book (x3): Mrs Crumpet’s pile (as page 3)",
+              "kitten: Mrs Crumpet, mood blink, fast asleep on top of the pile",
+              "trilla: mood happy, beside her, whispering",
+              "prop: a bookshelf behind them, its books jumbled by the purring (primitive: a wooden box and thin coloured slabs set askew)"
+            ],
+            "action": "Mrs Crumpet sleeps, purring so loudly that the bookshelves rattle, and Trilla smiles and whispers ‘Shhh, Mrs Crumpet!’",
+            "mood": "cosy and funny"
+          }
+        }
+      ]
+    },
+    {
+      "id": "giantFootprints",
+      "title": "The Giant Footprints",
+      "blurb": "Giant footprints appear all over the park and everyone hides, until brave RiPika works out that whoever made them walks far too slowly to be scary and follows them to Grandpa Tock, a 102-year-old tortoise who has never been on a ride.",
+      "adversary": "‘The giant’: dinner-plate footprints circle the fountain, nibble every yellow flower and creep towards the rides, until Sir Hopsalot, the mouse and Biscuit are all hiding. There is no villain, only a scary rumour, and it is beaten by courage and a clear head: brave RiPika sees that the prints are very close together, so whoever made them walks very slowly, and nothing that slow can be scary. She follows the trail to Grandpa Tock, the 102-year-old tortoise in the Reptile House’s Tortoise Garden, who sets off for the Rail Race every evening but is so slow that the carts are asleep when he arrives. The ending is a kindness rather than a confession: RiPika calls the cat bus to carry him, everyone who hid from him comes out to wave, and after a hundred and two years he gets his ride.",
+      "jokes": [
+        "p2: RiPika’s foot in a giant footprint looks like a pea on a dinner plate; ‘And probably a very big tummy.’",
+        "p3: ‘It likes yellow things,’ says RiPika, who is very yellow, and she hides behind you, just in case",
+        "p4: ‘A GIANT HAMSTER!’ wails Biscuit, from under a bench",
+        "p7: Grandpa Tock wakes up so slowly that it takes him until lunchtime to say good morning",
+        "p10: he doesn’t need to duck on the Rail Race, he just pops his head into his shell; and at the finish, ‘Again! But slower, please.’"
+      ],
+      "pages": [
+        {
+          "text": "One morning, RiPika found footprints by the fountain. Giant ones! Each was as round as a dinner plate, with stubby toes. They went round the fountain twice, then off across the grass.",
+          "words": 32,
+          "picture": {
+            "setting": "The fountain, early morning. sky skyDawnBottom, ground pathSand, decor sun.",
+            "models": [
+              "statue: the fountain’s RiPika statue, size 0.5, centre back",
+              "prop: giant footprints, round prints the size of dinner plates, each a shallow pathSandDark disc with four stubby toe-dots (primitive), ringing the fountain and heading off to the right",
+              "ripika: mood surprised, front left, staring at them"
+            ],
+            "action": "RiPika finds giant round footprints by the fountain, each as big as a dinner plate with stubby toes; they go round the fountain and then off across the grass.",
+            "mood": "astonished"
+          }
+        },
+        {
+          "text": "RiPika put her own foot in one. It looked like a pea on a dinner plate. ‘Whoever made these,’ she whispered, ‘has very big feet. And probably a very big tummy.’",
+          "words": 31,
+          "picture": {
+            "setting": "Close up on one footprint. sky skyDawnBottom, ground pathSand.",
+            "models": [
+              "prop: one giant footprint, a big shallow pathSandDark disc with four toe-dots (primitive), filling the foreground",
+              "ripika: mood surprised, standing with one foot set in the middle of the print, which dwarfs it"
+            ],
+            "action": "RiPika puts her own foot in a footprint and it looks like a pea on a dinner plate; she whispers that whoever made it has very big feet, and probably a very big tummy.",
+            "mood": "funny, wide-eyed"
+          }
+        },
+        {
+          "text": "The footprints led through the flowerbeds, where somebody had nibbled every yellow flower and left the rest. ‘It likes yellow things,’ said RiPika, who was very yellow. She hid behind you, just in case.",
+          "words": 34,
+          "picture": {
+            "setting": "A flowerbed beside the path. sky skyDayBottom, ground grassLight.",
+            "models": [
+              "prop: a row of flowers (primitive: thin leafMid cylinder stems with sphere heads): the blossomPink and flowerBlue ones whole, the flowerYellow ones nibbled down to bare stalks",
+              "prop: giant footprints, three round prints trampling through the bed (primitive, as page 1)",
+              "kid: mood surprised, standing by the bed",
+              "ripika: mood surprised, peeping out from behind the kid’s legs"
+            ],
+            "action": "The footprints run through a flowerbed where every yellow flower has been nibbled and the rest left alone; RiPika, who is very yellow, hides behind you, just in case.",
+            "mood": "nervous giggles"
+          }
+        },
+        {
+          "text": "Next morning there were more footprints, by the big wheel and the slide. ‘A giant!’ gasped Sir Hopsalot. ‘A monster!’ squeaked the mouse. ‘A GIANT HAMSTER!’ wailed Biscuit, from under a bench.",
+          "words": 32,
+          "picture": {
+            "setting": "On the grass, the next morning. sky skyDayBottom, ground grassLight, decor speed.",
+            "models": [
+              "prop: giant footprints, a fresh trail across the grass (primitive, as page 1)",
+              "bunny: Sir Hopsalot, mood surprised",
+              "mouse: mood surprised",
+              "prop: park bench (primitive: a woodLight box seat on two woodDark box legs)",
+              "biscuit: mood surprised, pose sit, peeping out from under the bench"
+            ],
+            "action": "More giant footprints have appeared; Sir Hopsalot gasps ‘A giant!’, the mouse squeaks ‘A monster!’, and Biscuit wails ‘A GIANT HAMSTER!’ from under a bench.",
+            "mood": "comic panic, never frightening"
+          }
+        },
+        {
+          "text": "But RiPika was brave. She looked carefully: the footprints were very close together. ‘Whoever it is walks VERY slowly,’ she said, ‘and nothing that slow can be scary. Let’s follow them!’",
+          "words": 31,
+          "picture": {
+            "setting": "Beside the trail. sky skyDayBottom, ground grassLight, decor sparkles.",
+            "models": [
+              "ripika: mood happy, pose armsUp (brave), in front",
+              "prop: giant footprints, a trail of prints set very close together, leading away behind her (primitive, as page 1)",
+              "kid: mood happy, pose wave, beside her"
+            ],
+            "action": "Brave RiPika has seen that the footprints are very close together, works out that anything so slow can’t be scary, and calls ‘Let’s follow them!’",
+            "mood": "brave and cheerful"
+          }
+        },
+        {
+          "text": "You and RiPika followed them through the smiling snake-mouth door of the Reptile House. There, in the Tortoise Garden, lay Grandpa Tock, fast asleep, with a yellow petal on his nose.",
+          "words": 31,
+          "picture": {
+            "setting": "The Tortoise Garden inside the Reptile House, leafy and warm under the greenhouse glass. sky skyDayBottom, ground grassLight, decor zzz.",
+            "models": [
+              "tortoise (NEW picture model: createTortoise(seed, 1), art/models/reptiles.ts) as Grandpa Tock: asleep, head low (needs head and face exposed on TortoiseHandle, so a mood blink can squash his face to scale.y about 0.2)",
+              "prop: a yellow petal on the end of his nose (primitive: a small flowerYellow disc)",
+              "prop: giant footprints, a trail leading up to him (primitive, as page 1)",
+              "kid: mood surprised, tiptoeing in from the left, turn 60",
+              "ripika: mood surprised, beside you"
+            ],
+            "action": "You and RiPika have followed the footprints into the Reptile House, where Grandpa Tock lies fast asleep in the Tortoise Garden with a yellow petal on his nose.",
+            "mood": "wonder and relief"
+          }
+        },
+        {
+          "text": "‘The giant is a tortoise!’ whispered RiPika. Grandpa Tock opened his eyes, very slowly. In fact, he woke up so slowly that it took him until lunchtime to say good morning.",
+          "words": 31,
+          "picture": {
+            "setting": "The Tortoise Garden at lunchtime, the sun high. sky skyDayBottom, ground grassLight, decor sun.",
+            "models": [
+              "tortoise: Grandpa Tock, eyes half open (face scale.y about 0.5), head lifting",
+              "ripika: mood surprised, pose wave, whispering behind her paw",
+              "kid: mood blink, pose sit, waiting patiently on the grass"
+            ],
+            "action": "RiPika whispers that the giant is a tortoise; Grandpa Tock wakes so slowly that the sun has climbed to lunchtime before he says good morning, and you sit and wait.",
+            "mood": "gentle comedy"
+          }
+        },
+        {
+          "text": "‘I’m a hundred and two,’ he said, ‘and I’ve never been on a ride. Every evening I set off for the Rail Race, but I’m so slow, the carts are asleep when I arrive.’",
+          "words": 34,
+          "picture": {
+            "setting": "The Tortoise Garden. sky skyDayBottom, ground grassLight.",
+            "models": [
+              "tortoise: Grandpa Tock, head low, eyes half closed (face scale.y about 0.6)",
+              "ripika: mood sad, pose sit, listening",
+              "kid: mood sad, pose sit, listening"
+            ],
+            "action": "Grandpa Tock tells you he is a hundred and two and has never been on a ride: every evening he sets off for the Rail Race, but he is so slow that the carts are asleep when he gets there.",
+            "mood": "tender, a little wistful"
+          }
+        },
+        {
+          "text": "RiPika had an idea. She called the cat bus! Grandpa Tock rode on its roof, all the way to the Rail Race. Everyone who had hidden from the giant came out to wave.",
+          "words": 33,
+          "picture": {
+            "setting": "A park path on a bright day. sky skyDayBottom, ground pathSand, decor notes, sparkles.",
+            "models": [
+              "catBus: turn 30",
+              "tortoise: Grandpa Tock on the cat bus’s roof, his head stretched up and out (his poke pose: poke() then one update(), head 0.18 m forward)",
+              "ripika: mood happy, pose wave, beside the bus",
+              "bunny: Sir Hopsalot, mood happy",
+              "mouse: mood happy",
+              "biscuit: mood happy, pose wave"
+            ],
+            "action": "RiPika has called the cat bus, and Grandpa Tock rides on its roof to the Rail Race; everyone who hid from the giant, Sir Hopsalot, the mouse and Biscuit, comes out to wave.",
+            "mood": "joyful parade"
+          }
+        },
+        {
+          "text": "In his race cart, Grandpa Tock didn’t need to duck. When a duck bar came, he just popped his head into his shell! At the finish he cried, ‘Again! But slower, please.’",
+          "words": 32,
+          "picture": {
+            "setting": "The Rail Race track. sky skyDayBottom, ground grassLight, decor speed, sparkles.",
+            "models": [
+              "cart: colour markerMint, size 0.4, the park scale a raceCart is drawn at, so its seat is at SEAT_HEIGHT 0.958 m",
+              "tortoise: Grandpa Tock, size about 0.7, sitting in the cart’s tub at the seat (y about 0.958), his head pulled right back inside his shell (the head-in pose: head moved behind its rest position, face hidden)",
+              "duckBar: just over the cart",
+              "prop: the Rail Race’s finish line, a rainbow arching over the track (primitive: six stacked half-torus bands in the park’s rainbow colours, as track.ts draws it), just ahead"
+            ],
+            "action": "Grandpa Tock rides a Rail Race cart; when a duck bar comes he doesn’t need to duck, he just pops his head into his shell, and the finish rainbow is just ahead, where he will cry ‘Again! But slower, please.’",
+            "mood": "triumphant and very funny"
+          }
+        }
+      ]
+    },
+    {
+      "id": "biscuitStorm",
+      "title": "Biscuit and the Storm",
+      "blurb": "When a scowling storm cloud rains on the Grand Fountain Picnic, Biscuit’s own tummy tells him why it is so cross, so he and RiPika brave the wind to feed it, and the greedy bear ends up sharing his picnic with a new friend called Nimbus.",
+      "adversary": "A huge grey storm cloud (a book-only stormCloud model) that scowls, rumbles and rains on the Grand Fountain Picnic, and whose wind blows the sandwiches away. It really is cross, and for a reason Biscuit knows better than anyone: when its rumble comes again and his own tummy rumbles back, he realises that it is not thunder at all but a hungry tummy. Won over by kindness and sharing rather than by a misunderstanding cleared up: Biscuit and RiPika march out into the storm for candy floss and carry it up the lift to the castle roof; the cloud gobbles it, burps a rainbow, blows every sandwich back and says its name is Nimbus; and the greedy bear who packed forty-two sandwiches as ‘a little snack’ gives it forty-one of them. Here the hero is the one who changes.",
+      "jokes": [
+        "p1: Biscuit’s ‘little snack’ is forty-two sandwiches, nine jam tarts and a cake",
+        "p3: everyone runs for cover except Biscuit, who chases his jam tarts and falls SPLASH into the fountain",
+        "p4: the owl librarian tells the thunder ‘SHHH!’ and it actually stops; Mrs Crumpet sleeps through the whole storm",
+        "p5: Biscuit’s tummy rumbles back at the cloud ‘as if to say hello’: ‘That’s not thunder. That’s a hungry TUMMY!’",
+        "p7: Biscuit’s umbrella blows inside out",
+        "p8: the cloud does an enormous BURP, and out pops a rainbow",
+        "p10: Nimbus gets forty-one sandwiches and Biscuit gets one, and the book ends: ‘And whose tummy rumbled all the way home?’"
+      ],
+      "pages": [
+        {
+          "text": "It was the day of the Grand Fountain Picnic. Biscuit had packed forty-two sandwiches, nine jam tarts and a cake. ‘Just a little snack,’ he told RiPika, licking his lips.",
+          "words": 30,
+          "picture": {
+            "setting": "The fountain plaza on a sunny morning, the picnic laid out. sky skyDayBottom, ground grassLight, decor sun.",
+            "models": [
+              "biscuit: mood happy, pose wave",
+              "ripika: mood surprised, turned about 30 degrees to stare up at the food",
+              "statue: size 0.45, behind them (the fountain)",
+              "prop: a red picnic blanket (primitive: a flat box)",
+              "prop: a teetering tower of sandwiches taller than Biscuit (primitive: cream triangular wedges)",
+              "prop: nine jam tarts (primitive: short golden cylinders with red tops)",
+              "prop: a cake (primitive: two stacked cylinders, pink icing)"
+            ],
+            "action": "Biscuit waves proudly beside an enormous heap of sandwiches, jam tarts and a cake on the picnic blanket, calling it a little snack, while RiPika gapes up at the pile.",
+            "mood": "sunny and cheerful"
+          }
+        },
+        {
+          "text": "But just as Biscuit unwrapped sandwich number one, an enormous grey cloud rolled across the sky. It scowled down at the picnic. RUMBLE, RUMBLE, RUMBLE! RiPika’s fur stood on end.",
+          "words": 30,
+          "picture": {
+            "setting": "The same picnic as the sky turns grey. sky stoneGreyLight, ground grassLight, decor clouds.",
+            "models": [
+              "stormCloud (NEW book-only model: a createStoryCloud factory in reader/readerAssets.ts beside createStoryDragon, made of squashed spheres plus createBakedFace, its colour a parameter): grey, mood frown, big and high above",
+              "biscuit: mood surprised, holding one half-unwrapped sandwich (primitive wedge)",
+              "ripika: mood surprised, pose armsUp (her fur on end)",
+              "prop: the picnic blanket and food pile (primitive, as page 1)"
+            ],
+            "action": "An enormous grey cloud scowls down at the picnic, rumbling; Biscuit freezes with sandwich number one in his paws, and RiPika’s fur stands on end.",
+            "mood": "uh-oh, a storm coming (gentle, never scary)"
+          }
+        },
+        {
+          "text": "Whoosh! The wind snatched the sandwiches. Splosh! The rain soaked the cake. Everyone ran for cover, except Biscuit, who chased his jam tarts and fell SPLASH into the fountain.",
+          "words": 29,
+          "picture": {
+            "setting": "The fountain in wind and rain. sky stoneGreyLight, ground waterTop, decor splash, speed, clouds.",
+            "models": [
+              "biscuit: mood surprised, pose armsUp, sitting in the fountain’s water",
+              "statue: size 0.45, behind him",
+              "ripika: turned 90 degrees, dashing off at the picture’s edge for cover",
+              "prop: sandwiches and jam tarts whirling through the air above Biscuit (primitive)",
+              "prop: a soggy cake at the water’s edge (primitive)",
+              "prop: raindrops (primitive: thin pale-blue capsules)"
+            ],
+            "action": "The wind whirls the sandwiches away and the rain soaks the cake; RiPika runs for cover, and Biscuit, grabbing at his flying jam tarts, has landed with a splash in the fountain.",
+            "mood": "blustery slapstick"
+          }
+        },
+        {
+          "text": "Soggy and squelchy, Biscuit and RiPika hurried into the library. Outside, the cloud went RUMBLE! ‘SHHH!’ said the owl librarian sternly, and the rumbling stopped at once. Mrs Crumpet never even woke up.",
+          "words": 33,
+          "picture": {
+            "setting": "Inside the library, warm and dim. sky buildingFloor, ground woodLight, night, decor zzz.",
+            "models": [
+              "owl (NEW picture model: createLibraryOwl, art/models/libraryCreatures.ts): the owl librarian, mood surprised, which is her shush face",
+              "biscuit: mood blink, dripping",
+              "ripika: mood surprised",
+              "prop: drips and a small puddle under Biscuit (primitive: pale-blue discs)",
+              "book (x3): Mrs Crumpet’s pile, drawn exactly as in The Loudest Shush (markerMint, markerLilac, markerPink, each about size 3)",
+              "kitten: Mrs Crumpet, mood blink, asleep on top of her pile"
+            ],
+            "action": "Soggy Biscuit and RiPika drip on the library floor; the owl librarian gives the thunder a stern SHHH and it goes quiet at once, and Mrs Crumpet sleeps on.",
+            "mood": "cosy and funny"
+          }
+        },
+        {
+          "text": "Soon the rumbling started again, soft and sad. Biscuit’s tummy rumbled back, as if to say hello. ‘That’s not thunder,’ Biscuit gasped. ‘That’s a hungry TUMMY! No wonder that cloud is cross.’",
+          "words": 32,
+          "picture": {
+            "setting": "By the library window, the storm outside. sky stoneGreyLight (the storm through the window), ground woodLight, night (the library’s dim light, as pages 4 and 6), decor sparkles.",
+            "models": [
+              "biscuit: mood surprised, pose armsUp (he has just worked it out)",
+              "ripika: mood happy",
+              "stormCloud: grey, mood sad, smaller and droopy, behind them through the window",
+              "prop: a window frame between them and the cloud (primitive: a flat rounded-rectangle frame)"
+            ],
+            "action": "When the cloud’s soft, sad rumble comes again, Biscuit’s tummy rumbles back, and he throws up his paws: that is not thunder, it is a hungry tummy, and no wonder the cloud is cross.",
+            "mood": "a bright idea"
+          }
+        },
+        {
+          "text": "But what do clouds eat? The owl found a book all about clouds and read: ‘Clouds love anything fluffy.’ RiPika squeaked with joy. Candy floss was the fluffiest food in the park!",
+          "words": 32,
+          "picture": {
+            "setting": "The library. sky buildingFloor, ground woodLight, night, decor sparkles.",
+            "models": [
+              "owl: the owl librarian, mood happy, reading aloud from the red book she carries under her wing",
+              "book: colour markerSky, beside her, as the cloud book, if her own held book does not read as one",
+              "ripika: mood happy, pose armsUp (squeaking with joy)",
+              "biscuit: mood happy"
+            ],
+            "action": "The owl reads from her book about clouds that clouds love anything fluffy; RiPika jumps for joy at the thought of candy floss while Biscuit listens.",
+            "mood": "a bright idea"
+          }
+        },
+        {
+          "text": "The library was cosy, but the picnic needed saving. Out into the storm they marched! Biscuit’s umbrella blew inside out, but on they went, and soon they had three candy flosses: pink, blue and rainbow.",
+          "words": 35,
+          "picture": {
+            "setting": "A wet, windy park path. sky stoneGreyLight, ground pathSand, decor speed, splash, clouds.",
+            "models": [
+              "biscuit: mood frown (read as determined), turned about 40 degrees, holding an inside-out umbrella (primitive: a cone, open side up, on a thin stick)",
+              "ripika: mood happy, pose armsUp, holding up three candy flosses",
+              "candyFloss (NEW picture model: createCandyFloss, art/models/shopItems.ts): variant pink",
+              "candyFloss: variant blue",
+              "candyFloss: variant rainbow",
+              "prop: raindrops (primitive: thin pale-blue capsules)"
+            ],
+            "action": "Biscuit and RiPika march on through the wind and rain; Biscuit’s umbrella has blown inside out, and RiPika holds up three candy flosses: pink, blue and rainbow.",
+            "mood": "brave and blustery"
+          }
+        },
+        {
+          "text": "Up they went in the lift, to the castle roof. Biscuit held up the candy floss, and the cloud gobbled the lot. Then it did an enormous BURP… and out popped a rainbow!",
+          "words": 33,
+          "picture": {
+            "setting": "The castle’s roof garden, high up in the storm. sky stoneGreyLight, ground grassLight, decor clouds, sparkles.",
+            "models": [
+              "stormCloud: grey, mood surprised (its ‘oh’ mouth is the burp), low over the roof",
+              "prop: the castle battlement along the back (primitive: a row of merlon boxes in buildingWall)",
+              "prop: a rainbow arch bursting from the cloud’s mouth (primitive: six stacked half-torus bands in the park’s rainbow colours)",
+              "biscuit: mood surprised, pose armsUp, holding three empty candy-floss sticks (primitive: thin cylinders)",
+              "ripika: mood surprised"
+            ],
+            "action": "On the castle roof the cloud has gobbled all the candy floss and burps out a rainbow; Biscuit, holding the empty sticks up high, and RiPika stare up in amazement.",
+            "mood": "triumphant and silly"
+          }
+        },
+        {
+          "text": "The rain stopped. The sun came out. The cloud smiled, then puffed very gently and blew every single sandwich back onto the picnic blanket. ‘Thank you,’ it whispered. ‘My name is Nimbus.’",
+          "words": 32,
+          "picture": {
+            "setting": "Back at the picnic, in sunshine again. sky skyDayBottom, ground grassLight, decor sun, sparkles.",
+            "models": [
+              "stormCloud: now Nimbus, the same model in cloud white, mood happy, puffing gently",
+              "prop: a line of sandwiches drifting back down onto the blanket (primitive)",
+              "prop: the picnic blanket (primitive)",
+              "biscuit: mood happy, pose armsUp",
+              "ripika: mood happy"
+            ],
+            "action": "The rain has stopped and the sun is out; the smiling, white cloud puffs every sandwich back onto the picnic blanket and whispers its thanks and its name, Nimbus, while Biscuit and RiPika cheer.",
+            "mood": "relieved and warm"
+          }
+        },
+        {
+          "text": "So Nimbus joined the Grand Fountain Picnic, and kept everyone cool in its shade. Biscuit even shared his sandwiches. Nimbus had forty-one. Biscuit had one. And whose tummy rumbled all the way home?",
+          "words": 33,
+          "picture": {
+            "setting": "The Grand Fountain Picnic in the afternoon sun. sky skyDayBottom, ground grassLight, decor hearts, sun.",
+            "models": [
+              "stormCloud: Nimbus, cloud white, mood happy, hovering low as a sunshade",
+              "prop: a mountain of forty-one sandwiches in front of Nimbus (primitive)",
+              "biscuit: mood happy, pose sit, holding one sandwich (primitive)",
+              "ripika: mood happy, pose sit",
+              "bunny: Sir Hopsalot, mood happy",
+              "mouse: mood happy",
+              "statue: size 0.45, behind (the fountain)",
+              "prop: the picnic blanket (primitive)"
+            ],
+            "action": "Everyone picnics in Nimbus’s cool shade; Nimbus has a mountain of forty-one sandwiches, and Biscuit, smiling, has just one.",
+            "mood": "warm, generous, funny"
+          }
+        }
+      ]
+    },
+    {
+      "id": "catchThatChicken",
+      "title": "Catch That Chicken!",
+      "blurb": "An hour before the Space Ferris Wheel climbs to space, Chicken-looter pinches its golden star, and you and Trilla chase him across the evening sky by jet pack, then win the star back with a better offer.",
+      "adversary": "Chicken-looter, the cheeky white-and-red chicken balloon (balloon, variant chicken) who loves shiny things, pinches the Space Ferris Wheel’s golden star an hour before its eight o’clock climb. A real trickster, and still a cheeky one at the end. He is outwitted twice, kindly: Trilla spots his feathery bottom poking out of the cloud he hides in; and when, sitting on the star in his nest of pinched treasures, he admits that shiny things are his night-lights because he is scared of the dark, you offer him a better deal: ‘The dark isn’t scary. It’s where the stars live. Give back one star, and you can see millions!’ He hands back the star and the disco ball (never the biscuit), you click the star in a minute before eight, and he rides to space, not scared one bit and so happy that he lays a surprise egg.",
+      "jokes": [
+        "p2: Trilla sings everything, even bad news",
+        "p3: Chicken-looter’s battle cry: ‘Shiny, shiny, MINE!’",
+        "p5: he hides in a cloud, but his feathery bottom is poking out",
+        "p6: his nest of shiny things holds spoons, keyrings, the hotel’s disco ball and, ‘for some reason, a biscuit’",
+        "p7: scared or not, he sits on the star, just in case, like a hen on an egg",
+        "p8: he gives back the star. And the disco ball. But not the biscuit.",
+        "p10: he is so happy that he lays an egg. ‘A surprise egg, of course!’"
+      ],
+      "pages": [
+        {
+          "text": "At eight o’clock every night, the Space Ferris Wheel lit its golden star and climbed all the way to space. But tonight, at seven, you and Trilla looked up and gasped. The star was gone!",
+          "words": 35,
+          "picture": {
+            "setting": "The foot of the Space Ferris Wheel at sunset. sky skySunsetBottom, ground grassLight, decor sun.",
+            "models": [
+              "prop: the Space Ferris Wheel as a primitive stand-in (a torus rim, cylinder spokes, a few box cars), not createFerrisWheelProp, which is a world ride that wants an anchor and a collision world",
+              "prop: a star-shaped bracket at the wheel’s hub, plainly empty (primitive)",
+              "kid: mood surprised, turned to look up at the hub",
+              "trilla: mood surprised"
+            ],
+            "action": "At seven o’clock, an hour before the climb, you and Trilla gasp up at the hub of the wheel, where the golden star should be and is not.",
+            "mood": "uh-oh"
+          }
+        },
+        {
+          "text": "On the grass lay one red feather and one white one. ‘Chicken-looter!’ sang Trilla, who sang everything, even bad news. That cheeky balloon loved shiny things, and the star was the shiniest of all.",
+          "words": 34,
+          "picture": {
+            "setting": "The grass beside the wheel as the sun goes down. sky skySunsetBottom, ground grassLight, decor notes.",
+            "models": [
+              "kid: mood surprised, looking down at the feathers",
+              "trilla: mood surprised, singing",
+              "prop: one red feather and one white feather lying on the grass (primitive: flattened, tapered spheres)"
+            ],
+            "action": "You find a red feather and a white one on the grass while Trilla sings out the culprit’s name: Chicken-looter!",
+            "mood": "detective work, a little worried"
+          }
+        },
+        {
+          "text": "Then you spotted him, bobbing above the trees with the golden star tucked under his wing. ‘Shiny, shiny, MINE!’ clucked Chicken-looter. And off he floated, giggling, towards the setting sun.",
+          "words": 30,
+          "picture": {
+            "setting": "Above the trees at sunset. sky skySunsetBottom, ground grassLight, decor sun.",
+            "models": [
+              "balloon: variant chicken, as Chicken-looter, mood happy (giggling), high up and drifting right",
+              "star: colour flowerYellow, the golden star, tucked against his side",
+              "lollipopTree (NEW picture model: createLollipopTree, art/models/props.ts): two of them, below him",
+              "kid: mood surprised, pose wave (pointing up)",
+              "trilla: mood surprised"
+            ],
+            "action": "Chicken-looter floats off giggling over the treetops towards the setting sun, the golden star tucked under his wing, while you point and Trilla stares.",
+            "mood": "the chase is on"
+          }
+        },
+        {
+          "text": "There was only one way to catch a flying chicken. You took a deep breath and switched on your jet pack. Trilla’s popped out too. WHOOSH! Up you zoomed into the evening sky.",
+          "words": 33,
+          "picture": {
+            "setting": "Rising into the evening sky. sky skySunsetBottom, no ground, decor speed, clouds.",
+            "models": [
+              "kid: mood happy, pose armsUp, wearing her jet pack",
+              "jetpack (NEW picture model: createJetpack(), art/models/jetpack.ts): mounted on the kid’s jetpackAnchor the way entities/WornJetpack.ts does it, setThrust(1)",
+              "trilla: mood happy, wearing a little jet pack of her own",
+              "jetpack: createJetpack(0.6) on Trilla’s back, setThrust(1)"
+            ],
+            "action": "You and Trilla blast off upwards on whooshing jet packs into the evening sky.",
+            "mood": "brave and exhilarating"
+          }
+        },
+        {
+          "text": "Round the big wheel and over the hotel you chased him. Chicken-looter dived into a fluffy cloud to hide. But Trilla spotted something. His feathery bottom was poking out!",
+          "words": 29,
+          "picture": {
+            "setting": "High in the dusk sky. sky skySunsetBottom, no ground, decor clouds.",
+            "models": [
+              "prop: a big fluffy white cloud with no face, so nobody takes it for Nimbus (primitive: white squashed spheres)",
+              "balloon: variant chicken, as Chicken-looter, turned away and half inside the cloud, his feathery tail end sticking out",
+              "trilla: mood happy, with her small jet pack (jetpack, size 0.6, setThrust(1)), nearest the cloud: she has spotted him",
+              "kid: mood happy, pose wave (pointing), with her jet pack (jetpack, setThrust(1))"
+            ],
+            "action": "Chicken-looter has dived into a fluffy cloud to hide, but his feathery bottom is poking out, and Trilla has spotted it.",
+            "mood": "funny and sneaky"
+          }
+        },
+        {
+          "text": "You followed him down to the roof of the Land Hotel, and there was his nest. It was full of shiny things: spoons, keyrings, the hotel’s disco ball and, for some reason, a biscuit.",
+          "words": 34,
+          "picture": {
+            "setting": "The crystal roof of the Land Hotel, up among the clouds, at dusk. sky skySunsetBottom, ground glassTint, decor clouds, sparkles.",
+            "models": [
+              "prop: a big twiggy nest (primitive: a brown torus with a few thin stick cylinders)",
+              "prop: three spoons (primitive: small silver ellipsoids on thin handles)",
+              "keychain: variant star, size 4",
+              "keychain: variant heart, size 4",
+              "keychain: variant strawberry, size 4",
+              "discoBall (NEW picture model: createDiscoBall, art/models/hotelAssets.ts; it hangs from its origin, so lift it by its own height to sit it in the nest)",
+              "prop: a biscuit to eat, not Biscuit the bear (primitive: a flat golden-brown cylinder)",
+              "kid: mood surprised, just landed, jet pack on (jetpack, thrust off)",
+              "trilla: mood surprised, with her jet pack (jetpack, size 0.6, thrust off)"
+            ],
+            "action": "You and Trilla land on the hotel roof beside Chicken-looter’s nest, which is heaped with spoons, keyrings, the hotel’s disco ball and, for some reason, a biscuit.",
+            "mood": "treasure found, with a puzzled giggle"
+          }
+        },
+        {
+          "text": "In the middle was Chicken-looter, hugging the star. ‘Please don’t take it,’ he whispered. ‘I’m scared of the dark. Shiny things are my night-lights.’ Then he sat on the star, just in case.",
+          "words": 33,
+          "picture": {
+            "setting": "The hotel roof as night falls. sky skyNightBottom, ground glassTint, night, decor moon, stars.",
+            "models": [
+              "prop: the twiggy nest (primitive, as page 6)",
+              "balloon: variant chicken, as Chicken-looter, mood sad, settled low in the middle of the nest like a hen on an egg",
+              "star: colour flowerYellow, the golden star, peeking out from under him",
+              "kid: mood sad (listening kindly)",
+              "trilla: mood sad"
+            ],
+            "action": "In the middle of his nest Chicken-looter whispers that he is scared of the dark and that shiny things are his night-lights, and he sits on the golden star, just in case, while you and Trilla listen.",
+            "mood": "quiet and tender, with a giggle"
+          }
+        },
+        {
+          "text": "‘The dark isn’t scary,’ you said. ‘It’s where the stars live. Give back one star, and you can see millions!’ So he gave back the star. And the disco ball. But not the biscuit.",
+          "words": 34,
+          "picture": {
+            "setting": "The hotel roof under the starry night. sky skyNightBottom, ground glassTint, night, decor stars, moon, sparkles.",
+            "models": [
+              "kid: mood happy, holding the golden star",
+              "star: colour flowerYellow, in her hands",
+              "discoBall: at her feet",
+              "trilla: mood happy",
+              "balloon: variant chicken, as Chicken-looter, mood happy, hugging the biscuit tight (primitive, as page 6)",
+              "prop: the nest behind them (primitive)"
+            ],
+            "action": "Offered a whole sky of stars for one, Chicken-looter has given back the golden star and the disco ball, but he is keeping a firm hold of his biscuit.",
+            "mood": "warm and funny"
+          }
+        },
+        {
+          "text": "It was one minute to eight! You zoomed back and clicked the star into place. Just in time! The lights blazed, everyone jumped aboard, and the great wheel began to climb.",
+          "words": 31,
+          "picture": {
+            "setting": "The Space Ferris Wheel at night. sky skyNightBottom, ground grassDark, night, decor sparkles, stars.",
+            "models": [
+              "prop: the primitive wheel stand-in (as page 1), its lights blazing: a ring of small glowing flowerYellow spheres round the rim",
+              "star: colour flowerYellow, size 2.2, back in its bracket at the hub",
+              "kid: mood happy, pose armsUp, beside the hub, wearing her jet pack (jetpack)",
+              "trilla: mood happy",
+              "balloon: variant chicken, as Chicken-looter, mood happy"
+            ],
+            "action": "With a minute to spare you have clicked the golden star back into the hub, and the wheel’s lights blaze, ready to climb.",
+            "mood": "just in time, triumphant"
+          }
+        },
+        {
+          "text": "Up and up, all the way to space, where millions of stars twinkled and an alien waved. Chicken-looter wasn’t scared one bit. He was so happy, he laid an egg. A surprise egg, of course!",
+          "words": 35,
+          "picture": {
+            "setting": "Space, at the very top of the wheel. sky skyNightBottom, night, no ground, decor stars, moon, sparkles.",
+            "models": [
+              "kid: mood happy, pose wave",
+              "trilla: mood happy",
+              "balloon: variant chicken, as Chicken-looter, mood happy, beaming",
+              "surpriseEgg (NEW picture model: createSurpriseEgg(shell, spots), art/models/shopItems.ts; for example a blossomPink shell with markerSky spots): just below him",
+              "alienSaucer (NEW picture model: createAlienSaucer, minigames/ferrisWheel/friends.ts; call setPresence(1) or it stays at its pop-in scale of 0.001): small and far back, its alien waving"
+            ],
+            "action": "Up among millions of stars the alien waves from its saucer, and Chicken-looter, not scared one bit, is so happy that he has just laid a surprise egg.",
+            "mood": "joyful and magical, happy enough for bedtime"
+          }
+        }
+      ]
+    }
+  ],
+  "notes": "EDITOR’S NOTES, 16 Oct 2026. Every edit the judge asked for is made and every page is recounted; what follows is what changed, why, and what the shelf still needs.\n\nSHELF ORDER (kept as the judge set it): 1 Duck, Sir Hopsalot! 2 Detective Biscuit 3 The Loudest Shush 4 The Giant Footprints 5 Biscuit and the Storm 6 Catch That Chicken! I tried every other order of the middle four against the shelf’s hard rules. The rules: Hopsalot first, as the step up from Duck, Duck, Duck! and so that Sir Hopsalot is met before his cameos; Shush before Storm, so Mrs Crumpet is introduced before she sleeps through the storm; the two footprint mysteries apart; the two Biscuit books apart; the bedtime book last. Only this order passes all of them. Its one cost is that Detective p5’s one-line shush joke stands next to The Loudest Shush. I kept it, because ‘I can’t shush a tummy!’ is a different joke from a whole book of shushing.\n\nHOW THE SIX NOW RESOLVE (the judge’s note that every adversary turned out to be misunderstood). Only one is purely misunderstood now; each of the other five ends a different way.\n1 Sir Hopsalot: a rival beaten fair and square and won over. He really was rude, and on p10 (new) he says sorry for pushing in and queues at the back.\n2 The mini: misunderstood. This is the classic mystery twist, with Biscuit’s trap kept and turned back on the detective.\n3 Mrs Crumpet: outwitted kindly. Her sad confession on p8 is cut. Trilla spots the yawn (p7) and finds a loophole, ‘I’m not singing, I’m lullabying’ (p8). Every shush then turns into a yawn (p9), and the shusher gets shushed (p10). Nothing about her turns out secretly sweet.\n4 The giant: no villain at all, only a rumour, beaten by courage and deduction and ended with a kindness: Grandpa Tock’s first ride.\n5 The storm: a cloud that really is cross, because it is hungry. ‘That’s not thunder. That’s a hungry TUMMY! No wonder that cloud is cross’ replaces ‘That cloud isn’t cross’. It is won over by a gift and by sharing, and here it is the hero who changes: forty-one sandwiches to one.\n6 Chicken-looter: a trickster outwitted twice, kindly. Trilla spots the feathery bottom (kept). Then comes a clever trade, ‘Give back one star, and you can see millions!’ (p8), which keeps the bedtime line. ‘Suddenly he didn’t seem cheeky at all’ is replaced by ‘Then he sat on the star, just in case’ (p7). He stays cheeky, keeps the biscuit, and the sitting sets up the egg.\n\nTHE JUDGE’S EDITS, AS MADE.\n- Hopsalot: the optional p1 line, ‘He even told the trees.’ Every cart a pet rides is at size 0.4, with the rider at SEAT_HEIGHT 0.958. Ducking riders are sunk into the tub. The p4 and p5 bars are brought down until they meet his ear tips. The biggest bar is left unscaled and set nearer the camera. On p8 he is sunk low, ear tips just under the bar.\n- Detective: the things are genuinely lost (p1 is the judge’s wording). It says keyring and ice cream parlour. The ‘MINI ATTACK!’ shout is the mini’s own (p9). The specs name createMini, a grab amount on the actor, createPinkWall({ length: 2 }), and a no-keyring kid on p1.\n- Shush: ‘Out of Trilla popped a song, all by itself’ (p4). ‘Round, then rounder, then the roundest puff there is’, drawn at size 1.3 (p6). A mouse dropped his book (p5). The kitten is Mrs Crumpet on every page.\n- Footprints: the mouse replaces the kitten on p4 and p9. Sir Hopsalot’s cameo is explicit on p4, with the verbs swapped so that it is the mouse who squeaks. p9 is split into two sentences. The tortoise needs its head and face exposed, a blink mood and a head-in pose. On p10 the cart is at size 0.4 and Tock at about 0.7.\n- Storm: the cloud is a book-only stormCloud model. The owl is createLibraryOwl, with mood surprised for her shush face. Mrs Crumpet is drawn exactly as in Shush and named on p4. There is no kitten at the picnic. The floss is createCandyFloss pink, blue and rainbow.\n- Catch: the wheel is a primitive stand-in, not createFerrisWheelProp. Jet packs are mounted the way WornJetpack.ts does it, with createJetpack(0.6) for Trilla. The alien saucer gets setPresence(1) and stands small and far back. No gondola.\n\nMY OTHER CHANGES, WITH REASONS.\n- Detective p2: Biscuit puts his bowl down by the pink wall and forgets it, where the judge had it left on a wall. The 0.72 m mini could not reach the top of the 1.3 m wall, and its whole defence is that nobody looks down. The change also plants the pink wall as a fair clue before the mini comes out from behind it.\n- Footprints: p1’s 23-word sentence is split. On p5, ‘looked closely: … very close together’ becomes ‘looked carefully’.\n- Hopsalot pictures: the finish line is the Rail Race’s real six-band rainbow arch (track.ts), not a chequered banner.\n- Storm p8: the castle roof is drawn as its real roof garden with a battlement in buildingWall. The Storm library pages share one dim lighting.\n- Pets (bunny, kitten, mouse and Trilla) are built with limbs: null, so no page asks them for a pose. Poses are only on the kid, RiPika, Biscuit and the mini.\n- The house face has no yawn and no burp. Mrs Crumpet’s yawn and Nimbus’s burp both use surprised (wide eyes and an ‘oh’ mouth), and the specs say so.\n\nHOUSE STYLE: dialogue in curly singles, curly doubles inside them (Detective p9), curly apostrophes and the single ellipsis character. A script checked that the file has no straight quote anywhere. British names: keyring, ice cream parlour, candy floss, queue, grey, cosy.\n\nCOUNTS: a word is a whitespace-separated token containing a letter or a digit, so a hyphenated word counts once. All 60 pages are 28 to 35 words (mean 32.2), and all six books have 10 pages. The longest sentence on the shelf is 20 words; the sentence splitter was first proved against a planted 25-word control. Titles run 17 to 21 characters. Ids are camelCase and unique, and none is one of the twelve picture books’ ids.\n\nCANON FOR THE SHELF:\n- Sir Hopsalot is the bunny model, a he. He has cameos in Shush p2, Footprints p4 and p9, and Storm p10.\n- Mrs Crumpet is the kitten on her pile of books, and the kitten model is used for nothing else.\n- Nimbus is the storm cloud.\n- The owl is a she, and her only faces are neutral, blink, happy and shush.\n- Chicken-looter appears only in Catch, and the mini only in Detective.\n\nSTILL TO BUILD (the judge’s list, not done here):\n- A chapter-book tier in check:brevity and check:book-reader (8 to 10 pages, 24 to 36 words a page), with Jim’s 14 October exception written into the BREVITY RULE.\n- A reader page layout for about 30 words at the TEXT RULE minimum.\n- Six more readable shelf slots, and a decision on whether the prize stays at all twelve or becomes all eighteen.\n- New picture models from existing factories, each with a pictureWarmSteps entry: mini, pinkWall, tortoise, owl, candyFloss, jetpack, discoBall, lollipopTree, surpriseEgg and alienSaucer, plus the book-only stormCloud.\n- Picture-schema fields: a no-keyring kid, a mini grab amount, a tortoise blink and head-in pose, and a worn jet pack.\n- Story licence to know about: the wheel’s golden star and its eight o’clock climb are invented, so a child may go looking for the star.\n\nNothing in the repository was edited; this JSON is the only file written."
+}
