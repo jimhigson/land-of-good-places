@@ -11,8 +11,8 @@ Scratch logs: `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/kid
 
 ## Status
 - [x] **Step 7 — sitting on the story cushions (the player)**: built, checked, every red proved
-      (commits 3d11ff8e, ca741597, 14a0d7a5; this file). Final hydrated run at the head's own park
-      hash: see "Checks at the head".
+      (commits 3d11ff8e, ca741597, 14a0d7a5, 8f684052, 64c00495; this file). Final run at the head's
+      own park (seed 5 built for source e599dd8f…): every check exit 0 — see "Checks at the head".
 - [ ] Step 8 — the library's three children (the next task on this track)
 
 ## Step 7 — what was built
@@ -70,9 +70,10 @@ go a stopping distance short (`PLAYER_MAX_SPEED² / 2·PLAYER_DECELERATION`, 0.8
    cushion's centre, root 0.000 mm off the floor; facing the story chair (2.592 rad, 0 rad round).
 5. Over the 120 frames (worst kept, NaN-safe): lowest drawn point and each sole within
    `FLOOR_TOLERANCE`; hip within `SEAT_TOLERANCE`.
-6. No Read chip while she sits — **self-arming**: once `library.book.*` meshes are drawn (track A's
-   Step 5) it asserts standing count == drawn count and seated count == 0; until then a stderr note
-   says it asserts nothing, on every run.
+6. No Read chip while she sits — **self-arming**: armed by either sign the shelves are readable
+   (track A's `library.book.*` meshes drawn, or any `library-book:` zone offered while she stands);
+   armed, it asserts some chip while standing, none while seated, and one per drawn book when books
+   are drawn. Unarmed (this branch), a stderr note says it asserts nothing, on every run.
 7. Seated: her zone offers 'Get up' alone and stays `selectableWhileRiding`; the other cushion offers
    nothing; `playerIsSeated`.
 8. 'Get up': not riding at once, a player-sized body clear where she stands; she walks off ≥ 1 m in
@@ -104,7 +105,13 @@ go a stopping distance short (`PLAYER_MAX_SPEED² / 2·PLAYER_DECELERATION`, 0.8
    lifted leg (the groundwork's note), so the plan's literal red ("set a leg to −0.7") came out green.
    Now one leg is red on `soles` (44.5 mm) while `floor` still reads 3.5 mm; both legs are red on both.
 8. **SIT samples 2 s and keeps the worst**: the pose sways, so one frame could pass by luck of phase.
-9. **Iteration runs hydrate the foundation's seed-5 file with `LGP_PARK_FILE`** (the resolver hook's
+9. **The stick does not stand her up** (the plan's Decision 39, the nap rule; the hotel breakfast chair
+   and the castle banquet do the same). The tortoise ride's 2 Oct ruling ("jumping or trying to walk
+   anywhere should jump off") is the other precedent, but a cushion is sat on through a whole story,
+   and a six-year-old fidgeting with the stick would be popped up and lose the Story listener card
+   (Step 9); the chip, a tap and a jump are deliberate. Lever if QA finds her pushing the stick and
+   stuck: one line in `updateSeated`, `|| context.input.moveAmount > 0.22` (the tortoise's threshold).
+10. **Iteration runs hydrate the foundation's seed-5 file with `LGP_PARK_FILE`** (the resolver hook's
    own switch: build that file's park whatever the source hash). Every closure edit makes a new hash,
    and a hash miss would start an acceptance loop; the reading room is seed-independent. The final
    runs hydrate seed 5 built for the head's own hash (below), which also proves the edits did not move
@@ -127,6 +134,22 @@ go a stopping distance short (`PLAYER_MAX_SPEED² / 2·PLAYER_DECELERATION`, 0.8
 | check:flat-primitives | 0 | no new flat primitives, no stale baseline entries |
 | check:cycle-tdz | 0 | the same 5 sites as the baseline |
 | scripts instrument (`kids-step7/tsconfig.scripts.json`, the foundation's pointed at this worktree) | 2, as expected | 56 errors, **the same 56 messages** as the foundation's `tsc-scripts.log` (diff empty). CONTROL: a deliberate `const sitControlBroken: number = seatedErrors;` in check-library → 58 errors, TS2322 naming `SeatedBody`/`SeatedErrors`; reverted |
+
+## Checks at the head (64c00495, park source e599dd8f…; seed 5 built for it, hydrated through its own manifest, no `LGP_PARK_FILE`)
+`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` at e599dd8f…: exit 0 in 578 s — restart 0
+rejected by check:coplanar (260 s), **restart 1 accepted as shipped (134 measures), digest
+9acd3a626f55d35c**, the foundation's digest: these edits did not move the park (its control: a
+perturbed seed 5 digests d0c1c494079015f4, differs). Logs in `kids-step7/final/`, each exit code the
+command's own:
+
+| check | exit | off the screen |
+|---|---|---|
+| `pnpm exec tsc --noEmit` | 0 | no diagnostics |
+| `pnpm run typecheck:test` | 0 | no diagnostics |
+| check:library | 0 | **73 ✓, 0 ✗**, "All clauses passed."; seed 5 (restart 1) hydrated; keep-outs 69 of 69; 8785 clear cells, no pocket; SIT worst lowest point 3.5 mm, worst sole 3.5 mm, worst hip 0.0 mm over 120 frames; the Read-chip half's "asserts nothing" note on stderr |
+| check:tap-spacing | 0 | 10 spaces, 133 zones, 27 portal bands; 233 zone-band and 20 close zone-zone pairs; 20 same-action overlaps; OK |
+| check:castle | 0 | props 1671, plate 1662 on 3 floors; banquet 117 seated, worst hip 0.0 mm, worst floor 4.7 mm |
+| `pnpm run build` | 0 | 480 modules, built in 442 ms |
 
 ## Red transcripts (each with the geometry it was proved against)
 Geometry for all: seed 5 restart 1 (digest 9acd3a626f55d35c), hydrated with `LGP_PARK_FILE`; cushion-1
@@ -159,6 +182,17 @@ saved copy), `git status` clean after.
   - seated facing +90°: 72 ✓ 1 ✗ —
     `✗ facing the storyteller's chair: 4.163 rad, the chair's bearing 2.592 (1.5708 rad round)`
 
+- **The constructor's cushion assertion**, the cushion's measured top lowered by 0.14 m to the 0.22 m
+  the plan names (the building branch's old primitive) in `assertCushionsAreSeats`: the World build
+  throws, exit 1 —
+  `Error: Library: the story cushion's top is 0.220 m, but a seat must be KID_HIP_HEIGHT (0.36 m) to within 0.02 m, or a listener's hips sit 140 mm above it: cut library.glb's cushion-body (or createLibraryCushion) to KID_HIP_HEIGHT`
+- **The Read-chip half, armed by a scratch monkeypatch** of `library.interactZones` placed just
+  before SIT (never committed; the real child, cushion-1, as above): a fake `library-book:fake` chip
+  offered seated or not → exit 1,
+  `✗ no Read chip while she sits: 1 offered (CONTROL: standing, 1 were, for 0 readable books drawn as 'library.book.*')`;
+  the same chip offered only while she is not riding (Step 5's rule) → exit 0, 74 ✓,
+  `✓ no Read chip while she sits: 0 offered (CONTROL: standing, 1 were, ...)`.
+
 ## Visual QA needed (no browser was owned on this track)
 - `/library?at=2.1,-8&facing=150` stands her on cushion 1: press **Sit down** (🧘). Her legs hang
   straight down inside the 0.45 m pouf (root on the floor, hips on its top), so she reads as sitting on
@@ -169,9 +203,10 @@ saved copy), `git status` clean after.
 ## For the join
 1. **`Library.interactZones()`** inside returns `this.sitZones()` only; track A adds the owl's Talk and
    the Read zones (Step 5: only while not riding), track C adds Pull, Pet and Say hi. One list.
-2. **SIT's Read-chip half arms itself** when Step 5's `library.book.*` meshes exist. After merging A,
-   confirm SIT prints `no Read chip while she sits: 0 offered (CONTROL: standing, N were — one for each
-   of the N readable books drawn)` with N = `BOOKS.length`, and not the stderr "asserts nothing" note.
+2. **SIT's Read-chip half arms itself** when Step 5's `library.book.*` meshes or `library-book:` zones
+   exist. After merging A, confirm SIT prints `✓ no Read chip while she sits: 0 offered (CONTROL:
+   standing, N were, for N readable books drawn as 'library.book.*')` with N = `BOOKS.length`, and
+   not the stderr "asserts nothing" note.
 3. **`Library.update` order** (the Seams table: story → owl → glow → seated jump): `updateSeated` sits
    right after `if (!player) return;`. Order-independent for the shush (a stand-up is airborne at
    vertical speed 0, never a jump, and the shush ignores a riding child), but place it per the table.
@@ -189,3 +224,16 @@ saved copy), `git status` clean after.
   `check:castle` measures the 117 NPC diners, whom `NpcCharacter.animate` already pins, never the
   player. The fix is the same two lines in `applyDiningPose`, plus a measure of the player at a free
   place.
+
+## Taking over at zero notice
+`cd .claude/worktrees/library-714-kids` (or `git worktree add <path> feat/library-714-kids`), then
+`pnpm install --frozen-lockfile`; check `pnpm exec node -e "console.log(process.env.npm_config_user_agent)"`
+says pnpm/12.1.0. `.parks/` holds seed 5 built for source e599dd8f… (Step 7's head); any closure edit
+(almost every `src/` file) makes a new hash, so a World-building check would start an acceptance loop.
+While iterating, run checks as `LGP_PARK_FILE=$PWD/.parks/5.json pnpm run check:library` (the
+reading room is seed-independent and the file is restart 1, digest 9acd3a626f55d35c); for a final
+run, `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` (≈10 min; edit nothing in `src/` while it
+runs) and run without the switch. A copy of the foundation's seed-5 file is in
+`.claude/library-build-scratch/kids-step7/foundation-5.json`. Scratch instruments: the mutation
+runner and snippets in the session scratchpad are not needed to resume; every red is reproducible
+from the description above.
