@@ -22,8 +22,14 @@ instruments (not committed): the session scratchpad's `den/digest-world.mts` and
 - [x] Parks at this branch's hash **a04bfcb4…** (`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run
       build:parks`, exit 0, 512 s): restart 0 rejected by check:coplanar (243 s) — as at the
       foundation — and **restart 1 accepted as shipped (134 measures), digest 06641bf963e37aa6**,
-      proven. `.parks/` in this worktree holds it.
-- [x] Final runs on that park (hydrated, no solve): every number below.
+      proven. Every number below was first read on it.
+- [x] **0a87d267** — two doc comments corrected (layout.ts `DEN_NORTH_PAST_DOOR`, shell.ts
+      `LINTEL_OVERLAP`); comments only, but in the closure, so the head's source hash is
+      **1feea9e1…**. Park rebuilt at it (exit 0, 544 s): restart 0 rejected by check:coplanar
+      (262 s), **restart 1 accepted (134 measures), digest 06641bf963e37aa6** — the same park.
+      `.parks/` holds it. **At the head**: tsc 0, typecheck:test 0, check:library green **70 ✓ 0
+      ✗** and all four check-side reds (below) re-run hydrated — each log identical, line for
+      line, to its a04bfcb4 run (`final2/`).
 
 ## What Step 11 built
 - **`layout.ts`** — `LIBRARY_DEN_DEPTH` 5.6; `LIBRARY_DEN_DOOR_HALF` 2 (asserted against the
@@ -91,7 +97,7 @@ CHILD are byte-identical. Counts off the screen:
   hidden while the shelf is shut`; stderr `the secret den: 3 walls; the lintel's band from 3.00 m
   over its doorway z -6.00..-2.00`.
 
-## Reds (each proved at a04bfcb4, seed 5 restart 1, digest 06641bf963e37aa6, hydrated; reverted)
+## Reds (each proved at a04bfcb4 and again at the head 1feea9e1, seed 5 restart 1, digest 06641bf963e37aa6, hydrated; reverted)
 Geometry they were proved against: the den's inner faces x −23.90, z −7.60 / −2.00; the doorway
 z −6..−2 in the wall at x −18.3..−17.7; west-2's collider (the shut shelf) x −17.7..−17.1, z
 −6..−2, absolute top 3.20; the lintel band from 3.00 m; the flier at 4.00 m; bodies as above.
