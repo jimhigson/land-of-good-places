@@ -8,6 +8,47 @@ pushed at the pause (checked branch by branch). **This file is the entry point.*
 everything is, what is done, what was cut off mid-way, and the order to resume in. The detail
 lives in the files it points to, all on this branch (`feat/library-714`).
 
+## 0. UPDATE, 16 Oct 2026 evening: the first slice is merged; read this section first
+
+Jim, 16 Oct: *"let's merge the library into main as it is for now before we do any more work on
+it"*. **PR #720 merged into `main` as 58165723** (a merge commit, not a squash, so every
+branch below still merges cleanly), at its head **eb5200e2**. All its checks were green on that
+head (run 38828139475: 89 pass, 1 skipped). Issues #715, #716 and #717 are closed. #714 (the
+epic), #718 and #719 stay open. Jim saw it working in the preview first: standing at a bookcase,
+**Read it!** opens the book.
+
+**On main now:** parts 1-3 (building, reading room, twelve picture books with the paper reader
+and Cute-o-dex bookmarks), the groundwork, plan Steps 0-4, plan **Step 5 (readable shelves)**,
+and this handover with the plan and the chapter-book drafts.
+
+**The second session stopped at 16 Oct 01:13**, with the resumed run part-way. Where each piece
+of work stands (all pushed; worktrees under `.claude/worktrees/`, all clean):
+
+| track | branch @ head | done | next |
+|---|---|---|---|
+| integration | `feat/library-714` @ this commit (main + this update) | foundation complete (FM: the Steps 3-4 merge's checks, all exit 0) | the merges below |
+| A, owl | `feat/library-714-owl` @ 272751d6 | **Step 5** (merged to main via #720) | re-run Step 5's review (never ran); **Step 6, the owl** |
+| B, kids | `feat/library-714-kids` @ a418e0ba | **Step 7** (sitting on the cushions) | re-run Step 7's review (never ran); **Step 8, the children** |
+| C, den | `feat/library-714-den` @ 56ed58d8 | **Step 11** (den walls, lintel) | re-run Step 11's review (never ran); **Steps 12, 13** |
+| D, chapter books | `feat/library-714-books2` @ d32a205a | the editor ran: **the six books' final words** are in `docs/library-build/chapter-books/final.json` on that branch | the last commit is the engineering-base agent's **uncommitted edits, saved as found and unverified** (5 files): verify or revert them from `HANDOFF-library-books2.md`, then finish the base, picture the six books, merge, review |
+
+**The foundation reviews ran:** `docs/library-build/reviews/foundation-reviews.json`. The merge
+review found nothing. The Steps 0-4 review found two minor things for the first merge to fix:
+the owl's 'happy' face is pixel-identical to her 'blink' face, and the dragon's wing colour
+change never reached the art render script.
+
+**How the next round differs from §5 and §6 below:**
+- **A new PR is needed.** #720 is merged, so the next PR is a new one. When there is something
+  new to see, fast-forward `feat/library` to the integration head and open a draft from it
+  (`gh pr create --draft --head feat/library`). Milestones then move it as before. Any script
+  or prompt that names PR 720 must name the new number.
+- Every track branch descends from commits now in main, so `git merge origin/main` into each
+  is clean. Do it when each track is merged back.
+- **In the relaunch script's cache**, F1A, F1B, F2, FM, A5, B7, C11, De, RFa and RFb are all
+  done. A5, B7 and C11 are cached without their reviews, so the script re-runs those reviews
+  by itself. Track D's base must re-run as a restart (the house rules' restart clause), and its
+  book engineers read `final.json`.
+
 Read in this order: this file → `docs/library-build/PLAN-parts-4-5.md` (the decided build plan
 for parts 4 and 5) → `HANDOFF-library-714.md` (the integration branch's own record) → the part
 handoffs as you need them (`HANDOFF-library-art.md`, `-building.md`, `-books.md`, `-shared.md`).
