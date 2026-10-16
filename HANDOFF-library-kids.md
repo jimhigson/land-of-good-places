@@ -211,7 +211,10 @@ saved copy), `git status` clean after.
    right after `if (!player) return;`. Order-independent for the shush (a stand-up is airborne at
    vertical speed 0, never a jump, and the shush ignores a riding child), but place it per the table.
 4. **Step 9** reads `library.playerIsSeated` ("seated since before reading began"),
-   `libraryArmchairSize().seatCentre` (the perch) and `LIBRARY_STORY_CHAIR`.
+   `libraryArmchairSize().seatCentre` (the perch) and `LIBRARY_STORY_CHAIR`. Its STORY clause should
+   hold each seated child's `seatedErrors(...).soles` to `FLOOR_TOLERANCE` as well as `floor` and
+   `seat` (`soles` is what sees one lifted foot); `NpcRig` already has the `rightLeg` that
+   `SeatedBody` now asks for.
 5. **Imports**: Library.ts now imports `LIBRARY_CHIPS` (`libraryLines.ts`, which brings `BOOKS` and
    `libraryCard.ts` into the park closure — track A's Step 6 does the same); check-library's imports
    gained names on the constants, libraryAssets and layout lines: union them with the other tracks'.
