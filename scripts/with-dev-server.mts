@@ -5,9 +5,9 @@
  * pnpm run with-dev-server pnpm run check:walking -- pnpm run check:deep-links
  * ```
  *
- * In the gate as `check:served-walking` (a shard of its own — ~10 min on the
- * hosted runner's software renderer) and `check:served-deep-links`. Both were
- * pulled out once for flakiness, and neither cause was this harness:
+ * In the gate as every `check:served-*` script (`check:served-walking` alone
+ * is ~10 min on the hosted runner's software renderer). Walking and deep links
+ * were pulled out once for flakiness, and neither cause was this harness:
  * `check:walking` (#699) tapped a fixed screen spot that, on some seeds, was a
  * tree; `check:deep-links` (#700) most likely lost its Escape to `InputSystem`
  * dropping a key pressed and released inside one frame (unreproduced).
@@ -115,6 +115,7 @@ for (const command of commands) {
       ...process.env,
       CHECK_WALKING_URL: BASE,
       CHECK_DEEP_LINKS_URL: BASE,
+      CHECK_BOOK_READER_URL: BASE,
     },
   });
   if (result.status !== 0) {

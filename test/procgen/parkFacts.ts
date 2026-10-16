@@ -2111,6 +2111,8 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
       world.hotel.hotelRoot,
       world.reptileHouse.hallRoot,
       world.reptileHouse.forecourtRoot,
+      // The Library's reading room (#716), at (-600, -600).
+      world.library.roomRoot,
     ];
     const instance = new reachThree.Matrix4();
     const toWorld = new reachThree.Matrix4();

@@ -52,7 +52,8 @@ import {
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_LOG_CENTRE_X,
 } from '../src/world/reptileHouse/layout.ts';
-import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
+import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
+import { LIBRARY_ARRIVAL, LIBRARY_DESK_STAND, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_SECRET_STAND } from '../src/world/library/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -175,10 +176,134 @@ const GAME_READY_TIMEOUT_MS = 120000;
  */
 const AUTOSAVE_TIMEOUT_MS = 60000;
 
+/** How far her facing may be from the one a link asked for, in radians: a link's facing is set, not steered to. */
+const FACING_TOLERANCE = 0.05;
+
+/**
+ * **A `/library` link lands inside the reading room, on `spot`** (room-local),
+ * converted back to world here from the layout's own constants. It waits for
+ * the link's own end state — inside *and* on the spot — never for `inside`
+ * alone: `requestEnter` teleports at the iris's midpoint, and a returning save
+ * written inside has her inside from the first frame (the Reptile House's
+ * race, 14 Oct 2026). A link that never moves her still fails: the wait times
+ * out and the read says where she is.
+ *
+ * With `facing` (degrees, the URL's own number), she must also face that way —
+ * `Player.facing` within {@link FACING_TOLERANCE} of it, as radians, whichever
+ * way round the circle. A facing that equals the arrival's own (180) cannot
+ * tell an honoured `facing=` from a dropped one, and the read says so.
+ */
+function libraryCheck(path: string, spot: { readonly x: number; readonly z: number }, what: string, facing?: number): DeepLinkCheck {
+  return {
+    path,
+    assert: async (page) => {
+      const want = { x: LIBRARY_ORIGIN_X + spot.x, z: LIBRARY_ORIGIN_Z + spot.z };
+      await page
+        .waitForFunction(
+          ({ x, z, tolerance }) => {
+            const g = (window as unknown as { game?: any }).game;
+            const p = g?.player?.position;
+            return g?.world?.library?.playerIsInside === true && !!p && Math.hypot(p.x - x, p.z - z) <= tolerance;
+          },
+          { x: want.x, z: want.z, tolerance: CASTLE_TOLERANCE },
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.library?.playerIsInside ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+          facing: typeof g?.player?.facing === 'number' ? (g.player.facing as number) : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Library was not entered (inside=${s.inside})` };
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
+      if (space !== SPACE_LIBRARY || off > CASTLE_TOLERANCE) {
+        return { ok: false, detail: `asked for ${what}, room (${spot.x}, ${spot.z}) = world (${want.x}, ${want.z}); she is in '${space}' at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}), ${off.toFixed(1)} m off` };
+      }
+      if (facing === undefined) return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}` };
+      const asked = (facing * Math.PI) / 180;
+      if (s.facing === null) return { ok: false, detail: `on ${what}, but the player reported no facing to read` };
+      const turn = Math.abs(Math.atan2(Math.sin(s.facing - asked), Math.cos(s.facing - asked)));
+      const blind = facing === LIBRARY_ARRIVAL.facing ? ' (the arrival faces this way too, so this read cannot tell an honoured facing= from a dropped one)' : '';
+      if (turn > FACING_TOLERANCE) {
+        return { ok: false, detail: `on ${what}, ${off.toFixed(2)} m off, but facing ${s.facing.toFixed(3)} rad where the link asked ${asked.toFixed(3)} (${facing}°): ${turn.toFixed(3)} rad round` };
+      }
+      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}, facing ${s.facing.toFixed(3)} rad (asked ${facing}°, ${turn.toFixed(3)} rad round)${blind}` };
+    },
+  };
+}
+
+/** Where `/library?at=` is asked to stand: the secret shelf's stand spot, to the centimetre a URL carries. */
+const LIBRARY_AT = { x: Number(LIBRARY_SECRET_STAND.x.toFixed(2)), z: Number(LIBRARY_SECRET_STAND.z.toFixed(2)) };
+
+/** And at the desk's front, where she talks to the owl (#718) — the link the owl's preview is sent with. */
+const LIBRARY_DESK_AT = { x: Number(LIBRARY_DESK_STAND.x.toFixed(2)), z: Number(LIBRARY_DESK_STAND.z.toFixed(2)) };
+
 /** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
 const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
 
 const CHECKS: DeepLinkCheck[] = [
+  libraryCheck('/library', LIBRARY_ARRIVAL, 'the arrival'),
+  // At a spot in the reading room: in front of the secret shelf, turned to it —
+  // the room-local point converted back to world from the layout's own table.
+  // Primed inside the room (the plain link lands at the arrival), so the
+  // returning-save run is the case that must still move her: restored inside,
+  // then asked for a spot in it.
+  {
+    ...libraryCheck(`/library?at=${LIBRARY_AT.x},${LIBRARY_AT.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_AT, LIBRARY_SECRET_STAND.what, LIBRARY_SECRET_STAND.facing),
+    primerPath: '/library',
+  },
+  // At the desk's front, turned to the owl's desk (plan Step 4): the parsed
+  // `/library` link — at, facing — every number read from the layout.
+  {
+    ...libraryCheck(`/library?at=${LIBRARY_DESK_AT.x},${LIBRARY_DESK_AT.z}&facing=${LIBRARY_DESK_STAND.facing}`, LIBRARY_DESK_AT, LIBRARY_DESK_STAND.what, LIBRARY_DESK_STAND.facing),
+    primerPath: '/library',
+  },
+  {
+    // Outside the Library's door, in the park, on the plot's own doormat.
+    path: '/library-door',
+    // Primed inside the room: the door link must put a restored-inside player back out.
+    primerPath: '/library',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            const mat = g?.world?.library?.doormat;
+            return !!g && !!mat && g.world.library.playerIsInside === false && !!g.player?.position &&
+              Math.hypot(g.player.position.x - mat.x, g.player.position.z - mat.z) < 1;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        const mat = g?.world?.library?.doormat;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.library?.playerIsInside ?? null,
+          mat: mat ? { x: mat.x, z: mat.z } : null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (!s.playerPos || !s.mat) return { ok: false, detail: 'the player or the doormat had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      if (space !== SPACE_GARDEN || s.inside !== false) {
+        return { ok: false, detail: `expected to stand in the park outside the door; she is in '${space}' (inside=${s.inside})` };
+      }
+      const off = Math.hypot(s.playerPos.x - s.mat.x, s.playerPos.z - s.mat.z);
+      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `in the park but ${off.toFixed(1)} m from the doormat at (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+      return { ok: true, detail: `on the Library's doormat, ${off.toFixed(2)} m from (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+    },
+  },
   {
     // The Reptile House's hall, at a spot: `inside` must flip and the player
     // must be at the asked-for hall-local point, converted back here from the
@@ -191,23 +316,55 @@ const CHECKS: DeepLinkCheck[] = [
     primerPath: '/reptile-house',
     assert: async (page) => {
       const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
+      // **Wait for the link's own end state: inside, the change of space
+      // finished, *and* on the spot. Never for `inside` alone.** On the
+      // `continueGame` path the restored save has her inside the hall from the
+      // first frame, on the primer's arrival spot, while the link's own change
+      // of space is still running: `requestEnter` returns before it has run, and
+      // the teleport is the iris's midpoint. Measured 14 Oct 2026, seed 5, local
+      // Chromium, on `main` and on the library branches alike: the read gave
+      // (606.0, -584.2), 24.71 m off, with the change still running, and she
+      // stood on (587.0, -600.0) with it done about 350 ms later. CI passed the
+      // same read on frame timing, so the old wait raced the iris instead of
+      // measuring the link. Both halves are kept: on the spot proves the link
+      // moved her, whenever its change began; `isChanging === false` proves the
+      // change is over. `isChanging` must be a real boolean, so a renamed field
+      // times the wait out and fails below rather than passing with nothing
+      // waited for; and a link that never moves her still fails, because the
+      // wait times out and the read below says where she is. No retry: the
+      // wait is for the end state, and the read after it is the measurement.
       await page
         .waitForFunction(
-          () => ((window as unknown as { game?: any }).game)?.world?.reptileHouse?.playerIsInside === true,
-          undefined,
+          ({ x, z, tolerance }) => {
+            const g = (window as unknown as { game?: any }).game;
+            const house = g?.world?.reptileHouse;
+            const p = g?.player?.position;
+            return (
+              house?.playerIsInside === true &&
+              house?.spaces?.isChanging === false &&
+              !!p &&
+              Math.hypot(p.x - x, p.z - z) <= tolerance
+            );
+          },
+          { x: want.x, z: want.z, tolerance: CASTLE_TOLERANCE },
           { timeout: 10000 },
         )
         .catch(() => {});
       const s = await page.evaluate(() => {
         const g = (window as unknown as { game?: any }).game;
+        const changing = g?.world?.reptileHouse?.spaces?.isChanging;
         return {
           hasGame: !!g,
           inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          changing: typeof changing === 'boolean' ? changing : 'missing',
           playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
         };
       });
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
       if (s.inside !== true) return { ok: false, detail: `the Reptile House was not entered (inside=${s.inside})` };
+      if (s.changing !== false) {
+        return { ok: false, detail: `the change of space into the hall never finished (isChanging=${s.changing})` };
+      }
       if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
       const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
       if (off > CASTLE_TOLERANCE) {

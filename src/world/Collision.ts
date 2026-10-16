@@ -115,6 +115,23 @@ interface CircleCollider {
   owner: string;
 }
 
+/**
+ * A filled capsule: the segment `(x1, z1)`-`(x2, z2)` thickened by
+ * `halfThickness` either side and round each end.
+ *
+ * **A zero-length wall — both ends on one point — is a filled disc of radius
+ * `halfThickness`, to every query alike**: the mover ({@link
+ * CollisionWorld.resolve}, {@link CollisionWorld.deepestSolidOverlap}, {@link
+ * CollisionWorld.wouldAutoHopClear}), the planner (`isClearCircle`,
+ * `solidDepthAt`) and the route lattice (`NavGrid`). It is how a solid that
+ * must come and go is registered round (the library owl's capsule, #718,
+ * taken out while she flies and put back as she lands): a wall can be handed
+ * back with {@link CollisionWorld.restoreWall}, the same object, and a circle
+ * cannot. Until 14 Oct 2026 the mover skipped a zero-length wall while the
+ * planner counted it, so a child walked straight through a disc the flood fill
+ * called solid — measured: a march at one stopped at -1.270 m with the fix and
+ * walked on to +3.000 m without it.
+ */
 export interface WallCollider {
   x1: number;
   z1: number;
@@ -137,8 +154,14 @@ export interface WallCollider {
  * "cleared it". Without this a jump that just grazes the top of a wall would
  * still be caught by the collider, which reads as snagging rather than
  * hopping over — a little forgiveness here is what makes the jump feel good.
+ *
+ * **Exported so that nothing has to copy it.** The library's lintel over the
+ * secret den's doorway (#719) is a banded collider whose base must sit under
+ * the bookcase top by *more* than this grace, or a flier could slip between
+ * case and lintel: its base is computed from this constant, never from a
+ * retyped 0.15.
  */
-const JUMP_CLEARANCE_GRACE = 0.15;
+export const JUMP_CLEARANCE_GRACE = 0.15;
 
 /**
  * "Are a mover's feet, right now at `clearance`, above something this tall?"
@@ -670,9 +693,12 @@ export class CollisionWorld {
    * Exists for `Scenery`'s tree-felling (see `pylons.ts`'s pylon search):
    * a support that would otherwise be skipped because a tree stands on its
    * spot removes that one tree's collider instead of giving up the spot.
-   * Every other registration in the park is still added once, at build time,
-   * and never removed — this is deliberately the *only* mutation of that
-   * kind, not a general licence to reshuffle the world at will.
+   * It is the only removal of a *circle*, and not a general licence to
+   * reshuffle the world at will. Walls have their own named toggles —
+   * {@link removeWall} and {@link restoreWall}: the hotel suite's lock, and
+   * the library's two (#718, #719), the owl's capsule while she flies and the
+   * secret leaf's closed and open collider sets. None of those goes through
+   * here.
    *
    * `thinnestHalfWidth` is deliberately left alone: if the collider removed
    * happened to be the thinnest one registered, the cached value is now a
@@ -724,11 +750,43 @@ export class CollisionWorld {
    * Takes back a wall {@link addWall} returned — a locked door opening.
    * `thinnestHalfWidth` is left as the running minimum it was; it can only be
    * conservative after a removal, never wrong.
+   *
+   * The named toggles that use it: the hotel suite's lock, and the library's
+   * two (#718, #719) — **the owl's zero-length capsule while she flies** (she
+   * is not at her desk, so her desk must not be solid) and **the secret leaf**
+   * (its closed collider set comes out as it lands open, its open set as it
+   * shuts). Both of the library's are put back with {@link restoreWall}, the
+   * same objects, so a check that names a solid still finds it afterwards.
    */
   removeWall(wall: WallCollider): void {
     const at = this.walls.indexOf(wall);
     if (at === -1) return;
     this.walls.splice(at, 1);
+    this.revisionCounter += 1;
+  }
+
+  /**
+   * Puts back a wall {@link removeWall} took out — **the same object**, not a
+   * fresh registration.
+   *
+   * The same object is the point: its `owner` tag (what `ownedBy` scoped it
+   * to) and every field come back exactly as they were, and anything holding
+   * the reference — a toggle about to remove it again, a check asking "is this
+   * solid present" — is still holding the live collider. Re-adding through
+   * {@link addWall} would mint a twin that the holder's reference no longer
+   * names, and the next `removeWall` would quietly remove nothing.
+   *
+   * Idempotent: a wall already present is left alone (no duplicate, no
+   * revision bump), so a toggle can restore without first asking. Otherwise
+   * the revision moves, exactly as {@link addWall}'s does, so a cached route
+   * lattice (`NavGrid`) sees the change. `thinnestHalfWidth` takes the wall
+   * back into its running minimum, as `addWall` would — after a `clear()` that
+   * minimum restarted, and a restored wall must still sub-step the mover.
+   */
+  restoreWall(wall: WallCollider): void {
+    if (this.walls.includes(wall)) return;
+    this.walls.push(wall);
+    this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, wall.halfThickness);
     this.revisionCounter += 1;
   }
 
@@ -1057,8 +1115,8 @@ export class CollisionWorld {
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
-      if (lengthSquared < 1e-8) continue;
-      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      // A zero-length wall is a disc: its nearest point is its one end (see WallCollider).
+      let t = lengthSquared < 1e-8 ? 0 : ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const depth =
         wall.halfThickness + radius -
@@ -1135,8 +1193,9 @@ export class CollisionWorld {
         const ax = wall.x2 - wall.x1;
         const az = wall.z2 - wall.z1;
         const lengthSquared = ax * ax + az * az;
-        if (lengthSquared < 1e-8) continue;
-        let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+        // A zero-length wall is a disc: its nearest point is its one end (see WallCollider).
+        const degenerate = lengthSquared < 1e-8;
+        let t = degenerate ? 0 : ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const closestX = wall.x1 + ax * t;
         const closestZ = wall.z1 + az * t;
@@ -1153,8 +1212,13 @@ export class CollisionWorld {
         }
         const distance = Math.sqrt(distanceSquared);
         if (distance < 1e-5) {
-          const invLength = 1 / Math.sqrt(lengthSquared);
-          applyCorrection(-az * invLength * minimum, ax * invLength * minimum);
+          if (degenerate) {
+            // Exactly on a disc's centre: the circles' arbitrary but stable direction.
+            applyCorrection(minimum, 0);
+          } else {
+            const invLength = 1 / Math.sqrt(lengthSquared);
+            applyCorrection(-az * invLength * minimum, ax * invLength * minimum);
+          }
           moved = true;
           continue;
         }
@@ -1231,8 +1295,8 @@ export class CollisionWorld {
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
-      if (lengthSquared < 1e-8) continue;
-      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      // A zero-length wall is a disc: its nearest point is its one end (see WallCollider).
+      let t = lengthSquared < 1e-8 ? 0 : ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const dx = position.x - (wall.x1 + ax * t);
       const dz = position.z - (wall.z1 + az * t);

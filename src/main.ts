@@ -40,6 +40,7 @@ import { PARK_RESTART, PARK_SEED_ASKED } from './world/parkManifest';
 import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/parkSeedPool';
 import { parkStamp } from './world/prebuilt/parkFileStore';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
+import { BOOKS, bookById } from './world/library/books';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -210,6 +211,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // The Reptile House's Tortoise Ride, boarded: into the hall at its stand
   // spot and straight onto the shell — `ReptileHouse.requestTortoiseRide`.
   '/tortoise-ride': 'reptileTortoiseRide',
+  // The Library's building from outside (#716): on the plot's doormat at the
+  // foot of the steps, facing the door — `Library.requestEnterDoor`. The
+  // reading room itself is `/library`, its own `DeepLink` kind below.
+  '/library-door': 'libraryDoor',
 };
 
 /**
@@ -326,7 +331,42 @@ type DeepLink =
   | {
       readonly kind: 'reptileHouse';
       readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
-    };
+    }
+  /**
+   * `/library`, `/library?at=x,z&facing=deg` — inside the Library's reading
+   * room (#716), at that room-local spot, or just in from the door (the
+   * arrival, facing up the central aisle) without one. Its own kind for the
+   * Reptile House's reason: the room is a *space* 849 m from the park, so
+   * `/spawn?pos=` would drop her at the coordinate with the room switched off,
+   * and finding the building on a layout different on every seed is the
+   * hotel's QA problem again. `at` is in the room's own metres
+   * (`world/library/layout.ts`: +X east, +Z towards the camera), so
+   * `?at=-15.8,-4&facing=270` is in front of the secret shelf.
+   */
+  | {
+      readonly kind: 'library';
+      readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
+    }
+  /**
+   * `/book?id=<bookId>` — **one of the library's twelve picture books, open in
+   * the reader** (#717), on the paused park, from the first frame.
+   *
+   * It exists so a book can be judged standalone before the library's shelves
+   * do: reaching one otherwise means a walk to the library, a shelf and a tap,
+   * and the shelves are a later PR of the epic (#714). Same spirit as `/view`
+   * and `/spawn` — a URL a developer types, never a button a child presses —
+   * and it works against a production build too
+   * (`landofgoodplaces.blockstack.ing/book?id=catBusDay`). The ids are
+   * `world/library/books.ts`'s `BOOKS`.
+   *
+   * - **A bad or missing id never breaks the boot**: it warns and opens the
+   *   first book, the way `/spawn` treats an unreadable `pos`.
+   * - **It leaves no durable mark** (`makeSessionUnsavable`): reading a book
+   *   to its end files a bookmark in the Cute-o-dex, and a debug link typed on
+   *   the machine holding Eleri's save must not hand her one — the `?pets=`
+   *   rule. Everything still works in-session, bookmarks and prize included.
+   */
+  | { readonly kind: 'book'; readonly bookId: string };
 
 /**
  * Matches this load's URL against every developer deep link, in the order they
@@ -343,7 +383,42 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   if (pathname === '/arrive') return parseArriveLink(search);
   if (pathname === '/castle') return parseCastleLink(search);
   if (pathname === '/reptile-house') return parseReptileLink(search);
+  if (pathname === '/library') return parseLibraryLink(search);
+  if (pathname === '/book') return parseBookLink(search);
   return null;
+}
+
+/** `/library?at=x,z&facing=deg` — see the `DeepLink` kind. Built the way `parseReptileLink` is. */
+function parseLibraryLink(search: string): DeepLink {
+  const params = new URLSearchParams(search);
+  const raw = params.get('at');
+  const at = parseSpawnPoint(raw);
+  const facingRaw = params.get('facing');
+  const link: { kind: 'library'; at?: { x: number; z: number; facing?: number } } = { kind: 'library' };
+  if (at) {
+    const spot: { x: number; z: number; facing?: number } = { x: at.x, z: at.z };
+    const facing = facingRaw === null ? Number.NaN : Number(facingRaw);
+    if (Number.isFinite(facing)) spot.facing = facing;
+    link.at = spot;
+  } else if (raw !== null) {
+    console.warn(
+      `Land of Good Places: /library could not read at=${raw} — expected "x,z" in the ` +
+        "reading room's own metres. Standing just in from the door instead.",
+    );
+  }
+  return link;
+}
+
+/** `/book?id=<bookId>` — see the `DeepLink` kind. An unknown id opens the first book, loudly. */
+function parseBookLink(search: string): DeepLink {
+  const raw = new URLSearchParams(search).get('id');
+  const first = BOOKS[0]?.id ?? '';
+  if (raw !== null && bookById(raw)) return { kind: 'book', bookId: raw };
+  console.warn(
+    `Land of Good Places: /book ${raw === null ? 'has no ?id=' : `has no book called "${raw}"`} — ` +
+      `opening "${first}" instead. The twelve are: ${BOOKS.map((book) => book.id).join(', ')}.`,
+  );
+  return { kind: 'book', bookId: first };
 }
 
 /** `/reptile-house?at=x,z&facing=deg` — see the `DeepLink` kind. Built the way `parseCastleLink` is. */
@@ -853,6 +928,9 @@ function launchGame(
   // ask. A URL a developer types, never a button a child presses, exactly as
   // `/view` and `/spawn` are.
   grantDebugPets(location.search);
+  // `/book` files a bookmark when a book is read to the end — see its
+  // `DeepLink` kind for why that must never reach a real save.
+  if (deepLink?.kind === 'book') makeSessionUnsavable();
 
   const engine = new Engine(canvas);
 
@@ -1141,9 +1219,23 @@ function rideInThenPlay(
     // costs a child nothing. Without this, 64 of the park's 116 programs
     // compiled while she was walking about, one of them freezing a frame for
     // 1.29 s. See `boot/shaderWarmup.ts`.
+    //
+    // Then the library's book reader (#717), behind the same bus and on the
+    // same budget: it draws in its own scene, under its own lamp, and its
+    // pictures into render targets under their own light rigs, so not one of
+    // the park's programs serves it — a first book opened cold would link a
+    // dozen mid-frame. Whole steps only, like the park's slices.
     if (warmup && director.shouldWarmShaders()) {
-      warmup.advance(director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS));
-      if (warmup.ready) director.noteWarmupReady();
+      const budget = director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS);
+      if (!warmup.ready) {
+        warmup.advance(budget);
+      } else if (handOverGame) {
+        const reader = handOverGame.bookReader;
+        const started = performance.now();
+        let more = true;
+        while (more && performance.now() - started < budget) more = reader.warmStep();
+        if (!more) director.noteWarmupReady();
+      }
     }
 
     if (director.readyToHandOver) finish();
@@ -1276,6 +1368,16 @@ async function finishLaunch(
           );
         }
         break;
+      case 'library':
+        // Fails loud, like `/reptile-house`: a reading room that will not open
+        // is the thing this link exists to check.
+        if (!game.enterLibrarySpawn(deepLink.at)) {
+          console.error(
+            'Land of Good Places: /library did not enter the Library — see Library.requestEnter ' +
+              '(she may be riding, or a change of space is already running).',
+          );
+        }
+        break;
       case 'arrive':
         // **`?at=` is the one thing this arm does.** It runs the sequence
         // forward to the named beat by *playing* it — see
@@ -1302,6 +1404,16 @@ async function finishLaunch(
         // bypassed on purpose, so there is no failure mode of the `/bridge`
         // kind to shout about. If no bus appears, the fault is in `Entrance`
         // building no arrival for `arriveByBus: true`, which is its own bug.
+        break;
+      case 'book':
+        // Loud, like `/castle`: a reader that will not open is the thing this
+        // link exists to check.
+        if (!game.bookReader.openBook(deepLink.bookId)) {
+          console.error(
+            `Land of Good Places: /book?id=${deepLink.bookId} did not open the reader — see ` +
+              'BookReader.openBook and world/library/books.ts.',
+          );
+        }
         break;
       case 'castle':
         // Loud, like `/bridge` and `/rail-race`: a deck that does not exist

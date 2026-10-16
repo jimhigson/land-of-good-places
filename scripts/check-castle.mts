@@ -89,6 +89,7 @@ import {
 } from '../src/world/building/castleLighting.ts';
 import { dressCastle } from '../src/world/building/castleDecor.ts';
 import { keepOutsFor } from '../src/world/building/dressing.ts';
+import { FLOOR_TOLERANCE, SEAT_TOLERANCE } from './lib/seatedPose.mts';
 
 const failures: string[] = [];
 
@@ -1492,9 +1493,11 @@ if (hearthFlamesInside < CASTLE_HEARTH_FLAME_COUNT) {
  * Because **the rig has no knee.** A leg rotated about the hip does not bend;
  * 0.36 m is `KID_HIP_HEIGHT`, and therefore the single height at which a
  * vertical leg lands a foot on the floor. If a pose breaks this, the pose moves.
+ *
+ * `SEAT_TOLERANCE` and `FLOOR_TOLERANCE` are `scripts/lib/seatedPose.mts`'s —
+ * the one owner, shared with the library's story-time clauses (#718), so a
+ * child on a cushion is held to exactly what a child at the feast is.
  */
-const SEAT_TOLERANCE = 0.003;
-const FLOOR_TOLERANCE = 0.015;
 
 let dinersChecked = 0;
 let worstSeat = 0;

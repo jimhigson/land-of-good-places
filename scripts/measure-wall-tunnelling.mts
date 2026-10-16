@@ -42,8 +42,11 @@
  *   boundary falls and where the wall is, and testing one phase tests nothing.
  * - **Shape**: a single long wall; a right angle charged into from the
  *   diagonal (a corner is two colliders' end caps meeting, the weakest point
- *   of any segment-based world); and a fence built as a chain of short
- *   segments, where the ends are everywhere.
+ *   of any segment-based world); a fence built as a chain of short
+ *   segments, where the ends are everywhere; and a **zero-length capsule**
+ *   walked at head-on — the disc a solid that comes and goes is registered as
+ *   (the library owl's, #718), which the mover once skipped outright while
+ *   the planner called it solid, so every run walked straight through it.
  *
  * ### The two suites
  *
@@ -195,6 +198,33 @@ function corner(wall: Wall): Case {
   };
 }
 
+/**
+ * **A zero-length capsule — both ends on one point — walked at head-on.** The
+ * disc `WallCollider`'s doc describes: a round solid registered as a wall so
+ * that it can be taken out and put back as the same object (the library owl's
+ * capsule, #718). Until 14 Oct 2026 `resolve` skipped any wall that short,
+ * so this case tunnelled on every run. Head-on at its centre the push is
+ * straight back, so a held run stays held; a run that slides off round its
+ * edge has walked round it, not through it, and is not scored.
+ */
+const ZERO_LENGTH = 'zero-length capsule';
+
+function zeroLengthCapsule(wall: Wall): Case {
+  const face = wall.halfThickness + PLAYER_RADIUS;
+  return {
+    name: `${ZERO_LENGTH} ${describe(wall)}`,
+    build: (collision) => collision.addWall(0, 0, 0, 0, wall.halfThickness, wall.topHeight, wall.autoHoppable),
+    startX: 0,
+    startZ: -6,
+    dirX: 0,
+    dirZ: 1,
+    topHeight: wall.topHeight,
+    through: (position) => position.z > face + 0.05,
+    overFootprint: (position) => Math.hypot(position.x, position.z) < face,
+    stillFenced: (position) => Math.abs(position.x) < face,
+  };
+}
+
 function describe(wall: Wall): string {
   return `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(2)}`;
 }
@@ -281,6 +311,13 @@ interface Summary {
   peakSpeed: number;
   /** A few tunnels, named, so a failure says where to look. */
   examples: string[];
+  /**
+   * The zero-length capsule runs alone: a finite disc can be walked round as
+   * well as held, so the clause asserts these were scored (held or flown),
+   * not merely untunnelled — every run sliding off round it would be a zero
+   * about nothing.
+   */
+  zeroLength: Record<Verdict, number>;
 }
 
 function sweep(cases: readonly Case[], substepping: boolean): Summary {
@@ -290,6 +327,7 @@ function sweep(cases: readonly Case[], substepping: boolean): Summary {
     worstOvershoot: 0,
     peakSpeed: 0,
     examples: [],
+    zeroLength: { held: 0, flew: 0, tunnelled: 0, left: 0 },
   };
   for (const testCase of cases) {
     for (const dt of DELTAS) {
@@ -298,6 +336,7 @@ function sweep(cases: readonly Case[], substepping: boolean): Summary {
           const result = run(testCase, dt, sprint, phase, substepping);
           summary.runs += 1;
           summary.counts[result.verdict] += 1;
+          if (testCase.name.startsWith(ZERO_LENGTH)) summary.zeroLength[result.verdict] += 1;
           if (result.verdict === 'tunnelled' && summary.examples.length < 6) {
             summary.examples.push(
               `${testCase.name} at ${Math.round(1 / dt)} fps, ` +
@@ -363,6 +402,8 @@ function buildCases(wallsOf: (halfThickness: number) => Wall): Case[] {
     cases.push(corner(wall));
     for (const angle of [0, 40, 75, 85]) cases.push(fenceChain(wall, angle));
   }
+  // The zero-length capsule at every half-thickness, up to the owl's own reach.
+  for (const halfThickness of [...HALF_THICKNESSES, 0.65]) cases.push(zeroLengthCapsule(wallsOf(halfThickness)));
   return cases;
 }
 
@@ -438,6 +479,21 @@ for (const suite of suites) {
         `    took                  ${((Date.now() - started) / 1000).toFixed(1)} s`,
     );
     for (const example of summary.examples) console.log(`      e.g. ${example}`);
+    if (substepping) {
+      const zero = summary.zeroLength;
+      const scored = zero.held + zero.flew;
+      process.stderr.write(
+        `    ${ZERO_LENGTH}s (the owl's kind of solid): ${scored + zero.tunnelled + zero.left} runs — ` +
+          `held ${zero.held}, flew over ${zero.flew}, tunnelled ${zero.tunnelled}, walked round ${zero.left}\n`,
+      );
+      if (zero.left > 0 || zero.tunnelled > 0 || scored === 0) {
+        failures.push(
+          `${suite.label}: the ${ZERO_LENGTH} runs were not all held or flown (held ${zero.held}, flew ${zero.flew}, ` +
+            `tunnelled ${zero.tunnelled}, walked round ${zero.left}) — a head-on walk must meet the disc, or ` +
+            '"no tunnel" says nothing about it',
+        );
+      }
+    }
     if (substepping && summary.counts.tunnelled > 0) {
       failures.push(
         `${suite.label}: ${summary.counts.tunnelled} of ${summary.runs} runs TUNNELLED through a wall with ` +

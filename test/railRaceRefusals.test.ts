@@ -16,11 +16,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
  * its road — so any seed whose plan solves exercises the same code; this is
  * just the cheapest one measured (fix/sb-rrtest).
  */
-// Seed 10 restart 0 since #708's band fix: the shipped park with the fastest
-// plan (11.5 s on CI). Pinned parks go stale when the park changes — see
+// Seed 3 restart 7 since the Library's plot (#716): the shipped park with the
+// fastest plan at that source (35.1 s searched on CI, run 38558411242; seed
+// 10 restart 0, the pin before it, now plans in ~290 s, over the 240 s hook).
+// Pinned parks go stale when the park changes — see
 // `railRaceRoadBounded.test.ts` for how to re-pick one.
-process.env['LGP_SEED'] = '10';
-process.env['LGP_PARK_RESTART'] = '0';
+process.env['LGP_SEED'] = '3';
+process.env['LGP_PARK_RESTART'] = '7';
 // Through a variable, as the other tests reach Node-only scripts, so the test
 // project's typecheck does not follow it (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';

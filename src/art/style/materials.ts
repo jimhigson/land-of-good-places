@@ -89,6 +89,23 @@ export function isShared(resource: Partial<HasUserData> | null | undefined): boo
 }
 
 /**
+ * A copy of `geometry` that belongs to whoever asked for it.
+ *
+ * `BufferGeometry.clone` copies `userData`, so a clone of a *cached* geometry
+ * came out marked shared as well — and {@link disposeTree} then left it on the
+ * GPU for ever. That was every outline drawn round a cached part: the kid's
+ * head, hands and feet are cached, so each `createKid` stranded six outline
+ * hulls, found by `check:book-reader` counting the renderer's live geometries
+ * across a picture book that has the girl in it. A clone is a new resource; a
+ * caller that does cache it marks it shared itself (`snake.ts` does).
+ */
+function ownedClone(geometry: BufferGeometry): BufferGeometry {
+  const clone = geometry.clone();
+  delete clone.userData[SHARED_FLAG];
+  return clone;
+}
+
+/**
  * Declares textures a material owns but does not currently reference.
  *
  * Only needed where a material swaps between several textures it alone paid
@@ -191,7 +208,7 @@ export function inkTint(colour: number, amount = 0.62): number {
  * here is a squashed sphere.
  */
 export function outlineGeometry(geometry: BufferGeometry, thickness: number): BufferGeometry {
-  const clone = geometry.clone();
+  const clone = ownedClone(geometry);
   const position = clone.getAttribute('position') as BufferAttribute | undefined;
   const normal = clone.getAttribute('normal') as BufferAttribute | undefined;
   if (!position || !normal) return clone;
@@ -235,7 +252,7 @@ export function addOutline(mesh: Mesh, thickness = 0.016, colour?: number): Mesh
  * welded — the visible mesh keeps its own crisp shading normals.
  */
 export function addSmoothOutline(mesh: Mesh, thickness = 0.016, colour?: number): Mesh {
-  const source = mesh.geometry.clone();
+  const source = ownedClone(mesh.geometry);
   // `mergeVertices` only welds bit-identical vertices, and the duplicates at
   // a hard edge differ in exactly the attribute being fixed — the normal. An
   // outline never reads normals-as-shading or UVs, so drop both and weld on

@@ -127,6 +127,25 @@ export const CUTE_CATEGORIES = [
   'flower',
   'secret',
   'keychain',
+  /**
+   * A library book read to the end (#717) — `world/library/books.ts`'s
+   * `bookCollectionId`. A thing she *did*, filed like a secret: recorded
+   * through `gameStore.collect`, so it is saved, restored and counted with
+   * everything else and needs no save field of its own. An older build reading
+   * a newer save drops these entries (its `readCuteThing` does not know the
+   * word) rather than failing the load — the save's ordinary tolerance.
+   */
+  'book',
+  /**
+   * A keepsake she was given — the library card (#718, `world/library/
+   * libraryCard.ts`). Filed under its own category so that its `collection`
+   * entry survives a load: `state/save.ts` drops an entry whose category it
+   * does not know. There is **no Cute-o-dex section** for it, so the dex total
+   * does not change — the dex counts only the shop catalogue, the flowers and
+   * `SECRETS` (and, with #717, the library's books), and a `card` entry is
+   * none of those.
+   */
+  'card',
 ] as const;
 export type CuteCategory = (typeof CUTE_CATEGORIES)[number];
 
@@ -184,6 +203,15 @@ export const INVENTORY_KINDS = [
    * slots that must all be usable at once.
    */
   'keychain',
+  /**
+   * A keepsake she is **given**, never bought — the library card the owl
+   * hands her (#718, `world/library/libraryCard.ts`, granted through
+   * `gameStore.grantKeepsakeOnce`). It is never worn, carried, eaten or
+   * paraded: `wearableSlot` answers `null`, `isEdible` answers false, and it is
+   * not one of `PARADE_KINDS`, so it is filed stowed in the backpack, where
+   * she can see it in the inventory and nothing else happens to it.
+   */
+  'card',
 ] as const;
 export type InventoryKind = (typeof INVENTORY_KINDS)[number];
 

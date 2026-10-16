@@ -79,6 +79,32 @@ export function playLiftDing(): void {
   note(783.99, 0.13, 0.34, 0.045); // G5
 }
 
+// ------------------------------------------------------------------ the library
+
+/**
+ * The secret bookcase starting to move (#719): one low, long note — a creak,
+ * as the gold book slides out and the whole case begins to swing away.
+ */
+export function playSecretDoor(): void {
+  note(130.81, 0, 0.55, 0.05); // C3
+}
+
+/** …and landing open against the den wall: a short, lower thunk. */
+export function playSecretThunk(): void {
+  note(98, 0, 0.2, 0.06); // G2
+}
+
+/**
+ * The library cat purring when she is petted (#719): three low notes a few
+ * hertz apart, started a beat apart, so they beat against each other into the
+ * rumble a purr is — no noise buffer needed.
+ */
+export function playPurr(): void {
+  note(88, 0, 1.4, 0.04);
+  note(92, 0.05, 1.4, 0.035);
+  note(97, 0.1, 1.3, 0.03);
+}
+
 // ------------------------------------------------------------------ eating
 
 /**

@@ -88,7 +88,11 @@ jobs:
       matrix:
         # Must name every `check:shard-N` in package.json, each once —
         # `check:chain-coverage` fails if it does not.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        #
+        # 9 is `check:served-book-reader` on its own (14 Oct, the Library PR):
+        # beside `check:served-walking` in 8 it ran shard 8 out of its 27-min
+        # watchdog on its first CI run (38580957653), killed after 19 min in it.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -115,8 +119,8 @@ jobs:
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
 
-      # `check:served-walking` and `check:served-deep-links` drive a real page
-      # in Chromium; `playwright-core` ships the driver but not the browser.
+      # Every `check:served-*` step drives a real page in Chromium;
+      # `playwright-core` ships the driver but not the browser.
       # Installed on every shard rather than the ones holding those steps
       # today: tying it to shard numbers would be a second definition of where
       # a step lives, kept in step by hand.

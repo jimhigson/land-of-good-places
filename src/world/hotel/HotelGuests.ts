@@ -1,6 +1,5 @@
 import type { Object3D } from 'three';
 import { PALETTE } from '../../core/palette';
-import { ART } from '../../art/style/artPalette';
 import { NPC_RADIUS } from '../../core/constants';
 import { Rng } from '../../core/mathUtils';
 import { KID_SKIN_TONES } from '../../art/models/kid';
@@ -12,6 +11,7 @@ import {
   type ResidentSpec,
   type Waypoint,
 } from '../../entities/npc';
+import { GUEST_PACE, HAIR_STYLES, HAIRS, OUTFITS } from '../../entities/npc/residentLooks';
 import { BREAKFAST, CORRIDOR, LOBBY, type HotelRoom } from './layout';
 import type { RoomKeepOut } from './place';
 
@@ -79,15 +79,10 @@ const WALL_INSET = 1.9;
 const WAYPOINTS = 4;
 
 /**
- * Fraction of the house walking pace a guest strolls at.
- *
- * A hotel is somewhere people amble; the park is somewhere children run. Half
- * pace is the difference, and it comes out of the same `CharacterIntent` the
- * park's own crowd fills in, so there is no second speed constant anywhere.
+ * A pet's legs are shorter still than a strolling guest's — `GUEST_PACE`, which
+ * lives in `entities/npc/residentLooks.ts` beside the guests' wardrobe, because
+ * the library's children stroll at it too.
  */
-const GUEST_PACE = 0.45;
-
-/** …and a pet's legs are shorter still. */
 const PET_PACE = 0.33;
 
 /** Who stays where. Kids are expensive (see the header); pets are not. */
@@ -122,28 +117,6 @@ const ROSTER: readonly GuestPlan[] = [
  * "Suki" for the sake of one line.
  */
 const GUEST_NAMES: readonly string[] = ['Suki', 'Otto', 'Nell', 'Bram', 'Pip', 'Moss', 'Wisp'];
-
-/** Outfit colours, all from the world's own marker set. */
-const OUTFITS: readonly number[] = [
-  PALETTE.markerSky,
-  PALETTE.markerMint,
-  PALETTE.markerLemon,
-  PALETTE.markerLilac,
-  PALETTE.flowerRed,
-  PALETTE.blossomPink,
-];
-
-const HAIRS: readonly number[] = [ART.kidHair, ART.kidHairBlonde, PALETTE.bark, PALETTE.barkDark];
-
-/**
- * Hair a guest may wear.
- *
- * No ponytail: those styles carry a **world-space** simulated chain
- * (`KidHandle.resetHair`'s doc comment), which then wants driving every frame
- * and resetting on every re-parent. A background guest is not worth a second
- * thing that can go visibly wrong, and none of these styles has one.
- */
-const HAIR_STYLES = ['bunches', 'bob', 'short', 'bowl', 'spiky'] as const;
 
 /**
  * Builds the hotel's guests, ready to hand to `NpcSystem`.

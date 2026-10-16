@@ -30,6 +30,7 @@ import type { ManagedLabel } from '../../ui/LabelManager';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter } from './NpcCharacter';
+import type { CharacterDriver } from './driver';
 import { characterModelAvatar, type NpcAvatar } from './npcAvatar';
 import { WaypointDriver, type Waypoint } from './waypointDriver';
 import { PoiGraph } from './poiGraph';
@@ -174,8 +175,13 @@ export const SEPARATION = CHILD_FOOTPRINT;
  * walking through them (design feedback #31d — "player↔NPC collision").
  * Exactly the same combined-radii idea as {@link SEPARATION}, just with the
  * player's own girth on one side instead of a second child's.
+ *
+ * **Exported** for the library's story time (#718): its children's routes to
+ * the rug and their cushions are laid out to keep this far from the cushions
+ * the player is offered, and asserted against it at load. A copied 1.6 would
+ * be the number the next retune forgets.
  */
-const PLAYER_SEPARATION = CHILD_FOOTPRINT / 2 + PLAYER_RADIUS;
+export const PLAYER_SEPARATION = CHILD_FOOTPRINT / 2 + PLAYER_RADIUS;
 
 /** Beyond this from the player, behaviour runs every other frame. */
 const FAR_DISTANCE = 34;
@@ -419,6 +425,19 @@ export interface ResidentSpec {
    * for ever. See `NpcCharacter.settle`.
    */
   readonly floorY?: number;
+  /**
+   * The resident's own decision layer, built from its own seeded stream —
+   * omitted, it strolls {@link waypoints} on a `WaypointDriver`, which is what
+   * every hotel guest does.
+   *
+   * For a space whose residents do more than stroll: the library's children
+   * (#718) stroll an aisle **and** answer story time's summons to the rug, so
+   * the library hands in a driver that owns both (`LibraryKidDriver`). Handed
+   * the same `Rng` the default driver would have been, at the same point in
+   * the stream, so a resident's facing and walk phase — drawn after it — come
+   * from the same place either way.
+   */
+  readonly driver?: (rng: Rng) => CharacterDriver;
 }
 
 /** A pet, and the child it belongs to. */
@@ -813,11 +832,13 @@ export class NpcSystem implements GameSystem {
       const start = spec.waypoints[0] ?? { x: 0, z: 0 };
       const character = new NpcCharacter(
         spec.avatar,
-        new WaypointDriver({
-          rng,
-          points: spec.waypoints,
-          ...(spec.pace !== undefined ? { pace: spec.pace } : {}),
-        }),
+        spec.driver
+          ? spec.driver(rng)
+          : new WaypointDriver({
+              rng,
+              points: spec.waypoints,
+              ...(spec.pace !== undefined ? { pace: spec.pace } : {}),
+            }),
         collision,
         start.x,
         start.z,
@@ -1043,12 +1064,29 @@ export class NpcSystem implements GameSystem {
    * touches `Player.velocity`, so (exactly like `resolve`'s own escorting)
    * being nudged apart from a child can never be mistaken for player input
    * and banked as speed.
+   *
+   * ## Furniture: a seated child, and a riding player
+   *
+   * Something sitting down cannot step aside, so the other one does — the
+   * whole correction (the full overlap, both halves), capped as ever:
+   *
+   * - **a riding player is furniture.** Whatever has her — a cushion at story
+   *   time (#718), a seat, a cart — is placing her each frame, and
+   *   `Player.nudge` has no riding guard, so a child walking past used to slide
+   *   her off her seat by the half it pushed. Now the child takes it all. This
+   *   is park-wide, for every ride, deliberately: no ride wants its passenger
+   *   shoved by a passer-by.
+   * - **a seated child is furniture** (`NpcCharacter.seated`, the library's
+   *   children on their cushions): the player takes it all, through
+   *   `Player.nudge`, so the child stays exactly on her cushion.
+   * - **both**: neither can move, so neither is moved.
    */
   private separateFromPlayer(dt: number): void {
     const player = this.player;
     if (!player) return;
 
     const maxPush = MAX_DEPENETRATION_SPEED * dt;
+    const playerRiding = player.riding;
 
     for (const character of this.characters) {
       // A climbing child's (x, z) is the tree it is up, not somewhere it is
@@ -1056,6 +1094,9 @@ export class NpcSystem implements GameSystem {
       // scripted one's is a bus seat, and this is the pass that would shove the
       // player's own seatmate out through the bodywork beside her.
       if (character.climbing || character.scripted) continue;
+      // Two pieces of furniture: nobody can step aside, so nobody is moved.
+      const childSeated = character.seated;
+      if (childSeated && playerRiding) continue;
 
       const push = circleSeparation(
         character.position.x,
@@ -1065,6 +1106,22 @@ export class NpcSystem implements GameSystem {
         PLAYER_SEPARATION,
       );
       if (!push) continue;
+
+      if (childSeated || playerRiding) {
+        // One side is furniture, so the other takes the whole correction —
+        // both halves `circleSeparation` split between them — at the same cap.
+        const wholeX = push.dx * 2;
+        const wholeZ = push.dz * 2;
+        const whole = Math.hypot(wholeX, wholeZ);
+        const cap = whole > maxPush ? maxPush / whole : 1;
+        if (playerRiding) {
+          character.position.x -= wholeX * cap;
+          character.position.z -= wholeZ * cap;
+        } else {
+          player.nudge(wholeX * cap, wholeZ * cap);
+        }
+        continue;
+      }
 
       const magnitude = Math.hypot(push.dx, push.dz);
       const scale = magnitude > maxPush ? maxPush / magnitude : 1;

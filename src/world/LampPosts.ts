@@ -71,7 +71,12 @@ import type { CollisionWorld } from './Collision';
  * spotlight with a hard rim.
  */
 const LIGHT_INTENSITY = 3.48;
-const LIGHT_DECAY = 1.0;
+/**
+ * The park's one pool-of-light falloff, exported so a room lit by lamps
+ * (`library/lighting.ts`) dies the same way as the paths do by asking, not by
+ * keeping a copy.
+ */
+export const LIGHT_DECAY = 1.0;
 const LIGHT_DISTANCE = 30;
 
 /** How far above the lamp's base the real light sits. */

@@ -48,7 +48,8 @@ import {
 } from '../src/world/tapSpacing.ts';
 import { zoneVerb, type InteractZone } from '../src/world/interact.ts';
 import { hotelDoorBands, ROOMS } from '../src/world/hotel/layout.ts';
-import { SPACE_REPTILE_HOUSE } from '../src/world/spaces.ts';
+import { SPACE_LIBRARY, SPACE_REPTILE_HOUSE } from '../src/world/spaces.ts';
+import { LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
 import {
   REPTILE_HOUSE_ORIGIN_X,
   REPTILE_HOUSE_ORIGIN_Z,
@@ -85,7 +86,10 @@ hotel.adoptRestoredPlayer();
 // The Reptile House's exterior is a park building now: its entrance and tail
 // zones are in the park's list, and its front door band shares the park floor.
 const [reptileEntryBand] = world.reptileHouse.doorBands();
+// …and the Library's (#716): its entrance zone and its front door's band.
+const [libraryEntryBand] = world.library.doorBands();
 const parkZones = world.interactZones();
+if (!parkZones.some((zone) => zone.id === 'library-entrance')) throw new Error("check:tap-spacing: the park offers no Library 'library-entrance' zone");
 {
   const ids = parkZones.map((zone) => zone.id);
   for (const wanted of ['reptile-entrance', 'reptile-tail']) {
@@ -98,7 +102,12 @@ const parkZones = world.interactZones();
 spaces.push({
   name: 'the park and castle',
   zones: parkZones,
-  bands: [hotel.towerDoorBand(), ...world.building.doorBands(), ...(reptileEntryBand ? [reptileEntryBand] : [])],
+  bands: [
+    hotel.towerDoorBand(),
+    ...world.building.doorBands(),
+    ...(reptileEntryBand ? [reptileEntryBand] : []),
+    ...(libraryEntryBand ? [libraryEntryBand] : []),
+  ],
 });
 
 // The keychain rack's own zoomed picker (#331): six keyrings crowd one small
@@ -139,6 +148,17 @@ for (const room of ROOMS) {
   outsidePlayer.position.set(REPTILE_HOUSE_ORIGIN_X, 0, REPTILE_HOUSE_ORIGIN_Z);
   reptileHouse.adoptRestoredPlayer();
   spaces.push({ name: SPACE_REPTILE_HOUSE, zones: reptileHouse.interactZones(), bands: exit ? [exit] : [] });
+}
+
+// The Library's reading room (#716): gated on where the player is, one door
+// band, the way out.
+{
+  const { library } = world;
+  library.attachPlayer(outsidePlayer as never);
+  const [, exit] = library.doorBands();
+  outsidePlayer.position.set(LIBRARY_ORIGIN_X, 0, LIBRARY_ORIGIN_Z);
+  library.adoptRestoredPlayer();
+  spaces.push({ name: SPACE_LIBRARY, zones: library.interactZones(), bands: exit ? [exit] : [] });
 }
 
 let pairsChecked = 0;

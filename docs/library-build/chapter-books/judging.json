@@ -1,0 +1,106 @@
+{
+ "scores": [
+  {
+   "writer": 1,
+   "index": 0,
+   "title": "Duck, Sir Hopsalot!",
+   "score": 91,
+   "why": "The funniest book of the nine. 'DUCK!' / 'A duck? Where?' / BONK works as a real running gag (peering left, right and up, then 'Still no duck'), pays off with a rubber duck, and the loser's forfeit comes back as an argument made of compliments. The rival is real: he pushes in and calls her 'small yellow person'. His flaw is honest ignorance, and RiPika earns the win by slowing down to teach him. He ends up at the back of the queue. It is faithful to the Rail Race (hold to go, let go to duck, a bonk is a wobble that doesn't hurt, confetti at the finish). Pages run 28 to 34 words. Every model is already in PICTURE_MODELS, though the pictures of pets riding in carts need scale fixes."
+  },
+  {
+   "writer": 1,
+   "index": 1,
+   "title": "The Loudest Shush",
+   "score": 87,
+   "why": "A tight grump story that keeps building: song, then hum, then held in, then hiccupped notes, each met by a bigger SHHHH, until her biggest shush comes out as a yawn. 'I can hear you THINKING about humming' and the closing 'Shhh, Mrs Crumpet!' over a purr like a tractor will land. Trilla's singing and the ginger she-cat on her pile of books are both canon, and the story explains why the library cat is always asleep. It has the least adventure of the nine (one room). Two beats are muddled: who the song comes out of (p4), and going 'pinker' on a puff that is already pink (p6). Buildable today from PICTURE_MODELS plus primitives."
+  },
+  {
+   "writer": 1,
+   "index": 2,
+   "title": "Detective Biscuit",
+   "score": 84,
+   "why": "Lots of laughs: 'The thief is a pillow!', Biscuit eating his own traps, 'Ordinary teddies don't talk.' / 'Or rumble.', and half of his last biscuit. It also uses a lovely picture-book device: Chicken-looter bobs in plain sight on p4 while 'nobody looked up'. Fully buildable from current models, and the motive (chasing is playing) nods to Chicken-looter in Mayhem mode. But 'the thief only took sweet things' (p6) arrives with no clue behind it, and a star and a keyring are 'sweet' only as a pun. It shares its title and id with writer 3's book. Its lonely Chicken-looter would also contradict the scared-of-the-dark one in Catch That Chicken!"
+  },
+  {
+   "writer": 2,
+   "index": 0,
+   "title": "Biscuit and the Storm",
+   "score": 85,
+   "why": "The only adversary that isn't a creature: a scowling storm that turns out to be a hungry tummy. The deduction is a nice one, because his own tummy rumbles back. Big laughs: forty-two sandwiches as 'a little snack', the owl shushing the thunder, an inside-out umbrella, a burp that pops out a rainbow, and 41 sandwiches to 1. There is a real trek (out into the storm, up the lift to the castle roof, which is canon) and a warm, earned ending in which the greedy bear gives nearly everything away. Good park fit: candy floss in its three real flavours, the library, the fountain. It costs a new cloud model with a face, plus the owl and the cat."
+  },
+  {
+   "writer": 2,
+   "index": 1,
+   "title": "The Great Rail Race",
+   "score": 76,
+   "why": "Well made and nicely personal: 'you' are the racer, and you give up the lead. But it is the same shape as Sir Hopsalot with thinner jokes. The podium line and the DING-DONG horns are the best of them, and 'ears flapped like flags' isn't a joke. Zip's cart 'ran out of puff' because he held the button too long, which invents a rule the real Rail Race doesn't have (holding only accelerates) and would teach Eleri the wrong thing about a ride she plays. Zip needs createMini added to the picture models. The raceCart and duckBar pictures are otherwise right."
+  },
+  {
+   "writer": 2,
+   "index": 2,
+   "title": "Catch That Chicken!",
+   "score": 88,
+   "why": "The most adventurous book. It has a ticking clock, a jet-pack chase across the sunset (her pet's jet pack popping out is exactly how the game works), 'Shiny, shiny, MINE!', a feathery bottom poking out of a cloud, a nest holding 'for some reason, a biscuit' that he won't give back, and a surprise-egg finale in space with the waving alien. Chicken-looter's secret, that shiny things are his night-lights, leads to 'The dark isn't scary. It's where the stars live', the best bedtime turn on the shelf. It is the most expensive to picture (jet packs mounted on the kid and Trilla, the alien saucer, disco ball, egg, trees, a stand-in wheel). The golden star at the wheel's hub is invented."
+  },
+  {
+   "writer": 3,
+   "index": 0,
+   "title": "Detective Biscuit",
+   "score": 86,
+   "why": "The cleverest mystery. Biscuit's three clues describe Biscuit himself ('My feet aren't funny!' / 'They were, a bit.'), 'I can't shush a tummy!' lands, and 'I didn't TAKE it, I FOUND it' turns the trap back on the detective. Beautifully researched: the mini model's flat, wide feet make the pancake prints, its brows always look naughty, and 'a mini attack is really a hug, round your knees' redeems the leg-grabbers from Mayhem mode. One real hole: the mini only keeps lost things, but the balloon, keyring and bowl were taken from where their owners put them. 'keychain' and 'ice cream stall' are also not the park's British names. Needs createMini added to the picture models."
+  },
+  {
+   "writer": 3,
+   "index": 1,
+   "title": "Bumps in the Library",
+   "score": 84,
+   "why": "A library story that matches the game exactly: the owl shushes, whispers even her sneezes, holds story time and hands out library cards, and the cat has 'been asleep since last Christmas'. The glasses-on-her-head gag is drawn so the reader spots them first. The bookmark-and-library-card ending is properly earned, since folded corners were the crime. But the adversary is a shy mouse, so the conflict is a quiet mystery. It is also this writer's third plot that runs from footprints to a misunderstood culprit. It needs six new picture models plus the owl's glasses mesh moved, which no PictureActor field can do. Its forever-asleep cat contradicts the sleepless cat in The Loudest Shush."
+  },
+  {
+   "writer": 3,
+   "index": 2,
+   "title": "The Giant Footprints",
+   "score": 89,
+   "why": "A great build-up: dinner-plate prints round the fountain, 'a pea on a dinner plate', nibbled yellow flowers ('said RiPika, who was very yellow'), and the whole park in comic panic ('A GIANT HAMSTER!' from under a bench). Then brave RiPika makes a real deduction: the prints are close together, so it walks slowly, so it can't be scary. Grandpa Tock, 102, in the Tortoise Garden behind the snake-mouth door, is the game's own character. 'Took until lunchtime to say good morning' and 'Again! But slower, please.' are perfect. A warm, earned ending with the cat bus and the Rail Race. The catch: the tortoise model can't yet be posed from a picture (asleep, or head in shell)."
+  }
+ ],
+ "chosen": [
+  {
+   "writer": 1,
+   "index": 0,
+   "title": "Duck, Sir Hopsalot!",
+   "notes": "Text ships as written (28–34 words a page). Every model is already in PICTURE_MODELS; the fixes are all about position and scale. (1) A bare `cart` is built at RIDE_SCALE (2.5×, with the seat 2.4 m up), but `duckBar` is hung for `raceCart`'s park scale (bar centre about 2.7 m). Give both carts size 0.4 and seat RiPika and Sir Hopsalot at y ≈ 0.958 (SEAT_HEIGHT), or the bar cuts straight through them. (2) pose 'duck' only folds a raceCart's own rider, and pets are 1.46 m tall including ears. Sitting up, both of them already pass under the bar. So 'ducking' on p4, p5, p7 and p8 means sinking them into the tub with `at`, and on p4/p5 the gate must come down (negative y) until it really meets his ear tips. (3) Drop size 1.3 on the p7/p8 bar. Scaling the gate lifts the bar 30%, so it would hang above everyone and nobody would need to duck. Make it 'the biggest' by setting it nearer the camera instead. (4) His ears can't fold (the picture schema has no ear control), so p8 shows him sunk low with his ear tips just under the bar. Optional: p1 is all set-up; adding 'He even told the trees.' gives it a laugh at 35 words."
+  },
+  {
+   "writer": 3,
+   "index": 0,
+   "title": "Detective Biscuit",
+   "notes": "(1) Muddled beat. The mini's whole defence on p8 ('People lose things… I always look down') needs the three things to have been lost. But p1 and p2 have them taken from where their owners put them: a balloon tied to a bench, a keyring on your bag, a bowl put down 'for one tiny moment'. Make them genuinely lost. p1: 'On Monday, RiPika's spotty balloon came untied from a bench and vanished. On Tuesday, the strawberry keyring fell off your bag and vanished too. Somebody in the Land of Good Places was taking things!' (34 words). p2: 'On Wednesday, Biscuit left his breakfast bowl on a wall and forgot it, and it vanished, spoon and all! …' (34 words). Draw p2 beside the empty pink wall instead of the bench. (2) British English and the park's real names: 'keychain' becomes 'keyring' (p1, p8), and 'ice cream stall' becomes 'ice cream parlour' (p3). (3) Canon: in the game it is the minis who run up shouting 'MINI ATTACK!' and grab your legs. Make p9 the mini's own shout, so p10 reinterprets the real behaviour: '…They look naughty even when I'm asleep. When I run up shouting “MINI ATTACK!”, everybody runs away.' (33 words). (4) Pictures: add createMini to PICTURE_MODELS. setGrab is the mini's own method; pose armsUp gives roughly a full grab, but the 0.4 and 0.6 grabs need a new field. createPinkWall({ length }) already exists in props.ts. On p1 the reader's kid is dressed with whatever keyring she is wearing (dressKid), so 'nothing hanging from the bag' can't be guaranteed. Add a no-keyring option on the kid actor for that page."
+  },
+  {
+   "writer": 1,
+   "index": 1,
+   "title": "The Loudest Shush",
+   "notes": "Buildable today from PICTURE_MODELS plus primitives. (1) p4: 'Out came a song, all by itself' reads as if the book sang, but the picture has the song burst out of Trilla. Change it to 'Out of Trilla popped a song, all by itself.' (34 words). (2) p6: Trilla is already pastel pink (the puff's fur is blossomPink), and a picture can't recolour a pet. So 'went pink, then pinker, then the pinkest pink there is' can't be shown and reads oddly. Change it to 'until she puffed up round, then rounder, then the roundest puff there is' (32 words) and draw her at size about 1.3, a gag the picture can actually show. (3) p5: 'a bunny dropped her book'. The white bunny model is Sir Hopsalot, a 'he', in book 1, so make it 'a mouse dropped his book' and swap the model. (4) Keep the `kitten` as Mrs Crumpet on every page. The library's own createLibraryCat can only show asleep or happy (frown, sad and surprised all fall back to those), so it can't scowl, shush or yawn. Don't switch to it for the sleeping pages either, or she becomes two different cats. Her name becomes canon for the shelf, and Biscuit and the Storm reuses it."
+  },
+  {
+   "writer": 3,
+   "index": 2,
+   "title": "The Giant Footprints",
+   "notes": "(1) Pictures that can't be built yet. createTortoise exists, and Grandpa Tock (102, Tortoise Garden) is canon in REPTILE-HOUSE.md. But TortoiseHandle exposes only `shell`, update() and poke(): there is no setExpression, no head and no face. poke() followed by one update() can give the stretched neck on p9, but nothing can give asleep (p6), eyes half open (p7, p8) or head inside the shell (p10, the punchline). Expose `head` and `face` on the handle (a few lines in reptiles.ts), and give the new `tortoise` picture model a mood (blink sets face.scale.y to about 0.2) and a head-in/head-out pose. On p10 the cart goes at size 0.4, with Tock at about 0.7 in its tub. (2) p4 and p9: swap the kitten for the mouse, because the kitten is Mrs Crumpet on this shelf. Optionally make the bunny's cameo explicit: '‘A giant!’ squeaked Sir Hopsalot.' (32 words). (3) p9 has a 25-word sentence. Split it: 'Grandpa Tock rode on its roof, all the way to the Rail Race. Everyone who had hidden from the giant came out to wave.' (33 words)."
+  },
+  {
+   "writer": 2,
+   "index": 0,
+   "title": "Biscuit and the Storm",
+   "notes": "(1) The storm cloud is a character with four faces (frown, sad, surprised, happy) and a grey-to-white change, not a simple prop. Build it as a book-only model in reader/readerAssets.ts next to createStoryDragon (squashed spheres plus createBakedFace, with colour as a parameter) and add it to PICTURE_MODELS. (2) The owl is createLibraryOwl (libraryCreatures.ts, on feat/library-714-assets), not raw library.glb parts through libraryPart. Her faces are neutral, blink, happy and shush only, so 'sternly' on p4 is mood surprised, which shows her shush face. (3) p4's cat: the library cat sleeps on her pile of books, never on a cushion. Draw her exactly as The Loudest Shush does (kitten, blink, on the three-book pile) and name her: 'Mrs Crumpet never even woke up.' (33 words). (4) p10 picnic crowd: drop the kitten, or it reads as Mrs Crumpet awake at a picnic. (5) Candy floss is createCandyFloss with a FlossFlavour variant; 'pink', 'blue' and 'rainbow' all exist. (6) Convert the straight ' quotes to the shelf's curly dialogue quotes, because straight quotes collide with apostrophes such as RiPika's. The text otherwise ships as written."
+  },
+  {
+   "writer": 2,
+   "index": 2,
+   "title": "Catch That Chicken!",
+   "notes": "Text ships as written; the work is all in the pictures. (1) Don't use createFerrisWheelProp. It takes an AnchorDefinition and a CollisionWorld, seats its legs on terrainHeight and registers collision: it is a world ride, not a picture prop. Build the primitive stand-in (torus rim, cylinder spokes, a few car boxes), with the star bracket at the hub plainly empty on p1 and filled on p9. (2) Jet packs (p4–p6, p9): createJetpack exists, but nothing in the reader can wear one. The kid branch needs a 'wearing a jet pack' option, mounted the way entities/WornJetpack.ts does it. Trilla's is createJetpack(0.6), with setThrust(1) on p4. (3) p10: createAlienSaucer builds at scale 0.001 (it pops in through setPresence) and its hull is 5.2 m across. Call setPresence(1) and set it small and far back, or it either vanishes or the camera framing shrinks the riders to dots. Drop the optional gondola from p9 and p10; the cast is big enough. (4) New PICTURE_MODELS entries: jetpack, discoBall (createDiscoBall, in hotelAssets, which the reader already imports), lollipopTree, surpriseEgg (createSurpriseEgg takes a shell colour and a spot colour), alienSaucer. (5) The golden star at the hub and the eight o'clock climb are inventions; the real wheel climbs on every ride and lights up at night. That is fine as story licence, but a child may go looking for the star. (6) Convert the straight quotes to the shelf's curly style."
+  }
+ ],
+ "setNotes": "VARIETY. The six cover one rival race (Hopsalot), one grump (Shush), one storm (Storm), one trickster chase (Catch) and two mysteries (Detective, Footprints). Heroes: RiPika ×2, Biscuit ×2, Trilla, and you. Settings: Rail Race, library, picnic and castle roof, sky and hotel roof and space, the pink wall, the reptile house. The sameness to watch: every adversary turns out to be misunderstood. The reasons differ each time (rude only because nobody told him, sleepy, hungry, scared of the dark, judged by his eyebrows, just slow), so keep the outwitting beats where they exist: Biscuit's trap, and Trilla spotting the feathery bottom.\n\nSHELF ORDER:\n1. Duck, Sir Hopsalot! (the step up from the little shelf's 'Duck, Duck, Duck!')\n2. Detective Biscuit\n3. The Loudest Shush\n4. The Giant Footprints\n5. Biscuit and the Storm\n6. Catch That Chicken!\nThis keeps the two footprint mysteries and the two Biscuit-led books apart. Shush comes before Storm, so Mrs Crumpet is already the cat who sleeps through everything. The shelf ends on the bedtime one: 'The dark isn't scary. It's where the stars live.'\n\nSHARED CHARACTERS, ONE DRAWING EACH. The library cat is Mrs Crumpet, drawn as the `kitten` on her pile of books in both Shush and Storm. So no book uses the kitten model for any other cat: swap the kittens in Footprints p4/p9 and Storm p10 for the mouse. The white `bunny` reads as Sir Hopsalot ('he') everywhere: Shush p5's 'a bunny dropped her book' becomes a mouse, and Footprints p4 can make the cameo explicit. The owl is 'she' everywhere, and her faces are neutral, blink, happy and shush only. Chicken-looter appears once (writer 1's Detective Biscuit gave him a different backstory and a clashing title and id), and so does the mini. New names that become canon: Sir Hopsalot, Mrs Crumpet, Nimbus.\n\nREPEATS TO KEEP APART:\n- Shush jokes: Shush, the owl in Storm, Detective p5.\n- Biscuit's rumbling tummy: Detective p5, Storm p5/p10. It is his signature gag, but add no more.\n- Footprint clues: Detective, Footprints.\n- Two different golden stars: the bait-turned-badge in Detective, the wheel's star in Catch.\n- The fountain appears in three books, which is fine: it is the middle of the park.\n\nHOUSE STYLE. Normalise the dialogue quotes: writer 1 uses “ ”, writer 2 straight ', writer 3 ‘ ’. Use curly singles with doubles inside, never straight quotes. British names: keyring, ice cream parlour.\n\nWHAT THE SHELF NEEDS BUILT:\n- These pages break today's picture-book rules: BOOK_MAX_PAGES is 6 (check:book-reader), and GAME_DESIGN's BREVITY RULE allows one sentence of at most 50 characters a page (check:brevity). Give chapter books their own tier and limits (8–10 pages, 24–36 words a page), and write Jim's 14 October exception into the BREVITY RULE itself rather than loosening the little books' check.\n- The reader's portrait page (a square picture with one sentence under it) needs a layout for about 30 words at the TEXT RULE's minimum size, for example the picture on the left page and the words on the right.\n- The shelves need six more readable slots.\n- The Cute-o-dex prize is for 'all twelve'. Decide whether it becomes all eighteen.\n- New picture models, all from existing factories: createMini, createPinkWall, createTortoise (with head and face exposed), createLibraryOwl, a book-only storm cloud, createCandyFloss, a mounted createJetpack, createDiscoBall, createLollipopTree, createSurpriseEgg, createAlienSaucer. Each one also adds a warm-up step in pictureWarmSteps. Hopsalot and Shush need none."
+}

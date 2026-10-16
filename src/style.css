@@ -206,13 +206,18 @@ body {
    is mostly played on have no hover to show "you can press this" with, and a
    jump-scare's reflex window is exactly the moment that needs saying loudest.
    Added to this shared selector rather than a one-off rule of its own, same
-   as everything else in the HIGHLIGHT RULE block. */
+   as everything else in the HIGHLIGHT RULE block.
+
+   `[data-pad-focus='true']` is the same promise to a controller: the library
+   book reader (`BookReader.padFocus`) puts it on the page button a stick or
+   d-pad last pointed at — the one A will press — because `:focus-visible`
+   follows the browser's idea of the last input, and a gamepad is not one. */
 @supports (mask-composite: exclude) or (-webkit-mask-composite: xor) {
   :is(button, summary, a[href], [role='button']):not(
       :disabled,
       [aria-disabled='true'],
       [data-show='false']
-    ):is(:hover, :focus-visible, [data-jumpscare-active='true'])::after {
+    ):is(:hover, :focus-visible, [data-jumpscare-active='true'], [data-pad-focus='true'])::after {
     content: '';
     position: absolute;
     /* Just outside the button, so it reads as an outline around the thing
@@ -247,7 +252,7 @@ body {
       :disabled,
       [aria-disabled='true'],
       [data-show='false']
-    ):is(:hover, :focus-visible, [data-jumpscare-active='true']) {
+    ):is(:hover, :focus-visible, [data-jumpscare-active='true'], [data-pad-focus='true']) {
     outline: var(--lgp-highlight-width) solid var(--lgp-pink-deep);
     outline-offset: calc(var(--lgp-highlight-width) * 0.7);
   }
@@ -4945,4 +4950,145 @@ kbd {
 
 .park-unavailable-go {
   margin-top: 0.25rem;
+}
+
+/* ------------------------------------------------------- the book reader
+
+   The library's picture books (#717, `world/library/reader/BookReader.ts`).
+   The book itself is three.js, drawn over the paused park; everything here is
+   the part you press. Three real buttons, so the HIGHLIGHT RULE's rainbow,
+   pointer and tap flash come from the global rules above with nothing extra:
+   two transparent page-sized buttons laid exactly over the left and right
+   pages (positioned in px by the reader, from the pages' projected corners —
+   layout, not type, so the TEXT RULE's no-px rule does not apply), and one big
+   close button. */
+
+.book-reader {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.book-reader[data-open='false'] {
+  visibility: hidden;
+}
+
+/* Open, it swallows taps: the book is the whole screen, and a stray tap must
+   not reach the paused park behind it. */
+.book-reader[data-open='true'] {
+  pointer-events: auto;
+}
+
+.book-turn {
+  appearance: none;
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.9rem;
+  background: transparent;
+  color: var(--lgp-ink);
+  font-family: inherit;
+}
+
+.book-turn[data-show='false'] {
+  visibility: hidden;
+}
+
+/* One page at a time, the back button is just its round arrow, ringed round. */
+.book-reader[data-framing='page'] .book-turn--prev {
+  border-radius: 999px;
+}
+
+/* "Tap here": a big round arrow on the page's outer edge, half off the paper
+   so it never sits on a word. The reader pulls it in (`--book-arrow-overhang`,
+   px) when the page runs to the edge of the screen, so it is always whole,
+   and on a tall screen, one page at a time, it moves it into the band under
+   the page (`--book-arrow-lift`). It takes taps itself: half of it is outside
+   its button's box, and a tap on that half bubbles up to the button's own
+   click like any other child's. */
+.book-turn-arrow {
+  position: absolute;
+  bottom: var(--book-arrow-lift, 0.6rem);
+  display: grid;
+  place-items: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border: 0.1875rem solid #fff;
+  border-radius: 999px;
+  background: var(--lgp-pink);
+  box-shadow: var(--lgp-shadow);
+}
+
+/* The chevron: two thick ink strokes, round-ended, the house's chunky look. */
+.book-turn-arrow::before {
+  content: '';
+  width: 0.78rem;
+  height: 0.78rem;
+  border-top: 0.3rem solid var(--lgp-ink);
+  border-right: 0.3rem solid var(--lgp-ink);
+  border-radius: 0.15rem;
+}
+
+.book-turn--prev .book-turn-arrow {
+  left: calc(var(--book-arrow-overhang, 1.45rem) * -1);
+}
+
+.book-turn--prev .book-turn-arrow::before {
+  transform: translateX(0.12rem) rotate(-135deg);
+}
+
+.book-turn--next .book-turn-arrow {
+  right: calc(var(--book-arrow-overhang, 1.45rem) * -1);
+}
+
+.book-turn--next .book-turn-arrow::before {
+  transform: translateX(-0.12rem) rotate(45deg);
+}
+
+.book-close {
+  appearance: none;
+  position: absolute;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  right: calc(0.75rem + env(safe-area-inset-right));
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 999px;
+  border: 0.25rem solid #fff;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  color: var(--lgp-ink);
+  font-family: inherit;
+  font-size: var(--lgp-text-xl);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.book-close:active,
+.book-turn:active .book-turn-arrow {
+  transform: translateY(0.125rem);
+}
+
+/* A Cute-o-dex bookmark: a ribbon in the book's own cover colour with a
+   notched tail and a cream stripe. */
+.dex-bookmark {
+  display: block;
+  width: 1.5rem;
+  height: 2.3rem;
+  margin-bottom: 0.2rem;
+  background:
+    linear-gradient(90deg, transparent 38%, rgba(255, 246, 234, 0.85) 38% 62%, transparent 62%),
+    var(--book-colour, var(--lgp-pink));
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%);
+  filter: drop-shadow(0 0.125rem 0 rgba(74, 58, 82, 0.2));
+}
+
+/* Unread, it is the same crushed-out silhouette every other `???` card shows.
+   Its own rule, because the drop shadow above is a `filter` too and, coming
+   later at the same specificity, would otherwise replace `.dex-icon--hidden`'s
+   — leaving each unread ribbon in its real cover colour, which also gives away
+   which book is which. */
+.dex-bookmark.dex-icon--hidden {
+  filter: brightness(0) saturate(0) drop-shadow(0 0.125rem 0 rgba(74, 58, 82, 0.2));
 }

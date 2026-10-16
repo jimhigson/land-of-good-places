@@ -13,6 +13,7 @@ import {
   Vector3,
 } from 'three';
 import { glbCanvasTexture } from '../../art/style/glb';
+import { lineSeconds } from '../../ui/speechTiming';
 import { LiftAlcove } from '../lift/LiftAlcove';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
@@ -6656,18 +6657,6 @@ function paintGameBoyScreen(screen: Mesh): void {
     emissive: PALETTE.markerMint,
     emissiveIntensity: 0.5,
   });
-}
-
-/**
- * How long one spoken line stays on screen.
- *
- * Proportional to its length, because a four-word line held as long as a
- * twelve-word one reads as the game having stalled. Floored well above reading
- * speed: nobody in this family is reading these — a six-year-old is looking at
- * the shape of a speech bubble and waiting for the next one.
- */
-function lineSeconds(line: string): number {
-  return Math.min(3.8, Math.max(2.1, 1.5 + line.split(' ').length * 0.22));
 }
 
 /**
