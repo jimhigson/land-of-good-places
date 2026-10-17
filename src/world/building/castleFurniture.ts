@@ -971,18 +971,22 @@ export function greatHallSolids(deck: number): readonly HallSolid[] {
       // which reach 2.95 m from a table's middle against the table's 3.00.
       const halfZ = (Math.abs(last - first) + TABLE_HALF_LENGTH * 2) / 2;
       const z = (first + last) / 2;
-      // **Each strip to what is drawn on it** (17 Oct 2026): the table to its
-      // top, and either side of it, out to the outer face of the bench, the
-      // bench to its seat — the 0.45 m slot between them split down its
-      // middle, half to each, which she is too wide to stand in anyway. One
-      // block to the table's top stood her on air 0.30 m over every bench. The
-      // strips butt, so the run is the one solid it always was, with no pocket.
+      // **Each part to what is drawn on it** (17 Oct 2026): the whole run, out
+      // to the benches' outer faces, to the benches' seat, and the table over
+      // the middle of it to its top — the 0.45 m slot between them split down
+      // its middle, half to each, which she is too wide to stand in anyway.
+      // One block to the table's top stood her on air 0.30 m over every bench.
+      //
+      // **One block for the run, and the table inside it — not three strips
+      // butting.** Butting strips each push a body inside toward their own
+      // nearest face, so where two meet they push it at each other, and a body
+      // dropped on the table's axis stopped 0.71 m out with nowhere to go
+      // (`check:hall-solid`: the four-walls trap again, by another road). The
+      // run's block pushes everything inside it out of the run, and the table
+      // inside it pushes the same way wherever they overlap.
       const tableHalf = CASTLE_TABLE_HALF_WIDTH + DINER_TABLE_GAP / 2;
       solids.push({ kind: 'banquet table', x: rowX, z, halfX: tableHalf, halfZ, top: CASTLE_TABLE_TOP });
-      const benchHalf = (BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH - tableHalf) / 2;
-      for (const side of [-1, 1] as const) {
-        solids.push({ kind: 'banquet bench', x: rowX + side * (tableHalf + benchHalf), z, halfX: benchHalf, halfZ, top: CASTLE_BENCH_SEAT });
-      }
+      solids.push({ kind: 'banquet bench', x: rowX, z, halfX: BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH, halfZ, top: CASTLE_BENCH_SEAT });
     }
   }
 
