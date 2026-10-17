@@ -30,7 +30,8 @@ import { PLAZA } from './paths';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
-import type { OpenAreaPoint } from './dismount';
+import type { OpenAreaPoint, PutDownSpace } from './dismount';
+import type { LevelConnector } from './building/surfaces';
 import { castleFloorFor } from './building/floors';
 import { roomFor } from './hotel/layout';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
@@ -714,6 +715,36 @@ export class World implements GameSystem {
 
   private readonly openAreas = new Map<SpaceId, readonly OpenAreaPoint[]>();
 
+  /**
+   * **The declared ways between levels** — the lobby's sweeping stair and
+   * whatever else declares a connector (`WalkSurfaces.connectors`). One of the
+   * two things the route lattice is built from beyond the collision world, and
+   * the one owner of where they come from: `Game`'s router, the put-down rule's
+   * window of that lattice ({@link putDownSpace}) and the checks that build a
+   * router "as Game does" all read this.
+   */
+  readonly routeConnectors = (): readonly LevelConnector[] => this.building.surfaces.connectors;
+
+  /**
+   * **Over a railway bridge's deck or ramps?** (issue #116, Decision 8) — the
+   * other thing the route lattice is built from, with the same readers as
+   * {@link routeConnectors}.
+   */
+  readonly routeBridgeCovers = (x: number, z: number): boolean =>
+    this.train.bridges.some((bridge) => bridge.covers(x, z));
+
+  /**
+   * **What the put-down rule asks of the space she is put down in** — its open
+   * area ({@link openAreaAt}) and the router's own stairs and bridges. The one
+   * object every asker of the rule passes: `Player` (`attachPlayer`), the
+   * procgen facts and `check:exits`.
+   */
+  readonly putDownSpace: PutDownSpace = {
+    openArea: (x, z) => this.openAreaAt(x, z),
+    connectors: this.routeConnectors,
+    bridgeCovers: this.routeBridgeCovers,
+  };
+
   private openAreaOf(space: SpaceId): readonly OpenAreaPoint[] {
     if (space === SPACE_GARDEN) {
       const points: OpenAreaPoint[] = [{ x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z }];
@@ -813,8 +844,8 @@ export class World implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.labels.add(player.label);
-    // The open area her put-downs must reach — see `openAreaAt`.
-    player.openArea = (x, z) => this.openAreaAt(x, z);
+    // What her put-downs ask of the space — see `putDownSpace`.
+    player.putDownSpace = this.putDownSpace;
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.reptileHouse.attachPlayer(player);

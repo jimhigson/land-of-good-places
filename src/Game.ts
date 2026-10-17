@@ -407,10 +407,11 @@ export class Game {
       // The declared ways between levels — the lobby's sweeping stair, and
       // whatever the imperial rebuild declares after it. Read at lattice
       // build; see NavGrid's header and Decision 11.
-      () => this.world.building.surfaces.connectors,
+      this.world.routeConnectors,
       // Every railway bridge's deck and ramps (issue #116, Decision 8) — see
-      // NavGrid's own `bridgeCovers` header.
-      (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
+      // NavGrid's own `bridgeCovers` header. Both are `World`'s, which the
+      // put-down rule's window of this lattice reads too.
+      this.world.routeBridgeCovers,
     );
 
     // And the same map, handed to the parade — issues #602 and #605, the pets

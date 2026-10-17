@@ -73,7 +73,10 @@ import {
 // centre", and a hand-written `Math.hypot(x, y + R, z)` beside it would be the
 // second definition CLAUDE.md's "two definitions of one thing" names.
 import { Geo } from '../../src/world/geo/Geo.ts';
-import { resolveDismountGroup } from '../../src/world/dismount.ts';
+// Leaf module, safe to import statically: `dismountGroup.ts`'s only import is a
+// type. The put-down rule itself (`world/dismount.ts`) reaches `NavGrid` and the
+// park manifest, so it is asked through `facts.putDownPlayer` instead.
+import { resolveDismountGroup } from '../../src/world/dismountGroup.ts';
 // Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
 // a type-only one (from `world/train/crossings`), which erases — no seeded
 // module loads, so this cannot pin the park's seed the way this file's own

@@ -67,9 +67,8 @@ import { JUMP_APEX_HEIGHT, PLAYER_PUT_DOWN, Player } from '../src/entities/Playe
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
-import { putDownSpot, SEARCH_REACH, OPEN_FLOOR_REACH } from '../src/world/dismount.ts';
-import { NAV_CELL } from '../src/world/navLattice.ts';
-import { NavGrid } from '../src/world/NavGrid.ts';
+import { BARE_SPACE, PUT_DOWN_WINDOW_CELLS, putDownSpot, SEARCH_REACH } from '../src/world/dismount.ts';
+import { NAV_CELL, NavGrid } from '../src/world/NavGrid.ts';
 import { DAY_LENGTH_SECONDS, DAY_START_TIME, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   BREAKFAST,
@@ -167,7 +166,10 @@ const say = (line: string): void => {
   {
     const collision = world();
     sealedRing(collision, 0, 0, 1.6);
-    const spot = putDownSpot(collision, flat, { x: 0, y: 0, z: 0 }, PLAYER_PUT_DOWN, [{ x: 0.2, z: -0.1 }]);
+    const spot = putDownSpot(collision, flat, { x: 0, y: 0, z: 0 }, PLAYER_PUT_DOWN, {
+      ...BARE_SPACE,
+      openArea: () => [{ x: 0.2, z: -0.1 }],
+    });
     if (!spot.found || spot.moved !== 0) {
       fail(`rule (d) open area honoured: a walled spot holding an open-area point was moved ${spot.moved.toFixed(2)} m`);
     }
@@ -186,16 +188,16 @@ const say = (line: string): void => {
     }
   }
 
-  // (f) The cost bound: one window of the router's cells, however bad the search.
+  // (f) The cost bound: one window of the router's lattice, however bad the
+  // search — the window's size is the rule's own (`PUT_DOWN_WINDOW_CELLS`).
   {
     const collision = world();
     for (let i = -4; i <= 4; i += 1) collision.addWall(-9, i * 2, 9, i * 2 + 0.6, 0.1); // a maze of near-misses
     const t0 = performance.now();
     const spot = putDownSpot(collision, flat, { x: 0.1, y: 0, z: 0.3 }, PLAYER_PUT_DOWN);
     const ms = performance.now() - t0;
-    const windowCells = (2 * Math.ceil((SEARCH_REACH + OPEN_FLOOR_REACH) / NAV_CELL) + 3) ** 2;
-    if (spot.cells > windowCells) fail(`rule (f) cost: ${spot.cells} cells classified, over the window's ${windowCells}`);
-    notes.push(`rule (f) cost bound: ${spot.cells} of at most ${windowCells} cells, ${ms.toFixed(1)} ms`);
+    if (spot.cells > PUT_DOWN_WINDOW_CELLS) fail(`rule (f) cost: ${spot.cells} cells built, over the window's ${PUT_DOWN_WINDOW_CELLS}`);
+    notes.push(`rule (f) cost bound: ${spot.cells} of at most ${PUT_DOWN_WINDOW_CELLS} cells, ${ms.toFixed(1)} ms`);
   }
 }
 
@@ -284,13 +286,11 @@ function tick(seconds: number, input = still): void {
 // ------------------------------------------------------------------ 2. the instrument
 
 /** The router, exactly as `Game` builds it — following the play bounds of the space she is in. */
-const router = new NavGrid(
-  collision,
-  PLAYER_RADIUS,
-  JUMP_APEX_HEIGHT,
-  () => world.building.surfaces.connectors,
-  (x, z) => world.train.bridges.some((bridge) => bridge.covers(x, z)),
-);
+const router = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers);
+/** The rule, asked for a spot exactly as `Player` asks it. */
+function putDownAt(x: number, y: number, z: number): ReturnType<typeof putDownSpot> {
+  return putDownSpot(collision, sample, { x, y, z }, PLAYER_PUT_DOWN, world.putDownSpace);
+}
 /** The space's way out: its open area's first point — the arrival a door or lift lands her on. */
 function wayOut(x: number, z: number): { x: number; z: number } | null {
   return world.openAreaAt(x, z)[0] ?? null;
@@ -405,6 +405,82 @@ function settle(): void {
   for (const wall of walls) collision.removeWall(wall);
   notes.push(`instrument controls: way out → out=${atDoor.out}; walled pocket → out=${inPocket.out}`);
 }
+
+// ------------------------------------------------------------------ 2b. the rule agrees with the router
+
+/**
+ * **Wherever the router can walk her out of, the rule leaves her exactly as
+ * asked.** The rule's clause 4 claims to be the router's own answer to "can she
+ * walk out of here?", and this holds it to that across a sample of real points
+ * in every space — every cell of every railway bridge's deck and ramps, every
+ * point of every declared stair, and a stride of every space's cells at each
+ * of their top surfaces (the lobby's gallery, the castle's decks). A point is
+ * in the sample when the router could stand there (`canStandAt`), her body is
+ * clear there by the resolver's own test, the soft boundary leaves her alone,
+ * and the router's flood from the space's way out reaches it. Every one of
+ * those must come back from the rule unmoved.
+ */
+const TOP = 500;
+const AGREE_STRIDE = 3;
+let agreeAsked = 0;
+const agreeMoved: string[] = [];
+const agreeBySpace: string[] = [];
+for (const visit of SPACES) {
+  settle();
+  visit.enter();
+  tick(0.3);
+  const door = wayOut(player.position.x, player.position.z);
+  if (!door) continue;
+  const doorY = sample(door.x, door.z, player.position.y + 3);
+  const fromDoor = router.floodFrom(door.x, door.z, doorY, sample);
+  if (!fromDoor) {
+    fail(`router agreement: no flood from ${visit.name}'s way out — the clause cannot ask anything there`);
+    continue;
+  }
+  const points: { x: number; y: number; z: number; what: string }[] = [];
+  let column = 0;
+  router.forEachCellCentre(sample, (x, z, blocked) => {
+    column += 1;
+    if (blocked || spaceAt(x, z) !== visit.space) return;
+    const onBridge = world.routeBridgeCovers(x, z);
+    const strided = Math.round(x / NAV_CELL) % AGREE_STRIDE === 0 && Math.round(z / NAV_CELL) % AGREE_STRIDE === 0;
+    if (visit.space === SPACE_GARDEN ? !onBridge : !strided) return;
+    points.push({ x, y: sample(x, z, TOP), z, what: onBridge ? 'a bridge' : 'a top surface' });
+  });
+  for (const connector of world.routeConnectors()) {
+    for (const point of connector.points) {
+      if (spaceAt(point.x, point.z) === visit.space) points.push({ x: point.x, y: point.y, z: point.z, what: 'a stair' });
+    }
+  }
+  let asked = 0;
+  let moved = 0;
+  for (const point of points) {
+    if (!router.canStandAt(point.x, point.z, point.y, sample)) continue;
+    if (!collision.clearOfBoundary(point.x, point.z, PLAYER_RADIUS)) continue;
+    if (collision.deepestSolidOverlap(new Vector3(point.x, point.y, point.z), PLAYER_RADIUS, 0) > 1e-3) continue;
+    if (!fromDoor.has(point.x, point.z, point.y)) continue;
+    asked += 1;
+    const spot = putDownAt(point.x, point.y, point.z);
+    if (spot.moved > 0 || !spot.found) {
+      moved += 1;
+      agreeMoved.push(
+        `${visit.name}, ${point.what} at (${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)}): ` +
+          `moved ${spot.moved.toFixed(2)} m to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})${spot.found ? '' : ', found nothing'}`,
+      );
+    }
+  }
+  agreeAsked += asked;
+  agreeBySpace.push(`${visit.name}: ${asked} points the router walks out of, ${moved} moved`);
+}
+if (agreeAsked < 200) fail(`router agreement: only ${agreeAsked} points asked — too few to mean anything`);
+if (agreeMoved.length > 0) {
+  fail(
+    `router agreement: the rule moved ${agreeMoved.length} of ${agreeAsked} points the router walks her out of exactly as given:\n      ` +
+      agreeMoved.slice(0, 12).join('\n      ') +
+      (agreeMoved.length > 12 ? `\n      … and ${agreeMoved.length - 12} more` : ''),
+  );
+}
+notes.push(`router agreement: ${agreeAsked} points, ${agreeMoved.length} moved — ${agreeBySpace.join('; ')}`);
 
 // ------------------------------------------------------------------ 3. the source
 
@@ -1015,6 +1091,7 @@ for (const key of Object.keys(NOT_DRIVEN)) {
 const moved = exits.filter((exit) => exit.moved > 0);
 say(`check:exits — the rule's own clauses:\n  ${notes.filter((note) => note.startsWith('rule')).join('\n  ')}`);
 say(`check:exits — ${notes.find((note) => note.startsWith('instrument')) ?? 'instrument controls: NOT RUN'}`);
+say(`check:exits — ${notes.find((note) => note.startsWith('router agreement')) ?? 'router agreement: NOT RUN'}`);
 say(
   `check:exits — ${sites.size} placement call sites in src/ outside Player.ts (endRide/teleportTo/teleport/beginRide), ` +
     `${covered.length} driven here, ${undriven.length} not:\n  ` +
@@ -1029,7 +1106,7 @@ say(
 );
 say(`check:exits — arrivals:\n  ${arrivals.join('\n  ')}`);
 say(`check:exits — Next day:\n  ${nextDays.join('\n  ')}`);
-for (const note of notes.filter((note) => !note.startsWith('rule') && !note.startsWith('instrument'))) say(`  note: ${note}`);
+for (const note of notes.filter((note) => !note.startsWith('rule') && !note.startsWith('instrument') && !note.startsWith('router agreement'))) say(`  note: ${note}`);
 if (problems.length > 0) {
   for (const problem of problems) console.error(`  ✗ ${problem}`);
   console.error(`check:exits FAILED — ${problems.length} problem(s)`);

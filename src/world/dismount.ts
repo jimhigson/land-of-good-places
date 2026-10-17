@@ -1,9 +1,10 @@
 import { Vector3 } from 'three';
 import type { CollisionWorld } from './Collision';
 import type { GroundSampler } from '../entities/Player';
+import type { LevelConnector } from './building/surfaces';
 import { BUILDING_STEP_UP } from '../core/constants';
-import { NAV_CELL, navLatticeFrame } from './navLattice';
-import { carryReference, withinStep } from './building/stepReach';
+import { NAV_CELL, NavGrid, type ReachSet } from './NavGrid';
+import { withinStep } from './building/stepReach';
 
 /**
  * **Where she may be put down — the one owner, for every way the game places
@@ -43,27 +44,29 @@ import { carryReference, withinStep } from './building/stepReach';
  *    within a step of it, so she is never put over a void or onto a deck;
  * 3. **clear** — a child's body there, at that floor's height, overlaps nothing
  *    solid by the resolver's own rule (`deepestSolidOverlap`); and
- * 4. **connected to the space's open area** — a bounded flood over the
- *    router's own player-sized cells reaches its arrival, its way out or a
- *    designed stand spot, or is too big to be a pocket ({@link OpenFloor}).
- *    This is the clause the café needed: the strip was clear floor, perfectly
- *    supported, and a dead end.
+ * 4. **connected to the space's open area** — the router's own flood, from
+ *    there, reaches its arrival, its way out or a designed stand spot, or floor
+ *    too far off to be a pocket ({@link OpenFloor}). This is the clause the café
+ *    needed: the strip was clear floor, perfectly supported, and a dead end.
  *
  * The spot asked for is tried first, and **handed back unchanged when it
  * passes** — every exit and arrival that was already sound puts her exactly
  * where it always did. Otherwise rings of {@link RING_STEP} around it, out to
  * {@link SEARCH_REACH}, nearest first, and the first spot that passes all four.
  *
- * ## The flood is the checks' flood
+ * ## Clause 4 is the router's answer
  *
- * Clause 4 floods in the cells `NavGrid` builds its lattice in
- * (`navLattice.ts`), classified by the rule `NavGrid` stamps them by
- * (`Collision.ts`'s `routeStamp`), stepped by the walk's own reach
- * (`stepReach.ts`) — so "open" here is what the router a child taps with can
- * walk out of, and `check:exits`, which floods the whole space with `NavGrid`
- * itself, measures the same thing at a larger scale. It is bounded so it fits in
- * a frame: a whole-park lattice costs 524 ms to build (measured 17 Oct 2026),
- * and one put-down here classifies at most one window of 1,849 cells.
+ * "Can she walk out of here?" is asked of the router a child taps with — not a
+ * model of it. {@link NavGrid.around} builds `NavGrid`'s own lattice over a
+ * small window of the space round the exit: the very cells `Game`'s router lays
+ * over it, stamped, banded, bridge-exempted, levelled and joined by stairs by
+ * the same code from the same inputs ({@link PutDownSpace}), and `floodFrom`
+ * floods it by the router's own start rule, steps, hops and corners. So a spot
+ * the router walks her out of is a spot this leaves exactly where it is — which
+ * `check:exits` holds it to across every bridge, stair, deck and room of the
+ * park — and the window is what keeps it to a frame or two: the whole park's
+ * lattice costs 524 ms to build (measured 17 Oct 2026), and one put-down builds
+ * at most {@link PUT_DOWN_WINDOW_CELLS} cells.
  */
 
 /**
@@ -97,7 +100,7 @@ export interface PutDown {
   readonly moved: number;
   /** False when nothing within reach passed — she is put at the exit regardless, loudly. */
   readonly found: boolean;
-  /** Router cells this put-down classified — its cost. */
+  /** Router cells this put-down built to ask clause 4 — its cost; 0 when no spot got that far. */
   readonly cells: number;
 }
 
@@ -116,20 +119,25 @@ const RING_STEP = 0.25;
 export const OPEN_FLOOR_REACH = 6;
 
 /**
- * Half the side of the one window of the router's cells a put-down works in,
- * metres: the search's reach plus the flood's, so that every candidate the
- * search tries has a full {@link OPEN_FLOOR_REACH} of window around it.
+ * **The window of the router's lattice the exit itself is asked in**, in cells
+ * either side of the exit's own: the flood's reach and one cell more. Enough to
+ * answer the exit exactly — a flood that reaches its edge has reached floor
+ * {@link OPEN_FLOOR_REACH} away — and the exit is all most put-downs ever ask.
  */
-const WINDOW_REACH = SEARCH_REACH + OPEN_FLOOR_REACH;
+const EXIT_WINDOW_HALF = Math.ceil(OPEN_FLOOR_REACH / NAV_CELL) + 1;
+
+/**
+ * **The window the search's spots are asked in**, when the exit does not pass:
+ * the search's reach plus the flood's, and one cell more, so that every spot it
+ * tries has a full {@link OPEN_FLOOR_REACH} of the router's lattice round it.
+ */
+const SEARCH_WINDOW_HALF = Math.ceil((SEARCH_REACH + OPEN_FLOOR_REACH) / NAV_CELL) + 1;
+
+/** The most cells one put-down ever builds: both windows. */
+export const PUT_DOWN_WINDOW_CELLS = (2 * EXIT_WINDOW_HALF + 1) ** 2 + (2 * SEARCH_WINDOW_HALF + 1) ** 2;
 
 /** Overlap that still counts as clear: float noise, an ordinary resolve's exact contact. */
 const CLEAR_TOLERANCE = 1e-3;
-
-/** Two surfaces in one cell closer than this are one level, asked twice. */
-const LEVEL_EPSILON = 0.05;
-
-/** Feet heights within this of each other ask a cell for its surface once, metres. */
-const SURFACE_BUCKET = 0.05;
 
 /**
  * **A point of a space's open area** — where the space's own design says a
@@ -143,10 +151,38 @@ export interface OpenAreaPoint {
 }
 
 /**
- * The body being put down: her radius, and the apex of her hop — so the flood
- * crosses the low walls she hops without being asked, exactly as the router
- * does. Passed in rather than imported: `Player` owns `JUMP_APEX_HEIGHT`, and
- * `Player` imports this file.
+ * **What the rule asks of the space she is put down in**, beyond its collision
+ * world and its floor — one object, `World.putDownSpace`, handed to `Player`,
+ * to the procgen facts and to the checks alike, so nothing asks the rule a
+ * second way:
+ *
+ * - the space's **open area** round a point ({@link OpenAreaPoint});
+ * - the router's two inputs beyond the collision world — the declared ways
+ *   between levels, and every railway bridge's deck — the same two `Game`
+ *   builds its router with (`World.routeConnectors`, `World.routeBridgeCovers`).
+ */
+export interface PutDownSpace {
+  readonly openArea: (x: number, z: number) => readonly OpenAreaPoint[];
+  readonly connectors: () => readonly LevelConnector[];
+  readonly bridgeCovers: (x: number, z: number) => boolean;
+}
+
+/**
+ * Nothing beyond the collision world — no open area, no stairs, no bridges:
+ * `NavGrid`'s own defaults, for a world built without a park (the rule's own
+ * clauses in `check:exits`).
+ */
+export const BARE_SPACE: PutDownSpace = {
+  openArea: () => [],
+  connectors: () => [],
+  bridgeCovers: () => false,
+};
+
+/**
+ * The body being put down: her radius, and the apex of her hop — the two
+ * numbers the router is built for her with (`Game`'s `NavGrid`), so the window
+ * of its lattice is hers. Passed in rather than imported: `Player` owns
+ * `JUMP_APEX_HEIGHT`, and `Player` imports this file.
  */
 export interface PutDownMover {
   readonly radius: number;
@@ -187,28 +223,28 @@ const SAME_FLOOR = 0.05;
 
 /**
  * **The one rule** — see this file's header. `collision` and `sample` are the
- * two authorities her own walking obeys, and `openArea` the space's own points
- * a flood may reach: `Player` passes its own three.
+ * two authorities her own walking obeys, and `space` the rest of what the
+ * router is built from, with the open area a flood may reach: `Player` passes
+ * its own.
  *
- * Bounded: one put-down classifies at most the cells of one window — `(2 ·
- * ⌈WINDOW_REACH / NAV_CELL⌉ + 3)²`, 1,849 router cells — each one scan of the
- * few colliders near the exit and, if walkable, one sample per floor it is
- * stepped onto from, because every flood the search runs shares the window's
- * cells and the regions already found in it, and a flood stops the moment it
- * knows its floor is open. Measured by `check:exits` over the 541 put-downs it
- * drives on seed 5 (17 Oct 2026): 1.8–2.0 ms on average, never more than 360
- * cells, the slowest under 15 ms — it prints the cost on every run.
+ * Bounded: one put-down builds at most two windows of the router's lattice,
+ * {@link PUT_DOWN_WINDOW_CELLS} cells in all, each once — see {@link OpenFloor};
+ * every flood after that is a flood of a window already built, and a spot in a
+ * region already flooded is answered from it. `check:exits` prints the cost of
+ * every put-down it drives.
  */
 export function putDownSpot(
   collision: CollisionWorld,
   sample: GroundSampler,
   exit: RideExit,
   mover: PutDownMover,
-  openArea: readonly OpenAreaPoint[] = [],
+  space: PutDownSpace = BARE_SPACE,
 ): PutDown {
   const { floor: exitFloor, lift } = floorOf(sample, exit);
-  const solids = collision.near(exit.x, exit.z, WINDOW_REACH + mover.radius + 2 * NAV_CELL);
-  const floor = new OpenFloor(collision, solids, sample, exit.x, exit.z, mover, openArea);
+  // Clause 3 is asked of every spot the search tries; the solids it could
+  // touch are the ones within her reach of the farthest of them.
+  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + mover.radius + NAV_CELL);
+  const floor = new OpenFloor(collision, sample, exit, mover, space);
   const probe = new Vector3();
 
   const accept = (x: number, z: number): PutDown | null => {
@@ -221,7 +257,7 @@ export function putDownSpot(
     probe.set(x, Math.min(surface, exitFloor), z);
     if (solids.deepestSolidOverlap(probe, mover.radius, 0) > CLEAR_TOLERANCE) return null;
     if (!floor.isOpen(x, surface, z)) return null;
-    return { x, z, y: surface + lift, floor: surface, moved: Math.hypot(x - exit.x, z - exit.z), found: true, cells: floor.cellsClassified };
+    return { x, z, y: surface + lift, floor: surface, moved: Math.hypot(x - exit.x, z - exit.z), found: true, cells: floor.cells };
   };
 
   const here = accept(exit.x, exit.z);
@@ -242,352 +278,120 @@ export function putDownSpot(
     `dismount: no clear, open spot within ${SEARCH_REACH} m of ` +
       `(${exit.x.toFixed(2)}, ${exit.y.toFixed(2)}, ${exit.z.toFixed(2)})`,
   );
-  return { x: exit.x, z: exit.z, y: exit.y, floor: exitFloor, moved: 0, found: false, cells: floor.cellsClassified };
+  return { x: exit.x, z: exit.z, y: exit.y, floor: exitFloor, moved: 0, found: false, cells: floor.cells };
 }
 
 /**
- * **Is the floor at a spot connected to the space's open area?** — clause 4 of
- * the rule, the question a pocket fails, asked in **the router's own cells**:
- * `navLattice.ts`'s frame for the space's current play bounds, so these are
- * exactly the cell centres `NavGrid` lays over the space. That matters more than
- * it looks: a lattice centred on the spot itself sees squeezes the router's does
- * not, and the first version of this rule, so centred, stood a child up from
- * the lobby café's middle chair on an island south of the tables that a stick
- * could wriggle out of and a tap never could (probe 31's 1.5 m² island).
+ * **Clause 4: can she walk out of here?** — asked of the router itself.
  *
- * One window of those cells, {@link WINDOW_REACH} round the exit, built lazily
- * and shared by every flood of one put-down:
+ * A window of `NavGrid`'s own lattice round the exit ({@link NavGrid.around}),
+ * built from the same inputs `Game`'s router is ({@link PutDownSpace}), and
+ * flooded by the router's own `floodFrom` — its start rule (from the nearest
+ * free cell when hers is stamped, as `findRoute` starts), its steps, hops,
+ * corners and stairs. A spot is open when that flood reaches a cell beside a
+ * point of the space's open area, or one {@link OPEN_FLOOR_REACH} from the
+ * spot: no pocket is that big.
  *
- * - a **cell** is blocked when a body of the mover's radius at its centre is
- *   not clear of the play boundary, or overlaps any collider the router stamps
- *   (`Collision.ts`'s `routeStamp`, the one rule `NavGrid` stamps its own
- *   lattice by): height-blind, so the top of a table is no more a road out than
- *   its legs, and the walls she hops left open;
- * - a **node** is a walkable cell at one level, its surface asked of the
- *   sampler from the height of the foot stepping onto it (`carryReference`, as
- *   her own walk asks); nodes join when the step is within her reach
- *   (`withinStep`, up or down, as `NavGrid` holds a route to it), and a diagonal
- *   only when both straight cells beside it are walkable — the router's
- *   no-corner-cutting rule;
- * - a **region** is every node one flood reaches. It is **open** when it holds a
- *   cell beside a point of the space's open area, or reaches
- *   {@link OPEN_FLOOR_REACH} from where the flood began — no pocket is that big.
- *   Otherwise it is a pocket, flooded whole. Every later spot in a labelled
- *   region is answered from the label.
+ * Two windows, each built lazily, at most once per put-down: the exit is asked
+ * in one just big enough to answer it ({@link EXIT_WINDOW_HALF}), and only when
+ * the search goes looking are its spots asked in one big enough for every spot
+ * it tries ({@link SEARCH_WINDOW_HALF}). Both answer exactly: a flood that
+ * reaches a window's edge has reached floor {@link OPEN_FLOOR_REACH} away.
+ * Every flood is kept, and a later spot in a region already flooded is
+ * answered from that region rather than flooded again.
  */
 class OpenFloor {
-  /** How many cells this window has classified — the cost of one put-down. */
-  cellsClassified = 0;
+  /** Cells of the router's lattice this put-down built — its cost. */
+  cells = 0;
 
   private readonly collision: CollisionWorld;
-  private readonly solids: CollisionWorld;
   private readonly sample: GroundSampler;
+  private readonly exit: RideExit;
   private readonly mover: PutDownMover;
-  private readonly originX: number;
-  private readonly originZ: number;
-  /** Global lattice indices of window cell (0, 0). */
-  private readonly baseI: number;
-  private readonly baseJ: number;
-  private readonly side: number;
-  /** 0 not yet asked, 1 walkable, 2 blocked. Height-blind, like the router's. */
-  private readonly blocked: Uint8Array;
-  /** 1 where the cell is beside a point of the open area. */
-  private readonly anchor: Uint8Array;
-  /** Each cell's levels found so far, and the region each belongs to (-1: not flooded yet). */
-  private readonly levels: { y: number; region: number }[][];
-  /**
-   * Each cell's surface as asked from a given height — `[reference bucket,
-   * surface, …]` — so a cell stepped onto from eight neighbours on one floor
-   * asks the sampler once, not eight times (the sampler is the flood's whole
-   * cost: 3.9 µs a call over the hotel's 222 plates, measured 17 Oct 2026).
-   */
-  private readonly surfaces: number[][];
-  /** Whether each region found is open. */
-  private readonly regionOpen: boolean[] = [];
+  private readonly space: PutDownSpace;
+  private readonly windows = new Map<number, { readonly router: NavGrid; readonly regions: Region[] }>();
+  private anchors: readonly OpenAreaPoint[] | null = null;
 
-  constructor(
-    collision: CollisionWorld,
-    solids: CollisionWorld,
-    sample: GroundSampler,
-    centreX: number,
-    centreZ: number,
-    mover: PutDownMover,
-    openArea: readonly OpenAreaPoint[],
-  ) {
+  constructor(collision: CollisionWorld, sample: GroundSampler, exit: RideExit, mover: PutDownMover, space: PutDownSpace) {
     this.collision = collision;
-    this.solids = solids;
     this.sample = sample;
+    this.exit = exit;
     this.mover = mover;
-    const frame = navLatticeFrame(collision.playBounds.extent);
-    this.originX = frame.originX;
-    this.originZ = frame.originZ;
-    const half = Math.ceil(WINDOW_REACH / NAV_CELL) + 1;
-    this.side = half * 2 + 1;
-    this.baseI = Math.round((centreX - frame.originX) / NAV_CELL) - half;
-    this.baseJ = Math.round((centreZ - frame.originZ) / NAV_CELL) - half;
-    this.blocked = new Uint8Array(this.side * this.side);
-    this.anchor = new Uint8Array(this.side * this.side);
-    this.levels = Array.from({ length: this.side * this.side }, () => []);
-    this.surfaces = Array.from({ length: this.side * this.side }, () => []);
-    for (const point of openArea) {
-      const i = Math.round((point.x - frame.originX) / NAV_CELL) - this.baseI;
-      const j = Math.round((point.z - frame.originZ) / NAV_CELL) - this.baseJ;
+    this.space = space;
+  }
+
+  /** Is the floor at `(x, floor, z)` one the router walks her out of? See the class. */
+  isOpen(x: number, floor: number, z: number): boolean {
+    // In another space altogether, as far as the play bounds go: the router has
+    // no lattice there and nothing to say, as the soft boundary has no push.
+    if (this.collision.inAnotherSpace(x, z)) return true;
+    const atExit = x === this.exit.x && z === this.exit.z;
+    const window = this.window(atExit ? EXIT_WINDOW_HALF : SEARCH_WINDOW_HALF);
+    for (const region of window.regions) {
+      if (region.reach.has(x, z, floor)) return region.openFrom(x, z);
+    }
+    const reach = window.router.floodFrom(x, z, floor, this.sample);
+    // Nowhere the router could start her within its own reach: shut in.
+    if (!reach) return false;
+    const region = new Region(reach, this.openArea());
+    window.regions.push(region);
+    return region.openFrom(x, z);
+  }
+
+  /** The window of `half` cells round the exit, built on first asking. */
+  private window(half: number): { readonly router: NavGrid; readonly regions: Region[] } {
+    let window = this.windows.get(half);
+    if (!window) {
+      const { exit, mover, space } = this;
+      const router = NavGrid.around(this.collision, mover.radius, mover.hopApex, space.connectors, space.bridgeCovers, exit.x, exit.z, half);
+      window = { router, regions: [] };
+      this.windows.set(half, window);
+      this.cells += (2 * half + 1) ** 2;
+    }
+    return window;
+  }
+
+  private openArea(): readonly OpenAreaPoint[] {
+    this.anchors ??= this.space.openArea(this.exit.x, this.exit.z);
+    return this.anchors;
+  }
+}
+
+/** One flood of the window: every cell it reached, and whether one is beside the open area. */
+class Region {
+  readonly reach: ReachSet;
+  private readonly cellX: number[] = [];
+  private readonly cellZ: number[] = [];
+  private readonly holdsOpenArea: boolean;
+
+  constructor(reach: ReachSet, anchors: readonly OpenAreaPoint[]) {
+    this.reach = reach;
+    let holds = false;
+    reach.forEachCell((x, z) => {
+      this.cellX.push(x);
+      this.cellZ.push(z);
       // Its own cell and the eight beside it: a stand spot drawn against a
       // counter may have its own cell's centre inside the counter's stamp.
-      for (let dj = -1; dj <= 1; dj += 1) {
-        for (let di = -1; di <= 1; di += 1) {
-          const ni = i + di;
-          const nj = j + dj;
-          if (ni >= 0 && nj >= 0 && ni < this.side && nj < this.side) this.anchor[nj * this.side + ni] = 1;
-        }
+      if (!holds && anchors.some((point) => Math.abs(point.x - x) <= ANCHOR_REACH && Math.abs(point.z - z) <= ANCHOR_REACH)) {
+        holds = true;
       }
-    }
+    });
+    this.holdsOpenArea = holds;
   }
 
-  /** Is the floor at `(x, floor, z)` connected to the open area? See the class. */
-  isOpen(x: number, floor: number, z: number): boolean {
-    const home = this.cellOf(x, z);
-    if (home < 0) return true; // off the window: the search never asks this far out
-    // Where the router would start her: her own cell, or the nearest free one
-    // beside it when her own cell's centre is in something (its `findRoute`).
-    let start = -1;
-    let startLevel = 0;
-    let best = Infinity;
-    const homeI = home % this.side;
-    const homeJ = (home - homeI) / this.side;
-    for (let k = -1; k < 8; k += 1) {
-      const i = homeI + (k < 0 ? 0 : NEIGHBOUR_I[k]!);
-      const j = homeJ + (k < 0 ? 0 : NEIGHBOUR_J[k]!);
-      if (i < 0 || j < 0 || i >= this.side || j >= this.side) continue;
-      const cell = j * this.side + i;
-      if (!this.walkable(cell)) continue;
-      const level = this.levelIndex(cell, x, floor, z);
-      if (level < 0) continue;
-      const distance = Math.hypot(this.cellX(cell) - x, this.cellZ(cell) - z);
-      if (k < 0) {
-        start = cell;
-        startLevel = level;
-        break;
-      }
-      if (distance < best) {
-        best = distance;
-        start = cell;
-        startLevel = level;
-      }
+  /** Open as seen from `(x, z)`: it holds the open area, or floor {@link OPEN_FLOOR_REACH} away. */
+  openFrom(x: number, z: number): boolean {
+    if (this.holdsOpenArea) return true;
+    const far = OPEN_FLOOR_REACH * OPEN_FLOOR_REACH;
+    for (let i = 0; i < this.cellX.length; i += 1) {
+      const dx = this.cellX[i]! - x;
+      const dz = this.cellZ[i]! - z;
+      if (dx * dx + dz * dz >= far) return true;
     }
-    if (start < 0) return false;
-    const node = this.levels[start]![startLevel]!;
-    if (node.region < 0) this.flood(start, startLevel);
-    return this.regionOpen[node.region] ?? false;
-  }
-
-  /**
-   * Floods one region from a node and labels every node it reaches — and stops
-   * the moment the region is known to be open: a cell beside the open area, or
-   * one {@link OPEN_FLOOR_REACH} from where the flood began. A pocket is small,
-   * so it is always flooded whole; open floor is answered in a few hundred
-   * cells. (The rest of an open region stays unlabelled; a later spot there
-   * floods again, and finds the same.)
-   */
-  private flood(startCell: number, startLevel: number): void {
-    const region = this.regionOpen.length;
-    let open = false;
-    const startX = this.cellX(startCell);
-    const startZ = this.cellZ(startCell);
-    const reachSquared = OPEN_FLOOR_REACH * OPEN_FLOOR_REACH;
-    const queueCell: number[] = [startCell];
-    const queueLevel: number[] = [startLevel];
-    this.levels[startCell]![startLevel]!.region = region;
-    for (let head = 0; head < queueCell.length && !open; head += 1) {
-      const cell = queueCell[head]!;
-      const level = queueLevel[head]!;
-      const i = cell % this.side;
-      const j = (cell - i) / this.side;
-      const dx = this.cellX(cell) - startX;
-      const dz = this.cellZ(cell) - startZ;
-      if (
-        this.anchor[cell] === 1 ||
-        dx * dx + dz * dz >= reachSquared ||
-        i === 0 ||
-        j === 0 ||
-        i === this.side - 1 ||
-        j === this.side - 1
-      ) {
-        open = true;
-        break;
-      }
-      const fromX = this.cellX(cell);
-      const fromZ = this.cellZ(cell);
-      const fromY = this.levels[cell]![level]!.y;
-      for (let k = 0; k < 8; k += 1) {
-        const ni = i + NEIGHBOUR_I[k]!;
-        const nj = j + NEIGHBOUR_J[k]!;
-        if (ni < 0 || nj < 0 || ni >= this.side || nj >= this.side) continue;
-        const next = nj * this.side + ni;
-        if (!this.walkable(next)) continue;
-        // No cutting corners — `NavGrid`'s rule, for the reason it gives there.
-        if (k >= 4 && (!this.walkable(j * this.side + ni) || !this.walkable(nj * this.side + i))) continue;
-        const nextLevel = this.levelIndex(next, fromX, fromY, fromZ);
-        if (nextLevel < 0) continue;
-        const node = this.levels[next]![nextLevel]!;
-        if (node.region >= 0) continue;
-        node.region = region;
-        queueCell.push(next);
-        queueLevel.push(nextLevel);
-      }
-    }
-    this.regionOpen.push(open);
-  }
-
-  /** The cell's height-blind verdict, asked once. */
-  private walkable(cell: number): boolean {
-    if (this.blocked[cell] === 0) {
-      this.cellsClassified += 1;
-      const x = this.cellX(cell);
-      const z = this.cellZ(cell);
-      const clear =
-        this.collision.clearOfBoundary(x, z, this.mover.radius) &&
-        !this.solids.routeBlocked(x, z, this.mover.radius, this.mover.hopApex);
-      this.blocked[cell] = clear ? 1 : 2;
-    }
-    return this.blocked[cell] === 1;
-  }
-
-  /**
-   * The level of `cell` a foot at `(fromX, fromY, fromZ)` steps onto — found or
-   * added — or -1 when the surface there is beyond her step.
-   */
-  private levelIndex(cell: number, fromX: number, fromY: number, fromZ: number): number {
-    const x = this.cellX(cell);
-    const z = this.cellZ(cell);
-    const bucket = Math.round(fromY / SURFACE_BUCKET);
-    const asked = this.surfaces[cell]!;
-    let surface = Number.NaN;
-    for (let k = 0; k < asked.length; k += 2) {
-      if (asked[k] === bucket) {
-        surface = asked[k + 1]!;
-        break;
-      }
-    }
-    if (Number.isNaN(surface)) {
-      surface = this.sample(x, z, carryReference(fromX, fromZ, fromY, x, z));
-      asked.push(bucket, surface);
-    }
-    if (!withinStep(fromX, fromY, fromZ, x, surface, z)) return -1;
-    const levels = this.levels[cell]!;
-    for (let k = 0; k < levels.length; k += 1) {
-      if (Math.abs(levels[k]!.y - surface) <= LEVEL_EPSILON) return k;
-    }
-    levels.push({ y: surface, region: -1 });
-    return levels.length - 1;
-  }
-
-  private cellOf(x: number, z: number): number {
-    const i = Math.round((x - this.originX) / NAV_CELL) - this.baseI;
-    const j = Math.round((z - this.originZ) / NAV_CELL) - this.baseJ;
-    if (i < 0 || j < 0 || i >= this.side || j >= this.side) return -1;
-    return j * this.side + i;
-  }
-
-  private cellX(cell: number): number {
-    return this.originX + (this.baseI + (cell % this.side)) * NAV_CELL;
-  }
-
-  private cellZ(cell: number): number {
-    return this.originZ + (this.baseJ + Math.floor(cell / this.side)) * NAV_CELL;
+    return false;
   }
 }
 
-/** Neighbour offsets: four straight, then four diagonal — `NavGrid`'s order. */
-const NEIGHBOUR_I = [1, -1, 0, 0, 1, 1, -1, -1] as const;
-const NEIGHBOUR_J = [0, 0, 1, -1, 1, -1, 1, -1] as const;
+/** How near an open-area point a reached cell's centre must be to count: within the cell beside it. */
+const ANCHOR_REACH = NAV_CELL * 1.5;
 
-/** A spot somebody is already standing on, in world metres. */
-export interface OccupiedSpot {
-  readonly x: number;
-  readonly z: number;
-  /** How much room that body needs around itself. */
-  readonly radius: number;
-}
-
-/**
- * **Where a group of cosmetic riders steps off** — the Rail Race's crowd of
- * racers: several bodies stepping off together, none of them standing inside
- * the geometry and none of them standing inside each other.
- *
- * Not the player's rule: she is put down by {@link putDownSpot} (through
- * `Player.endRide`), first, and passed in here in `occupied`, so nobody can
- * ever appear standing on top of her. A single-point search asked three times
- * hands back the same answer three times, which is precisely wrong for a crowd,
- * so a candidate here is only accepted if it is clear of the geometry *and* of
- * everybody already placed, the caller's own `occupied` list included.
- *
- * Bodies are placed in the order asked for, each one starting its own search
- * from a point fanned around `preferredX/Z`, so the result reads as a little
- * group gathered round a spot rather than a queue marching away from it.
- */
-export function resolveDismountGroup(
-  collision: CollisionWorld,
-  preferredX: number,
-  preferredZ: number,
-  radius: number,
-  count: number,
-  occupied: readonly OccupiedSpot[] = [],
-): { x: number; z: number }[] {
-  const placed: OccupiedSpot[] = [...occupied];
-  const out: { x: number; z: number }[] = [];
-
-  // Fan the *starting guesses* around the exit rather than all searching from
-  // its centre: three bodies spiralling out of one point find three spots in a
-  // line, because they all walk the same ring in the same order.
-  const spread = radius * 2.4;
-  for (let i = 0; i < count; i += 1) {
-    const angle = ((i + 0.5) / count) * Math.PI * 2;
-    const seedX = preferredX + Math.cos(angle) * spread;
-    const seedZ = preferredZ + Math.sin(angle) * spread;
-
-    const clear = (x: number, z: number): boolean =>
-      collision.isClearCircle(x, z, radius) &&
-      placed.every((o) => Math.hypot(x - o.x, z - o.z) >= radius + o.radius);
-
-    let spot: { x: number; z: number } | null = clear(seedX, seedZ)
-      ? { x: seedX, z: seedZ }
-      : null;
-
-    if (!spot) {
-      const ringStep = 0.6;
-      const maxRing = 6;
-      search: for (let ring = ringStep; ring <= maxRing; ring += ringStep) {
-        const samples = Math.max(8, Math.round((ring * Math.PI * 2) / ringStep));
-        for (let s = 0; s < samples; s += 1) {
-          // Start each body's sweep at its own bearing, so two bodies that
-          // fall back to the same ring do not both take the first sample.
-          const a = angle + (s / samples) * Math.PI * 2;
-          const x = seedX + Math.cos(a) * ring;
-          const z = seedZ + Math.sin(a) * ring;
-          if (clear(x, z)) {
-            spot = { x, z };
-            break search;
-          }
-        }
-      }
-    }
-
-    // Same contract as `putDownSpot`: say so loudly, hand back the best
-    // guess, never drop a body on the floor. These are cosmetic characters, so
-    // the worst case is two of them overlapping for a few seconds — never a
-    // player stuck in anything.
-    if (!spot) {
-      console.warn(
-        `dismount: no clear group spot ${i + 1}/${count} near ` +
-          `(${preferredX.toFixed(1)}, ${preferredZ.toFixed(1)})`,
-      );
-      spot = { x: seedX, z: seedZ };
-    }
-
-    placed.push({ x: spot.x, z: spot.z, radius });
-    out.push(spot);
-  }
-
-  return out;
-}

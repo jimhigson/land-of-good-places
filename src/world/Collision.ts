@@ -294,33 +294,6 @@ export function autoHopClears(topHeight: number, apexClearance: number): boolean
 }
 
 /**
- * **What one collider is to the route lattice** — the one owner of the rule
- * `world/NavGrid.ts` stamps its lattice by, and `world/dismount.ts` floods by:
- *
- * - `'hop'`: a wall she hops without being asked (`autoHoppable`, and within
- *   {@link autoHopClears} of the walker's apex) — crossed at a price, never a
- *   wall;
- * - `'skip'`: a **banded** collider (a finite `baseHeight`, the balustrade on an
- *   overhanging deck) that guards an edge rather than a column of space, unless
- *   it says it must be stamped (`navStamped`, a ramp's flank) — see the header;
- * - `'blocked'`: everything else, at every height. The lattice is
- *   two-dimensional on purpose: a wall pushes a walker back at any height.
- */
-export function routeStamp(
-  collider: {
-    readonly autoHoppable: boolean;
-    readonly topHeight: number;
-    readonly baseHeight: number;
-    readonly navStamped: boolean;
-  },
-  hopApex: number,
-): 'hop' | 'skip' | 'blocked' {
-  if (collider.autoHoppable && autoHopClears(collider.topHeight, hopApex)) return 'hop';
-  if (Number.isFinite(collider.baseHeight) && !collider.navStamped) return 'skip';
-  return 'blocked';
-}
-
-/**
  * Overlaps up to this deep are ordinary contact — the everyday case of
  * walking (even sprinting) straight into a wall, tree or fountain rim — and
  * get corrected fully and instantly, exactly as before. That is what keeps
@@ -420,6 +393,11 @@ export const MAX_DEPENETRATION_SPEED = 3;
  * Inside the garden, nothing about the leash changes.
  */
 const BOUNDARY_LEASH_REACH = 100;
+
+/** An edge gap that far outside the boundary is another space — {@link BOUNDARY_LEASH_REACH}'s one comparison. */
+function beyondLeash(edgeGap: number): boolean {
+  return edgeGap <= -BOUNDARY_LEASH_REACH;
+}
 
 /**
  * How much of a collider's own half-footprint a single movement sub-step is
@@ -677,26 +655,41 @@ export class CollisionWorld {
   }
 
   /**
-   * **Would the soft boundary leave a mover of `radius` at `(x, z)` alone?** —
-   * true when she stands a full radius inside the edge, and also when she is so
-   * far outside it that she is in another space entirely, which `resolve` does
-   * not touch either (see {@link BOUNDARY_LEASH_REACH}). The same rule `resolve`
-   * enforces, asked without moving anybody: `world/dismount.ts` asks it before
-   * putting a child down, so it never puts her where the boundary would shove.
+   * **The soft boundary's gap where it would push a mover of `radius` at
+   * `(x, z)`, or `null` where it leaves her alone** — a full radius inside the
+   * edge, or so far outside it that she is in another space entirely
+   * ({@link inAnotherSpace}). The one owner of that rule: `resolve` pushes by
+   * it, and the put-down rule (`world/dismount.ts`) asks it before putting a
+   * child down, so it never puts her where the boundary would shove.
    */
-  clearOfBoundary(x: number, z: number, radius: number): boolean {
+  boundaryShortfall(x: number, z: number, radius: number): number | null {
     const edgeGap = this.bounds.distanceToEdge(x, z);
-    return edgeGap >= radius || edgeGap <= -BOUNDARY_LEASH_REACH;
+    return edgeGap < radius && !beyondLeash(edgeGap) ? edgeGap : null;
+  }
+
+  /** {@link boundaryShortfall}'s "leaves her alone", as a yes or no. */
+  clearOfBoundary(x: number, z: number, radius: number): boolean {
+    return this.boundaryShortfall(x, z, radius) === null;
+  }
+
+  /**
+   * **Somewhere else entirely, as far as these play bounds are concerned** —
+   * {@link BOUNDARY_LEASH_REACH} or more outside them, where the edge has
+   * nothing to say: another space, whose own bounds are not the ones set.
+   */
+  inAnotherSpace(x: number, z: number): boolean {
+    return beyondLeash(this.bounds.distanceToEdge(x, z));
   }
 
   /**
    * **A small world of just the solids near `(x, z)`** — every collider whose
    * footprint comes within `reach` metres, the same objects (never copies, so
    * nothing can drift), the same play bounds. For a caller that asks hundreds of
-   * point questions about one neighbourhood — `world/dismount.ts`'s put-down
-   * flood — and would otherwise scan the whole park's three thousand colliders
-   * for every one of them. Every query on it answers exactly as this world would
-   * for a point within `reach` of `(x, z)`.
+   * point questions about one neighbourhood — `world/dismount.ts`'s ring
+   * search, which asks whether her body is clear at every spot it tries — and
+   * would otherwise scan the whole park's three thousand colliders for each.
+   * Every query on it answers exactly as this world would for a point within
+   * `reach` of `(x, z)`.
    */
   near(x: number, z: number, reach: number): CollisionWorld {
     const view = new CollisionWorld();
@@ -717,36 +710,6 @@ export class CollisionWorld {
       view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, wall.halfThickness);
     }
     return view;
-  }
-
-  /**
-   * **Would the route lattice call a disc of `radius` at `(x, z)` blocked?** —
-   * some collider {@link routeStamp} calls `'blocked'` overlaps it, at any
-   * height: exactly the cell `NavGrid` stamps out for a walker of that radius
-   * centred here. The put-down rule floods the router's own cells with it, so
-   * an exit it calls open is one a tap can walk out of.
-   */
-  routeBlocked(x: number, z: number, radius: number, hopApex: number): boolean {
-    for (const circle of this.circles) {
-      const minimum = circle.radius + radius;
-      const dx = x - circle.x;
-      const dz = z - circle.z;
-      if (dx * dx + dz * dz >= minimum * minimum) continue;
-      if (routeStamp(circle, hopApex) === 'blocked') return true;
-    }
-    for (const wall of this.walls) {
-      const ax = wall.x2 - wall.x1;
-      const az = wall.z2 - wall.z1;
-      const lengthSquared = ax * ax + az * az;
-      let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const dx = x - (wall.x1 + ax * t);
-      const dz = z - (wall.z1 + az * t);
-      const minimum = wall.halfThickness + radius;
-      if (dx * dx + dz * dz >= minimum * minimum) continue;
-      if (routeStamp(wall, hopApex) === 'blocked') return true;
-    }
-    return false;
   }
 
   /**
@@ -1340,8 +1303,8 @@ export class CollisionWorld {
       // four extra queries only happen when the walker is actually within her
       // own radius of the edge, which is rare — everywhere else this is the one
       // `distanceToEdge` call it always was.
-      const edgeGap = this.bounds.distanceToEdge(position.x, position.z);
-      if (edgeGap < radius && edgeGap > -BOUNDARY_LEASH_REACH) {
+      const edgeGap = this.boundaryShortfall(position.x, position.z, radius);
+      if (edgeGap !== null) {
         const e = 0.25;
         const gradientX =
           this.bounds.distanceToEdge(position.x + e, position.z) -

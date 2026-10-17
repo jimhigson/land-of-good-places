@@ -31,7 +31,7 @@ import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
 import { NameLabel } from '../ui/NameLabel';
 import { discoverSecret, gameStore, type PlayerState } from '../state';
-import { putDownSpot, type OpenAreaPoint, type PutDown, type RideExit } from '../world/dismount';
+import { BARE_SPACE, putDownSpot, type PutDown, type PutDownSpace, type RideExit } from '../world/dismount';
 import type { WornHat } from './WornHat';
 import type { WornJetpack } from './WornJetpack';
 
@@ -569,12 +569,12 @@ export class Player implements GameSystem {
   /** How many put-downs she has had — `check:exits` counts them across a placement. */
   putDowns = 0;
   /**
-   * The open area of the space at a point — its arrival, its way out, its
-   * designed stand spots — for the put-down rule's flood to reach. `World`
-   * supplies it (`attachPlayer`); without one, only "too big to be a pocket"
-   * makes floor open.
+   * What the put-down rule asks of the space beyond her collision world and
+   * her floor — its open area, and the router's own stairs and bridges
+   * (`world/dismount.ts`'s `PutDownSpace`). `World` supplies its one object
+   * (`attachPlayer`); without a world, nothing beyond the collision world.
    */
-  openArea: ((x: number, z: number) => readonly OpenAreaPoint[]) | null = null;
+  putDownSpace: PutDownSpace = BARE_SPACE;
   /** 0..1 of the tree-climb wave. See {@link setClimbWave}. */
   private climbWave = 0;
   /**
@@ -1594,8 +1594,8 @@ export class Player implements GameSystem {
 
   /**
    * **The one put-down** — `world/dismount.ts`'s rule, asked with her own
-   * collision world, her own ground sampler, her own body and the open area of
-   * the space she is going to. `endRide` and `teleportTo` are its only callers.
+   * collision world, her own ground sampler, her own body and the space's own
+   * {@link putDownSpace}. `endRide` and `teleportTo` are its only callers.
    */
   private putDown(spot: RideExit): PutDown {
     const result = putDownSpot(
@@ -1603,7 +1603,7 @@ export class Player implements GameSystem {
       (x, z, y) => this.groundAt(x, z, y),
       spot,
       PLAYER_PUT_DOWN,
-      this.openArea?.(spot.x, spot.z) ?? [],
+      this.putDownSpace,
     );
     this.lastPutDown = result;
     this.putDowns += 1;

@@ -1624,8 +1624,9 @@ export interface ParkFacts {
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
   /**
    * **Where `Player.endRide` would put her down for this exit** — the game's
-   * own put-down rule (`world/dismount.ts`'s `putDownSpot`), asked with her own
-   * body (`PLAYER_PUT_DOWN`) and the sampler her feet use. Here rather than
+   * own put-down rule (`world/dismount.ts`'s `putDownSpot`), asked as `Player`
+   * asks it: her own body (`PLAYER_PUT_DOWN`), the sampler her feet use and
+   * the world's own `putDownSpace`. Here rather than
    * imported by an invariant: `Player.ts` reaches the park manifest, and a
    * static import of it from `invariants.ts` pins every seed to the default.
    */
@@ -4152,7 +4153,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,
-    putDownPlayer: (exit) => putDownSpot(world.collision, sample, exit, PLAYER_PUT_DOWN),
+    putDownPlayer: (exit) => putDownSpot(world.collision, sample, exit, PLAYER_PUT_DOWN, world.putDownSpace),
     pushedTo,
     buildMs,
   };
