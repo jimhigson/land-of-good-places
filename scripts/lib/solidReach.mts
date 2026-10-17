@@ -195,8 +195,21 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: So
   sim.previousPosition.copy(sim.position);
   sim.groundHeight = top;
   sim.groundY = top;
-  for (let frame = 0; frame < Math.ceil(1.2 / dt); frame += 1) sim.step(dt, o.nx, o.nz, false);
-  for (let frame = 0; frame < Math.ceil(1 / dt); frame += 1) sim.step(dt, 0, 0, false);
+  // Walking for up to 1.2 s, then standing for up to a second — but where she
+  // comes down is the answer, so once she has fallen and landed she stops
+  // walking and settles for a quarter of a second: walking on across the
+  // ground below was most of what a drop cost, and told nothing.
+  const walkFrames = Math.ceil(1.2 / dt);
+  const settleFrames = Math.ceil(0.25 / dt);
+  let fell = false;
+  let landedAt = -1;
+  for (let frame = 0; frame < walkFrames + Math.ceil(1 / dt); frame += 1) {
+    const walking = frame < walkFrames && landedAt < 0;
+    sim.step(dt, walking ? o.nx : 0, walking ? o.nz : 0, false);
+    if (sim.airborne) fell = true;
+    else if (fell && landedAt < 0) landedAt = frame;
+    if (landedAt >= 0 && frame >= landedAt + settleFrames) break;
+  }
   if (sim.airborne) return null;
   if (source.depthAt(sim.position.x, sim.position.z) >= -0.05 && Math.abs(sim.groundHeight - top) < 0.05) return null;
   if (!(sim.groundHeight < top - 0.05)) return null;
@@ -403,6 +416,12 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       let done = false;
       for (const o of points) {
         if (done) break;
+        const aimX = o.x - o.nx * Math.min(solid.halfWidth, 0.6);
+        const aimZ = o.z - o.nz * Math.min(solid.halfWidth, 0.6);
+        // Only where her middle may be: the leash holds it off whatever lies
+        // past the space's edge — every point of the park's own wall, 7974
+        // jumps of the park's census that could never stand her on it.
+        if (collision.playBounds.distanceToEdge(aimX, aimZ) < PLAYER_RADIUS) continue;
         // A run-up on ground she can reach: 2.4 m out from the face, or — in
         // a pocket with no room for one — 1.2 m, or a standing hop.
         for (const runUp of RUN_UPS) {
@@ -416,8 +435,6 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           const key = `${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
           if (triedRunUps.has(key)) continue;
           triedRunUps.add(key);
-          const aimX = o.x - o.nx * Math.min(solid.halfWidth, 0.6);
-          const aimZ = o.z - o.nz * Math.min(solid.halfWidth, 0.6);
           for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 0.4]) {
             jumps += 1;
             cost.sims.jump += 1;
@@ -505,6 +522,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       // 3. Chains: onto any other top within a long jump of it.
       for (const solid of near(source.solid.centreX, source.solid.centreZ, source.solid.reach + 6 + 8)) {
         if (reached.has(solid)) continue;
+        if (collision.playBounds.distanceToEdge(solid.centreX, solid.centreZ) < PLAYER_RADIUS) continue;
         const gap = Math.hypot(solid.centreX - source.solid.centreX, solid.centreZ - source.solid.centreZ) - solid.reach - source.solid.reach;
         if (gap > 6) continue;
         const rise = solid.topAt(solid.centreX, solid.centreZ) - source.top;

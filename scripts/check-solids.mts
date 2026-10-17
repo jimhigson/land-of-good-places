@@ -760,12 +760,17 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
   }
   const seen = new Set<string>();
   const pockets: { at: Stand; n: number; on: string }[] = [];
+  let besideTheWalk = 0;
   for (const key of cells.keys()) {
     if (seen.has(key)) continue;
     seen.add(key);
     const stack = [key];
     let n = 0;
     let lowest = cells.get(key)!;
+    // Ground on the walk within a metre, no higher than a step up from it:
+    // she walks or drops straight off, and the place is the walk's edge — the
+    // lattice keeps a body's width off every solid — rather than a place.
+    let offTheEdge = false;
     while (stack.length) {
       const k = stack.pop()!;
       const cell = cells.get(k)!;
@@ -775,20 +780,31 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nk = keyOf(i + di, j + dj);
         const next = cells.get(nk);
-        if (next && !seen.has(nk) && Math.abs(next.y - cell.y) <= 0.62) {
-          seen.add(nk);
-          stack.push(nk);
+        if (next && Math.abs(next.y - cell.y) <= 0.62) {
+          if (!seen.has(nk)) {
+            seen.add(nk);
+            stack.push(nk);
+          }
+          continue;
+        }
+        for (const reach of [1, 2]) {
+          if (offTheEdge) break;
+          const nx = (i + di * reach) * STEP;
+          const nz = (j + dj * reach) * STEP;
+          const ny = sample(nx, nz, cell.y + 0.62);
+          if (ny <= cell.y + 0.62 && main(nx, nz, ny)) offTheEdge = true;
         }
       }
     }
-    pockets.push({ at: lowest, n, on: lowest.on });
+    if (offTheEdge) besideTheWalk += 1;
+    else pockets.push({ at: lowest, n, on: lowest.on });
   }
   pockets.sort((a, b) => b.n - a.n);
   const byOn = new Map<string, number>();
   for (const pocket of pockets) byOn.set(pocket.on, (byOn.get(pocket.on) ?? 0) + 1);
   const link = (at: Stand): string => `/spawn?pos=${at.x.toFixed(1)},${at.z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
   note(
-    `the jet pack: ${cells.size} places (${STEP} m apart) it can set her down that she cannot walk to, in ${pockets.length} pockets — ${[...byOn].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([on, k]) => `${k} on ${on}`).join(', ')}; the largest ${pockets.slice(0, 4).map((p) => `${p.n} on ${p.on} at ${link(p.at)}`).join('; ')}. She flies out the way she came; asserted nowhere`,
+    `the jet pack: ${cells.size} places (${STEP} m apart) it can set her down off the walk — ${besideTheWalk} clusters she steps or drops straight off into it, and ${pockets.length} pockets she does not: ${[...byOn].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([on, k]) => `${k} on ${on}`).join(', ')}; the largest ${pockets.slice(0, 4).map((p) => `${p.n} on ${p.on} at ${link(p.at)}`).join('; ')}. She flies out the way she came; asserted nowhere`,
   );
 }
 
