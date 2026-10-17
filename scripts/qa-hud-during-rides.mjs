@@ -171,7 +171,8 @@ for (const vp of VIEWPORTS) {
 
     // Off again — naturally if the ride ends by itself, otherwise handed back.
     const ended = await waitFor(page, () => window.game.player.riding === false, 45000);
-    if (!ended) await page.evaluate(() => window.game.player.endRide());
+    // `letGo`: whatever has her gives her back through its own exit (`Player.endRide` needs one).
+    if (!ended) await page.evaluate(() => window.game.player.letGo());
     await wait(1200);
     // Reopen the drawer for a like-for-like "after" shot.
     await page.evaluate(() => document.querySelector('.pill--menu')?.click());
