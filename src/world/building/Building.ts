@@ -1656,6 +1656,19 @@ export class Building implements GameSystem {
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   }
 
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running** — the "Next day" button, from inside the castle. The castle stops
+   * being where she is: its interior hidden, `inside` false, exactly as walking
+   * out would leave it. It does not teleport her or touch the play bounds; the
+   * space she was taken to owns both. A no-op if she was not in here.
+   */
+  releasePlayer(): void {
+    if (!this.inside) return;
+    this.inside = false;
+    this.interiorRoot.visible = false;
+  }
+
   // ----------------------------------------------------- which floor shows
 
   /**

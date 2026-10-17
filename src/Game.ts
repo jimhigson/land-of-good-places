@@ -558,6 +558,7 @@ export class Game {
     // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
     this.hud.setLookHandler(() => this.reopenCharacterCreator());
+    this.hud.setNextDayHandler(() => this.nextDay());
     // The HIGHLIGHT RULE's activation flash, for the interface: press any
     // button anywhere and the same rainbow radiates off it. One delegated
     // listener and a pool of four overlays — see `ui/TapBurst.ts`; no panel
@@ -1305,6 +1306,38 @@ export class Game {
   // menu they drove. The lift is the only way between floors now (#377), and
   // it has a control panel of its own that the family designed — see
   // GAME_DESIGN.md's "Riding the lift".
+
+  /**
+   * **"Next day"** — the ☰ menu's way out of anywhere (Jim, 17 Oct 2026: *"a
+   * 'manual rescue' feature like in the menu an option that says 'next day' and
+   * then you wake up in the hotel bed"*).
+   *
+   * First, whatever she is doing ends, so that nothing is left holding her: the
+   * shop panels, the backpack, the face paint, the Cute-o-dex, the map and an
+   * open book put away; a curtain game abandoned; a tap walk cancelled; and
+   * whatever ride, seat, nap or cinematic has her let go, through its own way
+   * off (`Player.letGo`). A jet-pack flight ends on the teleport by itself.
+   * Then `World.nextDay` — the iris, tomorrow morning, and waking up in her own
+   * bed in her suite, which the hotel owns.
+   *
+   * The ☰ button is hidden while an attraction has her (#404), so in play this
+   * is pressed on her own two feet; every one of those endings is still done
+   * here rather than assumed, so that "Next day" means the same from anywhere.
+   */
+  private nextDay(): void {
+    this.shopping.closeAll();
+    this.world.facePaintStall.closeUi();
+    if (this.cuteODex.isOpen) this.cuteODex.close();
+    if (this.parkMap.isOpen) this.parkMap.close();
+    if (this.bookReader.isOpen) this.bookReader.close();
+    if (this.world.keychainShop.viewOpen) this.world.keychainShop.closeView();
+    this.miniGames.abandon();
+    this.tapNavigator.cancel();
+    this.player.letGo();
+    if (!this.world.nextDay()) {
+      console.warn('Next day: not now — a change of space is already running, or something still has her');
+    }
+  }
 
   /**
    * "Look" pill in the HUD menu (`Hud.ts`). Mounts `CharacterCreation`

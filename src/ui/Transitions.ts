@@ -26,6 +26,8 @@ export class Transitions {
   private openTimer = 0;
   private flashTimer = 0;
   private irisRunning = false;
+  /** The midpoint of a wipe still closing — see {@link irisWipe}. */
+  private pendingMidpoint: (() => void) | null = null;
 
   constructor(container: HTMLElement) {
     this.iris = document.createElement('div');
@@ -60,10 +62,21 @@ export class Transitions {
   irisWipe(midpoint: () => void, onOpened?: () => void): void {
     window.clearTimeout(this.closeTimer);
     window.clearTimeout(this.openTimer);
+    // **A wipe that starts while another is still closing runs the first one's
+    // midpoint now**, rather than dropping it with its timer. A midpoint is a
+    // change to the world — a ride's camera handed back, a gondola put away —
+    // and losing one leaves it undone for good: the "Next day" button lets a
+    // ride go (whose exit starts a wipe) and starts its own wipe in the same
+    // frame, and the ride's camera stayed the one being drawn in the suite.
+    const pending = this.pendingMidpoint;
+    this.pendingMidpoint = null;
+    pending?.();
 
     this.irisRunning = true;
     this.iris.dataset.closed = 'true';
+    this.pendingMidpoint = midpoint;
     this.closeTimer = window.setTimeout(() => {
+      this.pendingMidpoint = null;
       midpoint();
       this.iris.dataset.closed = 'false';
       this.openTimer = window.setTimeout(() => {

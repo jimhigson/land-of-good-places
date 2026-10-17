@@ -443,6 +443,18 @@ export class Library implements GameSystem {
     for (const stack of this.stacks) stack.setAlpha(1);
   }
 
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running** — the "Next day" button, from the reading room. The room stops
+   * being where she is, as walking out would leave it; no teleport and no play
+   * bounds, which the space she was taken to owns.
+   */
+  releasePlayer(): void {
+    if (!this.inside) return;
+    this.inside = false;
+    this.roomRoot.visible = false;
+  }
+
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */
   private standOutside(facing: number): void {
     const player = this.player;

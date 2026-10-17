@@ -16,7 +16,7 @@ import { glbCanvasTexture } from '../../art/style/glb';
 import { lineSeconds } from '../../ui/speechTiming';
 import { LiftAlcove } from '../lift/LiftAlcove';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
+import { HOTEL_PLAY_RADIUS, IRIS_OPEN_SECONDS, PLAYER_RADIUS } from '../../core/constants';
 import { hexToCss, PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { lerp, Rng, smoothstep } from '../../core/mathUtils';
@@ -604,6 +604,14 @@ const CHAIR_SEAT_Y = 0.42;
  * not clear, open floor, `Hotel.chairStand` lets the put-down rule move it.
  */
 const CHAIR_STAND_BACK = 0.3 + PLAYER_RADIUS + 0.08;
+
+/**
+ * How long after the "Next day" iris reaches its middle she wakes up, seconds:
+ * the iris opening on her asleep in bed, then a beat to see her there in the
+ * morning before `Hotel.wakeNap` stands her up. A tap or a hop wakes her
+ * sooner, as it wakes any nap.
+ */
+const NEXT_DAY_WAKE_SECONDS = IRIS_OPEN_SECONDS + 1.4;
 
 /**
  * Honest tops for the scatter dressing, metres above the floor they stand on.
@@ -1201,6 +1209,8 @@ export class Hotel implements GameSystem {
    */
   private napping = false;
   private nappingAt: Bed | null = null;
+  /** Seconds until a "Next day" nap wakes by itself, or `null` — see {@link wakeTomorrowInSuite}. */
+  private nextDayWake: number | null = null;
   /**
    * How dimmed the hotel's own light rig is right now, 0 (wide awake) to 1
    * (fully settled into a nap) — {@link update} eases this toward
@@ -1626,6 +1636,62 @@ export class Hotel implements GameSystem {
     this.hotelRoot.visible = true;
     this.boundTo(room);
     this.spaces.holdOff();
+  }
+
+  /**
+   * **"Next day": her own bed, in her own suite, and waking up in it** — the
+   * one owner of going there and getting up (Jim, 17 Oct 2026: *"a 'manual
+   * rescue' feature like in the menu an option that says 'next day' and then
+   * you wake up in the hotel bed"*).
+   *
+   * Through the hotel's own iris — `SpaceManager.changeTo`, the door every
+   * room here uses, so the camera snaps and the space settles exactly as a
+   * doorway leaves them. Behind it, in order: `behindTheIris` (`World.nextDay`
+   * passes the clock moving to tomorrow morning and whichever building she was
+   * in letting go of her); her key, if reception had not given it yet — a suite
+   * you wake up in is yours, and its lock must never hold you in it; the suite
+   * becomes where she is; and {@link nap} lays her in the middle bedroom's bed
+   * (it holds the most pet beds, `layout.ts`'s `petBedSlots`), sending every pet
+   * she has out to its own bed — the nap's own code, not a second copy. The iris
+   * opens on her asleep, and after {@link NEXT_DAY_WAKE_SECONDS} {@link wakeNap},
+   * the very wake-up a tap gives, stands her up on the mattress.
+   *
+   * Refused (`false`) while a change of space is already running or while
+   * anything still has her: the caller lets go of whatever that is first.
+   */
+  wakeTomorrowInSuite(behindTheIris: () => void): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.spaces.isChanging) return false;
+    this.spaces.changeTo(() => {
+      behindTheIris();
+      if (!saveFlags.hasHotelKey()) saveFlags.giveHotelKey();
+      this.lightYoursStar(true);
+      this.inside = true;
+      this.hotelRoot.visible = true;
+      this.boundTo(SUITE);
+      const bed = this.beds.find((candidate) => candidate.bedIndex === MIDDLE_BEDROOM_INDEX) ?? this.beds[0];
+      if (!bed) return;
+      // In the room first, so everything that asks "which room is she in?"
+      // while the nap starts — the pets' beds, the dim — answers the suite.
+      player.teleportTo(bed.x, BED_MATTRESS_TOP, bed.z + NAP_FEET_Z, 0);
+      this.nap(bed);
+      this.nextDayWake = NEXT_DAY_WAKE_SECONDS;
+    });
+    return true;
+  }
+
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running.** The hotel stops being where she is — every room hidden, the
+   * receptionist's words stopped — as walking out of the front door would leave
+   * it; no teleport and no play bounds, which the space she went to owns.
+   */
+  releasePlayer(): void {
+    if (!this.inside) return;
+    this.inside = false;
+    this.hotelRoot.visible = false;
+    this.speech = null;
+    this.receptionBubble.setText(null);
   }
 
   /**
@@ -2238,6 +2304,11 @@ export class Hotel implements GameSystem {
       // reaches its own jump handler at all, so nothing there would ever see
       // this press regardless of which one runs first in a frame.
       if (input.justPressed('jump')) this.wakeNap();
+      else if (this.nextDayWake !== null) {
+        // "Next day": she wakes by herself, once the morning has been seen.
+        this.nextDayWake -= dt;
+        if (this.nextDayWake <= 0) this.wakeNap();
+      }
       return;
     }
 
@@ -3117,6 +3188,7 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!this.napping || !this.nappingAt || !player) return;
     const bed = this.nappingAt;
+    this.nextDayWake = null;
     this.napping = false;
     bed.blanket.visible = false;
     this.nappingAt = null;

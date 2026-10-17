@@ -683,6 +683,26 @@ export class World implements GameSystem {
   }
 
   /**
+   * **"Next day"** — the ☰ menu's way out of anywhere: tomorrow morning, waking
+   * up in her own bed in her suite. The going there and the waking are the
+   * hotel's (`Hotel.wakeTomorrowInSuite`, the one owner); this hands it the two
+   * things only the world can do, behind its iris — the clock (`DayNight`'s
+   * `advanceToNextMorning`) and every other building letting go of being where
+   * she is (`releasePlayer`), so nothing of where she was is left switched on.
+   *
+   * Whatever had her must have let her go first (`Player.letGo`); returns false,
+   * and does nothing, if anything still does, or a change of space is running.
+   */
+  nextDay(): boolean {
+    return this.hotel.wakeTomorrowInSuite(() => {
+      this.dayNight.advanceToNextMorning();
+      this.building.releasePlayer();
+      this.reptileHouse.releasePlayer();
+      this.library.releasePlayer();
+    });
+  }
+
+  /**
    * Every tap target in the park (see `world/interact.ts`).
    *
    * Only the building has any for now; garden rides add theirs here as they are

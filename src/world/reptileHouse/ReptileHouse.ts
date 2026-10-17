@@ -527,6 +527,23 @@ export class ReptileHouse implements GameSystem {
     this.warmExhibitCamera();
   }
 
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running** — the "Next day" button, from the hall or the forecourt. The
+   * building stops being where she is, as walking out would leave it: both
+   * rooms hidden, the exhibit shot and the keeper's words stopped. No teleport
+   * and no play bounds; the space she was taken to owns both.
+   */
+  releasePlayer(): void {
+    if (!this.inside && !this.onForecourt) return;
+    this.inside = false;
+    this.onForecourt = false;
+    this.exhibitCamera.cancel();
+    this.hallRoot.visible = false;
+    this.forecourtRoot.visible = false;
+    this.bubble.setText(null);
+  }
+
   /** Out through the door: into the park at the plot's doormat, or onto the forecourt. */
   private leaveToOutside(): void {
     const player = this.player;
