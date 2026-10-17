@@ -70,6 +70,7 @@ import { NavGrid } from '../src/world/NavGrid.ts';
 import { DAY_LENGTH_SECONDS, DAY_START_TIME, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   BREAKFAST,
+  CORRIDOR,
   GARDEN_FLOOR,
   HOTEL_FLOORS,
   hotelDoorBands,
@@ -452,6 +453,47 @@ interface ExitRecord {
 const exits: ExitRecord[] = [];
 const arrivals: string[] = [];
 
+// ------------------------------------------------------------------ 5. Next day (the helper; run first keyless, the rest after 4)
+
+const suiteBed = SUITE_BED_SPOTS[MIDDLE_BEDROOM_INDEX];
+const nextDays: string[] = [];
+function nextDayFrom(label: string, setUp: () => void): void {
+  settle();
+  setUp();
+  const dayBefore = gameStore.get().world.dayCount;
+  const wasRiding = player.riding;
+  // As `Game.nextDay` does it: let go of whatever has her, then the world's own.
+  player.letGo();
+  if (!world.nextDay()) {
+    fail(`Next day from ${label}: refused (riding=${player.riding})`);
+    return;
+  }
+  let laidInBed = false;
+  for (let t = 0; t < 6 && (player.riding || !laidInBed); t += 0.1) {
+    tick(0.1);
+    if (player.sleeping && suiteBed) {
+      const bx = SUITE.originX + suiteBed[0];
+      const bz = SUITE.originZ + suiteBed[1];
+      if (Math.hypot(player.position.x - bx, player.position.z - bz) < 1.2) laidInBed = true;
+    }
+  }
+  const { dayCount, timeOfDay } = gameStore.get().world;
+  const space = spaceAt(player.position.x, player.position.z);
+  const expectedTime = DAY_START_TIME + 6 / DAY_LENGTH_SECONDS;
+  const clauses: string[] = [];
+  if (player.riding) clauses.push(`still riding (${player.rideHolder?.holding ?? '?'})`);
+  if (space !== SUITE.space) clauses.push(`woke in ${space}, not ${SUITE.space}`);
+  if (dayCount !== dayBefore + 1) clauses.push(`day ${dayBefore} → ${dayCount}, not ${dayBefore + 1}`);
+  if (timeOfDay < DAY_START_TIME || timeOfDay > expectedTime + 0.01) {
+    clauses.push(`the clock reads ${timeOfDay.toFixed(3)}, not the morning (${DAY_START_TIME} plus the seconds since)`);
+  }
+  if (!laidInBed) clauses.push('she was never lying in the middle bedroom’s bed');
+  if (!saveFlags.hasHotelKey()) clauses.push('no key: the suite would lock her in');
+  const out = walksOut();
+  if (!out.out) clauses.push(`cannot walk to the suite's door — ${out.why}`);
+  if (clauses.length > 0) fail(`Next day from ${label}${wasRiding ? ' (mid-ride)' : ''}: ${clauses.join('; ')}`);
+  nextDays.push(`${label}${wasRiding ? ' (mid-ride)' : ''}: ${clauses.length === 0 ? 'awake in the suite, day ' + dayCount : 'FAILED'}`);
+}
 // ------------------------------------------------------------------ 4a. doors, both ways
 
 /** The stick held along world (dx, dz), through the camera's ground basis, as a thumb holds it. */
@@ -513,14 +555,21 @@ function walkAcross(visit: SpaceVisit, band: PortalBand): void {
   }
 }
 
-// Before anything gives her the key: the suite's own door refuses her, by a
-// step back (`Hotel.refuseSuite`) — a put-down like any other.
-if (saveFlags.hasHotelKey()) fail('the key was already given before the keyless suite door could be walked');
+// **Keyless, first** — the key is only ever given, never taken back. The
+// suite's own door refuses her, by a step back (`Hotel.refuseSuite`), a
+// put-down like any other; and then "Next day" must give her the key, or her
+// own suite's lock would hold her in it.
+if (saveFlags.hasHotelKey()) fail('the key was already given before the keyless suite door and Next day could be tried');
+{
+  const corridor = SPACES.find((visit) => visit.space === CORRIDOR.space)!;
+  for (const band of hotelDoorBands(CORRIDOR).filter((candidate) => candidate.kind === 'suite-door')) walkAcross(corridor, band);
+}
+nextDayFrom('the park, never checked in', () => SPACES[0]!.enter());
+
 for (const visit of SPACES) {
   for (const band of everyBand()) walkAcross(visit, band);
 }
 
-// ------------------------------------------------------------------ 4. every exit
 // ------------------------------------------------------------------ 4. every exit
 
 
@@ -834,47 +883,6 @@ for (const [label, go] of [
   if (!out.out) fail(`${label}: put her where she cannot walk out — ${out.why}`);
 }
 
-// ------------------------------------------------------------------ 5. Next day
-
-const suiteBed = SUITE_BED_SPOTS[MIDDLE_BEDROOM_INDEX];
-const nextDays: string[] = [];
-function nextDayFrom(label: string, setUp: () => void): void {
-  settle();
-  setUp();
-  const dayBefore = gameStore.get().world.dayCount;
-  const wasRiding = player.riding;
-  // As `Game.nextDay` does it: let go of whatever has her, then the world's own.
-  player.letGo();
-  if (!world.nextDay()) {
-    fail(`Next day from ${label}: refused (riding=${player.riding})`);
-    return;
-  }
-  let laidInBed = false;
-  for (let t = 0; t < 6 && (player.riding || !laidInBed); t += 0.1) {
-    tick(0.1);
-    if (player.sleeping && suiteBed) {
-      const bx = SUITE.originX + suiteBed[0];
-      const bz = SUITE.originZ + suiteBed[1];
-      if (Math.hypot(player.position.x - bx, player.position.z - bz) < 1.2) laidInBed = true;
-    }
-  }
-  const { dayCount, timeOfDay } = gameStore.get().world;
-  const space = spaceAt(player.position.x, player.position.z);
-  const expectedTime = DAY_START_TIME + 6 / DAY_LENGTH_SECONDS;
-  const clauses: string[] = [];
-  if (player.riding) clauses.push(`still riding (${player.rideHolder?.holding ?? '?'})`);
-  if (space !== SUITE.space) clauses.push(`woke in ${space}, not ${SUITE.space}`);
-  if (dayCount !== dayBefore + 1) clauses.push(`day ${dayBefore} → ${dayCount}, not ${dayBefore + 1}`);
-  if (timeOfDay < DAY_START_TIME || timeOfDay > expectedTime + 0.01) {
-    clauses.push(`the clock reads ${timeOfDay.toFixed(3)}, not the morning (${DAY_START_TIME} plus the seconds since)`);
-  }
-  if (!laidInBed) clauses.push('she was never lying in the middle bedroom’s bed');
-  if (!saveFlags.hasHotelKey()) clauses.push('no key: the suite would lock her in');
-  const out = walksOut();
-  if (!out.out) clauses.push(`cannot walk to the suite's door — ${out.why}`);
-  if (clauses.length > 0) fail(`Next day from ${label}${wasRiding ? ' (mid-ride)' : ''}: ${clauses.join('; ')}`);
-  nextDays.push(`${label}${wasRiding ? ' (mid-ride)' : ''}: ${clauses.length === 0 ? 'awake in the suite, day ' + dayCount : 'FAILED'}`);
-}
 for (const visit of SPACES) nextDayFrom(visit.name, () => visit.enter());
 // Mid-ride: at breakfast, up a tree, on the train's platform ride, in the castle lift.
 nextDayFrom('a breakfast chair', () => {
