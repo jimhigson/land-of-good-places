@@ -217,7 +217,18 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: So
     else if (fell && landedAt < 0) landedAt = frame;
     if (landedAt >= 0 && frame >= landedAt + settleFrames) break;
   }
+  // Where she can be, not where a drop wedged her: off a bush into the crack
+  // between two more, her body comes down overlapping them by half a metre,
+  // and the resolver eases a body that deep out over seconds, not a frame. A
+  // place she cannot stand is no place — the census called four of them traps
+  // (seeds 2, 7, 8, 9). So she stands still until it lets her go, and a drop
+  // that never stops overlapping lands her nowhere.
+  for (let frame = 0; frame < Math.ceil(4 / dt); frame += 1) {
+    if (!sim.airborne && options.collision.deepestSolidOverlap(wedged.set(sim.position.x, sim.position.y, sim.position.z), PLAYER_RADIUS) <= 0.02) break;
+    sim.step(dt, 0, 0, false);
+  }
   if (sim.airborne) return null;
+  if (options.collision.deepestSolidOverlap(wedged.set(sim.position.x, sim.position.y, sim.position.z), PLAYER_RADIUS) > 0.02) return null;
   // Measured against the top in the column she ended in, not the one she
   // set off from: out in the park a top is a height over the planet's centre,
   // and its world y falls away a fifth of a metre per metre outward at 44 m —
@@ -284,6 +295,9 @@ function standsOn(solid: SolidView, stand: Stand): boolean {
   if (!solid.standsAt(stand.x, stand.z)) return false;
   return Math.abs(stand.y - solid.topAt(stand.x, stand.z)) < 0.05;
 }
+
+/** A scratch vector for the overlap test in {@link walkOff}. */
+const wedged = new Vector3();
 
 /** How far from a solid's face she runs up to a jump: room to run, less room, a standing hop. */
 const RUN_UPS = [2.4, 1.2, 0.4] as const;
