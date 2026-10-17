@@ -342,10 +342,18 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   // floor read as the walk outside its ring, and the search "left" the pit
   // before it began (the stranded proof, 17 Oct 2026). A drop's flood is held
   // to the same test below; the start never was.
+  //
+  // A start on the ground in a stamped cell — a body's width off a bush, where
+  // she stands perfectly well — keeps the nearest free cell's flood if her own
+  // walking takes her into it; failing that, the start is the ground within
+  // half a metre of her, and the search begins from there.
   const flood = grid.reachableFrom(options.start.x, options.start.z, options.start.y, sample);
-  const first = flood && flood(options.start.x, options.start.z, options.start.y) ? flood : null;
-  if (!first && !startTop) throw new Error(`solidReach: no lattice under the start (${options.start.x.toFixed(1)}, ${options.start.z.toFixed(1)})`);
-  regions.push({ entry: options.start, via: 'the start', has: first ?? (() => false) });
+  const start = options.start;
+  let first: ((x: number, z: number, y: number) => boolean) | null = null;
+  if (flood && flood(start.x, start.z, start.y)) first = flood;
+  else if (flood && !startTop && joinsMain(options, flood, start, options.fps ?? 60, 3)) first = flood;
+  const aroundStart = (x: number, z: number): boolean => Math.hypot(x - start.x, z - start.z) < 0.5;
+  regions.push({ entry: start, via: 'the start', has: first ?? (startTop ? () => false : aroundStart) });
   const groundReached = (x: number, z: number, y: number): boolean => regions.some((region) => region.has(x, z, y));
 
   const reached = new Map<SolidView, ReachedTop>();
