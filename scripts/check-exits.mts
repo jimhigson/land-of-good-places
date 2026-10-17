@@ -31,6 +31,11 @@
  *    the arrival a door or lift lands her on). Controls first: from the way out
  *    itself it must say "out", and from inside four walls registered round a
  *    spot of open floor it must say "trapped" — or nothing below means anything.
+ *    **And the rule agrees with it**: across a sample of every space — every
+ *    cell of every railway bridge, every stair point, a stride of every room's
+ *    top surfaces — every spot the router could stand on and walk out of is one
+ *    the rule leaves exactly where it is (its clause 4 *is* the router's flood,
+ *    over a window of the router's own lattice).
  * 3. **Every placement, enumerated from the source.** Every call that places
  *    her (`.endRide(`, `.teleportTo(`, `.teleport(`) and every ride that takes
  *    her (`.beginRide(`) outside `Player.ts`, listed by file and line; and no
@@ -46,10 +51,13 @@
  *    the way — a door, a lift, a space's arrival — is asked the same.
  * 5. **"Next day", from everywhere.** From every space, never checked in,
  *    mid-ride and mid-flight, the ☰ menu's "Next day" must end with her laid in
- *    the middle bedroom's bed and then awake in her suite, not riding, not
- *    flying, key in hand, on tomorrow morning's clock, able to walk to the
- *    suite's door. The `/hotel-cafe` link is driven too: sat at `lobby-a-1`,
- *    then left by its own "Leave breakfast".
+ *    the middle bedroom's bed with her pets asleep in theirs — a real parade,
+ *    built and wired as `Game` builds it — and then awake in her suite, not
+ *    riding, not flying, on tomorrow morning's clock, able to walk to the
+ *    suite's door, her pets up and at her heels. For the child who never
+ *    checked in, the key it gives her must do its one job: she walks out to
+ *    the corridor and back into her suite. The `/hotel-cafe` link is driven
+ *    too: sat at `lobby-a-1`, then left by its own "Leave breakfast".
  * 6. **Coverage.** Every call site found in (3) must have been driven by (4) or
  *    (5), or be named in {@link NOT_DRIVEN} with the reason; one that is neither
  *    fails. Coverage notes go to stderr, so a passing run says what it covered.
@@ -92,6 +100,8 @@ import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layo
 import { gameStore } from '../src/state/index.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
+import { Parade } from '../src/entities/parade/Parade.ts';
+import { shopItem } from '../src/world/building/shops/catalogue.ts';
 
 const problems: string[] = [];
 const notes: string[] = [];
@@ -203,6 +213,26 @@ const say = (line: string): void => {
 
 // ------------------------------------------------------------------ the park
 
+// **Her pets**, two of them, bought before the park is built: the hotel dresses
+// a pet bed for each companion she owns from the inventory, once, as it is
+// built — as it does for a child who already has them.
+gameStore.earn(1000);
+const PETS: { readonly uid: string; readonly who: string }[] = [];
+for (const [id, who] of [['pet.bunny', 'bunny'], ['pet.kitten', 'kitten']] as const) {
+  const spec = shopItem(id);
+  const bought = spec ? gameStore.buy(spec) : null;
+  if (!bought || bought.outcome !== 'kept') fail(`the ${who} could not be bought — Next day's pets cannot be checked`);
+  else PETS.push({ uid: bought.item.uid, who });
+}
+// Buying hands the newest thing to her hands; both walk in her parade instead.
+gameStore.setCarried(null);
+/**
+ * How near her a pet must be, three seconds after she gets up, to be at her
+ * heels: her parade's line is two companions long, and a companion back in it
+ * walks within a few metres of her.
+ */
+const PET_HEEL_REACH = 4;
+
 const { world, scene } = quietly(() => buildHeadlessPark());
 const { collision } = world;
 const camera = new IsoCamera();
@@ -226,6 +256,13 @@ function callerSite(stack: string | undefined): string | null {
 }
 /** The slowest single placement (endRide/teleportTo/teleport), and its cost in router cells. */
 const slowest = { ms: 0, cells: 0, site: '' };
+/**
+ * Where she stood the instant the last put-down returned, and whether in the
+ * air — what "she stands where the rule put her" is asked of, so that nothing
+ * the world does in the frames after (a child walking into her) can be
+ * mistaken for the rule.
+ */
+const placed = { x: 0, z: 0, airborne: false };
 let putDownCount = 0;
 let putDownMsTotal = 0;
 for (const name of PLACEMENTS) {
@@ -241,6 +278,7 @@ for (const name of PLACEMENTS) {
     const result = original(...args);
     const ms = performance.now() - t0;
     if (player.putDowns !== before) {
+      Object.assign(placed, { x: player.position.x, z: player.position.z, airborne: player.isAirborne });
       putDownCount += 1;
       putDownMsTotal += ms;
       if (ms > slowest.ms) Object.assign(slowest, { ms, cells: player.lastPutDown?.cells ?? 0, site: site ?? "this check's own placement" });
@@ -250,6 +288,12 @@ for (const name of PLACEMENTS) {
 }
 
 world.attachPlayer(player as never);
+// Her pets' parade, built and wired as `Game` does: one parade, handed to the
+// hotel and the castle, routed by her own router (below, once it exists).
+const parade = new Parade(player as never, collision, camera);
+scene.add(parade.group);
+world.hotel.petParade = parade;
+world.building.petParade = parade;
 // The trees are `Game`'s system, not `World`'s; built here as `Game` builds them.
 const hudStub = { setPrompt(): void {} };
 const trees = new TreeClimbing(player, world.npcs, hudStub as never, world.scenery.climbableTrees);
@@ -279,6 +323,8 @@ function tick(seconds: number, input = still): void {
     const context = { dt, elapsed, frame: Math.round(elapsed * 30), input, playerPosition: player.position, cameraForward: camera.forward };
     player.update(context as never);
     world.update(context as never);
+    // `Game`'s systems, in `Game`'s order: the parade, then the trees.
+    parade.update(context as never);
     trees.update(context as never);
   }
 }
@@ -287,6 +333,7 @@ function tick(seconds: number, input = still): void {
 
 /** The router, exactly as `Game` builds it — following the play bounds of the space she is in. */
 const router = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers);
+parade.setNavGrid(router);
 /** The rule, asked for a spot exactly as `Player` asks it. */
 function putDownAt(x: number, y: number, z: number): ReturnType<typeof putDownSpot> {
   return putDownSpot(collision, sample, { x, y, z }, PLAYER_PUT_DOWN, world.putDownSpace);
@@ -560,13 +607,16 @@ function nextDayFrom(label: string, setUp: () => void): void {
     fail(`Next day from ${label}: refused (riding=${player.riding})`);
     return;
   }
+  const hadKey = saveFlags.hasHotelKey();
   let laidInBed = false;
+  let petsAbed = false;
   for (let t = 0; t < 6 && (player.riding || !laidInBed); t += 0.1) {
     tick(0.1);
     if (player.sleeping && suiteBed) {
       const bx = SUITE.originX + suiteBed[0];
       const bz = SUITE.originZ + suiteBed[1];
       if (Math.hypot(player.position.x - bx, player.position.z - bz) < 1.2) laidInBed = true;
+      if (petsInTheirBeds()) petsAbed = true;
     }
   }
   const { dayCount, timeOfDay } = gameStore.get().world;
@@ -581,11 +631,73 @@ function nextDayFrom(label: string, setUp: () => void): void {
   }
   if (!laidInBed) clauses.push('she was never lying in the middle bedroom’s bed');
   if (player.isFlying) clauses.push('still flying');
-  if (!saveFlags.hasHotelKey()) clauses.push('no key: the suite would lock her in');
+  if (!petsAbed) clauses.push(`her pets were never all asleep in their own beds while she slept (${petsNow()})`);
   const out = walksOut();
   if (!out.out) clauses.push(`cannot walk to the suite's door — ${out.why}`);
+  const following = petsFollowHer();
+  if (following) clauses.push(following);
+  // The key's one job, for a child who had none: the suite's own door out has
+  // no lock, and the corridor's door back in has (`Hotel.suiteLock`) — so
+  // without it she would be shut out of her own suite the moment she stepped
+  // out of it.
+  if (!hadKey) {
+    const home = outAndBackIn();
+    if (home !== SUITE.space) {
+      clauses.push(`locked out of her own suite: she walked out to the corridor, and its door would not let her back in (left in ${home})`);
+    }
+  }
   if (clauses.length > 0) fail(`Next day from ${label}${wasRiding ? ' (mid-ride)' : ''}: ${clauses.join('; ')}`);
-  nextDays.push(`${label}${wasRiding ? ' (mid-ride)' : ''}: ${clauses.length === 0 ? 'awake in the suite, day ' + dayCount : 'FAILED'}`);
+  nextDays.push(
+    `${label}${wasRiding ? ' (mid-ride)' : ''}: ` +
+      (clauses.length > 0
+        ? 'FAILED'
+        : `awake in the suite, day ${dayCount}; her ${PETS.length} pets asleep in their beds, then at her heels` +
+          (hadKey ? '' : '; out to the corridor and back in, with the key it gave her')),
+  );
+}
+/** Every pet she owns asleep in its own bed in the middle bedroom, as the hotel's beds report it. */
+function petsInTheirBeds(): boolean {
+  const beds = world.hotel.petBeds;
+  return PETS.every((pet) => beds.some((bed) => bed.uid === pet.uid && bed.bedIndex === MIDDLE_BEDROOM_INDEX && bed.asleep));
+}
+/** Where her pets are now, for a failure message. */
+function petsNow(): string {
+  return PETS.map((pet) => {
+    const state = parade.petState(pet.uid);
+    if (!state) return `the ${pet.who}: not in the parade`;
+    const away = Math.hypot(state.x - player.position.x, state.z - player.position.z);
+    return `the ${pet.who}: ${state.bedPhase ?? 'up'}, ${away.toFixed(1)} m from her`;
+  }).join(', ');
+}
+/**
+ * **Up, and her pets come with her**: she walks for three seconds toward the
+ * suite's door, and every pet must be out of its bed and at her heels.
+ */
+function petsFollowHer(): string | null {
+  const door = hotelDoorBands(SUITE).find((band) => band.kind === 'corridor-door');
+  if (!door) return 'the suite has no corridor door to walk toward';
+  for (let t = 0; t < 3; t += 0.1) {
+    tick(0.1, stickAlong(door.centreX - player.position.x, door.centreZ - player.position.z));
+  }
+  const lagging = PETS.filter((pet) => {
+    const state = parade.petState(pet.uid);
+    return !state || state.bedPhase !== null || Math.hypot(state.x - player.position.x, state.z - player.position.z) > PET_HEEL_REACH;
+  });
+  return lagging.length === 0 ? null : `her pets did not get up and follow her (${petsNow()})`;
+}
+/** Out of the suite by its own door, then back by the corridor's: the space she ends in. */
+function outAndBackIn(): SpaceId {
+  const out = hotelDoorBands(SUITE).find((band) => band.kind === 'corridor-door');
+  const back = hotelDoorBands(CORRIDOR).find((band) => band.kind === 'suite-portal');
+  if (!out || !back) return spaceAt(player.position.x, player.position.z);
+  for (const sign of [1, -1] as const) {
+    if (spaceAt(...startOf(out, sign)) === SUITE.space) crossBand(out, sign);
+  }
+  if (spaceAt(player.position.x, player.position.z) !== CORRIDOR.space) return spaceAt(player.position.x, player.position.z);
+  for (const sign of [1, -1] as const) {
+    if (spaceAt(...startOf(back, sign)) === CORRIDOR.space) crossBand(back, sign);
+  }
+  return spaceAt(player.position.x, player.position.z);
 }
 // ------------------------------------------------------------------ 4a. doors, both ways
 
@@ -613,6 +725,37 @@ function everyBand(): PortalBand[] {
   ];
 }
 
+/** Where a walk across `band` starts on its `sign` side: 1.6 m short of it. */
+function startOf(band: PortalBand, sign: 1 | -1): [number, number] {
+  return [
+    band.centreX - sign * Math.sin(band.yaw) * (band.halfAlong + 1.6),
+    band.centreZ - sign * Math.cos(band.yaw) * (band.halfAlong + 1.6),
+  ];
+}
+
+/**
+ * Walk her across `band` from its `sign` side — stood 1.6 m short of it, the
+ * stick held through it, the way every door is used — until the space she is
+ * in changes or three seconds pass. True when the door placed her (a change
+ * of space, a refusal's step back): something besides the walk to its start.
+ */
+function crossBand(band: PortalBand, sign: 1 | -1): boolean {
+  const [startX, startZ] = startOf(band, sign);
+  // Past an arrival's cooldown (`SpaceManager.settling`, 0.9 s): no doorway
+  // fires in it, which is the point of it, and a walk through one inside it
+  // walks off the end of the room's floor instead.
+  tick(1.2);
+  player.teleportTo(startX, sample(startX, startZ, player.position.y + 1), startZ);
+  tick(0.1);
+  const before = player.putDowns;
+  const from = spaceAt(player.position.x, player.position.z);
+  for (let t = 0; t < 3 && spaceAt(player.position.x, player.position.z) === from; t += 0.1) {
+    tick(0.1, stickAlong(sign * Math.sin(band.yaw), sign * Math.cos(band.yaw)));
+  }
+  tick(0.3);
+  return player.putDowns !== before;
+}
+
 /**
  * Walk across one band, from 1.6 m short of it on each side that lies in this
  * space, holding the stick through it — the way every door is used. Whatever
@@ -620,27 +763,12 @@ function everyBand(): PortalBand[] {
  * makes is asked whether she can walk out.
  */
 function walkAcross(visit: SpaceVisit, band: PortalBand): void {
-  const dirX = Math.sin(band.yaw);
-  const dirZ = Math.cos(band.yaw);
-  for (const sign of [1, -1]) {
-    const startX = band.centreX - sign * dirX * (band.halfAlong + 1.6);
-    const startZ = band.centreZ - sign * dirZ * (band.halfAlong + 1.6);
-    if (spaceAt(startX, startZ) !== visit.space) continue;
+  for (const sign of [1, -1] as const) {
+    if (spaceAt(...startOf(band, sign)) !== visit.space) continue;
     settle();
     visit.enter();
-    // Past the arrival's cooldown (`SpaceManager.settling`, 0.9 s): no doorway
-    // fires in it, which is the point of it, and a walk through one inside it
-    // walks off the end of the room's floor instead.
-    tick(1.2);
-    player.teleportTo(startX, sample(startX, startZ, player.position.y + 1), startZ);
-    tick(0.1);
-    const from = spaceAt(player.position.x, player.position.z);
-    const before = player.putDowns;
-    for (let t = 0; t < 3 && spaceAt(player.position.x, player.position.z) === from; t += 0.1) {
-      tick(0.1, stickAlong(sign * dirX, sign * dirZ));
-    }
-    tick(0.3);
-    if (player.putDowns === before) continue; // walked on past it: nothing placed her
+    const from = visit.space;
+    if (!crossBand(band, sign)) continue; // walked on past it: nothing placed her
     const to = spaceAt(player.position.x, player.position.z);
     const out = walksOut();
     arrivals.push(`${band.what}, walked ${sign > 0 ? 'along' : 'against'} it from ${from}: now in ${to}, out=${out.out}`);
@@ -650,8 +778,9 @@ function walkAcross(visit: SpaceVisit, band: PortalBand): void {
 
 // **Keyless, first** — the key is only ever given, never taken back. The
 // suite's own door refuses her, by a step back (`Hotel.refuseSuite`), a
-// put-down like any other; and then "Next day" must give her the key, or her
-// own suite's lock would hold her in it.
+// put-down like any other; and then "Next day" must give her the key, or the
+// lock on the corridor's door would shut her out of the suite she woke in the
+// moment she stepped out of it.
 if (saveFlags.hasHotelKey()) fail('the key was already given before the keyless suite door and Next day could be tried');
 {
   const corridor = SPACES.find((visit) => visit.space === CORRIDOR.space)!;
@@ -680,9 +809,10 @@ function judge(what: string, before: number, holding: string, left: string, ms: 
     return;
   }
   if (!spot.found) fail(`${what}: the rule found no clear, open spot within ${SEARCH_REACH} m of (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
-  // A fling lands where gravity takes her; anything else stands where she was put.
-  if (Math.hypot(p.x - spot.x, p.z - spot.z) > 1e-6 && !player.isAirborne) {
-    fail(`${what}: she stands at (${p.x.toFixed(2)}, ${p.z.toFixed(2)}), not where the rule put her (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
+  // A fling lands where gravity takes her; anything else stands where she was
+  // put — asked of the instant the put-down returned (`placed`).
+  if (Math.hypot(placed.x - spot.x, placed.z - spot.z) > 1e-6 && !placed.airborne) {
+    fail(`${what}: she was left at (${placed.x.toFixed(2)}, ${placed.z.toFixed(2)}), not where the rule put her (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
   }
   tick(1); // let a fling land
   const out = walksOut();

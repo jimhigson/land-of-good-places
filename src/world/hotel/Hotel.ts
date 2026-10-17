@@ -913,9 +913,10 @@ export interface PetParadeLink {
    * nothing, when that uid is not a live pet in the line right now — stowed,
    * carried in her hands, or a bed built before she owned a matching pet at
    * all — in which case the bed simply stays the empty furniture it already
-   * was.
+   * was. `asleep`: already lying in it, the walk and the climb done — the
+   * "Next day" morning's.
    */
-  sendPetToBed(uid: string, bed: PetBedSpot): boolean;
+  sendPetToBed(uid: string, bed: PetBedSpot, asleep?: boolean): boolean;
   /**
    * The nap is over, or ended early: this pet stands back up and rejoins the
    * line. Safe to call for a uid that was never sent to bed.
@@ -1639,13 +1640,17 @@ export class Hotel implements GameSystem {
    * room here uses, so the camera snaps and the space settles exactly as a
    * doorway leaves them. Behind it, in order: `behindTheIris` (`World.nextDay`
    * passes the clock moving to tomorrow morning and whichever building she was
-   * in letting go of her); her key, if reception had not given it yet — a suite
-   * you wake up in is yours, and its lock must never hold you in it; the suite
-   * becomes where she is; and {@link nap} lays her in the middle bedroom's bed
-   * (it holds the most pet beds, `layout.ts`'s `petBedSlots`), sending every pet
-   * she has out to its own bed — the nap's own code, not a second copy. The iris
-   * opens on her asleep, and after {@link NEXT_DAY_WAKE_SECONDS} {@link wakeNap},
-   * the very wake-up a tap gives, stands her up on the mattress.
+   * in letting go of her); her key, if reception had not given it yet — the
+   * suite she wakes in is hers, and its own door out to the corridor has no
+   * lock, but the corridor's door back in has ({@link suiteLock}): without the
+   * key she would be shut out of her own suite the moment she stepped out of
+   * it; the suite becomes where she is; and {@link nap} lays her in the middle
+   * bedroom's bed (it holds the most pet beds, `layout.ts`'s `petBedSlots`),
+   * with every pet she has already asleep in its own bed — the nap's own code,
+   * its pets' bedtime entered at its end, because the night has passed. The
+   * iris opens on them all asleep, and after {@link NEXT_DAY_WAKE_SECONDS}
+   * {@link wakeNap}, the very wake-up a tap gives, stands her up on the
+   * mattress and her pets up out of their beds to follow her.
    *
    * Refused (`false`) while a change of space is already running or while
    * anything still has her: the caller lets go of whatever that is first.
@@ -1665,7 +1670,7 @@ export class Hotel implements GameSystem {
       // In the room first, so everything that asks "which room is she in?"
       // while the nap starts — the pets' beds, the dim — answers the suite.
       player.teleportTo(bed.x, BED_MATTRESS_TOP, bed.z + NAP_FEET_Z, 0);
-      this.nap(bed);
+      this.nap(bed, true);
       this.nextDayWake = NEXT_DAY_WAKE_SECONDS;
     });
     return true;
@@ -3164,7 +3169,12 @@ export class Hotel implements GameSystem {
    * **Runs until {@link wakeNap} ends it — no timer.** Jim, 24 Aug 2026:
    * *"make them stay in the bed until the player gets them out."*
    */
-  private nap(bed: Bed): void {
+  /**
+   * Lies her down in `bed`, and sends every pet she has to its own bed —
+   * walking there and climbing in, or with `petsAsleep` already lying in it
+   * (the "Next day" morning, {@link wakeTomorrowInSuite}).
+   */
+  private nap(bed: Bed, petsAsleep = false): void {
     const player = this.player;
     if (!player || player.riding) return;
     player.beginRide(this.bedHolder);
@@ -3174,7 +3184,7 @@ export class Hotel implements GameSystem {
     bed.blanket.visible = true;
     this.napping = true;
     this.nappingAt = bed;
-    this.sendPetsToBed(bed.bedIndex);
+    this.sendPetsToBed(bed.bedIndex, petsAsleep);
   }
 
   /**
@@ -5340,9 +5350,9 @@ export class Hotel implements GameSystem {
    * exactly as they do everywhere else in the park. {@link petBedShortfall}
    * is what says so out loud rather than letting it pass as success.
    */
-  private sendPetsToBed(bedIndex: number): void {
+  private sendPetsToBed(bedIndex: number, asleep = false): void {
     for (const { uid, spot } of this.petBedsForNapIn(bedIndex)) {
-      this.petParade?.sendPetToBed(uid, spot);
+      this.petParade?.sendPetToBed(uid, spot, asleep);
     }
   }
 
