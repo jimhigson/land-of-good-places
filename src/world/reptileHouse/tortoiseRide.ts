@@ -1,9 +1,7 @@
 import { Box3, CatmullRomCurve3, Group, Vector3 } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
-import type { Player } from '../../entities/Player';
-import { PLAYER_RADIUS } from '../../core/constants';
-import { resolveDismount } from '../dismount';
+import type { Player, RideHolder } from '../../entities/Player';
 import { pressZone, type InteractZone } from '../interact';
 import { highlightObject } from '../highlight';
 import { createTortoise, type TortoiseHandle } from '../../art/models/reptiles';
@@ -160,10 +158,13 @@ export class TortoiseRide {
       this.collision.removeWall(this.bay);
       this.bay = null;
     }
-    player.beginRide();
+    player.beginRide(this.holder);
     this.place(0);
     return true;
   }
+
+  /** Whoever rides the shell is held by this — and let go by hopping off it. */
+  private readonly holder: RideHolder = { holding: 'the tortoise', letGo: () => this.dismount() };
 
   zones(): InteractZone[] {
     if (this.riding) return [];
@@ -202,19 +203,18 @@ export class TortoiseRide {
     if (!player || !this.riding) return;
     this.riding = false;
     // Beside its flank, on the side away from the ring's middle — the beds and
-    // Noodle's kerb are inboard of the ring, the open floor outboard — then
-    // `resolveDismount` spirals out from there if that spot is not clear.
+    // Noodle's kerb are inboard of the ring, the open floor outboard — and
+    // `endRide`'s put-down rule moves her from there if that spot is not clear.
     const sideX = Math.cos(this.yaw);
     const sideZ = -Math.sin(this.yaw);
     const outward = sideX * this.at.x + sideZ * this.at.z >= 0 ? 1 : -1;
-    const { x, z } = resolveDismount(
-      this.collision,
-      REPTILE_HOUSE_ORIGIN_X + this.at.x + sideX * outward * DISMOUNT_BESIDE,
-      REPTILE_HOUSE_ORIGIN_Z + this.at.z + sideZ * outward * DISMOUNT_BESIDE,
-      PLAYER_RADIUS,
-    );
-    player.setRidePose(x, REPTILE_HOUSE_FLOOR_Y, z, this.yaw);
-    player.endRide(sideX * outward * HOP_OFF_SIDE, HOP_OFF_UP, sideZ * outward * HOP_OFF_SIDE);
+    player.endRide({
+      x: REPTILE_HOUSE_ORIGIN_X + this.at.x + sideX * outward * DISMOUNT_BESIDE,
+      y: REPTILE_HOUSE_FLOOR_Y,
+      z: REPTILE_HOUSE_ORIGIN_Z + this.at.z + sideZ * outward * DISMOUNT_BESIDE,
+      facing: this.yaw,
+      velocity: { x: sideX * outward * HOP_OFF_SIDE, y: HOP_OFF_UP, z: sideZ * outward * HOP_OFF_SIDE },
+    });
   }
 
   update(dt: number, elapsed: number, input?: RideInput): void {
@@ -268,14 +268,12 @@ export class TortoiseRide {
     this.parkedSolid.handle = this.bay;
     const player = this.player;
     if (!player || !rider) return;
-    const { x, z } = resolveDismount(
-      this.collision,
-      REPTILE_HOUSE_ORIGIN_X + TORTOISE_RIDE_STAND.x,
-      REPTILE_HOUSE_ORIGIN_Z + TORTOISE_RIDE_STAND.z,
-      PLAYER_RADIUS,
-    );
-    player.setRidePose(x, REPTILE_HOUSE_FLOOR_Y, z, (TORTOISE_RIDE_STAND.facing * Math.PI) / 180);
-    player.endRide();
+    player.endRide({
+      x: REPTILE_HOUSE_ORIGIN_X + TORTOISE_RIDE_STAND.x,
+      y: REPTILE_HOUSE_FLOOR_Y,
+      z: REPTILE_HOUSE_ORIGIN_Z + TORTOISE_RIDE_STAND.z,
+      facing: (TORTOISE_RIDE_STAND.facing * Math.PI) / 180,
+    });
   }
 
   private park(): void {

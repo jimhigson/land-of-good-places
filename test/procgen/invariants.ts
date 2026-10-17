@@ -73,7 +73,7 @@ import {
 // centre", and a hand-written `Math.hypot(x, y + R, z)` beside it would be the
 // second definition CLAUDE.md's "two definitions of one thing" names.
 import { Geo } from '../../src/world/geo/Geo.ts';
-import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
+import { resolveDismountGroup } from '../../src/world/dismount.ts';
 // Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
 // a type-only one (from `world/train/crossings`), which erases — no seeded
 // module loads, so this cannot pin the park's seed the way this file's own
@@ -1955,7 +1955,7 @@ const noDrawnPavingInTheRailCorridor: Invariant = (facts) => {
  * extra bodies is three more chances for somebody to be standing inside a
  * hedge, or inside the player, on a seed nobody looked at.
  *
- * This runs the **real** placement code (`resolveDismount` then
+ * This runs the **real** placement code (`Player.endRide`'s put-down rule then
  * `resolveDismountGroup`) against the **real** built collision world, in the
  * same order and with the same radii the ride uses, and then measures where
  * everybody actually ended up. It does not restate the rule that placed them:
@@ -1976,8 +1976,9 @@ const railRaceExitFitsTheParty: Invariant = (facts) => {
 
   const collision = facts.world.collision;
   // The player is set down first and keeps her spot — exactly `arrive()`'s
-  // order, which is what makes "nobody appears on top of her" true.
-  const player = resolveDismount(collision, exit.x, exit.z, PLAYER_RADIUS);
+  // order, which is what makes "nobody appears on top of her" true — by the
+  // game's own put-down rule, with the exit `RailRace.arrive()` hands it.
+  const player = facts.putDownPlayer({ x: exit.x, y: terrainHeight(exit.x, exit.z), z: exit.z, facing: 0 });
   const rivals = facts.world.railRace.laneCount - 1;
   const spots = resolveDismountGroup(collision, player.x, player.z, PLAYER_RADIUS, rivals, [
     { x: player.x, z: player.z, radius: PLAYER_RADIUS },

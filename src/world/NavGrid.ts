@@ -1,9 +1,10 @@
 import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
+import { NAV_CELL, navLatticeFrame } from './navLattice';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
 import { stepReferenceFor, withinStep } from './building/stepReach';
-import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
+import { MAX_AUTO_HOP_HEIGHT, autoHopClears, routeStamp, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
 /**
@@ -203,30 +204,16 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  */
 
 /**
- * Lattice pitch, in metres.
- *
- * Half a metre against a 0.62 m walker radius: fine enough that the gaps
- * between trees and the doorways between stalls survive, coarse enough that the
- * whole park is a few hundred cells square and builds in a few tens of
- * milliseconds. Cells are classified by their **centre**, so the lattice is
- * very slightly optimistic about tight corners — which is the right way to be
- * wrong. An optimistic route clips a corner and the collision resolver slides
- * her round it; a pessimistic one seals a gap she can plainly see and walks her
- * the long way about.
+ * The lattice's cell pitch — `world/navLattice.ts`'s (see there for its
+ * reasoning, and for why a leaf holds it), re-exported here for a caller
+ * sampling one cell outside a stamp (`parkLayout.ts`) and for instruments that
+ * walk the grid (`measure-walk-reach.mts`).
  */
-/**
- * The lattice's cell pitch — the one owner. Exported for a caller sampling one
- * cell outside a stamp (`parkLayout.ts`) and for instruments that walk the grid
- * (`measure-walk-reach.mts`).
- */
-export const NAV_CELL = 0.5;
+export { NAV_CELL };
 /** Nodes popped per piece of a sliced flood ({@link NavGrid.floodFromSearch}). */
 const FLOOD_PIECE = 4096;
 const CELL = NAV_CELL;
 const INVERSE_CELL = 1 / CELL;
-
-/** Metres of lattice built beyond the soft play boundary, for elbow room. */
-const MARGIN = 2;
 
 /**
  * The biggest height change between neighbouring nodes a route may take.
@@ -786,20 +773,18 @@ export class NavGrid {
     // Sized and centred on the boundary's own extent rather than on a radius
     // about a centre: the park's edge is neither circular nor, for the castle
     // interior, centred on the origin.
-    const { minX, maxX, minZ, maxZ } = boundary.extent;
-    const centreX = (minX + maxX) / 2;
-    const centreZ = (minZ + maxZ) / 2;
-    const reach = Math.max(maxX - minX, maxZ - minZ) / 2;
-    const side = Math.ceil(((reach + MARGIN) * 2) / CELL);
+    // The frame is `navLattice.ts`'s, so the put-down rule floods in exactly
+    // these cells — see that file.
+    const frame = navLatticeFrame(boundary.extent);
+    const side = frame.side;
     if (side <= 0) {
       this.built = false;
       return;
     }
 
     this.cells = side;
-    // Cell (0, 0)'s centre, half a cell in from the corner of the square.
-    this.originX = centreX - (side * CELL) / 2 + CELL / 2;
-    this.originZ = centreZ - (side * CELL) / 2 + CELL / 2;
+    this.originX = frame.originX;
+    this.originZ = frame.originZ;
 
     const total = side * side;
     if (this.blocked.length !== total) {
@@ -862,10 +847,13 @@ export class NavGrid {
     // the rail refuses, and stamping it would block the walkable floor
     // *beneath* the overhang — the lobby's walk-through arch — at every
     // level. See `Collision.ts`'s `baseHeight` header.
+    // `routeStamp` is the one owner of which is which — the put-down rule
+    // (`world/dismount.ts`) floods these same cells by it.
     this.collision.forEachCircle(
       (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped) => {
-        const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
-        if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        const stamp = routeStamp({ autoHoppable, topHeight, baseHeight, navStamped }, this.hopApex);
+        if (stamp === 'skip') return;
+        const hoppable = stamp === 'hop';
         this.stampCircle(
           x,
           z,
@@ -876,8 +864,9 @@ export class NavGrid {
     );
     this.collision.forEachWall(
       (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped) => {
-        const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
-        if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        const stamp = routeStamp({ autoHoppable, topHeight, baseHeight, navStamped }, this.hopApex);
+        if (stamp === 'skip') return;
+        const hoppable = stamp === 'hop';
         this.stampSegment(
           x1,
           z1,

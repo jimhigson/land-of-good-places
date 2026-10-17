@@ -31,6 +31,7 @@ import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
 import { NameLabel } from '../ui/NameLabel';
 import { discoverSecret, gameStore, type PlayerState } from '../state';
+import { putDownSpot, type PutDown, type RideExit } from '../world/dismount';
 import type { WornHat } from './WornHat';
 import type { WornJetpack } from './WornJetpack';
 
@@ -104,6 +105,14 @@ const GRAVITY = 17;
  * this one number.
  */
 export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
+
+/**
+ * **Her body, as the put-down rule measures it** — `world/dismount.ts`'s
+ * `putDownSpot`: her radius, and the hop she makes without being asked. One
+ * object, so `endRide`, the hotel's chair stand spots and `check:exits` all
+ * ask the rule about the same child.
+ */
+export const PLAYER_PUT_DOWN = { radius: PLAYER_RADIUS, hopApex: JUMP_APEX_HEIGHT } as const;
 
 /**
  * The ride pose now lives in `./ridePose.ts`, and everything it used to export
@@ -324,6 +333,28 @@ const _restMatrix = /* @__PURE__ */ new Matrix4();
 const _restVertex = /* @__PURE__ */ new Vector3();
 
 /**
+ * **Whatever has her while she rides — and how to give her back.**
+ *
+ * Required by {@link Player.beginRide}, for the reason {@link RideExit} is
+ * required by {@link Player.endRide}: a ride that can take a child must be able
+ * to say how she gets off, and say it to anybody who asks, not only to its own
+ * finish line. The "Next day" button asks — from a ride, a seat, a nap, a
+ * cinematic — and so does `check:exits`, which enters and leaves every one.
+ */
+export interface RideHolder {
+  /** What has her, in a few words, for a failure message: "the train", "a breakfast chair". */
+  readonly holding: string;
+  /**
+   * Give her back **now**, through this ride's own way off: the same exit it
+   * would have used, its own state cleared, `Player.endRide` called. Must leave
+   * her not riding; {@link Player.letGo} says so loudly if it does not.
+   */
+  letGo(): void;
+}
+
+export type { RideExit } from '../world/dismount';
+
+/**
  * The player character: movement, collision, and the walk animation.
  *
  * Movement is camera-relative — pushing the stick "up" always walks up the
@@ -527,6 +558,14 @@ export class Player implements GameSystem {
   /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
   private readonly face: FaceLife;
   private ridingFlag = false;
+  /** Who has her while {@link ridingFlag} is up — see {@link RideHolder}. */
+  private holder: RideHolder | null = null;
+  /**
+   * Where the last {@link endRide} put her, and how far the put-down rule had
+   * to move her from the exit she was given — read by `check:exits`, which
+   * reports every exit the rule had to repair.
+   */
+  lastPutDown: PutDown | null = null;
   /** 0..1 of the tree-climb wave. See {@link setClimbWave}. */
   private climbWave = 0;
   /**
@@ -884,9 +923,15 @@ export class Player implements GameSystem {
     this.group.position.copy(this.position);
   }
 
-  /** Hands the character to a ride: input, collision and gravity stop applying. */
-  beginRide(): void {
+  /**
+   * Hands the character to a ride: input, collision and gravity stop applying.
+   *
+   * `holder` is required — see {@link RideHolder}: whatever takes her must be
+   * able to give her back on request.
+   */
+  beginRide(holder: RideHolder): void {
     this.ridingFlag = true;
+    this.holder = holder;
     // Every ride is sat in until it says otherwise, so a ride that has never
     // heard of postures cannot inherit one from the ride before it.
     this.ridePosture = 'seated';
@@ -1033,8 +1078,45 @@ export class Player implements GameSystem {
     this.scriptedWalkSpeed = Math.max(0, speed);
   }
 
-  /** Gives the character back, optionally still moving. */
-  endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
+  /** Whatever has her right now, or `null` on her own two feet. */
+  get rideHolder(): RideHolder | null {
+    return this.ridingFlag ? this.holder : null;
+  }
+
+  /**
+   * **Give her back from whatever has her, now** — the "Next day" button's
+   * first step, and `check:exits`' way off every ride. Asks the holder to let
+   * go through its own exit; a holder that leaves her riding is a bug, said out
+   * loud, and she is put down where she is through {@link endRide}'s own rule
+   * rather than left a statue.
+   */
+  letGo(): void {
+    const holder = this.rideHolder;
+    if (!holder) return;
+    holder.letGo();
+    if (!this.ridingFlag) return;
+    console.error(`Player.letGo: ${holder.holding} did not let her go — putting her down where she is`);
+    this.endRide({ x: this.position.x, y: this.position.y, z: this.position.z });
+  }
+
+  /**
+   * **Gives the character back, at `exit`.**
+   *
+   * `exit` is required: a ride cannot hand her back without saying where. And
+   * it is not taken on trust — `world/dismount.ts`'s `putDownSpot`, the one
+   * owner of where a child may be put down, checks it is in bounds, solid
+   * underfoot, clear and open floor, and moves her to the nearest spot that is
+   * when it is not (an exit that passes is used exactly as given). She is put
+   * there before anything else happens: `previousPosition` collapses onto it,
+   * as every teleport's does, so no doorway trigger sweeps the jump.
+   *
+   * Handed back moving when the exit says so — the slide's delivery into the
+   * balls, the tortoise's hop off — and standing still on the floor otherwise.
+   */
+  endRide(exit: RideExit): void {
+    const spot = putDownSpot(this.collision, (x, z, y) => this.groundAt(x, z, y), exit, PLAYER_PUT_DOWN);
+    this.lastPutDown = spot;
+    this.holder = null;
     this.ridingFlag = false;
     // Stand her back up before handing her over, or she walks away lying down.
     this.ridePosture = 'seated';
@@ -1046,9 +1128,22 @@ export class Player implements GameSystem {
     // The sleeping pose lolls her head to one side; unloll it with the rest.
     this.model.head.rotation.z = 0;
     this.climbWave = 0;
-    this.velocity.set(velocityX, 0, velocityZ);
-    this.verticalVelocity = velocityY;
-    this.airborne = true;
+    const velocity = exit.velocity;
+    this.velocity.set(velocity?.x ?? 0, 0, velocity?.z ?? 0);
+    this.verticalVelocity = velocity?.y ?? 0;
+    this.position.set(spot.x, spot.y, spot.z);
+    this.previousPosition.copy(this.position);
+    // The surface under her, not the height she is let go at: the slide's
+    // little drop is gravity's to close, from the floor's own reference.
+    this.groundHeight = spot.floor;
+    // Moving, or let go above the floor: in the air, and gravity closes it.
+    // Otherwise on her feet already — a put-down is a placing, not a drop.
+    this.airborne = velocity !== undefined || spot.y > spot.floor + 1e-6;
+    this.flying = false;
+    this.jumpHeldFor = 0;
+    if (exit.facing !== undefined) this.facingAngle = exit.facing;
+    this.group.position.copy(this.position);
+    faceOnGround(this.group, this.facingAngle);
     // A ride hands back a fresh velocity of its own choosing; nothing about
     // the overlap she was in before it took over still applies.
     this.escorting = false;

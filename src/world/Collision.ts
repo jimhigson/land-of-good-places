@@ -294,6 +294,33 @@ export function autoHopClears(topHeight: number, apexClearance: number): boolean
 }
 
 /**
+ * **What one collider is to the route lattice** — the one owner of the rule
+ * `world/NavGrid.ts` stamps its lattice by, and `world/dismount.ts` floods by:
+ *
+ * - `'hop'`: a wall she hops without being asked (`autoHoppable`, and within
+ *   {@link autoHopClears} of the walker's apex) — crossed at a price, never a
+ *   wall;
+ * - `'skip'`: a **banded** collider (a finite `baseHeight`, the balustrade on an
+ *   overhanging deck) that guards an edge rather than a column of space, unless
+ *   it says it must be stamped (`navStamped`, a ramp's flank) — see the header;
+ * - `'blocked'`: everything else, at every height. The lattice is
+ *   two-dimensional on purpose: a wall pushes a walker back at any height.
+ */
+export function routeStamp(
+  collider: {
+    readonly autoHoppable: boolean;
+    readonly topHeight: number;
+    readonly baseHeight: number;
+    readonly navStamped: boolean;
+  },
+  hopApex: number,
+): 'hop' | 'skip' | 'blocked' {
+  if (collider.autoHoppable && autoHopClears(collider.topHeight, hopApex)) return 'hop';
+  if (Number.isFinite(collider.baseHeight) && !collider.navStamped) return 'skip';
+  return 'blocked';
+}
+
+/**
  * Overlaps up to this deep are ordinary contact — the everyday case of
  * walking (even sprinting) straight into a wall, tree or fountain rim — and
  * get corrected fully and instantly, exactly as before. That is what keeps
@@ -647,6 +674,79 @@ export class CollisionWorld {
   /** The soft boundary, for anything that has to map the space inside it. */
   get playBounds(): ParkBoundary {
     return this.bounds;
+  }
+
+  /**
+   * **Would the soft boundary leave a mover of `radius` at `(x, z)` alone?** —
+   * true when she stands a full radius inside the edge, and also when she is so
+   * far outside it that she is in another space entirely, which `resolve` does
+   * not touch either (see {@link BOUNDARY_LEASH_REACH}). The same rule `resolve`
+   * enforces, asked without moving anybody: `world/dismount.ts` asks it before
+   * putting a child down, so it never puts her where the boundary would shove.
+   */
+  clearOfBoundary(x: number, z: number, radius: number): boolean {
+    const edgeGap = this.bounds.distanceToEdge(x, z);
+    return edgeGap >= radius || edgeGap <= -BOUNDARY_LEASH_REACH;
+  }
+
+  /**
+   * **A small world of just the solids near `(x, z)`** — every collider whose
+   * footprint comes within `reach` metres, the same objects (never copies, so
+   * nothing can drift), the same play bounds. For a caller that asks hundreds of
+   * point questions about one neighbourhood — `world/dismount.ts`'s put-down
+   * flood — and would otherwise scan the whole park's three thousand colliders
+   * for every one of them. Every query on it answers exactly as this world would
+   * for a point within `reach` of `(x, z)`.
+   */
+  near(x: number, z: number, reach: number): CollisionWorld {
+    const view = new CollisionWorld();
+    view.bounds = this.bounds;
+    for (const circle of this.circles) {
+      if (Math.hypot(circle.x - x, circle.z - z) - circle.radius > reach) continue;
+      view.circles.push(circle);
+      view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, circle.radius);
+    }
+    for (const wall of this.walls) {
+      const dx = wall.x2 - wall.x1;
+      const dz = wall.z2 - wall.z1;
+      const lengthSq = dx * dx + dz * dz;
+      const t = lengthSq < 1e-8 ? 0 : Math.max(0, Math.min(1, ((x - wall.x1) * dx + (z - wall.z1) * dz) / lengthSq));
+      const gap = Math.hypot(wall.x1 + t * dx - x, wall.z1 + t * dz - z) - wall.halfThickness;
+      if (gap > reach) continue;
+      view.walls.push(wall);
+      view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, wall.halfThickness);
+    }
+    return view;
+  }
+
+  /**
+   * **Would the route lattice call a disc of `radius` at `(x, z)` blocked?** —
+   * some collider {@link routeStamp} calls `'blocked'` overlaps it, at any
+   * height: exactly the cell `NavGrid` stamps out for a walker of that radius
+   * centred here. The put-down rule floods the router's own cells with it, so
+   * an exit it calls open is one a tap can walk out of.
+   */
+  routeBlocked(x: number, z: number, radius: number, hopApex: number): boolean {
+    for (const circle of this.circles) {
+      const minimum = circle.radius + radius;
+      const dx = x - circle.x;
+      const dz = z - circle.z;
+      if (dx * dx + dz * dz >= minimum * minimum) continue;
+      if (routeStamp(circle, hopApex) === 'blocked') return true;
+    }
+    for (const wall of this.walls) {
+      const ax = wall.x2 - wall.x1;
+      const az = wall.z2 - wall.z1;
+      const lengthSquared = ax * ax + az * az;
+      let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const dx = x - (wall.x1 + ax * t);
+      const dz = z - (wall.z1 + az * t);
+      const minimum = wall.halfThickness + radius;
+      if (dx * dx + dz * dz >= minimum * minimum) continue;
+      if (routeStamp(wall, hopApex) === 'blocked') return true;
+    }
+    return false;
   }
 
   /**

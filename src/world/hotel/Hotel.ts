@@ -25,7 +25,8 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { hasWalk, type CreatureHandle } from '../../art/style/asset';
-import type { Player } from '../../entities/Player';
+import { PLAYER_PUT_DOWN, type Player, type RideHolder } from '../../entities/Player';
+import { putDownSpot, type RideExit } from '../dismount';
 import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
 import type { LiftPanelSource } from '../building/liftRide';
@@ -597,6 +598,14 @@ const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
 const CHAIR_SEAT_Y = 0.42;
 
 /**
+ * How far behind a breakfast chair's centre her stand spot starts, metres: the
+ * chair's own 0.3 m footprint plus her 0.62 m radius, and a hand's breadth of
+ * air, so the spot is clear of the seat she has just left. Where that spot is
+ * not clear, open floor, `Hotel.chairStand` lets the put-down rule move it.
+ */
+const CHAIR_STAND_BACK = 0.3 + PLAYER_RADIUS + 0.08;
+
+/**
  * Honest tops for the scatter dressing, metres above the floor they stand on.
  *
  * Approximate on purpose — a seeded crystal cluster varies a little — but
@@ -798,6 +807,16 @@ interface Chair {
    * alternative is a second list of chair ids to keep in step with this one.
    */
   taken: boolean;
+  /**
+   * **Where she stands to sit here, and where she is put down when she gets
+   * up** — one spot, for the Sit chip's walk and for "Leave breakfast" alike.
+   * Found once, the first time anything asks ({@link Hotel.chairStand}), by the
+   * put-down rule itself, so it is clear, open floor rather than a formula's
+   * guess. Two answers here were the bug: the chip walked her to a spot behind
+   * the chair (inside the next table, for one café chair), and standing up
+   * ended the ride on the seat.
+   */
+  stand: { readonly x: number; readonly z: number } | null;
 }
 
 interface Bed {
@@ -1932,8 +1951,9 @@ export class Hotel implements GameSystem {
         y: 1,
         z: chair.z,
         pickRadius: 1.6,
-        standX: chair.x - Math.sin(chair.facing) * 0.9,
-        standZ: chair.z - Math.cos(chair.facing) * 0.9,
+        // The chair's one stand spot — see `Chair.stand`.
+        standX: this.chairStand(chair).x,
+        standZ: this.chairStand(chair).z,
         standRadius: 2.2,
         // Sitting is a ride as far as the engine cares, and a zone is not
         // selectable while riding unless it says so — the train's own 'Get
@@ -2472,6 +2492,10 @@ export class Hotel implements GameSystem {
     // is preserved rather than tidied here.
     this.spaces.hop(() => {
       const player = this.player;
+      // Only while the lift still has her: let off half way (the "Next day"
+      // button, from inside the car), she is somewhere else by now, and
+      // neither her pose nor the play bounds are the lift's to move.
+      if (!player || !this.lift.holds(player)) return;
       if (player) {
         // Behind the closed iris, like every other space change — posing
         // her before it closed gave a visible cross-space camera whip
@@ -2733,16 +2757,63 @@ export class Hotel implements GameSystem {
   private sitAt(chair: Chair): void {
     const player = this.player;
     if (!player || player.riding) return;
-    player.beginRide();
+    player.beginRide(this.chairHolder);
     player.setRidePose(chair.x, CHAIR_SEAT_Y, chair.z, chair.facing);
     this.seatedAt = chair.id;
+  }
+
+  /**
+   * Whoever sits at breakfast is held by this — and let go by getting up, the
+   * food shot cut short first so its camera does not outlive the meal.
+   */
+  private readonly chairHolder: RideHolder = {
+    holding: 'a breakfast chair',
+    letGo: () => {
+      if (this.moment === 'food') this.cine.cancel();
+      this.standUp();
+    },
+  };
+
+  /** A nap is let go by waking up — the same wake a tap or a hop gives. */
+  private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap() };
+
+  /**
+   * The one stand spot of one chair — see `Chair.stand`.
+   *
+   * Asked of `world/dismount.ts`'s put-down rule, starting a step behind the
+   * chair (her body clear of its seat, `CHAIR_STAND_BACK`) on the floor: the
+   * rule hands that back unchanged where it is clear, open floor, and moves it
+   * to the nearest spot that is where it is not — the lobby café's middle
+   * chair, whose "behind" is inside the next table. Kept once found: the
+   * furniture does not move.
+   */
+  private chairStand(chair: Chair): { readonly x: number; readonly z: number } {
+    if (!chair.stand) {
+      const spot = putDownSpot(
+        this.collision,
+        (x, z, y) => this.surfaces.sample(x, z, y),
+        {
+          x: chair.x - Math.sin(chair.facing) * CHAIR_STAND_BACK,
+          y: 0,
+          z: chair.z - Math.cos(chair.facing) * CHAIR_STAND_BACK,
+        },
+        PLAYER_PUT_DOWN,
+      );
+      chair.stand = { x: spot.x, z: spot.z };
+    }
+    return chair.stand;
   }
 
   private standUp(): void {
     const player = this.player;
     if (!player) return;
+    const chair = this.chairs.find((seat) => seat.id === this.seatedAt);
     this.seatedAt = null;
-    player.endRide();
+    // **Onto the chair's own stand spot**, never the seat she sat on: the seat
+    // is inside the chair and within her table's reach, and getting up there
+    // is how the lobby café left a child in the strip behind its tables.
+    const stand = chair ? this.chairStand(chair) : player.position;
+    player.endRide({ x: stand.x, y: 0, z: stand.z, facing: chair?.facing ?? player.facing });
     // Breakfast is over: the bowls and the pet go with it. Hidden rather than
     // disposed — she may sit straight back down, and rebuilding a pet to eat a
     // second bowl of cereal is three models for one child changing her mind.
@@ -3011,7 +3082,7 @@ export class Hotel implements GameSystem {
   private nap(bed: Bed): void {
     const player = this.player;
     if (!player || player.riding) return;
-    player.beginRide();
+    player.beginRide(this.bedHolder);
     player.ridePosture = 'sleeping';
     player.sleeping = true;
     player.setRidePose(bed.x, BED_MATTRESS_TOP + NAP_LIE_HEIGHT, bed.z + NAP_FEET_Z, 0);
@@ -3045,13 +3116,16 @@ export class Hotel implements GameSystem {
   wakeNap(): void {
     const player = this.player;
     if (!this.napping || !this.nappingAt || !player) return;
+    const bed = this.nappingAt;
     this.napping = false;
-    this.nappingAt.blanket.visible = false;
+    bed.blanket.visible = false;
     this.nappingAt = null;
     // `endRide` stands the model back up itself and opens her eyes again (it
     // clears `sleeping`); the group was never pitched (see `nap` — the
-    // posture owns the recline).
-    player.endRide();
+    // posture owns the recline). Up on the mattress where her feet were, the
+    // way she always got up: a bed is soft, its own floor, and open on its
+    // sides — and the put-down rule checks exactly that rather than trusting it.
+    player.endRide({ x: bed.x, y: BED_MATTRESS_TOP, z: bed.z + NAP_FEET_Z, facing: 0 });
     player.model.setExpression('happy');
     // The pets get up together too, and go back to being out and about
     // rather than standing in bed — the other half of `nap`'s issue #275
@@ -6151,13 +6225,16 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player || player.riding) return;
     this.controls.cancelWalk();
-    player.beginRide();
-    player.setRidePose(
-      art.x + art.normalX * 1.9,
-      0,
-      art.z + art.normalZ * 1.9,
-      Math.atan2(-art.normalX, -art.normalZ),
-    );
+    // A picture is let go by cutting the shot short: `cancel` runs the undo
+    // below, which is where she gets off.
+    player.beginRide({ holding: 'a painting', letGo: () => this.cine.cancel() });
+    const stand: RideExit = {
+      x: art.x + art.normalX * 1.9,
+      y: 0,
+      z: art.z + art.normalZ * 1.9,
+      facing: Math.atan2(-art.normalX, -art.normalZ),
+    };
+    player.setRidePose(stand.x, stand.y, stand.z, stand.facing ?? 0);
     this.moment = 'art';
     // The camera is her eyes for this moment, so the body steps out of the
     // frame entirely. The lens ends 0.3 m in front of where her face is
@@ -6168,7 +6245,7 @@ export class Hotel implements GameSystem {
     this.cine.play(this.artShotFor(art), () => {
       this.moment = null;
       player.group.visible = true;
-      player.endRide();
+      player.endRide(stand);
     });
   }
 
@@ -6205,12 +6282,35 @@ export class Hotel implements GameSystem {
     const eye = this.windowVantage(room);
 
     this.controls.cancelWalk();
-    player.beginRide();
+    // She stays where she stood to look, and gets off there.
+    const stood: RideExit = {
+      x: player.position.x,
+      y: this.surfaces.sample(player.position.x, player.position.z, player.position.y),
+      z: player.position.z,
+      facing: player.facing,
+    };
+    const holder: RideHolder = {
+      holding: 'a window view',
+      letGo: () => {
+        // Mid-shot, `cancel` runs the undo below. Before the iris has reached
+        // its middle there is no shot yet: get her off now, and the midpoint
+        // sees she is no longer this window's and starts nothing.
+        if (this.cine.running) {
+          this.cine.cancel();
+          return;
+        }
+        this.moment = null;
+        this.hotelRoot.visible = this.inside;
+        player.endRide(stood);
+      },
+    };
+    player.beginRide(holder);
     this.moment = 'window';
 
     // Behind the soft fade, both ways — the camera is jumping four hundred
     // metres and an ease would be a flight over the void between the spaces.
     this.controls.iris(() => {
+      if (player.rideHolder !== holder) return;
       this.hotelRoot.visible = false;
       this.cine.play(
         {
@@ -6227,7 +6327,7 @@ export class Hotel implements GameSystem {
         () => {
           this.moment = null;
           this.hotelRoot.visible = this.inside;
-          player.endRide();
+          player.endRide(stood);
         },
       );
     });
@@ -6409,6 +6509,7 @@ export class Hotel implements GameSystem {
         room,
         id: `${id}-${index}`,
         taken: false,
+        stand: null,
       });
     });
   }

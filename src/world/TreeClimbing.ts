@@ -4,7 +4,7 @@ import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathU
 import { isTouchDevice } from '../core/device';
 import { KID_HEIGHT } from '../art/models/kid';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { Player } from '../entities/Player';
+import type { Player, RideHolder } from '../entities/Player';
 import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
 import type { NpcSystem } from '../entities/npc';
 import type { Hud } from '../ui/Hud';
@@ -241,7 +241,48 @@ export class TreeClimbing implements GameSystem {
     this.playerStartZ = this.player.position.z;
     this.playerPhase = 'up';
     this.playerTimer = 0;
-    this.player.beginRide();
+    this.player.beginRide(this.climbHolder);
+  }
+
+  /**
+   * Up a tree she is held by this — and let go by being back down at its foot
+   * now: the very spot the scramble down ends on.
+   */
+  private readonly climbHolder: RideHolder = {
+    holding: 'a tree',
+    letGo: () => {
+      const tree = this.playerTree;
+      this.endPlayerWave();
+      this.hud.setPrompt(null);
+      if (tree) this.player.endRide(this.footOf(tree));
+      else if (this.player.riding) this.player.endRide(this.startSpot());
+      this.playerPhase = null;
+      this.playerTree = null;
+    },
+  };
+
+  /** Where the scramble down ends — the descent's own last pose, as the exit. */
+  private footOf(tree: ClimbableTreeSeed): { x: number; y: number; z: number; facing: number } {
+    const pose = climbPose(
+      tree,
+      this.playerStartX,
+      this.playerStartZ,
+      this.player.model.headHeight,
+      'down',
+      1,
+      0,
+      CLIMB_PEEK_LIFT,
+    );
+    return { x: pose.x, y: pose.y, z: pose.z, facing: pose.facing };
+  }
+
+  /** Where she stood to start climbing, on the ground. */
+  private startSpot(): { x: number; y: number; z: number } {
+    return {
+      x: this.playerStartX,
+      y: terrainHeight(this.playerStartX, this.playerStartZ),
+      z: this.playerStartZ,
+    };
   }
 
   private beginPlayerDescend(): void {
@@ -260,7 +301,7 @@ export class TreeClimbing implements GameSystem {
       // half of the hazard outright.) Cheap to make safe, and impossible to
       // notice in testing if it is ever reachable.
       this.endPlayerWave();
-      if (this.player.riding) this.player.endRide(0, 0, 0);
+      if (this.player.riding) this.player.endRide(this.startSpot());
       this.playerPhase = null;
       return;
     }
@@ -382,7 +423,7 @@ export class TreeClimbing implements GameSystem {
     this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
     this.hud.setPrompt(null);
     if (t >= 1) {
-      this.player.endRide(0, 0, 0);
+      this.player.endRide({ x: pose.x, y: pose.y, z: pose.z, facing: pose.facing });
       this.playerPhase = null;
       this.playerTree = null;
     }
