@@ -25,9 +25,11 @@
  *    test block a metre tall and *not* on one 1.6 m tall.
  * 4. **The census.** Every top she can reach, jumps and chains of jumps
  *    included (`lib/solidReach.mts`), in the park and inside every building,
- *    grouped by kind with a deep link to one of each. No guard is reached (the
- *    railway's fence, a stall's roof); no reached place is on the railway or
- *    off the edge of a space; every region she can drop into, she can leave.
+ *    grouped by kind with a deep link to one of each. No escape is reached —
+ *    a roof, an enclosure, the railway (its corridor, or any place inside its
+ *    fences), the edge of a space — and every region she can drop into, she
+ *    can leave. A guard stood on but not passed (a fence's top, a bridge's
+ *    parapet) is reported on stderr, not failed: what it guards is asserted.
  * 5. **Marches.** Every kind of solid this rework added is walked at from
  *    sixteen bearings at 5 cm and at `PLAYER_LONGEST_STEP`, and no body ends up
  *    inside one below its top.
@@ -66,10 +68,11 @@ import { terrainHeight } from '../src/world/terrain.ts';
  * **The red proofs.** Each breaks one thing and must turn its clause red:
  *
  * - `infinite`: registers an invisible pillar with no top — clause 1.
- * - `low-top`: sinks one garden wall's top 0.4 m under its coping — clause 2.
+ * - `low-top`: a solid sunk 0.4 m under a station bench's seat — clause 2.
  * - `too-tall`: the precedent bench made 1 m taller — clause 3 cannot land.
- * - `low-fence`: the railway's fence cut to a knee-high rail — clause 4 must
- *   find her on it.
+ * - `rail-step`, `low-roof`, `low-exhibit`: a step by the gate carrying the
+ *   kind of the railway's corridor, a stall's roof, an exhibit — each of
+ *   clause 4's escapes must find her on it.
  * - `trap`: a ring of tall walls round a crate, so dropping off the crate
  *   leaves her nowhere to go — clause 4's trap clause.
  * - `ghost`: a bench registered as a 5 cm sliver — clause 5's march walks in.
@@ -123,11 +126,16 @@ const sample = park.sample;
     const bench = before.find((s) => s.owner === 'castle' && s.shape === 'box' && Math.abs(s.halfWidth - 0.36) < 0.02);
     if (bench) collision.kinded('proof: the bench a metre taller', () => collision.addCircle(bench.centreX, bench.centreZ, bench.reach, bench.topAt(bench.centreX, bench.centreZ) + 1, false, true));
   }
-  if (PROVE === 'low-fence') {
-    // A knee-high rail along the first bay of railway fence.
-    const fence = before.find((s) => s.kind === 'railway fence');
-    if (fence) collision.kinded('railway fence', () => collision.addCircle(fence.centreX, fence.centreZ, 0.6, groundAt(fence) + 0.5, false, true));
-  }
+  // A step a child walks onto, 3 m in front of the gate, carrying the kind of
+  // an escape: each must turn its own clause red through the census.
+  const stepNearGate = (kind: string): void => {
+    const x = ENTRANCE_PLAYER_X + 3;
+    const z = ENTRANCE_PLAYER_Z;
+    collision.kinded(kind, () => collision.addCircle(x, z, 0.7, sample(x, z, 50) + 0.4, false, true));
+  };
+  if (PROVE === 'rail-step') stepNearGate('railway corridor');
+  if (PROVE === 'low-roof') stepNearGate('stall awning');
+  if (PROVE === 'low-exhibit') stepNearGate("proof's enclosure");
 }
 
 const solids: SolidView[] = [];
@@ -295,17 +303,29 @@ const spaceRuns: SpaceRun[] = [
 ];
 
 /**
- * **Guards, by kind**: what stands between her and somewhere she must not go,
- * and so must be taller than she can reach. A top of one of these reached is a
- * guard climbed.
+ * **The escapes, by what she reaches** (the brief: out of the park, onto the
+ * railway, into an enclosure, over a ride's fence, onto a roof). Each is
+ * asserted as the place itself, never as a guard's top: a guard stood on but
+ * not passed has guarded, and is reported, not failed.
+ *
+ * - Roofs: standing on one is the escape.
+ * - Enclosures: an exhibit's solid is its habitat — standing on it is
+ *   standing over the animals.
+ * - The railway: its own clause below, and any top of its corridor.
+ * - Out of the park: clause 7, at every height.
  */
-const GUARD_KINDS: Readonly<Record<string, string>> = {
-  'railway fence': 'the railway',
-  'railway fence post': 'the railway',
+const ROOF_KINDS: Readonly<Record<string, string>> = {
   'stall awning': "a stall's roof",
   'stall parasol': "the keychain cart's parasol",
   'station canopy': "a station's roof",
   'bus shelter canopy': "the bus shelter's roof",
+};
+const isEnclosure = (kind: string): boolean => /'s enclosure$/.test(kind);
+/** Guards whose top she may stand on without getting past them: reported with how, never failed. */
+const PERCH_KINDS: Readonly<Record<string, string>> = {
+  'railway fence': 'the railway',
+  'railway fence post': 'the railway',
+  'bridge parapet': 'the drop beside a bridge',
 };
 
 const allReached: { space: string; top: ReachedTop }[] = [];
@@ -358,9 +378,18 @@ if (SKIP_CENSUS) {
     for (const [kind, entry] of [...byKind].sort((a, b) => b[1].n - a[1].n)) {
       console.log(`    ${String(entry.n).padStart(4)}  ${kind.padEnd(34)} [${[...entry.how].map(([h, n]) => `${h} ${n}`).join(', ')}]  ${run.link(entry.example.at)}`);
     }
-    // Guards climbed.
-    const climbed = result.tops.filter((top) => top.solid.kind in GUARD_KINDS);
-    say(climbed.length === 0, `${run.name}: no guard climbed${climbed.length ? ` — ${climbed.length}: ${[...new Set(climbed.map((t) => `${t.solid.kind} (${GUARD_KINDS[t.solid.kind]})`))].join(', ')}, e.g. ${run.link(climbed[0]!.at)}` : ''}`);
+    // Roofs and enclosures: the places themselves.
+    const roofs = result.tops.filter((top) => top.solid.kind in ROOF_KINDS);
+    say(roofs.length === 0, `${run.name}: no roof reached${roofs.length ? ` — ${roofs.length}: ${[...new Set(roofs.map((t) => ROOF_KINDS[t.solid.kind]))].join(', ')}, e.g. ${run.link(roofs[0]!.at)}` : ''}`);
+    const exhibits = result.tops.filter((top) => isEnclosure(top.solid.kind));
+    say(exhibits.length === 0, `${run.name}: no enclosure reached${exhibits.length ? ` — ${exhibits.length}: ${[...new Set(exhibits.map((t) => t.solid.kind))].join(', ')}, e.g. ${run.link(exhibits[0]!.at)}` : ''}`);
+    // Guards stood on but not passed: what they guard is asserted directly.
+    const perched = result.tops.filter((top) => top.solid.kind in PERCH_KINDS);
+    if (perched.length) {
+      const byKind = new Map<string, ReachedTop[]>();
+      for (const top of perched) byKind.set(top.solid.kind, [...(byKind.get(top.solid.kind) ?? []), top]);
+      note(`${run.name}: guards stood on but not passed — ${[...byKind].map(([kind, tops]) => `${kind} ×${tops.length} (${[...new Set(tops.map((t) => t.how))].join('/')}), e.g. ${run.link(tops[0]!.at)}`).join('; ')}`);
+    }
     // On the railway: a reached place inside the fences that walking from the start does not reach.
     if (run.name === 'the park') {
       const onRail: { stand: Stand; how: string }[] = [];
@@ -372,7 +401,11 @@ if (SKIP_CENSUS) {
         if (main(stand.x, stand.z, stand.y)) return; // a level crossing: walked to
         onRail.push({ stand, how: `${how}, ${off.toFixed(2)} m off the rail's centre, ${(stand.y - terrainHeight(stand.x, stand.z)).toFixed(2)} m up` });
       };
-      for (const top of result.tops) consider(top.at, `on a ${top.solid.kind || 'solid'} (${top.how})`);
+      for (const top of result.tops) {
+        // The corridor's own top — the seam under a bridge deck — is the railway wherever it stands.
+        if (top.solid.kind === 'railway corridor') onRail.push({ stand: top.at, how: `on the railway's corridor (${top.how}), ${(top.at.y - terrainHeight(top.at.x, top.at.z)).toFixed(2)} m up` });
+        else consider(top.at, `on a ${top.solid.kind || 'solid'} (${top.how})`);
+      }
       for (const region of result.regions.slice(1)) consider(region.entry, `${region.via}`);
       say(onRail.length === 0, `the railway is out of reach: ${onRail.length} place(s) inside its fences reached off the walk${onRail.length ? `:\n${onRail.slice(0, 12).map((r) => `      ${run.link(r.stand)} — ${r.how}`).join('\n')}` : ''}`);
     }
