@@ -57,18 +57,21 @@
  *   is only ever bounded by the plate, which is what an `isClearCircle` that
  *   was never actually consulted would look like.
  */
-import { Box3, Matrix4, Vector3, type Object3D } from 'three';
+import { Box3, Group, Matrix4, Vector3, type Object3D } from 'three';
 import './headless-canvas.mjs';
 import { BuildingShell } from '../src/world/building/Shell.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
+  registerDecorCollision,
   registerInteriorCollision,
   registerHallCollision,
   registerPavilionCollision,
   registerPlanterCollision,
   registerRoofTurretCollision,
 } from '../src/world/building/Building.ts';
+import { dressCastle } from '../src/world/building/castleDecor.ts';
+import type { CastleDecorSolid } from '../src/world/building/castleFurniture.ts';
 import {
   BENCH_DEPTH,
   BENCH_HEIGHT,
@@ -133,7 +136,22 @@ function worldFor(floor: CastleFloor): CollisionWorld {
   registerPlanterCollision(world, floor);
   registerPavilionCollision(world, floor);
   registerRoofTurretCollision(world, floor);
+  // The dressing's own solids (17 Oct 2026) — the crates, the woodpile, the
+  // troughs, the throne, the armour, the chest — asked of `dressCastle` the
+  // way `Building` asks it, so the fill walks the room as it really is.
+  registerDecorCollision(world, floor, decorSolidsFor(floor));
   return world;
+}
+
+/** What `dressCastle` stands on this floor and hands back, built once per floor. */
+const decorSolidsByFloor = new Map<number, readonly CastleDecorSolid[]>();
+function decorSolidsFor(floor: CastleFloor): readonly CastleDecorSolid[] {
+  let solids = decorSolidsByFloor.get(floor.index);
+  if (!solids) {
+    solids = dressCastle(floor.index, new Group());
+    decorSolidsByFloor.set(floor.index, solids);
+  }
+  return solids;
 }
 
 /** The same castle **without this branch's colliders** — the "before" the
@@ -944,7 +962,8 @@ for (const floor of CASTLE_FLOORS) {
   process.stderr.write(
     `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches, ` +
       `${planterRing(floor.index).length} planters` +
-      `${floor.index === TOP_DECK ? ', the pavilion and 4 corner turrets' : ''} cost ` +
+      `${floor.index === TOP_DECK ? ', the pavilion and 4 corner turrets' : ''}, ` +
+      `${decorSolidsFor(floor).length} dressing solids (${[...new Set(decorSolidsFor(floor).map((s) => s.kind))].join(', ') || 'none'}) cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
       `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );

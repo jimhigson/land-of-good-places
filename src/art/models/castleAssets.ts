@@ -378,6 +378,103 @@ export const CASTLE_BENCH_HALF_LENGTH = surfaceHalf(['bench-plank'], 'z');
 export const CASTLE_PLINTH_TOP = surfaceTop(['plinth-block']);
 
 /**
+ * **A prop's bare footprint and height, for its solid** — the box its emitted
+ * geometry occupies about the prop's own origin (outline-free, like
+ * {@link surfaceTop}, and carrying each node's own translation the same way).
+ * Measured, so the solid a child bumps is the prop she sees, whatever the
+ * Artist does to it next.
+ */
+export interface CastleFootprint {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+  readonly top: number;
+}
+
+function surfaceFootprint(names: readonly string[]): CastleFootprint {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const name of names) {
+    const part = castlePart(name);
+    part.geometry.computeBoundingBox();
+    const box = part.geometry.boundingBox;
+    if (!box) throw new Error(`castleAssets: '${name}' has no geometry to measure.`);
+    minX = Math.min(minX, box.min.x + part.position.x);
+    maxX = Math.max(maxX, box.max.x + part.position.x);
+    minZ = Math.min(minZ, box.min.z + part.position.z);
+    maxZ = Math.max(maxZ, box.max.z + part.position.z);
+  }
+  return { minX, maxX, minZ, maxZ, top: surfaceTop(names) };
+}
+
+/**
+ * The bare vertices of some parts that pass `keep`, as a footprint — for a
+ * prop whose solid is two boxes rather than one, cut where its own shape
+ * changes. Node translations carried as everywhere else here.
+ */
+function surfaceRegion(names: readonly string[], keep: (x: number, y: number, z: number) => boolean): CastleFootprint {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  let top = -Infinity;
+  for (const name of names) {
+    const part = castlePart(name);
+    const position = part.geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i) + part.position.x;
+      const y = position.getY(i) + part.position.y;
+      const z = position.getZ(i) + part.position.z;
+      if (!keep(x, y, z)) continue;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z);
+      maxZ = Math.max(maxZ, z);
+      top = Math.max(top, y);
+    }
+  }
+  if (top === -Infinity) throw new Error(`castleAssets: no vertex of ${names.join(', ')} passed the cut.`);
+  return { minX, maxX, minZ, maxZ, top };
+}
+
+const THRONE_PARTS = ['throne-frame', 'throne-cushion', 'throne-gold'] as const;
+
+/** The throne, whole — frame, cushion and gilt. The sitter faces +Z. */
+export const CASTLE_THRONE_FOOTPRINT = surfaceFootprint(THRONE_PARTS);
+
+/**
+ * **The throne's back, and its seat in front of it** — the two solids it stands
+ * as, cut where its own shape is: at the front of the back cushion (the part
+ * of the cushion rising over 0.55 m). Behind that is the back, frame and
+ * cushion, to the tip of its crest; in front of it the seat, as high as the
+ * cushion there. Measured, not typed: the back comes out 0.27 m deep and
+ * 2.75 m tall.
+ *
+ * The arms and the gilt apron (0.14 m wide, under half a metre over the
+ * cushion) are not their own solids: a collider that thin would raise the
+ * sub-step count of every mover in the park (`CollisionWorld.maxSafeStep`), so
+ * they stand at the seat's height.
+ */
+const THRONE_BACK_FRONT_Z = surfaceRegion(['throne-cushion'], (_x, y) => y > 0.55).maxZ;
+export const CASTLE_THRONE_BACK: CastleFootprint = {
+  ...CASTLE_THRONE_FOOTPRINT,
+  maxZ: THRONE_BACK_FRONT_Z,
+};
+export const CASTLE_THRONE_SEAT: CastleFootprint = {
+  ...CASTLE_THRONE_FOOTPRINT,
+  minZ: THRONE_BACK_FRONT_Z,
+  top: surfaceRegion(['throne-cushion'], (_x, _y, z) => z > THRONE_BACK_FRONT_Z).top,
+};
+/** The armour's plinth, and the knight standing on it. */
+export const CASTLE_PLINTH_FOOTPRINT = surfaceFootprint(['plinth-block']);
+export const CASTLE_ARMOUR_TOP = surfaceTop(['armour-plate', 'armour-trim', 'armour-visor', 'armour-plume']);
+/** The treasure chest, lid shut. */
+export const CASTLE_CHEST_FOOTPRINT = surfaceFootprint(['chest-body', 'chest-bands', 'chest-lid']);
+
+/**
  * **Where a sconce's cup mouth sits, relative to the back plate on the wall** —
  * `out` away from the wall along the bracket's own +Z, `up` from the mount.
  *

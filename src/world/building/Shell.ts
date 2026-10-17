@@ -70,6 +70,8 @@ import {
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_HEIGHT,
+  ROOF_PAVILION_ROOF_HEIGHT,
+  ROOF_PAVILION_ROOF_Y,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
   CASTLE_TURRET_FOOTPRINT_RADIUS,
@@ -515,7 +517,7 @@ function buildCornerPillars(plan: ShellPlan): InstancedMesh {
  * doorway now moves all four, which is what CLAUDE.md's "one owner; everyone
  * else asks" is for.
  */
-const ROOF_SLIDE_GAPS: readonly (readonly [number, number])[] = lazyArrayView(() => [
+export const ROOF_SLIDE_GAPS: readonly (readonly [number, number])[] = lazyArrayView(() => [
   [SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX],
 ]);
 
@@ -701,6 +703,14 @@ function roofMerlonSlots(plan: ShellPlan): MerlonSlot[] {
 const ROOF_TURRET_EAVES = ROOF_CRENEL_BASE + CASTLE_MERLON_HEIGHT;
 
 /**
+ * **The top of the roof garden's battlement** — its merlons' tops, which is
+ * where its solid stands to (`Building.ts`'s `registerInteriorCollision`). A
+ * crenel between two merlons is 0.85 m wide against a child 1.24 m across, so
+ * her body never fits down into one: to her the battlement is a wall this high.
+ */
+export const ROOF_BATTLEMENT_TOP = ROOF_TURRET_EAVES;
+
+/**
  * **How tall a roof-garden turret's cone is — decided by the camera, not by
  * taste.**
  *
@@ -732,6 +742,9 @@ const ROOF_TURRET_ROOF = (() => {
   const tipCap = nearestFloor * Math.tan((CAMERA_PITCH_DEGREES * Math.PI) / 180) + KID_HEIGHT;
   return Math.max(1.2, tipCap - ROOF_TURRET_EAVES);
 })();
+
+/** A roof-garden turret's apex over the deck — its solid's real top. */
+export const ROOF_TURRET_TOP = ROOF_TURRET_EAVES + ROOF_TURRET_ROOF;
 
 /**
  * How far the roof garden's curtain wall — and the turret shafts standing in
@@ -868,14 +881,14 @@ export function buildRoofPavilion(scale: number, withMast = true): Group {
     new Mesh(
       new ConeGeometry(
         (Math.hypot(ROOF_PAVILION_HALF_X, ROOF_PAVILION_HALF_Z) + 0.5) * scale,
-        2.4 * scale,
+        ROOF_PAVILION_ROOF_HEIGHT * scale,
         4,
       ),
       softMaterial(PALETTE.buildingRoofDeep, 0.72),
     ),
   );
   pavilionRoof.name = 'roof-pavilion-roof';
-  pavilionRoof.position.y = 4.1 * scale;
+  pavilionRoof.position.y = ROOF_PAVILION_ROOF_Y * scale;
   pavilionRoof.rotation.y = Math.PI / 4;
   group.add(pavilionRoof);
 

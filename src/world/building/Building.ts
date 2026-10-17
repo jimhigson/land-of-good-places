@@ -39,7 +39,7 @@ import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
 import { InteriorLighting } from './InteriorLighting';
-import { BuildingShell } from './Shell';
+import { BuildingShell, ROOF_BATTLEMENT_TOP, ROOF_SLIDE_GAPS, ROOF_TURRET_TOP } from './Shell';
 import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
 import { ROOF_EDGE_Z, ROOF_PARAPET_THICKNESS, roofTurretSpots } from './layout';
 import { ShopUnits } from './ShopUnits';
@@ -64,6 +64,7 @@ import {
   greatHallPetPlaces,
   greatHallSeats,
   greatHallSolids,
+  type CastleDecorSolid,
 } from './castleFurniture';
 import { CASTLE_TABLE_TOP, createCastleFeastProp, type FeastProp } from '../../art/models/castleAssets';
 import { WildPets } from './WildPets';
@@ -104,9 +105,16 @@ import {
   LIFT_WALL_X,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
+  ROOF_PAVILION_ROOF_HEIGHT,
+  ROOF_PAVILION_ROOF_Y,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  CASTLE_MERLON_HEIGHT,
   CASTLE_TOWERS,
+  CASTLE_WALL_HEIGHT,
+  castleTopY,
+  TOWER_HEIGHT,
+  TOWER_ROOF_HEIGHT,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -852,11 +860,12 @@ export class Building implements GameSystem {
     addRideEntrances(this.shell.floorGroups);
     // Roundels, planters and benches, so sixty metres of floor plate reads as a
     // place rather than a car park. Must be before the fader claims materials.
+    const decorSolids: CastleDecorSolid[][] = [];
     this.shell.floorGroups.forEach((floor, deck) => {
       dressDeck(deck, floor);
       // Fire, cloth, paint and the things that reward looking twice (#376).
       this.castleFire.dress(deck, floor);
-      dressCastle(deck, floor);
+      decorSolids[deck] = dressCastle(deck, floor);
       // After `dressCastle`, because the benches the diners sit on are placed
       // by it — `greatHallSeats` reads the same bench list, so a hall that laid
       // out no furniture seats nobody rather than seating people in mid-air.
@@ -930,6 +939,11 @@ export class Building implements GameSystem {
     for (const floor of CASTLE_FLOORS) registerPlanterCollision(collision, floor);
     for (const floor of CASTLE_FLOORS) registerPavilionCollision(collision, floor);
     for (const floor of CASTLE_FLOORS) registerRoofTurretCollision(collision, floor);
+    // **And everything the dressing stood on the floor** (17 Oct 2026): the
+    // crates in the corners, the woodpile, the roof's troughs, the throne on
+    // its dais, the armour on its plinths, the chest, the fireside bench.
+    // Each solid is the one its drawer handed back — see `CastleDecorSolid`.
+    for (const floor of CASTLE_FLOORS) registerDecorCollision(collision, floor, decorSolids[floor.index] ?? []);
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -2390,25 +2404,52 @@ export function registerInteriorCollision(collision: CollisionWorld, floor: Cast
   const north = floorZ(floor, -floor.halfZ + inset);
   const south = floorZ(floor, floor.halfZ - inset);
 
-  collision.addWall(west, north, east, north, INTERIOR_WALL_HALF_THICKNESS);
+  // **Real heights** (Jim, 17 Oct 2026: no `Infinity` on a drawn thing). A
+  // storey's wall stands to its ceiling; the roof garden's battlement to its
+  // merlons' tops, which a crenel too narrow for her body never lets her below.
+  const top = BUILDING_BASE_Y + (floor.index === TOP_DECK ? ROOF_BATTLEMENT_TOP : BUILDING_FLOOR_HEIGHT);
+  const kind = floor.index === TOP_DECK ? 'castle roof battlement' : 'castle storey wall';
+  const wall = (ax: number, az: number, bx: number, bz: number): void => {
+    collision.kinded(kind, () => collision.addWall(ax, az, bx, bz, INTERIOR_WALL_HALF_THICKNESS, top, false, true));
+  };
+
+  wall(west, north, east, north);
 
   // South face. The way out is only cut on the **mall** — it is the only floor
   // with a front door, and a gap in the great hall's or the roof garden's south
   // wall would be a hole a child could walk out of into three hundred metres of
   // nothing.
   if (floor.index === CASTLE_MALL.index) {
-    collision.addWall(west, south, floorX(floor, INTERIOR_DOOR_MIN_X), south, INTERIOR_WALL_HALF_THICKNESS);
-    collision.addWall(floorX(floor, INTERIOR_DOOR_MAX_X), south, east, south, INTERIOR_WALL_HALF_THICKNESS);
+    wall(west, south, floorX(floor, INTERIOR_DOOR_MIN_X), south);
+    wall(floorX(floor, INTERIOR_DOOR_MAX_X), south, east, south);
+  } else if (floor.index === TOP_DECK) {
+    // The roof's south battlement stops for the ginormous slide's mouth
+    // (`ROOF_SLIDE_GAPS`, the gaps the drawn parapet steps round). Across the
+    // gap there is nothing drawn and nothing to stand on beyond it, so it keeps
+    // the one invisible solid left in the castle: the slide is boarded from
+    // its pad, never walked into, and this is all that stands between the pad
+    // and the drop. No height would do — it is the ride's own doorway.
+    let from = west;
+    for (const [gapMin, gapMax] of ROOF_SLIDE_GAPS) {
+      const gapWest = floorX(floor, gapMin);
+      const gapEast = floorX(floor, gapMax);
+      wall(from, south, gapWest, south);
+      collision.kinded('roof slide mouth (invisible guard)', () =>
+        collision.addWall(gapWest, south, gapEast, south, INTERIOR_WALL_HALF_THICKNESS),
+      );
+      from = gapEast;
+    }
+    wall(from, south, east, south);
   } else {
-    collision.addWall(west, south, east, south, INTERIOR_WALL_HALF_THICKNESS);
+    wall(west, south, east, south);
   }
 
   // East face: solid all the way since the lift moved off it (#450).
-  collision.addWall(east, north, east, south, INTERIOR_WALL_HALF_THICKNESS);
+  wall(east, north, east, south);
 
   // West face, minus the way into the lift alcove. Every floor has one.
-  collision.addWall(west, north, west, floorZ(floor, LIFT_DOOR_MIN_Z), INTERIOR_WALL_HALF_THICKNESS);
-  collision.addWall(west, floorZ(floor, LIFT_DOOR_MAX_Z), west, south, INTERIOR_WALL_HALF_THICKNESS);
+  wall(west, north, west, floorZ(floor, LIFT_DOOR_MIN_Z));
+  wall(west, floorZ(floor, LIFT_DOOR_MAX_Z), west, south);
 
   // The stairs' and the escalator's side walls were registered here — a wall
   // down each side of every ramp, so a wobbly step sideways met a rail instead
@@ -2563,6 +2604,35 @@ export function registerPlanterCollision(collision: CollisionWorld, floor: Castl
 }
 
 /**
+ * **The castle's dressing is solid** — whatever `dressCastle` stood on this
+ * floor and handed back ({@link CastleDecorSolid}), one filled box each at its
+ * real top, so a crate is a crate she climbs and the armour a knight she
+ * bumps. A filled box has no hollow middle (`Collision.ts`'s `BoxCollider`),
+ * so nothing here can trap a body inside it.
+ */
+export function registerDecorCollision(
+  collision: CollisionWorld,
+  floor: CastleFloor,
+  solids: readonly CastleDecorSolid[],
+): void {
+  for (const solid of solids) {
+    collision.kinded(solid.kind, () =>
+      collision.addBox(
+        floorX(floor, solid.x),
+        floorZ(floor, solid.z),
+        solid.halfX,
+        solid.halfZ,
+        -solid.yaw,
+        0,
+        BUILDING_BASE_Y + solid.top,
+        false,
+        true,
+      ),
+    );
+  }
+}
+
+/**
  * **The roof pavilion is solid** (#459).
  *
  * Jim: *"Why does the roof garden have a big shed-like building on it that you
@@ -2570,12 +2640,12 @@ export function registerPlanterCollision(collision: CollisionWorld, floor: Castl
  * block from, so the shed she can see and the shed she is stopped by are the
  * same 10.8 × 9.2 m.
  *
- * **Not `topIsAbsolute`, and that is the one deliberate difference from every
- * other prop on this branch.** An absolute top is for something a jump should
- * clear; a 2.9 m building is not, and stating a finite top at all invites a
- * future reader to wonder whether she can get over it. The default `Infinity`
- * is the honest description of a building — exactly like the castle's own
- * shell, registered a few functions above.
+ * **Its real top, the apex of its pyramid roof** (5.3 m over the deck). This
+ * was the one prop left `Infinity`, on the argument that a finite top invites
+ * the question whether she can get over it. Jim's ruling of 17 Oct 2026 asks
+ * that question of everything and answers it with physics: no solid has a
+ * flag for a top, and a 1.28 m jump apex cannot reach 2.9 m eaves, which the
+ * solids census measures rather than this paragraph asserting.
  *
  * ## The hollow middle, at the one size where it matters
  *
@@ -2599,12 +2669,17 @@ export function registerPlanterCollision(collision: CollisionWorld, floor: Castl
  */
 export function registerPavilionCollision(collision: CollisionWorld, floor: CastleFloor): void {
   if (floor.index !== TOP_DECK) return;
-  collision.addRectangle(
-    floorX(floor, ROOF_PAVILION_X),
-    floorZ(floor, ROOF_PAVILION_Z),
-    ROOF_PAVILION_HALF_X - PAVILION_HALF_THICKNESS,
-    ROOF_PAVILION_HALF_Z - PAVILION_HALF_THICKNESS,
-    PAVILION_HALF_THICKNESS,
+  collision.kinded('roof pavilion', () =>
+    collision.addRectangle(
+      floorX(floor, ROOF_PAVILION_X),
+      floorZ(floor, ROOF_PAVILION_Z),
+      ROOF_PAVILION_HALF_X - PAVILION_HALF_THICKNESS,
+      ROOF_PAVILION_HALF_Z - PAVILION_HALF_THICKNESS,
+      PAVILION_HALF_THICKNESS,
+      BUILDING_BASE_Y + ROOF_PAVILION_ROOF_Y + ROOF_PAVILION_ROOF_HEIGHT / 2,
+      false,
+      true,
+    ),
   );
 }
 
@@ -2629,9 +2704,8 @@ export function registerPavilionCollision(collision: CollisionWorld, floor: Cast
  * `Shell.ts` draws from and `keepOutsFor` keeps benches off: one footprint,
  * three consumers, `hotel/place.ts`'s shape.
  *
- * Infinity-topped like the pavilion and like the castle's own shell. A 7.6 m
- * tower is not something a 1.28 m jump apex has any business clearing, and
- * stating a finite top would invite the question.
+ * Its top is the cone's apex (`ROOF_TURRET_TOP`): a real height, like every
+ * solid since 17 Oct 2026, and far over anything she can jump to.
  */
 export function registerRoofTurretCollision(
   collision: CollisionWorld,
@@ -2639,10 +2713,15 @@ export function registerRoofTurretCollision(
 ): void {
   if (floor.index !== TOP_DECK) return;
   for (const spot of roofTurretSpots()) {
-    collision.addCircle(
-      floorX(floor, spot.x),
-      floorZ(floor, spot.z),
-      CASTLE_TURRET_FOOTPRINT_RADIUS,
+    collision.kinded('roof turret', () =>
+      collision.addCircle(
+        floorX(floor, spot.x),
+        floorZ(floor, spot.z),
+        CASTLE_TURRET_FOOTPRINT_RADIUS,
+        BUILDING_BASE_Y + ROOF_TURRET_TOP,
+        false,
+        true,
+      ),
     );
   }
 }
@@ -2668,16 +2747,24 @@ function registerFacadeCollision(collision: CollisionWorld): void {
   const north = facadeZ(-BUILDING_HALF_Z);
   const south = facadeZ(BUILDING_HALF_Z);
 
-  collision.addWall(west, north, east, north, 0.3);
-  collision.addWall(west, north, west, south, 0.3);
-  collision.addWall(east, north, east, south, 0.3);
+  // Each to the top of the battlement it carries — a real height, in the
+  // leaning castle's own frame (`castleTopY`), far over anything she can reach.
+  const wall = (ax: number, az: number, bx: number, bz: number): void => {
+    const midX = (ax + bx) / 2;
+    const midZ = (az + bz) / 2;
+    const top = castleTopY(midX, midZ, midX - BUILDING_CENTRE_X, CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT, midZ - BUILDING_CENTRE_Z);
+    collision.kinded('castle curtain wall', () => collision.addWall(ax, az, bx, bz, 0.3, top, false, true));
+  };
+  wall(west, north, east, north);
+  wall(west, north, west, south);
+  wall(east, north, east, south);
 
-  collision.addWall(west, south, facadeX(ENTRANCE_MIN_X), south, 0.3);
-  collision.addWall(facadeX(ENTRANCE_MAX_X), south, east, south, 0.3);
+  wall(west, south, facadeX(ENTRANCE_MIN_X), south);
+  wall(facadeX(ENTRANCE_MAX_X), south, east, south);
 
   // The back of the lobby.
   const lobbyZ = facadeZ(BUILDING_HALF_Z - 1.8);
-  collision.addWall(facadeX(ENTRANCE_MIN_X), lobbyZ, facadeX(ENTRANCE_MAX_X), lobbyZ, 0.3);
+  wall(facadeX(ENTRANCE_MIN_X), lobbyZ, facadeX(ENTRANCE_MAX_X), lobbyZ);
 }
 
 /**
@@ -2761,8 +2848,9 @@ function registerFacadeCollision(collision: CollisionWorld): void {
  * There is no reachable height band here where the right answer differs, so a
  * banded collider would be machinery with nothing to do.
  *
- * Infinity-topped, like the shell and the roof turrets: the body is 10.6 m with
- * a 4.2 m cone on it, and a 1.28 m jump apex has no business clearing that.
+ * Its top is the tip of the 4.2 m cone on the 10.6 m body, in the castle's own
+ * leaning frame (`castleTopY`): a real height, like every solid since 17 Oct
+ * 2026, and nothing a 1.28 m jump apex comes near.
  */
 function registerCastleTowerCollision(collision: CollisionWorld): void {
   for (const tower of CASTLE_TOWERS) {
@@ -2770,7 +2858,9 @@ function registerCastleTowerCollision(collision: CollisionWorld): void {
     // alone is the whole footprint a child can walk into.
     if (!tower.name.startsWith('tower-body-')) continue;
     // `radiusBottom` is `CASTLE_TURRET_BASE_RADIUS`, which the drawn shaft is
-    // also built from — one owner, so the two cannot drift.
-    collision.addCircle(tower.x, tower.z, tower.radiusBottom);
+    // also built from — one owner, so the two cannot drift. Its top is the tip
+    // of the cone on it, in the castle's own frame.
+    const top = castleTopY(tower.x, tower.z, tower.localX, TOWER_HEIGHT + TOWER_ROOF_HEIGHT, tower.localZ);
+    collision.kinded('castle tower', () => collision.addCircle(tower.x, tower.z, tower.radiusBottom, top, false, true));
   }
 }
