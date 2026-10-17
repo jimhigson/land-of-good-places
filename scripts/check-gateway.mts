@@ -94,7 +94,9 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
   const collision = park.world.collision;
   const probe = new Vector3();
   const standable = (x: number, z: number): boolean => {
-    probe.set(x, 0, z);
+    // At the ground, not at y = 0: a solid's real top is measured against her
+    // feet, and over most of the sphere the ground is metres below y = 0.
+    probe.set(x, park.sample(x, z, 0), z);
     collision.resolve(probe, PLAYER_RADIUS);
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };
