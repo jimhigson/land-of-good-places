@@ -619,11 +619,13 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       case 'storyChair': {
         const cloth = CHAIR_CLOTH[piece.id] ?? PALETTE.markerPink;
         place(piece, createLibraryArmchair(cloth).root, 0);
-        // Its seat to the cushion and its arms and back each to its own top,
-        // tiling the chair's drawn plan (`libraryArmchairParts`).
-        for (const part of libraryArmchairParts()) {
+        // Its seat to the cushion, and its arms and back each to its own top,
+        // tiling the chair's drawn plan (`libraryArmchairParts`): she sits and
+        // stands on the seat; the rolled arms and the wings are met square,
+        // never stood on.
+        for (const [index, part] of libraryArmchairParts().entries()) {
           const centre = turned(piece, part.centreX, part.centreZ);
-          props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: part.halfX, halfDepth: part.halfZ }, part.top);
+          props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: part.halfX, halfDepth: part.halfZ }, part.top, index === 0);
         }
         break;
       }

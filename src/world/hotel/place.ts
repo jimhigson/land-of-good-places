@@ -246,6 +246,11 @@ export interface PropPlan {
    * for furniture: everything she can see is solid.
    */
   readonly solid?: boolean;
+  /**
+   * `false` for a solid whose top is no ledge — crystals that come to points:
+   * met square and jumped against, never stood on (`CollisionWorld.toppedNarrow`).
+   */
+  readonly ledge?: boolean;
 }
 
 /**
@@ -337,11 +342,12 @@ export class HotelProps {
     const worldZ = room.originZ + plan.z;
     const solid = plan.solid ?? true;
     const worldTop = (plan.base ?? 0) + plan.top;
+    const topHalf = plan.ledge === false ? 0 : Number.NaN;
 
     if (solid) this.checkDoorwayClearance(room, plan);
 
     if (plan.radius !== undefined) {
-      if (solid) this.collision.addCircle(worldX, worldZ, plan.radius, worldTop, false, true);
+      if (solid) this.collision.toppedNarrow(topHalf, () => this.collision.addCircle(worldX, worldZ, plan.radius!, worldTop, false, true));
       this.keepOuts.push({ room, x: plan.x, z: plan.z, radius: plan.radius });
       return;
     }
@@ -361,15 +367,17 @@ export class HotelProps {
       // visual edge rather than {@link WALL_HALF_THICKNESS} beyond it. Floored
       // well above zero so a shallow prop still makes a box rather than a
       // degenerate one.
-      this.collision.addRectangle(
-        worldX,
-        worldZ,
-        Math.max(0.05, halfX - WALL_HALF_THICKNESS),
-        Math.max(0.05, halfZ - WALL_HALF_THICKNESS),
-        WALL_HALF_THICKNESS,
-        worldTop,
-        false,
-        true,
+      this.collision.toppedNarrow(topHalf, () =>
+        this.collision.addRectangle(
+          worldX,
+          worldZ,
+          Math.max(0.05, halfX - WALL_HALF_THICKNESS),
+          Math.max(0.05, halfZ - WALL_HALF_THICKNESS),
+          WALL_HALF_THICKNESS,
+          worldTop,
+          false,
+          true,
+        ),
       );
     }
     this.coverWithDiscs(room, plan.x, plan.z, halfX, halfZ);

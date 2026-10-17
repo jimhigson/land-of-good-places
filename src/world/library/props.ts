@@ -192,7 +192,7 @@ export class LibraryProps {
    * Returns the box's collider ({@link BoxWalls}), so a box that must come and
    * go can be {@link detach}ed and {@link attach}ed whole.
    */
-  box(what: string, footprint: BoxFootprint, top: PropTop): BoxWalls {
+  box(what: string, footprint: BoxFootprint, top: PropTop, ledge = true): BoxWalls {
     const yaw = (footprint.facing * Math.PI) / 180;
     // The box's length runs across its facing: `(cos, -sin)` is local +X, so
     // the collider's own yaw (local +X onto `(cos θ, sin θ)`) is `-yaw`.
@@ -212,8 +212,12 @@ export class LibraryProps {
     this.checkBoxKeepOuts(what, footprint, top);
     const worldX = this.originX + footprint.x;
     const worldZ = this.originZ + footprint.z;
-    const handle = this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true);
-    this.standables.push({ what, top, footprint });
+    // `ledge` false: met square, never stood on — a chair's arms and back
+    // (`CollisionWorld.toppedNarrow`), not a top her feet look for.
+    const handle = ledge
+      ? this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true)
+      : this.collision.toppedNarrow(0, () => this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true));
+    if (ledge) this.standables.push({ what, top, footprint });
     this.solids.push({ what, shape: 'box', top, points: corners, radius: 0, handle });
     return [handle];
   }

@@ -30,6 +30,7 @@ import {
   libraryEntryBand,
   libraryExitBand,
   LibraryFrame,
+  registerLibraryRoofCollision,
   registerLibraryShellCollision,
   registerLibrarySteps,
   type LibraryShellSolids,
@@ -236,6 +237,7 @@ export class Library implements GameSystem {
     group.add(this.parkRoot);
     deps.anchorPlots.setPlaceholderVisible('library', false);
     this.shellSolids = registerLibraryShellCollision(collision, this.frame, this.plan);
+    registerLibraryRoofCollision(collision, this.frame, this.plan);
     registerLibrarySteps(surfaces, this.frame, this.plan);
 
     // "The Library", over the middle of the entablature, just proud of it.

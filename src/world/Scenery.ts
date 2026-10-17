@@ -621,10 +621,8 @@ function buildFoliage(
     // height, measured up from the foot it was rolled standing on.
     let treeTop = -Infinity;
     for (const part of parts) treeTop = Math.max(treeTop, partTopY(part));
-    // To the top of its crown, and topped with leaves: the trunk is what she
-    // bumps, the crown is what she could only ever sink into.
     const colliderId = collision.kinded('tree', () =>
-      collision.foliageTopped(() => collision.addCircle(x, z, trunkRadius, yAtAltitude(x, z, treeTop - terrainHeight(x, z)), false, true)),
+      collision.addCircle(x, z, trunkRadius, yAtAltitude(x, z, treeTop - terrainHeight(x, z)), false, true),
     );
     treeColliders.push({ id: colliderId, radius: trunkRadius });
   }
@@ -634,11 +632,14 @@ function buildFoliage(
   for (const clump of decisions.bushes) {
     const instanceStart = bushes.length;
     for (const blob of clump.blobs) bushes.push(blob);
-    // Solid to its crown over the clump's middle, and topped with leaves: she
-    // walks into a bush, jumps over a small one, and never stands on one.
+    // Solid to its crown over the clump's middle — where she lands if she jumps
+    // onto it, and a small bush is low enough to. She stands *in* its leaves
+    // (the planters ruling), and that is also how she climbs out of a ring of
+    // bushes: 1.7 m across, a bush is too wide to jump clean over, so a bush
+    // she could not stand on was a pen she could not leave (17 Oct 2026).
     const crown = bushCrownY(clump.blobs, clump.x, clump.z) - terrainHeight(clump.x, clump.z);
     const bushColliderId = collision.kinded('bush', () =>
-      collision.foliageTopped(() => collision.addCircle(clump.x, clump.z, BUSH_COLLIDER, yAtAltitude(clump.x, clump.z, crown), false, true)),
+      collision.addCircle(clump.x, clump.z, BUSH_COLLIDER, yAtAltitude(clump.x, clump.z, crown), false, true),
     );
     bushColliders.push({ id: bushColliderId, instanceStart, instanceCount: clump.blobs.length });
     bushClumps.push({ x: clump.x, z: clump.z, radius: BUSH_COLLIDER });

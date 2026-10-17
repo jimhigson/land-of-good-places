@@ -217,7 +217,7 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
     // Solid to the tops of the puffs along its crown.
     const hedge = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, y, y + HEDGE_PUFF_Y + HEDGE_PUFF_RADIUS * HEDGE_PUFF_SQUASH);
     collision.kinded('water fight hedge', () =>
-      collision.foliageTopped(() => collision.addRectangle(hedge.x, hedge.z, extent, 0.55, 0.35, hedge.top, false, true)),
+      collision.addRectangle(hedge.x, hedge.z, extent, 0.55, 0.35, hedge.top, false, true),
     );
 
     const puffs = Math.round(extent * 2);

@@ -2557,15 +2557,17 @@ export function registerHallCollision(collision: CollisionWorld, floor: CastleFl
     const top = BUILDING_BASE_Y + solid.top;
 
     // The edges, crisp: four thin walls on the footprint the eye can see.
-    collision.addRectangle(
-      cx,
-      cz,
-      solid.halfX - HALL_SOLID_HALF_THICKNESS,
-      solid.halfZ - HALL_SOLID_HALF_THICKNESS,
-      HALL_SOLID_HALF_THICKNESS,
-      top,
-      false,
-      true,
+    collision.kinded(solid.kind, () =>
+      collision.addRectangle(
+        cx,
+        cz,
+        solid.halfX - HALL_SOLID_HALF_THICKNESS,
+        solid.halfZ - HALL_SOLID_HALF_THICKNESS,
+        HALL_SOLID_HALF_THICKNESS,
+        top,
+        false,
+        true,
+      ),
     );
   }
 }

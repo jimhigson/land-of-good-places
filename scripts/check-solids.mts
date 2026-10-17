@@ -36,6 +36,9 @@
  * 6. **Headroom.** Every top she can reach has room for all of her over it.
  * 7. **The boundary at height.** The park's edge holds a body pushed at it at
  *    every height from the grass to ten metres up.
+ * 8. **Open to the sky.** Wherever in the park her body fits with nothing over
+ *    her — where a jet pack could set her down — she can walk or jump out to
+ *    the walk again: no hollow, roof or pocket shuts her in.
  *
  * Every clause is proved red by `SOLIDS_PROVE=<name>` (see {@link PROVE}),
  * which breaks the one thing the clause is for and must turn it red, and the
@@ -64,6 +67,7 @@ import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
 import { altitudeAt, terrainHeight } from '../src/world/terrain.ts';
 import { carryReference } from '../src/world/building/stepReach.ts';
+import { standingHeight } from '../src/world/standing.ts';
 
 /**
  * **The red proofs.** Each breaks one thing and must turn its clause red:
@@ -79,6 +83,7 @@ import { carryReference } from '../src/world/building/stepReach.ts';
  * - `ghost`: a bench registered as a 5 cm sliver — clause 5's march walks in.
  * - `no-headroom`: a canopy hung 1 m over a reached top — clause 6.
  * - `no-bounds`: the park's leash taken off — clause 7.
+ * - `sky-trap`: a ring of 3 m walls round open grass by the gate — clause 8.
  */
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 /** Clause 4 is minutes long; `SOLIDS_SKIP_CENSUS=1` runs the rest alone (never in the chain). */
@@ -220,7 +225,7 @@ function hopOnto(world: CollisionWorld, ground: (x: number, z: number, y: number
     { what: 'a castle bench', kind: (s) => s.owner === 'castle' && s.shape === 'box' && Math.abs(s.halfWidth - 0.36) < 0.02 },
     { what: 'a hotel sofa', kind: (s) => s.owner === 'hotel' && s.shape === 'box' && Math.abs(s.halfWidth - 0.48) < 0.02 },
     { what: 'a library cushion', kind: (s) => s.owner === 'library' && s.shape === 'circle' && Math.abs(s.halfWidth - 0.45) < 0.02 },
-    { what: 'a banquet table', kind: (s) => s.owner === 'castle' && s.shape === 'box' && s.halfWidth > 2 && s.halfWidth < 2.3 },
+    { what: 'a banquet table', kind: (s) => s.kind === 'banquet table' },
   ];
   for (const precedent of precedents) {
     const solid = solids.find(precedent.kind);
@@ -455,6 +460,10 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
   const SOFT_OVER: Readonly<Record<string, string>> = {
     'roof trough': 'the shrubs in it are foliage (planters ruling, 7 Aug 2026)',
     'mall planter': 'the shrubs in it are foliage (planters ruling, 7 Aug 2026)',
+    bush: 'she stands in its leaves (the planters ruling); its solid is its crown over the clump',
+    'water fight hedge': 'its top is puffs of leaves (the planters ruling)',
+    tree: 'its top is the crown of leaves (the planters ruling)',
+    'shop counter': "the stock on display is the shop's dressing: she stands on the counter's board among it",
     'palm at': 'its fronds are foliage',
     "bed '": "a planting bed's plants are foliage",
   };
@@ -657,6 +666,110 @@ console.log('\n7. THE BOUNDARY AT HEIGHT — the park\'s edge holds her at every
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   say(out.length === 0, `${pushes} bodies pushed 12 m outward at 64 bearings, from the grass to 10 m up: ${out.length} got past the edge${out.length ? ` — ${out.slice(0, 6).join('; ')}` : ''}`);
   if (unplaced) note(`clause 7: ${unplaced} of ${64 * 4} bearing-heights had no room for her within 12 m of the edge and pushed nothing`);
+}
+
+// ---------------------------------------------------------------------------
+// 8. Open to the sky — wherever the jet pack could set her down, she can leave
+// ---------------------------------------------------------------------------
+console.log('\n8. OPEN TO THE SKY — wherever the jet pack could set her down, she walks or jumps out of:');
+if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'.includes(word)))) {
+  note('clause 8 skipped with the park\'s census — it asserted nothing');
+} else {
+  if (PROVE === 'sky-trap') {
+    // A ring of walls 3 m tall round open grass 6 m north of the gate: over it
+    // from the sky, she is shut in.
+    const cx = ENTRANCE_PLAYER_X;
+    const cz = ENTRANCE_PLAYER_Z - 8;
+    const top = sample(cx, cz, 50) + 3;
+    for (let i = 0; i < 16; i += 1) {
+      const a = (i / 16) * Math.PI * 2;
+      const b = ((i + 1) / 16) * Math.PI * 2;
+      collision.kinded('proof: a pen open to the sky', () =>
+        collision.addWall(cx + Math.cos(a) * 2.5, cz + Math.sin(a) * 2.5, cx + Math.cos(b) * 2.5, cz + Math.sin(b) * 2.5, 0.2, top, false, true),
+      );
+    }
+  }
+  collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
+  const grid = playerNavGrid(world);
+  const startY = sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 500);
+  const main = grid.floodFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, startY, sample)!.has;
+  const STEP = 0.5;
+  const body = new Vector3();
+  const cells = new Map<string, Stand>();
+  const keyOf = (i: number, j: number): string => `${i},${j}`;
+  for (let x = -130; x <= 130; x += STEP) {
+    for (let z = -130; z <= 130; z += STEP) {
+      if (spaceAt(x, z) !== SPACE_GARDEN) continue;
+      if (GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS) continue;
+      // Where she comes down from high above: the highest thing she can stand on.
+      const y = standingHeight(sample(x, z, 1e3), collision, x, z, 1e3);
+      if (!Number.isFinite(y)) continue;
+      body.set(x, y, z);
+      if (collision.deepestSolidOverlap(body, PLAYER_RADIUS * 0.9, 0, undefined, KID_HEIGHT) > 0.02) continue;
+      if (collision.ceilingAt(x, z, y + 1e-3) < Infinity) continue;
+      if (main(x, z, y)) continue;
+      cells.set(keyOf(Math.round(x / STEP), Math.round(z / STEP)), { x, z, y });
+    }
+  }
+  // Clusters, and the ones she can simply step or drop off into the walk.
+  const seen = new Set<string>();
+  const shut: { at: Stand; n: number }[] = [];
+  let clusters = 0;
+  let dropOff = 0;
+  for (const [key, first] of cells) {
+    if (seen.has(key)) continue;
+    clusters += 1;
+    const members: Stand[] = [];
+    const stack = [key];
+    seen.add(key);
+    let edgeOut = false;
+    while (stack.length) {
+      const k = stack.pop()!;
+      const cell = cells.get(k)!;
+      members.push(cell);
+      const [i, j] = k.split(',').map(Number) as [number, number];
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nk = keyOf(i + di, j + dj);
+        const next = cells.get(nk);
+        if (next && Math.abs(next.y - cell.y) <= 0.62) {
+          if (!seen.has(nk)) {
+            seen.add(nk);
+            stack.push(nk);
+          }
+          continue;
+        }
+        // A neighbour on the walk, no higher than a step up: off she goes.
+        const nx = (i + di) * STEP;
+        const nz = (j + dj) * STEP;
+        const ny = sample(nx, nz, cell.y + 0.62);
+        if (!edgeOut && ny <= cell.y + 0.62 && main(nx, nz, ny)) edgeOut = true;
+      }
+    }
+    if (edgeOut) {
+      dropOff += 1;
+      continue;
+    }
+    const lowest = members.reduce((a, b) => (b.y < a.y ? b : a));
+    let out = false;
+    const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+    try {
+      out = outside(lowest) || reachWithJumps({
+        collision,
+        sample,
+        grid,
+        start: lowest,
+        inSpace: (x, z) => spaceAt(x, z) === SPACE_GARDEN && Math.hypot(x - lowest.x, z - lowest.z) < 16,
+        fps: 60,
+        until: outside,
+      }).stopped;
+    } catch {
+      out = false;
+    }
+    if (!out) shut.push({ at: lowest, n: members.length });
+  }
+  const parkLink = (at: Stand): string => `/spawn?pos=${at.x.toFixed(1)},${at.z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
+  say(shut.length === 0, `${cells.size} places open to the sky off the walk, in ${clusters} clusters (${dropOff} she steps or drops straight off): ${shut.length} she cannot leave${shut.length ? ` — ${shut.slice(0, 6).map((s) => `${s.n} cells at ${parkLink(s.at)}, ${altitudeAt(s.at.x, s.at.y, s.at.z).toFixed(2)} m up`).join('; ')}` : ''}`);
+  note(`clause 8 searched the park on a ${STEP} m grid, where her body fits with nothing over her; a pocket under a canopy, flown into sideways, is not in it`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');

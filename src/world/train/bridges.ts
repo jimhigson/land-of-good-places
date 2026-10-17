@@ -1082,14 +1082,23 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
         // (one height, the higher end's, stood 0.57 m over it). The pieces lie
         // end to end on the segment's own line at its own width, so the solid
         // they make is the segment's, and only its top follows the stone.
+        //
+        // And to the coping's top where a coping is laid on it — the stone a
+        // child sees and stands on, `COPING_HEIGHT − COPING_SINK` over the
+        // wall's own top, on a parapet at least a block tall (the very test
+        // `buildCopingRun` makes).
+        const drawnTop = (surface: number, x: number, z: number): number => {
+          const wallTop = parapetTopFor(surface, x, z);
+          return wallTop - surface >= COPING_HEIGHT ? wallTop + COPING_HEIGHT - COPING_SINK : wallTop;
+        };
         let pieceX = previous.x;
         let pieceZ = previous.z;
-        let pieceTop = parapetTopFor(topA, previous.x, previous.z);
+        let pieceTop = drawnTop(topA, previous.x, previous.z);
         for (let k = 1; k <= PARAPET_PIECES; k += 1) {
           const t = k / PARAPET_PIECES;
           const x = previous.x + (point.x - previous.x) * t;
           const z = previous.z + (point.z - previous.z) * t;
-          const top = k === PARAPET_PIECES ? parapetTopFor(topB, point.x, point.z) : parapetTopFor(surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t), x, z);
+          const top = k === PARAPET_PIECES ? drawnTop(topB, point.x, point.z) : drawnTop(surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t), x, z);
           walls.push({ x1: pieceX, z1: pieceZ, x2: x, z2: z, topHeight: pieceTop, topHeightEnd: top });
           pieceX = x;
           pieceZ = z;

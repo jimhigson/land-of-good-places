@@ -238,6 +238,9 @@ function standsOn(solid: SolidView, stand: Stand): boolean {
   return Math.abs(stand.y - solid.topAt(stand.x, stand.z)) < 0.05;
 }
 
+/** How far from a solid's face she runs up to a jump: room to run, less room, a standing hop. */
+const RUN_UPS = [2.4, 1.2, 0.4] as const;
+
 export function reachWithJumps(options: ReachOptions): ReachResult {
   const fps = options.fps ?? 60;
   const say = options.say ?? (() => {});
@@ -353,26 +356,30 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       let done = false;
       for (const o of points) {
         if (done) break;
-        // A run-up: 2.4 m out from the face, on ground she can reach.
-        const sx = o.x + o.nx * (PLAYER_RADIUS + 2.4);
-        const sz = o.z + o.nz * (PLAYER_RADIUS + 2.4);
-        const sy = sample(sx, sz, solid.topAt(o.x, o.z) + 2);
-        // Out of any jump's reach from there: not worth a simulation.
-        if (solid.topAt(o.x, o.z) - sy > 1.6) continue;
-        if (!groundReached(sx, sz, sy)) continue;
-        const key = `${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
-        if (triedRunUps.has(key)) continue;
-        triedRunUps.add(key);
-        const aimX = o.x - o.nx * Math.min(solid.halfWidth, 0.6);
-        const aimZ = o.z - o.nz * Math.min(solid.halfWidth, 0.6);
-        for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 0.4]) {
-          jumps += 1;
-          const landed = runAndJump(options, { x: sx, z: sz, y: sy }, aimX, aimZ, jumpAt, fps);
-          if (landed && standsOn(solid, landed)) {
-            markReached({ solid, top: landed.y, how: 'jump', at: landed, from: { x: sx, z: sz, y: sy } });
-            changed = true;
-            done = true;
-            break;
+        // A run-up on ground she can reach: 2.4 m out from the face, or — in
+        // a pocket with no room for one — 1.2 m, or a standing hop.
+        for (const runUp of RUN_UPS) {
+          if (done) break;
+          const sx = o.x + o.nx * (PLAYER_RADIUS + runUp);
+          const sz = o.z + o.nz * (PLAYER_RADIUS + runUp);
+          const sy = sample(sx, sz, solid.topAt(o.x, o.z) + 2);
+          // Out of any jump's reach from there: not worth a simulation.
+          if (solid.topAt(o.x, o.z) - sy > 1.6) continue;
+          if (!groundReached(sx, sz, sy)) continue;
+          const key = `${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
+          if (triedRunUps.has(key)) continue;
+          triedRunUps.add(key);
+          const aimX = o.x - o.nx * Math.min(solid.halfWidth, 0.6);
+          const aimZ = o.z - o.nz * Math.min(solid.halfWidth, 0.6);
+          for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 0.4]) {
+            jumps += 1;
+            const landed = runAndJump(options, { x: sx, z: sz, y: sy }, aimX, aimZ, jumpAt, fps);
+            if (landed && standsOn(solid, landed)) {
+              markReached({ solid, top: landed.y, how: 'jump', at: landed, from: { x: sx, z: sz, y: sy } });
+              changed = true;
+              done = true;
+              break;
+            }
           }
         }
       }
@@ -398,26 +405,31 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         const ly = sample(lx, lz, top + 2);
         if (!Number.isFinite(ly) || groundReached(lx, lz, ly)) continue;
         // A run-up on her side, on ground she has reached, within a jump of the top.
-        const sx = o.x + o.nx * (PLAYER_RADIUS + 2.4);
-        const sz = o.z + o.nz * (PLAYER_RADIUS + 2.4);
-        const sy = sample(sx, sz, top + 2);
-        if (top - sy > 1.6) continue;
-        if (!groundReached(sx, sz, sy)) continue;
-        const key = `over ${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
-        if (triedRunUps.has(key)) continue;
-        triedRunUps.add(key);
-        for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 2.3]) {
-          jumps += 1;
-          const landed = runAndJump(options, { x: sx, z: sz, y: sy }, lx, lz, jumpAt, fps);
-          if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
-          // Over, and somewhere new: her walking first, then her lattice, as a drop's.
-          if (joinsMain(options, groundReached, landed, fps)) break;
-          const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
-          const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
-          regions.push({ entry: landed, via: `a jump over ${solid.kind || solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
-          changed = true;
-          if (options.until?.(landed)) stopped = true;
-          break;
+        let over = false;
+        for (const runUp of RUN_UPS) {
+          if (over || stopped) break;
+          const sx = o.x + o.nx * (PLAYER_RADIUS + runUp);
+          const sz = o.z + o.nz * (PLAYER_RADIUS + runUp);
+          const sy = sample(sx, sz, top + 2);
+          if (top - sy > 1.6) continue;
+          if (!groundReached(sx, sz, sy)) continue;
+          const key = `over ${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
+          if (triedRunUps.has(key)) continue;
+          triedRunUps.add(key);
+          for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 2.3]) {
+            jumps += 1;
+            const landed = runAndJump(options, { x: sx, z: sz, y: sy }, lx, lz, jumpAt, fps);
+            if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
+            over = true;
+            // Over, and somewhere new: her walking first, then her lattice, as a drop's.
+            if (joinsMain(options, groundReached, landed, fps)) break;
+            const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
+            const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
+            regions.push({ entry: landed, via: `a jump over ${solid.kind || solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
+            changed = true;
+            if (options.until?.(landed)) stopped = true;
+            break;
+          }
         }
       }
     }

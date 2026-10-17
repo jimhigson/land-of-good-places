@@ -1,5 +1,5 @@
 import { Box3, CatmullRomCurve3, Group, Vector3 } from 'three';
-import { roundTopHalf, type CollisionWorld, type WallCollider } from '../Collision';
+import type { CollisionWorld, WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
 import type { Player } from '../../entities/Player';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -60,6 +60,12 @@ import {
  * bypasses collision, so a bed's kerb could not stop it anyway, which is why
  * the loop is proved against the layout's own path widths rather than trusted.
  */
+/**
+ * How far from the parked capsule's line her shell's top is a place to stand:
+ * the crown of the dome, within 0.15 m of its crest (`check:solids`).
+ */
+const TORTOISE_DOME_HALF = 0.35;
+
 /** The parked capsule's two ends, hall-local: along the parking spot's facing, head end first. */
 function parkedCapsule(): [LocalPoint, LocalPoint] {
   const yaw = (TORTOISE_RIDE_PARK.facing * Math.PI) / 180;
@@ -132,9 +138,9 @@ export class TortoiseRide {
 
     const [front, back] = parkedCapsule();
     // To the top of her shell — the drawn tortoise, a real height — and stood
-    // on only on its dome (`roundTopHalf`), not out over her head and tail.
+    // on only on the crown of its dome (`TORTOISE_DOME_HALF`), not out over her head and tail.
     this.shellTop = shell.max.y; // flat-ok: the same box the seat above is set from; the hall is flat (floor y 0, off the sphere)
-    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, this.shellTop, roundTopHalf(TORTOISE_RIDE_PARK_HALF_WIDTH));
+    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, this.shellTop, TORTOISE_DOME_HALF);
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
     this.bay = this.parkedSolid.handle as WallCollider;
     this.park();
@@ -267,7 +273,7 @@ export class TortoiseRide {
     // dome. (Re-added with no top at all, she came back from her first lap
     // an infinitely tall pillar.)
     this.bay = this.collision.kinded('the tortoise ride, parked', () =>
-      this.collision.toppedNarrow(roundTopHalf(TORTOISE_RIDE_PARK_HALF_WIDTH), () =>
+      this.collision.toppedNarrow(TORTOISE_DOME_HALF, () =>
         this.collision.addWall(
           REPTILE_HOUSE_ORIGIN_X + front.x,
           REPTILE_HOUSE_ORIGIN_Z + front.z,

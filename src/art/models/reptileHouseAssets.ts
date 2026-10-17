@@ -1,4 +1,4 @@
-import { Group, Mesh, MeshToonMaterial } from 'three';
+import { Group, Mesh, MeshBasicMaterial, MeshToonMaterial, Raycaster, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
 import { REPTILE_HOUSE_GLB_BASE64 } from '../assets/reptileHouseGlb';
@@ -188,6 +188,31 @@ export function reptileHouseTopOver(
  * sector — the coil, the wall, the dome behind it — and not just the plinth
  * the chord happens to run along. Measured off the shipped mesh.
  */
+/**
+ * **The drawn top of the house over a point of its own plan** (`x` across,
+ * `z` along), house-local metres, or 0 where nothing of it is over the point:
+ * a ray down every part of the shipped mesh. Where {@link reptileHouseTopOver}
+ * asks the vertices near a point, this asks the faces, so it is right over the
+ * middle of a big curved face with no vertex near it — the dome's.
+ */
+export function reptileHouseDrawnTopAt(x: number, z: number): number {
+  const kit = houseKit();
+  const from = 100;
+  const ray = new Raycaster(new Vector3(x, from, z), new Vector3(0, -1, 0)); // flat-ok: house-local metres, where the kit's own up is +Y
+  const material = new MeshBasicMaterial();
+  let top = 0;
+  for (const name of kit.names) {
+    const part = kit.part(name);
+    const mesh = new Mesh(part.geometry, material);
+    mesh.position.copy(part.position);
+    mesh.updateMatrixWorld(true);
+    const hit = ray.intersectObject(mesh, false)[0];
+    if (hit) top = Math.max(top, from - hit.distance);
+  }
+  material.dispose();
+  return top;
+}
+
 export function reptileHouseTopInSector(from: number, to: number): number {
   const kit = houseKit();
   const wrap = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));

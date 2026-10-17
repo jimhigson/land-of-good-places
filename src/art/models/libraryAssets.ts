@@ -759,8 +759,8 @@ export interface ArmchairPart {
 
 /**
  * **The armchair as the solids she meets** — measured off the kit's own
- * vertices: the seat cushion to its top, and the frame round it (an arm either
- * side, the back behind) each to its own. One box over the whole chair at the
+ * vertices: the seat cushion to its top (first), and the frame round it (an
+ * arm either side, the back behind) each to its own. One box over the whole chair at the
  * seat's height stood her 0.3 m deep in an arm wherever she stood on its edge
  * (`check:solids`, 17 Oct 2026). The parts tile the chair's plan, so it is the
  * one solid it was, stepped.

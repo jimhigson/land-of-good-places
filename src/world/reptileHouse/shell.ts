@@ -7,7 +7,7 @@ import { DOOR_HALF, WALL_HALF_DEPTH } from '../hotel/layout';
 import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
 import { solidInFrame } from '../terrain';
-import { reptileHouseTopInSector, reptileHouseTopOver } from '../../art/models/reptileHouseAssets';
+import { reptileHouseDrawnTopAt, reptileHouseTopInSector, reptileHouseTopOver } from '../../art/models/reptileHouseAssets';
 import { PALETTE } from '../../core/palette';
 import { solid, decal, softMaterial, toonMaterial } from '../../art/style/materials';
 import {
@@ -208,6 +208,61 @@ export function registerReptileShellCollision(
     collision.kinded('reptile house', () => collision.addCircle(at.x, at.z, disc.radius, top, false, true));
   }
   return walls;
+}
+
+/** The reptile house's roof strips: about this wide, and pieces this long, so each top lies on the coil drawn over it. */
+const ROOF_STRIP = 1;
+const ROOF_PIECE = 2;
+/** How far down from the drawn roof the roof's solid reaches: a crust, its edge below every chord's top. */
+const ROOF_CRUST = 1.5;
+
+/**
+ * **The coil the park sees is somewhere to stand.**
+ *
+ * The ring's chords seal the hall's footprint, and once they stood to
+ * `Infinity`; with real tops (17 Oct 2026) a jet pack clears the lower sectors
+ * and the dome and coil over the middle had no solid, so she fell through the
+ * roof she could see into a ring walled in on every side. Strips across the
+ * inside of the chords, each a crust banded from `ROOF_CRUST` under the drawn
+ * roof to the drawn roof (`reptileHouseDrawnTopAt`, a ray down the shipped
+ * mesh in the house's own metres), one height at each end of a piece: the hall's
+ * footprint is sealed from above, and she stands on the coil. Banded, so no
+ * route lattice stamps them, and the mouth's bore keeps its air.
+ */
+export function registerReptileRoofCollision(collision: CollisionWorld, frame: FacadeFrame): void {
+  // The 16-gon's inner faces: its apothem, less a chord's thickness.
+  const inner = REPTILE_SHELL_RADIUS * Math.cos(Math.PI / SHELL_SIDES) - 2 * SHELL_HALF_THICKNESS;
+  const strips = Math.max(1, Math.round((2 * inner) / ROOF_STRIP));
+  const half = inner / strips;
+  const drawnOver = (along: number, across: number): number => reptileHouseDrawnTopAt(across, along);
+  collision.kinded('reptile house roof', () => {
+    for (let i = 0; i < strips; i += 1) {
+      const across = -inner + (2 * i + 1) * half;
+      // The strip's run inside the ring, its round ends inside it too.
+      const reach = Math.sqrt(Math.max(0, inner * inner - (Math.abs(across) + half) * (Math.abs(across) + half))) - half;
+      if (reach <= 0) continue;
+      const pieces = Math.max(1, Math.round((2 * reach) / ROOF_PIECE));
+      for (let k = 0; k < pieces; k += 1) {
+        const alongA = -reach + (2 * reach * k) / pieces;
+        const alongB = -reach + (2 * reach * (k + 1)) / pieces;
+        // Not over the mouth's bore: she walks in under it, and it is open to
+        // the front, so nobody is ever shut in there.
+        if (Math.abs(across) - half < REPTILE_JAMB_STRIP && alongB > REPTILE_BACK_WALL_ALONG - half) continue;
+        const drawnA = drawnOver(alongA, across);
+        const drawnB = drawnOver(alongB, across);
+        if (drawnA <= 0 || drawnB <= 0) continue;
+        const atA = facadeToWorld(frame, alongA, across);
+        const atB = facadeToWorld(frame, alongB, across);
+        const a = solidInFrame(frame.x, frame.z, atA.x, atA.z, drawnA - ROOF_CRUST, drawnA);
+        const b = solidInFrame(frame.x, frame.z, atB.x, atB.z, drawnB - ROOF_CRUST, drawnB);
+        const base = Math.min(
+          solidInFrame(frame.x, frame.z, atA.x, atA.z, 0, drawnA - ROOF_CRUST).top,
+          solidInFrame(frame.x, frame.z, atB.x, atB.z, 0, drawnB - ROOF_CRUST).top,
+        );
+        collision.addWall(a.x, a.z, b.x, b.z, half, a.top, false, true, base, false, Number.NaN, b.top);
+      }
+    }
+  });
 }
 
 /**

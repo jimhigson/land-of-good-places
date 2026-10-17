@@ -44,6 +44,7 @@ import {
   buildHallShell,
   facadeToWorld,
   registerPlinthStep,
+  registerReptileRoofCollision,
   registerReptileShellCollision,
   reptileEntryBand,
   reptileExitBand,
@@ -264,6 +265,7 @@ export class ReptileHouse implements GameSystem {
       throw new Error(`ReptileHouse: the mouth reaches ${mouthReach.toFixed(2)} m, past REPTILE_LIPS_REACH ${REPTILE_LIPS_REACH} — raise it in layout.ts`);
     }
     this.shellSolids = registerReptileShellCollision(collision, this.frame, lowDiscs, lipsReach);
+    registerReptileRoofCollision(collision, this.frame);
     registerPlinthStep(surfaces, this.frame, reptileHousePlinthTop());
     atlas.applyTo(this.exterior.sign);
   }

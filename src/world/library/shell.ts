@@ -9,6 +9,7 @@ import { PALETTE } from '../../core/palette';
 import { solid, toonMaterial } from '../../art/style/materials';
 import { LIBRARY_INTERIOR_LIFT } from './lighting';
 import { END_HALF } from './props';
+import { libraryTopOver } from '../../art/models/libraryKit';
 import {
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
@@ -313,6 +314,54 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
     return collision.kinded('library column', () => collision.addCircle(at.x, at.z, column.radius, top, false, true));
   });
   return { walls, corners, edges, columns };
+}
+
+/** The library roof's strips: about this wide across the cella, and this long front to back, so each top lies on the roof's slope. */
+const ROOF_STRIP = 1;
+const ROOF_PIECE = 2;
+
+/**
+ * **The roof the park sees is somewhere to stand.**
+ *
+ * The cella's walls seal its inside, and once they stood to `Infinity`; with
+ * real tops (17 Oct 2026) the jet pack flies over them — 9.5 m against its
+ * 12 m — and the roof over the cella had no solid, so she fell through the
+ * slates into a room walled in on every side. Strips across the cella, inside
+ * its walls' inner faces, each banded from the walls' top to the roof drawn
+ * over it (`libraryTopOver`, a ray down the kit's own geometry), one height
+ * at each end of a piece: the attic between the walls and the roof is solid,
+ * so the room under it is sealed from above, and she stands on the slates.
+ * Banded, so no route lattice stamps them, and the door's recess keeps its
+ * air: the strips start at the walls' top, nine metres over its floor.
+ */
+export function registerLibraryRoofCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): void {
+  const H = SHELL_HALF;
+  const minX = -plan.cellaHalfX + 2 * H;
+  const maxX = plan.cellaHalfX - 2 * H;
+  const minZ = plan.cellaBackZ + 2 * H;
+  const maxZ = plan.cellaFrontZ - 2 * H;
+  const strips = Math.max(1, Math.round((maxX - minX) / ROOF_STRIP));
+  const half = (maxX - minX) / strips / 2;
+  // A capsule's round ends inside the walls' inner faces.
+  const z0 = minZ + half;
+  const z1 = maxZ - half;
+  const pieces = Math.max(1, Math.round((z1 - z0) / ROOF_PIECE));
+  const roofOver = (x: number, z: number): number => Math.max(plan.height, libraryTopOver(['shell-roof'], x, z) ?? plan.height);
+  collision.kinded('library roof', () => {
+    for (let i = 0; i < strips; i += 1) {
+      const x = minX + (2 * i + 1) * half;
+      for (let k = 0; k < pieces; k += 1) {
+        const za = z0 + ((z1 - z0) * k) / pieces;
+        const zb = z0 + ((z1 - z0) * (k + 1)) / pieces;
+        const a = frame.foot(x, za);
+        const b = frame.foot(x, zb);
+        const topA = frame.topY(a.x, a.z, x, za, roofOver(x, za));
+        const topB = frame.topY(b.x, b.z, x, zb, roofOver(x, zb));
+        const base = Math.min(frame.topY(a.x, a.z, x, za, plan.height), frame.topY(b.x, b.z, x, zb, plan.height));
+        collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, base, false, Number.NaN, topB);
+      }
+    }
+  });
 }
 
 /**

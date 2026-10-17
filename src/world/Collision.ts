@@ -875,17 +875,6 @@ export class CollisionWorld {
     }
   }
 
-  /**
-   * **Every solid `build` registers is topped with leaves** — a bush, a hedge,
-   * a tree's crown: solid to walk into, jumped over where it is low enough,
-   * never stood on, because leaves are what she brushes through (the planters
-   * ruling, 7 Aug 2026, which `check:solids` holds every landing to). The
-   * census stood her on 247 bushes' crowns, 0.4 m sunk in the drawn leaves,
-   * and dropped her from them into pockets she could not leave.
-   */
-  foliageTopped<T>(build: () => T): T {
-    return this.toppedNarrow(0, build);
-  }
 
   /**
    * **Files every collider `build` registers as one kind of thing** — "garden

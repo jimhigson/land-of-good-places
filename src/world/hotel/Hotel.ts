@@ -605,9 +605,10 @@ const CHAIR_SEAT_Y = 0.42;
  *
  * Approximate on purpose — a seeded crystal cluster varies a little — but
  * approximately *true*, where the old `Infinity` default made every one an
- * unjumpable pillar (probe 11). A top is somewhere to land if her jump can
- * reach it, and these, at 1.4-1.5 m, are just past it: physics, not a flag,
- * is what keeps her out of the crystals.
+ * unjumpable pillar (probe 11). These, at 1.4-1.5 m, are just past her jump
+ * from the floor — and crystals come to points, so their tops are no ledge
+ * (`ledge: false`): from a sofa beside one she could reach 1.5 m, and the
+ * census stood her on air over the planter (17 Oct 2026).
  */
 const CLUSTER_TOP = 1.4;
 const PLANTER_TOP = 1.5;
@@ -4125,17 +4126,17 @@ export class Hotel implements GameSystem {
         radius: 0.62,
         top: 8.3,
       },
-      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP, ledge: false },
       // Back at its natural, mirrored x (3.4, matching the planter at −3.4),
       // 18 August 2026: it moved to 7.2 only to dodge the reception check-in
       // stand spot, which shared this room with it at the time. Issue #280's
       // room split moved the desk (and its stand spot) into its own room
       // entirely — see {@link RECEPTION_X} — so nothing here needs dodging
       // any more.
-      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP, ledge: false },
     ]);
 
     // The one keep-out in the lobby that is not a prop: the patch of floor a
@@ -4350,10 +4351,10 @@ export class Hotel implements GameSystem {
     shell.add(sun);
 
     this.placeProps(shell, BREAKFAST, [
-      { prop: () => crystalCluster(0x20b1), x: -10.6, z: -7.4, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x20b2), x: 11, z: -7.4, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x20b3), x: -10.8, z: 6.4, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x20b4), x: 10.6, z: 1, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x20b1), x: -10.6, z: -7.4, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalCluster(0x20b2), x: 11, z: -7.4, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x20b3), x: -10.8, z: 6.4, top: PLANTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x20b4), x: 10.6, z: 1, top: PLANTER_TOP, ledge: false },
     ]);
     this.hangOnWalls(shell, BREAKFAST, {
       // No sconces on the north wall here: the glowing window band already
@@ -4492,10 +4493,10 @@ export class Hotel implements GameSystem {
       // `/hotel-suite` furniture fix) caught this cluster 0.22 m inside the
       // west lift doorway's now-deeper zone. It is still the same corner
       // scatter, just a stride further from the door it stands beside.
-      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 3.0, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 3.0, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9, top: PLANTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9, top: PLANTER_TOP, ledge: false },
     ]);
     this.hangOnWalls(shell, CORRIDOR, { north: [], west: [-2.9, 2.9], pictures: [] });
 
@@ -4617,8 +4618,8 @@ export class Hotel implements GameSystem {
       // the `/hotel-suite` furniture fix) caught this planter 0.04 m inside
       // the west lift doorway's now-deeper zone. Still the same corner spot,
       // just clear of it.
-      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.0, z: 0.4, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.0, z: 0.4, top: PLANTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6, top: PLANTER_TOP, ledge: false },
       { prop: () => flowerTuft(0x50f3, 1.6), x: -2.4, z: 5.4, radius: 0.4, top: 1.2 },
     ]);
 
@@ -4965,9 +4966,9 @@ export class Hotel implements GameSystem {
     // bedroom3 (east, 9.8 → 13.6) when `SUITE.halfX` grew for issue #274 —
     // both still hug the same wall at the same margin, just further out.
     this.placeProps(shell, SUITE, [
-      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -13.4, z: -7, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 13.6, z: -7, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -13.4, z: 6.6, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -13.4, z: -7, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 13.6, z: -7, top: CLUSTER_TOP, ledge: false },
+      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -13.4, z: 6.6, top: PLANTER_TOP, ledge: false },
     ]);
     this.hangOnWalls(shell, SUITE, {
       // Threaded between the three north windows, one per bedroom.
@@ -6076,7 +6077,7 @@ export class Hotel implements GameSystem {
   private placeProps(
     shell: Group,
     room: HotelRoom,
-    items: readonly { prop: () => Group; x: number; z: number; radius?: number; top: number }[],
+    items: readonly { prop: () => Group; x: number; z: number; radius?: number; top: number; ledge?: false }[],
   ): void {
     for (const item of items) {
       this.props.place(shell, room, item.prop(), {
@@ -6084,8 +6085,9 @@ export class Hotel implements GameSystem {
         z: item.z,
         radius: item.radius ?? 0.6,
         top: item.top,
-        // The scatter props are crystals, seaweed and tufts: real heights,
-        // never floors, so none of them offers a landing plate.
+        // The scatter props are crystals, seaweed and tufts: real heights;
+        // crystals come to points, so their tops are no ledge.
+        ...(item.ledge === false ? { ledge: false as const } : {}),
       });
     }
   }

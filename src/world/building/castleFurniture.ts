@@ -886,6 +886,8 @@ export function greatHallFootprint(deck: number): readonly KeepOut[] {
  * their own half-thickness, exactly as `hotel/place.ts` does.
  */
 export interface HallSolid {
+  /** What it is, for anything that reports a solid: a run's table or bench side, or the pets' table. */
+  readonly kind: 'banquet table' | 'banquet bench' | "the pets' table";
   readonly x: number;
   readonly z: number;
   readonly halfX: number;
@@ -971,14 +973,15 @@ export function greatHallSolids(deck: number): readonly HallSolid[] {
       const z = (first + last) / 2;
       // **Each strip to what is drawn on it** (17 Oct 2026): the table to its
       // top, and either side of it, out to the outer face of the bench, the
-      // bench to its seat — the 0.45 m slot between them with it, which she is
-      // too wide to stand in. One block to the table's top stood her on air
-      // 0.30 m over every bench. The strips butt, so the run is the one solid
-      // it always was, with no pocket.
-      solids.push({ x: rowX, z, halfX: CASTLE_TABLE_HALF_WIDTH, halfZ, top: CASTLE_TABLE_TOP });
-      const benchHalf = (BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH - CASTLE_TABLE_HALF_WIDTH) / 2;
+      // bench to its seat — the 0.45 m slot between them split down its
+      // middle, half to each, which she is too wide to stand in anyway. One
+      // block to the table's top stood her on air 0.30 m over every bench. The
+      // strips butt, so the run is the one solid it always was, with no pocket.
+      const tableHalf = CASTLE_TABLE_HALF_WIDTH + DINER_TABLE_GAP / 2;
+      solids.push({ kind: 'banquet table', x: rowX, z, halfX: tableHalf, halfZ, top: CASTLE_TABLE_TOP });
+      const benchHalf = (BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH - tableHalf) / 2;
       for (const side of [-1, 1] as const) {
-        solids.push({ x: rowX + side * (CASTLE_TABLE_HALF_WIDTH + benchHalf), z, halfX: benchHalf, halfZ, top: CASTLE_BENCH_SEAT });
+        solids.push({ kind: 'banquet bench', x: rowX + side * (tableHalf + benchHalf), z, halfX: benchHalf, halfZ, top: CASTLE_BENCH_SEAT });
       }
     }
   }
@@ -986,6 +989,7 @@ export function greatHallSolids(deck: number): readonly HallSolid[] {
   const pets = greatHallPetTable(deck);
   if (pets) {
     solids.push({
+      kind: "the pets' table",
       x: pets.x,
       z: pets.z,
       halfX: PET_TABLE_HALF_X,

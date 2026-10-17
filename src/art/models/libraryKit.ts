@@ -143,6 +143,17 @@ function firstHit(names: readonly string[], origin: Vector3, direction: Vector3)
   return best;
 }
 
+/**
+ * **The drawn top of the named nodes over a building-local `(x, z)`**, its
+ * local height, or `null` where none of them is over the point — a ray down
+ * the building's own up, which in its own metres is plain `−Y`.
+ */
+export function libraryTopOver(names: readonly string[], x: number, z: number): number | null {
+  const from = 100;
+  const distance = firstHit(names, new Vector3(x, from, z), new Vector3(0, -1, 0)); // flat-ok: building-local metres, where the kit's own up is +Y
+  return distance === null ? null : from - distance;
+}
+
 // ---------------------------------------------------------------------------
 // The exterior's plan
 // ---------------------------------------------------------------------------
