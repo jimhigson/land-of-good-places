@@ -27,7 +27,9 @@ import {
   MINI_GAME_AWNING_Z,
   MINI_GAME_BACK_WALL_HEIGHT,
   MINI_GAME_COUNTER_BOARD_Y,
+  MINI_GAME_SIDE_PANEL_DEPTH,
   MINI_GAME_SIDE_PANEL_HEIGHT,
+  MINI_GAME_SIDE_PANEL_Z,
 } from './boothFootprint';
 import type { StallDefinition } from './types';
 
@@ -103,9 +105,9 @@ export function createStallProp(definition: StallDefinition): StallProp {
 
   for (const side of [-1, 1] as const) {
     const panel = solid(
-      new Mesh(new RoundedBoxGeometry(0.18, MINI_GAME_SIDE_PANEL_HEIGHT, 1.9, 3, 0.07), creamMaterial),
+      new Mesh(new RoundedBoxGeometry(0.18, MINI_GAME_SIDE_PANEL_HEIGHT, MINI_GAME_SIDE_PANEL_DEPTH, 3, 0.07), creamMaterial),
     );
-    panel.position.set(side * (halfWidth - 0.09), MINI_GAME_SIDE_PANEL_HEIGHT / 2, -0.2);
+    panel.position.set(side * (halfWidth - 0.09), MINI_GAME_SIDE_PANEL_HEIGHT / 2, MINI_GAME_SIDE_PANEL_Z);
     root.add(panel);
   }
 

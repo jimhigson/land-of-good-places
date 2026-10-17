@@ -401,8 +401,11 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         const landed = walkOff(options, source.solid, o, fps);
         if (!landed) continue;
         if (groundReached(landed.x, landed.z, landed.y)) continue;
-        // Her lattice from where she landed: if it walks into ground already
-        // reached, this is the same place by another door, not a new one.
+        // Her own walking first — cheap, local, and the common answer: she
+        // came down beside ground already reached and walks onto it.
+        if (joinsMain(options, groundReached, landed, fps)) continue;
+        // Then her lattice from where she landed: if it walks into ground
+        // already reached, this is the same place by another door.
         const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
         let joins = false;
         if (flood && flood.has(landed.x, landed.z, landed.y)) {
@@ -411,8 +414,6 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           });
         }
         if (joins) continue;
-        // Somewhere her lattice cannot see: ask her own walking.
-        if (joinsMain(options, groundReached, landed, fps)) continue;
         const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
         regions.push({ entry: landed, via: `a drop off ${source.solid.kind || source.solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
         changed = true;

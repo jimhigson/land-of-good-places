@@ -64,6 +64,16 @@ export interface BoothHeights {
   readonly back: number;
   /** Solid right through, up to `front` (a cart), rather than a hollow booth closed by its four walls. */
   readonly filled?: true;
+  /**
+   * Where the drawn side panels stop, booth-local `z`, when they stop short of
+   * the front: in front of it a side wall is the counter's own end, and stands
+   * to the counter's height (`front`), not the panel's. Without it the side
+   * walls' solids ran on, panel-high and undrawn, out to the counter's line —
+   * a ledge in the air beside the counter, outside the awning, that a child on
+   * the counter stepped up to and walked from onto the roof (the census, 17
+   * Oct 2026).
+   */
+  readonly sideFront?: number;
   /** A round canopy (a parasol), local-frame centre and radius, banded from `base` to `top`. */
   readonly canopy?: { readonly x: number; readonly z: number; readonly radius: number; readonly base: number; readonly top: number };
   readonly awning?: {
@@ -87,6 +97,9 @@ export const MINI_GAME_COUNTER_BOARD_Y = 1.08;
 export const MINI_GAME_COUNTER_BOARD_HALF = 0.07;
 export const MINI_GAME_COUNTER_TOP = MINI_GAME_COUNTER_BOARD_Y + MINI_GAME_COUNTER_BOARD_HALF;
 export const MINI_GAME_SIDE_PANEL_HEIGHT = 2.3;
+/** The side panels' middle and depth, booth-local `z` — they stop 0.6 m short of the counter's line. */
+export const MINI_GAME_SIDE_PANEL_Z = -0.2;
+export const MINI_GAME_SIDE_PANEL_DEPTH = 1.9;
 export const MINI_GAME_BACK_WALL_HEIGHT = 2.5;
 export const MINI_GAME_AWNING_Y = 2.72;
 export const MINI_GAME_AWNING_Z = 0.15;
@@ -120,6 +133,7 @@ export const MINI_GAME_BOOTH_BOX: BoothBox = {
     front: MINI_GAME_COUNTER_TOP,
     sides: MINI_GAME_SIDE_PANEL_HEIGHT,
     back: MINI_GAME_BACK_WALL_HEIGHT,
+    sideFront: MINI_GAME_SIDE_PANEL_Z + MINI_GAME_SIDE_PANEL_DEPTH / 2,
     awning: tiltedAwning(2.1),
   },
 };
@@ -291,12 +305,19 @@ export function addBoothCollision(
   const toWorld = (lx: number, lz: number): [number, number] => [x + lx * cos + lz * sin, z - lx * sin + lz * cos];
   return collision.ownedBy('booth', () =>
     collision.kinded('stall booth', () => {
-      const solids: (WallCollider | BoxCollider)[] = [
-        wall(frontLeft, frontRight, h.front),
-        wall(backLeft, backRight, h.back),
-        wall(frontLeft, backLeft, h.sides),
-        wall(frontRight, backRight, h.sides),
-      ];
+      const solids: (WallCollider | BoxCollider)[] = [wall(frontLeft, frontRight, h.front), wall(backLeft, backRight, h.back)];
+      if (h.sideFront === undefined) {
+        solids.push(wall(frontLeft, backLeft, h.sides), wall(frontRight, backRight, h.sides));
+      } else {
+        // Each side in two: the drawn panel to its height, and the counter's
+        // end, from the panel's front to the counter's line, to the counter's.
+        for (const side of [-1, 1] as const) {
+          const back = toWorld(side * box.halfWidth, box.back);
+          const split = toWorld(side * box.halfWidth, h.sideFront);
+          const front = toWorld(side * box.halfWidth, box.front);
+          solids.push(wall(back, split, h.sides), wall(split, front, h.front));
+        }
+      }
       if (h.filled) {
         const [cx, cz] = toWorld(0, (box.front + box.back) / 2);
         solids.push(
