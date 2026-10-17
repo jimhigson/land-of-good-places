@@ -220,6 +220,33 @@ const say = (line: string): void => {
     notes.push(`rule (g) sealed box ${(innerHalf * 2).toFixed(2)} m inside: moved ${spot.moved.toFixed(2)} m to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
   }
 
+  // (g, thin) The same box with walls a tenth of a metre thick, moved 0.2 m
+  // off the corner the others sit on. Now free cells of the router's lattice
+  // stand within the rule's start reach of her centre, on the far side of a
+  // wall, and only the swept path to the start cell (`OpenFloor.walksTo`)
+  // keeps the flood from starting out there and calling the box open. The
+  // final review of 18c2ecd1 found 5 of 28 such boxes leave her inside
+  // without that sweep, and nothing else here noticed it missing.
+  {
+    const collision = world();
+    const innerHalf = 0.66;
+    const wall = 0.05;
+    const cx = 0.2;
+    const cz = 0;
+    collision.addRectangle(cx, cz, innerHalf + wall, innerHalf + wall, wall);
+    const spot = putDownSpot(collision, flat, { x: cx, y: 0, z: cz }, PLAYER_PUT_DOWN);
+    const outside = Math.max(Math.abs(spot.x - cx), Math.abs(spot.z - cz)) >= innerHalf + 2 * wall + PLAYER_RADIUS - 1e-6;
+    if (!spot.found || !outside) {
+      fail(
+        `rule (g) thin-walled box ${(innerHalf * 2).toFixed(2)} m inside, walls 0.10 m: asked (${cx.toFixed(2)}, ${cz.toFixed(2)}), ` +
+          `got (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) moved ${spot.moved.toFixed(2)} found=${spot.found} — LEFT INSIDE THE SEALED BOX`,
+      );
+    }
+    notes.push(
+      `rule (g) thin-walled box ${(innerHalf * 2).toFixed(2)} m inside, walls 0.10 m: moved ${spot.moved.toFixed(2)} m to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`,
+    );
+  }
+
   // (f) The cost bound: one window of the router's lattice, however bad the
   // search — the window's size is the rule's own (`PUT_DOWN_WINDOW_CELLS`).
   {
@@ -351,6 +378,44 @@ function tick(seconds: number, input = still): void {
   }
 }
 
+// ------------------------------------------------------------------ 1b. a wedge with nowhere to go backs off
+
+/**
+ * **When the rule finds nowhere to put her, the wedge rescue waits longer
+ * before it asks again** (`Player`'s `WEDGE_RETRY_MAX_SECONDS`). A real
+ * `Player` on a world of her own: play bounds 1.2 m across, so no spot within
+ * the rule's reach is open, and a world that reports her 0.2 m inside
+ * something solid wherever she stands, so the wedge never lets up. Over 10 s,
+ * half-second retries would be 20 full searches and 20 warnings; backing off,
+ * doubling each time, it is four (at 0.5, 1.5, 3.5 and 7.5 s).
+ */
+{
+  const box = new CollisionWorld();
+  box.setPlayBounds(circleBoundary(1.2, 0, 0));
+  const body = quietly(() => new Player(box, camera, new Vector3(0, 0, 0)));
+  body.groundSampler = (): number => 0;
+  box.deepestSolidOverlap = (): number => 0.2;
+  const warn = console.warn;
+  let warned = 0;
+  console.warn = (): void => {
+    warned += 1;
+  };
+  let clock = 0;
+  for (let t = 0; t < 10 - 1e-9; t += 1 / 30) {
+    clock += 1 / 30;
+    body.update({ dt: 1 / 30, elapsed: clock, frame: Math.round(clock * 30), input: still, playerPosition: body.position, cameraForward: camera.forward } as never);
+  }
+  console.warn = warn;
+  const tries = body.wedgeRescues;
+  if (tries < 3 || tries > 5 || warned !== tries) {
+    fail(
+      `the wedge rescue with nowhere to go: ${tries} tries and ${warned} warnings in 10 s — ` +
+        'it must back off, doubling its wait after each search that finds nowhere (4 tries, not 20)',
+    );
+  }
+  notes.push(`rule (h) a wedge with nowhere to go: ${tries} tries in 10 s, ${warned} warnings (half-second retries would be 20)`);
+}
+
 // ------------------------------------------------------------------ 2. the instrument
 
 /** The router, exactly as `Game` builds it — following the play bounds of the space she is in. */
@@ -387,7 +452,7 @@ function walksOut(): { out: boolean; why: string } {
  * sweep's question is only "can she get {@link WALK_AWAY} m?", and asking it
  * of thousands of spots for the full 20 s each would cost minutes.
  */
-function walkAway(x: number, y: number, z: number, enough = Infinity): number {
+function walkAway(x: number, y: number, z: number, enough = Infinity, what = ''): number {
   let farthest = 0;
   for (let k = 0; k < 8 && farthest < enough; k += 1) {
     const heading = (k * Math.PI) / 4;
@@ -395,16 +460,53 @@ function walkAway(x: number, y: number, z: number, enough = Infinity): number {
     player.position.set(x, y, z);
     player.previousPosition.copy(player.position);
     player.launch(0);
+    let rescues = player.wedgeRescues;
     for (let t = 0; t < 2.5 && farthest < enough; t += 1 / 30) {
       elapsed += 1 / 30;
       player.update({ dt: 1 / 30, elapsed, frame: Math.round(elapsed * 30), input, playerPosition: player.position, cameraForward: camera.forward } as never);
       farthest = Math.max(farthest, Math.hypot(player.position.x - x, player.position.z - z));
+      rescues = noteRescue(
+        `${what ? `${what}: ` : ''}walking away from (${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}) heading ${k * 45}°`,
+        rescues,
+      );
     }
   }
+  walksWatched += 1;
   player.position.set(x, y, z);
   player.previousPosition.copy(player.position);
   player.launch(0);
   return farthest;
+}
+/**
+ * **The wedge rescue never misfires on an ordinary walk.** `Player` lets go of
+ * her when she has been stuck inside something solid for half a second: a
+ * wedge, a gap narrower than she is that a hop or a drop put her in
+ * (`check:hotel` probe 33 finds those on purpose). Walking on the flat can
+ * never put her in one — `resolveMovement` refuses a step that leaves her
+ * deeper in anything — so a rescue that is not straight after a landing is
+ * the rescue misfiring: catching her leaning on a wall, say, and teleporting
+ * her. Every rescue on these walks is collected; one whose wedge took hold
+ * more than {@link WEDGE_AFTER_LANDING} after her last landing fails the
+ * check. One straight after a landing is a real wedge she dropped into, and is
+ * named on every run. (Walking off the suite's bed onto the floor beside a
+ * pet bed is one: with two pets, the pet bed stands where she comes down,
+ * 0.67 m inside its footprint.)
+ */
+const rescuedOnWalks: { what: string; afterLanding: boolean }[] = [];
+let walksWatched = 0;
+/** How soon after a landing a wedge she came down in takes hold, seconds. */
+const WEDGE_AFTER_LANDING = 0.5;
+/** Records any rescue since `before`, under `what`; returns the count to watch from. */
+function noteRescue(what: string, before: number): number {
+  if (player.wedgeRescues === before || !player.lastWedge) return player.wedgeRescues;
+  const held = player.lastWedge;
+  rescuedOnWalks.push({
+    what:
+      `${what}: a wedge let go of her, held at (${held.x.toFixed(2)}, ${held.y.toFixed(2)}, ${held.z.toFixed(2)}) ` +
+      `${held.depth.toFixed(3)} m deep, taking hold ${Number.isFinite(held.afterLanding) ? `${held.afterLanding.toFixed(2)} s after a landing` : 'with no landing before it'}`,
+    afterLanding: held.afterLanding <= WEDGE_AFTER_LANDING,
+  });
+  return player.wedgeRescues;
 }
 /** How far she must be able to walk from anywhere she was put down, metres. */
 const WALK_AWAY = 1.5;
@@ -412,7 +514,7 @@ const WALK_AWAY = 1.5;
 const nearest = { walked: Infinity, what: '' };
 function judgeWalkAway(what: string): void {
   const p = player.position.clone();
-  const walked = walkAway(p.x, p.y, p.z);
+  const walked = walkAway(p.x, p.y, p.z, Infinity, what);
   if (walked < nearest.walked) Object.assign(nearest, { walked, what });
   if (walked < WALK_AWAY) {
     fail(
@@ -682,7 +784,7 @@ for (const visit of SPACES) {
     asked += 1;
     if (!spot.found || router.canStandAt(spot.x, spot.z, spot.y, sample)) continue;
     offLattice += 1;
-    const walked = walkAway(spot.x, spot.y, spot.z, WALK_AWAY);
+    const walked = walkAway(spot.x, spot.y, spot.z, WALK_AWAY, `off the lattice, ${visit.name}`);
     if (walked < WALK_AWAY) {
       fail(
         `off the lattice: ${visit.name}, an exit at (${point.x.toFixed(2)}, ${y.toFixed(2)}, ${point.z.toFixed(2)}) is put down at ` +
@@ -922,11 +1024,16 @@ function crossBand(band: PortalBand, sign: 1 | -1): boolean {
   player.teleportTo(startX, sample(startX, startZ, player.position.y + 1), startZ);
   tick(0.1);
   const before = player.putDowns;
+  let rescues = player.wedgeRescues;
   const from = spaceAt(player.position.x, player.position.z);
+  const walking = `walking ${sign > 0 ? 'along' : 'against'} ${band.what} from ${from}`;
   for (let t = 0; t < 3 && spaceAt(player.position.x, player.position.z) === from; t += 0.1) {
     tick(0.1, stickAlong(sign * Math.sin(band.yaw), sign * Math.cos(band.yaw)));
+    rescues = noteRescue(walking, rescues);
   }
   tick(0.3);
+  noteRescue(walking, rescues);
+  walksWatched += 1;
   return player.putDowns !== before;
 }
 
@@ -1394,6 +1501,19 @@ for (const key of Object.keys(NOT_DRIVEN)) {
   if (!keys.has(key)) fail(`NOT_DRIVEN names '${key}', which is no longer a placement — remove it, or name the line as it now reads`);
 }
 
+// ------------------------------------------------------------------ the wedge rescue, never on a walk
+
+if (walksWatched < 100) fail(`the wedge rescue's watch saw only ${walksWatched} walks — too few to say it never misfires on one`);
+const misfires = rescuedOnWalks.filter((rescue) => !rescue.afterLanding);
+if (misfires.length > 0) {
+  fail(
+    `the wedge rescue fired ${misfires.length} time(s) on ordinary walks for a wedge that took hold with no landing in the ${WEDGE_AFTER_LANDING} s before — ` +
+      `it must only ever let go of a wedge she landed in:\n      ` +
+      misfires.slice(0, 12).map((rescue) => rescue.what).join('\n      ') +
+      (misfires.length > 12 ? `\n      … and ${misfires.length - 12} more` : ''),
+  );
+}
+
 // ------------------------------------------------------------------ report
 
 const moved = exits.filter((exit) => exit.moved > 0);
@@ -1402,6 +1522,14 @@ say(`check:exits — ${notes.find((note) => note.startsWith('instrument')) ?? 'i
 say(`check:exits — ${notes.find((note) => note.startsWith('router agreement')) ?? 'router agreement: NOT RUN'}`);
 say(`check:exits — ${notes.find((note) => note.startsWith('off the lattice')) ?? 'off the lattice: NOT RUN'}`);
 say(`check:exits — walked away from every put-down on her own feet: the shortest walk was ${nearest.walked.toFixed(2)} m (${nearest.what}); she must get ${WALK_AWAY} m`);
+say(
+  `check:exits — the wedge rescue on ordinary walking: ${rescuedOnWalks.length} firing(s) over ${walksWatched} walk-aways and doorway walks, ` +
+    `${misfires.length} with no landing just before (must be 0)` +
+    rescuedOnWalks
+      .filter((rescue) => rescue.afterLanding)
+      .map((rescue) => `\n  after a landing, a real wedge: ${rescue.what}`)
+      .join(''),
+);
 say(
   `check:exits — ${sites.size} placement call sites in src/ outside Player.ts (endRide/teleportTo/teleport/beginRide), ` +
     `${covered.length} driven here, ${undriven.length} not:\n  ` +
