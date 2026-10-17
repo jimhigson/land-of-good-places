@@ -208,3 +208,9 @@ no-headroom need the census run.
   (never settle: it ejects through walls — proof caught it).
 - 16-seed census at e0c63589/d33cb4d2: 14 green, seed 15 station bench 0.20 m (lean, left as gap).
 - Local gate restarted at 81861e39 in snap5 (/tmp/es-gate-d), proofs in /tmp/es-proofs6.
+- 3b3e3834: measuredHopCeiling = the measured lower envelope (knots per measured half, −1 mm): the
+  straight refit fell under the fountain rim (1.0 m @ 1.88) → boot.asserts 28 on every seed in
+  test:procgen. Now test:procgen 0 (46/2154), build 0, sweep:fountain-hop 16/16, hop-clearance 0.
+- 16-seed census at 81861e39: 15/16 green; seed 15 far station bench 0.20 m (documented gap).
+- Proofs at 81861e39 (/tmp/es-proofs6): all 11 red, controls green. PR body draft /tmp/es-pr-body.md.
+- Full local check restarted at 3b3e3834 (snap5, /tmp/es-gate-d). Then: push PR head, CI, preview.
