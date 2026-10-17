@@ -138,9 +138,12 @@ Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue of
 - check:hotel on 503bd56f (red-hotel-33.log, copy with 503bd56f's café constants): probe 33 lobby 246
   ways in, breakfast 10, garden 4, ocean 42; probe 31 22 > 12; probe 32 7 walks off the tables stuck.
 - mutation A, old café + rescue (mut-A.log): probe 33 lobby 123 ways into the strip, overlap 0.000.
-- mutation B, new café, no rescue (mut-B.log): lobby 122 (deck sofas, overlap 0.51), breakfast 10,
-  garden 4, ocean 42. mut-B-sites.log lists every site (pending).
-- M9, M10 (bridgeCovers/connectors off) → mut-M9.log, mut-M10.log (pending).
+- mutation B, new café, no rescue (mut-B.log): lobby 122, breakfast 10, garden 4, ocean 42.
+  Sites (mut-B-sites.log): gallery sofas both sides of the deck (z −24.5, overlap 0.51), lounge sofa
+  + lamp table (±8, 7; 0.26), and the bathrooms of lobby (12, 11–13; 0.06), Floor 1 (11, 9; 0.07),
+  garden (11, −2.5; 0.67), ocean (−10, 3/6; 0.34/0.57).
+- M9 (bridgeCovers off): exit 1, 2b "moved 25 of 2947". M10 (connectors off): exit 0 — no sampled
+  point needs a connector on seed 5 (not traced why); reported as measured.
 
 ## Status
 - [x] re-review items + minors; check:exits OK (exits-16), check:hotel OK (hotel-33d); menu green
