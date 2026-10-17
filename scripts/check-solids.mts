@@ -97,10 +97,9 @@ function note(line: string): void {
  * stay out of her reach, which clause 4 measures.
  */
 const INVISIBLE_SOLIDS: Readonly<Record<string, string>> = {
-  '': '',
+  'railway corridor':
+    "the railway's corridor between its fences (`train/fence.ts`): the route lattice's closure of it, the floor of the track under a bridge, and no slot beside the rail she could be wedged in",
 };
-/** The railway's centre band carries no kind (it is registered bare in `train/fence.ts`) — found by its own width. */
-const RAIL_BAND_HALF = 1.3;
 
 const park = buildHeadlessPark();
 const world = park.world;
@@ -144,12 +143,7 @@ console.log('1. REAL TOPS — every solid stands to a real top:');
   for (const solid of solids) {
     const finite = solid.topIsAbsolute && Number.isFinite(solid.topHeight);
     if (finite) continue;
-    if (solid.kind in INVISIBLE_SOLIDS && solid.kind !== '') {
-      invisible += 1;
-      continue;
-    }
-    // The railway's centre band: invisible, bare, its own width.
-    if (solid.kind === '' && solid.shape === 'capsule' && Math.abs(solid.halfWidth - RAIL_BAND_HALF) < 1e-6) {
+    if (solid.kind in INVISIBLE_SOLIDS) {
       invisible += 1;
       continue;
     }
@@ -157,7 +151,7 @@ console.log('1. REAL TOPS — every solid stands to a real top:');
     flagged.set(key, (flagged.get(key) ?? 0) + 1);
   }
   say(flagged.size === 0, `${solids.length} solids, ${solids.length - invisible - [...flagged.values()].reduce((a, b) => a + b, 0)} with a real top, ${invisible} invisible by declared reason, ${[...flagged.values()].reduce((a, b) => a + b, 0)} without one${flagged.size ? `: ${[...flagged].map(([k, n]) => `${k} ×${n}`).join('; ')}` : ''}`);
-  note(`clause 1 covers ${solids.length} solids in every space; invisible by reason: the railway's centre band (the route lattice's closure of the corridor, and the floor of the track under a bridge) and ${Object.keys(INVISIBLE_SOLIDS).filter((k) => k).join(', ')}`);
+  note(`clause 1 covers ${solids.length} solids in every space; invisible by reason: ${Object.entries(INVISIBLE_SOLIDS).map(([kind, why]) => `${kind} — ${why}`).join('; ')}`);
 }
 
 // ---------------------------------------------------------------------------

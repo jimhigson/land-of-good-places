@@ -392,22 +392,46 @@ export function buildRailFence(
   // closes it, and (see `addFenceWall`) gets exactly the same `topIsAbsolute`
   // seam under a bridge deck that the flanks get, so nothing here narrows
   // what a bridge already opened.
-  const linkCentre = (a: Post, b: Post): void => {
-    const deckY = deckSpanForSegment(a, b, TRACK_CLEARANCE);
-    if (deckY === null) {
-      collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE);
-    } else {
-      collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE, deckY - FENCE_SEAM_MARGIN, false, true);
-    }
+  //
+  // **And it reaches the fences' inner faces.** At `TRACK_CLEARANCE` it
+  // stopped 0.52 m short of each, a slot narrower than she is: nothing put
+  // her in it while the fence had no top, but a fence she can see the top of
+  // is one she can stand on, and a child stepping off that top on the track
+  // side fell into the slot, wedged between rail and fence with a 1.67 m rail
+  // over her head — the census found ten such places on seed 5. A fill run
+  // down each side closes the slot, as the band itself closed the strip:
+  // invisible, solid at every height but the same seam under a deck, and
+  // inside the stamp the fences and the band already make, so no lattice
+  // cell changes — which is why each fill stops its own half-width short of
+  // the box's end: run to the end cap, its round end stamped one cell beyond
+  // the cap's own (seed 5, the north station). It also holds her centre
+  // further than the rail's own width from the fence's line, so the fence's
+  // top is not somewhere she can stand.
+  const linkBand = (a: Post, b: Post, half: number): void => {
+    const deckY = deckSpanForSegment(a, b, half);
+    collision.kinded('railway corridor', () => {
+      if (deckY === null) {
+        collision.addWall(a.x, a.z, b.x, b.z, half);
+      } else {
+        collision.addWall(a.x, a.z, b.x, b.z, half, deckY - FENCE_SEAM_MARGIN, false, true);
+      }
+    });
   };
+  const fillHalf = (FENCE_OFFSET - FENCE_HALF_THICKNESS - TRACK_CLEARANCE) / 2;
+  const fillSide = (TRACK_CLEARANCE + fillHalf) / FENCE_OFFSET;
   for (const box of closed) {
-    let previousCentre: Post | null = null;
+    let previous: Post[] | null = null;
     const steps = Math.max(2, Math.ceil((box.to - box.from) / STEP));
     for (let i = 0; i <= steps; i += 1) {
       const distance = box.from + ((box.to - box.from) * i) / steps;
-      const centre = sideAt(distance, 0);
-      if (previousCentre) linkCentre(previousCentre, centre);
-      previousCentre = centre;
+      const inset = box.from + fillHalf + ((box.to - box.from - 2 * fillHalf) * i) / steps;
+      const runs = [sideAt(distance, 0), sideAt(inset, fillSide), sideAt(inset, -fillSide)];
+      if (previous) {
+        linkBand(previous[0] as Post, runs[0] as Post, TRACK_CLEARANCE);
+        linkBand(previous[1] as Post, runs[1] as Post, fillHalf);
+        linkBand(previous[2] as Post, runs[2] as Post, fillHalf);
+      }
+      previous = runs;
     }
   }
 
