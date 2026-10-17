@@ -70,27 +70,54 @@ import { carryReference } from '../src/world/building/stepReach.ts';
 import { standingHeight } from '../src/world/standing.ts';
 
 /**
- * **The red proofs.** Each breaks one thing and must turn its clause red:
+ * **The red proofs.** Each breaks one thing and must turn its clause red, in
+ * the part (`--part`) that clause runs in:
  *
- * - `infinite`: registers an invisible pillar with no top — clause 1.
- * - `tall-top`: a prop made too tall — a solid round a station bench half a
- *   metre over its drawn seat — clause 2 finds her standing on air.
- * - `too-tall`: the precedent bench made 1 m taller — clause 3 cannot land.
- * - `rail-step`, `low-roof`, `low-exhibit`: a step by the gate carrying the
- *   kind of the railway's corridor, a stall's roof, an exhibit — each of
+ * - `infinite` (core): registers an invisible pillar with no top — clause 1.
+ * - `tall-top` (park): a prop made too tall — a solid round a station bench
+ *   half a metre over its drawn seat — clause 2 finds her standing on air.
+ * - `too-tall` (core): the precedent bench made 1 m taller — clause 3 cannot
+ *   land.
+ * - `rail-step`, `low-roof`, `low-exhibit` (park): a step by the gate carrying
+ *   the kind of the railway's corridor, a stall's roof, an exhibit — each of
  *   clause 4's escapes must find her on it.
- * - `trap`: a ring of tall walls round a crate, so dropping off the crate
- *   leaves her nowhere to go — clause 4's trap clause.
- * - `ghost`: a bench registered as a 5 cm sliver — clause 5's march walks in.
- * - `no-headroom`: a canopy hung 1 m over a reached top — clause 6.
- * - `no-bounds`: the park's leash taken off — clause 7.
- * - `sky-trap`: a ring of 3 m walls round open grass by the gate — clause 8.
+ * - `trap` (core): a ring of tall walls round a castle crate, so dropping off
+ *   the crate leaves her nowhere to go — clause 4's trap clause.
+ * - `ghost` (core): a bench drawn and never registered — clause 5's march
+ *   walks into it.
+ * - `no-headroom` (park): a canopy hung 1 m over a reached top — clause 6.
+ * - `no-bounds` (core): the park's leash taken off — clause 7.
+ * - `sky-trap` (sky): a ring of 3 m walls round open grass by the gate —
+ *   clause 8.
  */
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 /** Clause 4 is minutes long; `SOLIDS_SKIP_CENSUS=1` runs the rest alone (never in the chain). */
 const SKIP_CENSUS = process.env['SOLIDS_SKIP_CENSUS'] === '1';
 /** And `SOLIDS_SPACES=park,library` runs the census over the spaces whose names hold one of those words (never in the chain). */
 const ONLY_SPACES = (process.env['SOLIDS_SPACES'] ?? '').split(',').map((word) => word.trim()).filter(Boolean);
+
+/**
+ * **Which part of the check this run is: `--part=core`, `park` or `sky`** —
+ * or every clause, with no `--part`. The chain runs the three as three steps,
+ * so that each fits a CI shard on its own:
+ *
+ * - `core` (`check:solids`): clauses 1, 3, 5 and 7, and the census (4, with 2
+ *   and 6 over what it reached) inside every building — the castle's floors,
+ *   the hotel's lobby, the library, the reptile house.
+ * - `park` (`check:solids-park`): the census of the park, with 2 and 6 over
+ *   what it reached.
+ * - `sky` (`check:solids-sky`): clause 8.
+ */
+const PARTS = ['core', 'park', 'sky'] as const;
+type Part = (typeof PARTS)[number];
+const PART_ASKED = process.argv.find((arg: string) => arg.startsWith('--part='))?.slice('--part='.length) ?? null;
+if (PART_ASKED !== null && !(PARTS as readonly string[]).includes(PART_ASKED)) {
+  console.error(`check:solids: --part is one of ${PARTS.join(', ')}, not '${PART_ASKED}'`);
+  process.exit(2);
+}
+/** Does this run do `part`'s clauses? */
+const inPart = (part: Part): boolean => PART_ASKED === null || PART_ASKED === part;
+const STEP_OF: Readonly<Record<Part, string>> = { core: 'check:solids', park: 'check:solids-park', sky: 'check:solids-sky' };
 
 let failures = 0;
 function say(ok: boolean, line: string): void {
@@ -117,6 +144,10 @@ const INVISIBLE_SOLIDS: Readonly<Record<string, string>> = {
   'railway corridor':
     "the railway's corridor between its fences (`train/fence.ts`): the route lattice's closure of it, the floor of the track under a bridge, and no slot beside the rail she could be wedged in",
 };
+
+if (PART_ASKED !== null) {
+  note(`this is --part=${PART_ASKED}: the rest of the check is ${PARTS.filter((part) => part !== PART_ASKED).map((part) => `${STEP_OF[part]} (--part=${part})`).join(' and ')}, run as their own steps`);
+}
 
 const park = buildHeadlessPark();
 const world = park.world;
@@ -158,8 +189,8 @@ collision.forEachSolid((solid) => solids.push(solid));
 // ---------------------------------------------------------------------------
 // 1. Real tops
 // ---------------------------------------------------------------------------
+if (inPart('core')) {
 console.log('1. REAL TOPS — every solid stands to a real top:');
-{
   const flagged = new Map<string, number>();
   let invisible = 0;
   for (const solid of solids) {
@@ -179,8 +210,6 @@ console.log('1. REAL TOPS — every solid stands to a real top:');
 // ---------------------------------------------------------------------------
 // 3. The precedents land
 // ---------------------------------------------------------------------------
-console.log('\n3. PRECEDENTS — her own jump comes down on what was always landable:');
-
 /**
  * Her own jump at a solid, the census's way (`runAndJump`): a sprint from
  * `from` at a point just inside its near edge, hopping at several distances,
@@ -228,7 +257,8 @@ function hopOnto(world: CollisionWorld, ground: (x: number, z: number, y: number
   return null;
 }
 
-{
+if (inPart('core')) {
+  console.log('\n3. PRECEDENTS — her own jump comes down on what was always landable:');
   const precedents: { what: string; kind: (s: SolidView) => boolean }[] = [
     { what: 'a castle bench', kind: (s) => s.owner === 'castle' && s.shape === 'box' && Math.abs(s.halfWidth - 0.36) < 0.02 },
     { what: 'a hotel sofa', kind: (s) => s.owner === 'hotel' && s.shape === 'box' && Math.abs(s.halfWidth - 0.48) < 0.02 },
@@ -343,8 +373,12 @@ const PERCH_KINDS: Readonly<Record<string, string>> = {
 };
 
 const allReached: { space: string; top: ReachedTop }[] = [];
+/** The census's spaces in this part: the park in `park`, every building in `core`. */
+const spacesInPart = spaceRuns.filter((run) => (run.name === 'the park' ? inPart('park') : inPart('core')));
 if (SKIP_CENSUS) {
   note('clause 4 (the census) SKIPPED by SOLIDS_SKIP_CENSUS=1 — this run says nothing about what she can reach');
+} else if (spacesInPart.length === 0) {
+  // `--part=sky`: the census is the other two parts'.
 } else {
   console.log('\n4. THE CENSUS — what she can reach by jumping, chains included:');
   if (PROVE === 'trap') {
@@ -362,9 +396,12 @@ if (SKIP_CENSUS) {
   const grid = playerNavGrid(world);
   const route = world.train.route;
   const railScratch = new Vector3();
-  const runs = ONLY_SPACES.length ? spaceRuns.filter((run) => ONLY_SPACES.some((word) => run.name.includes(word))) : spaceRuns;
+  const runs = ONLY_SPACES.length ? spacesInPart.filter((run) => ONLY_SPACES.some((word) => run.name.includes(word))) : spacesInPart;
   if (runs.length < spaceRuns.length) {
-    note(`clause 4 ran over ${runs.length} of ${spaceRuns.length} spaces (SOLIDS_SPACES=${ONLY_SPACES.join(',')}) — it says nothing about ${spaceRuns.filter((run) => !runs.includes(run)).map((run) => run.name).join(', ')}`);
+    const others = spaceRuns.filter((run) => !runs.includes(run));
+    note(
+      `clause 4 ran over ${runs.length} of ${spaceRuns.length} spaces (${[PART_ASKED !== null ? `--part=${PART_ASKED}` : '', ONLY_SPACES.length ? `SOLIDS_SPACES=${ONLY_SPACES.join(',')}` : ''].filter(Boolean).join(', ')}) — it says nothing about ${others.map((run) => `${run.name}${spacesInPart.includes(run) ? '' : ` (${STEP_OF[run.name === 'the park' ? 'park' : 'core']}'s)`}`).join(', ')}`,
+    );
   }
   for (const run of runs) {
     collision.setPlayBounds(run.bounds);
@@ -458,8 +495,8 @@ if (SKIP_CENSUS) {
 // ---------------------------------------------------------------------------
 // 2. Tops where they are drawn — at every place the census stood her
 // ---------------------------------------------------------------------------
+if (spacesInPart.length) {
 console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is under her feet:');
-{
   /**
    * Kinds whose top is not their mesh's highest point by a ruling, each with
    * it. Foliage is soft — leaves are what she brushes through — so a solid
@@ -533,8 +570,8 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
 // ---------------------------------------------------------------------------
 // 5. Marches at the new solids
 // ---------------------------------------------------------------------------
+if (inPart('core')) {
 console.log('\n5. MARCHES — walked at from sixteen bearings, at 5 cm and at a sprint stride:');
-{
   /** The kinds this rework made solid that had no collider at all before it. */
   const NEW_KINDS = [
     'dodgems post',
@@ -624,8 +661,8 @@ console.log('\n5. MARCHES — walked at from sixteen bearings, at 5 cm and at a 
 // ---------------------------------------------------------------------------
 // 6. Headroom
 // ---------------------------------------------------------------------------
+if (spacesInPart.length) {
 console.log('\n6. HEADROOM — every top she reaches has room for all of her:');
-{
   if (PROVE === 'no-headroom') {
     const victim = allReached.find((r) => r.space === 'the park');
     if (victim) collision.kinded('proof: a low canopy', () => collision.addCircle(victim.top.at.x, victim.top.at.z, 0.5, victim.top.at.y + 1.5, false, true, victim.top.at.y + 1.0));
@@ -638,8 +675,8 @@ console.log('\n6. HEADROOM — every top she reaches has room for all of her:');
 // ---------------------------------------------------------------------------
 // 7. The boundary at height
 // ---------------------------------------------------------------------------
+if (inPart('core')) {
 console.log('\n7. THE BOUNDARY AT HEIGHT — the park\'s edge holds her at every height:');
-{
   if (PROVE === 'no-bounds') collision.setPlayBounds(circleBoundary(1e5));
   let pushes = 0;
   let unplaced = 0;
@@ -680,10 +717,12 @@ console.log('\n7. THE BOUNDARY AT HEIGHT — the park\'s edge holds her at every
 // ---------------------------------------------------------------------------
 // 8. Open to the sky — wherever the jet pack could set her down, she can leave
 // ---------------------------------------------------------------------------
-console.log('\n8. OPEN TO THE SKY — wherever the jet pack could set her down, she walks or jumps out of:');
-if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'.includes(word)))) {
+if (!inPart('sky')) {
+  // The other parts': said once, at the top.
+} else if ((SKIP_CENSUS && PART_ASKED === null) || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'.includes(word)))) {
   note('clause 8 skipped with the park\'s census — it asserted nothing');
 } else {
+  console.log('\n8. OPEN TO THE SKY — wherever the jet pack could set her down, she walks or jumps out of:');
   if (PROVE === 'sky-trap') {
     // A ring of walls 3 m tall round open grass 6 m north of the gate: over it
     // from the sky, she is shut in.
@@ -791,7 +830,9 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
     } catch {
       out = false;
     }
-    slowest.push({ at: lowest, n: members.length, ms: performance.now() - t0, how });
+    const ms = performance.now() - t0;
+    slowest.push({ at: lowest, n: members.length, ms, how });
+    if (ms > 20_000) note(`clause 8: ${(ms / 1000).toFixed(0)} s for ${members.length} cells at (${lowest.x.toFixed(1)}, ${lowest.z.toFixed(1)}), ${altitudeAt(lowest.x, lowest.y, lowest.z).toFixed(2)} m up, ${out ? 'out' : 'SHUT IN'} — ${how}`);
     if (!out) shut.push({ at: lowest, n: members.length });
   }
   const parkLink = (at: Stand): string => `/spawn?pos=${at.x.toFixed(1)},${at.z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
