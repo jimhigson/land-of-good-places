@@ -146,8 +146,11 @@ Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue of
   point needs a connector on seed 5 (not traced why); reported as measured.
 
 ## Status
-- [x] re-review items + minors; check:exits OK (exits-16), check:hotel OK (hotel-33d); menu green
-- [ ] CI parks artifact parks-b72244bf… → .parks/, then full `pnpm run check` + `test:procgen` locally
-- [ ] push (local commits after 066a42db: label fix, two check:hotel doc commits, this handoff)
-- [ ] CI green on the final head; preview /hotel-cafe at 844x390 + desktop (browser-preview-3.mjs)
-- [ ] PR body (/tmp/hotel-unstick/pr-body.md, placeholders) + answer comment (/tmp/hotel-unstick/answer-3.md)
+- [x] all of QA's and the re-review's asks pushed; CI green on c8c059ba (31 jobs: 25 success, 6 skipped
+  park builds reused); local re-runs on this source's own park: check:hotel OK, check:exits OK.
+- [x] c8c059b's preview loaded at 844x390 + desktop: two-column menu, dex opens — but the shut ☰ button
+  sat over the open Cute-o-dex (z-index on .hud-menu always) → d3f17f6f lifts it only while open;
+  check:menu-reach clause 4 red on the always-lifted CSS ×4, green here.
+- [ ] CI on the final head; its preview at 844x390 + desktop (browser-preview-3.mjs); full local check log
+  /tmp/hotel-unstick/check-full.log
+- [ ] PR body (/tmp/hotel-unstick/pr-body.md) + answer comment (/tmp/hotel-unstick/answer-3.md), then hand back
