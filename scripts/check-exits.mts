@@ -77,6 +77,7 @@ import { CollisionWorld } from '../src/world/Collision.ts';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { BARE_SPACE, PUT_DOWN_WINDOW_CELLS, putDownSpot, SEARCH_REACH } from '../src/world/dismount.ts';
 import { NAV_CELL, NavGrid } from '../src/world/NavGrid.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 import { DAY_LENGTH_SECONDS, DAY_START_TIME, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   BREAKFAST,
@@ -196,6 +197,27 @@ const say = (line: string): void => {
     if (!spot.found || spot.y !== 0 || Math.hypot(spot.x + 4, spot.z - 4) < 0.3 + PLAYER_RADIUS - 1e-6) {
       fail(`rule (e) a seat is not the floor: got (${spot.x.toFixed(2)}, ${spot.y.toFixed(2)}, ${spot.z.toFixed(2)})`);
     }
+  }
+
+  // (g) A sealed box she fits inside but the router's lattice has no free cell
+  // in: four walls round her with 1.32-1.60 m of floor between them, centred on
+  // a corner of the router's cells, so every cell centre inside is stamped. The
+  // router plans a tap from the nearest free cell *outside* — and a rule that
+  // flooded from there would call the box open and leave her in it (the review
+  // of 503bd56f found exactly that). She must be moved out.
+  for (const innerHalf of [0.66, 0.72, 0.8]) {
+    const collision = world();
+    const wall = 0.1;
+    collision.addRectangle(0, 0, innerHalf + wall, innerHalf + wall, wall);
+    const spot = putDownSpot(collision, flat, { x: 0, y: 0, z: 0 }, PLAYER_PUT_DOWN);
+    const outside = Math.max(Math.abs(spot.x), Math.abs(spot.z)) >= innerHalf + 2 * wall + PLAYER_RADIUS - 1e-6;
+    if (!spot.found || !outside) {
+      fail(
+        `rule (g) sealed box ${(innerHalf * 2).toFixed(2)} m inside: asked (0, 0), got (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) ` +
+          `moved ${spot.moved.toFixed(2)} found=${spot.found} — LEFT INSIDE THE SEALED BOX`,
+      );
+    }
+    notes.push(`rule (g) sealed box ${(innerHalf * 2).toFixed(2)} m inside: moved ${spot.moved.toFixed(2)} m to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
   }
 
   // (f) The cost bound: one window of the router's lattice, however bad the
@@ -352,6 +374,52 @@ function walksOut(): { out: boolean; why: string } {
   const doorY = sample(door.x, door.z, p.y + 3);
   const out = flood.has(door.x, door.z, doorY) || nearAnyReached(flood, door);
   return { out, why: out ? '' : `the router cannot reach the way out at (${door.x.toFixed(1)}, ${door.z.toFixed(1)})` };
+}
+/**
+ * **How far she gets on her own feet** from `(x, y, z)`: a real `Player`,
+ * stood there and stepped by its own `update`, the stick held each of eight
+ * ways for 2.5 s — the farthest she gets from the spot. The body's answer, not
+ * the router's, so this cannot share the rule's blind spots: the review of
+ * 503bd56f found the router's start rule calling sealed nooks open, and every
+ * instrument here that asked only the router agreed with it.
+ *
+ * `enough`, when given, stops at the first walk that gets that far — the
+ * sweep's question is only "can she get {@link WALK_AWAY} m?", and asking it
+ * of thousands of spots for the full 20 s each would cost minutes.
+ */
+function walkAway(x: number, y: number, z: number, enough = Infinity): number {
+  let farthest = 0;
+  for (let k = 0; k < 8 && farthest < enough; k += 1) {
+    const heading = (k * Math.PI) / 4;
+    const input = stickAlong(Math.sin(heading), Math.cos(heading));
+    player.position.set(x, y, z);
+    player.previousPosition.copy(player.position);
+    player.launch(0);
+    for (let t = 0; t < 2.5 && farthest < enough; t += 1 / 30) {
+      elapsed += 1 / 30;
+      player.update({ dt: 1 / 30, elapsed, frame: Math.round(elapsed * 30), input, playerPosition: player.position, cameraForward: camera.forward } as never);
+      farthest = Math.max(farthest, Math.hypot(player.position.x - x, player.position.z - z));
+    }
+  }
+  player.position.set(x, y, z);
+  player.previousPosition.copy(player.position);
+  player.launch(0);
+  return farthest;
+}
+/** How far she must be able to walk from anywhere she was put down, metres. */
+const WALK_AWAY = 1.5;
+/** The shortest walk-away any put-down gave, for the report. */
+const nearest = { walked: Infinity, what: '' };
+function judgeWalkAway(what: string): void {
+  const p = player.position.clone();
+  const walked = walkAway(p.x, p.y, p.z);
+  if (walked < nearest.walked) Object.assign(nearest, { walked, what });
+  if (walked < WALK_AWAY) {
+    fail(
+      `${what}: from (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}) she walks at most ${walked.toFixed(2)} m on her own feet ` +
+        `— eight ways, 2.5 s each; she must get ${WALK_AWAY} m`,
+    );
+  }
 }
 /** The way out's own cell may sit inside a stamp; a reached cell within one cell of it counts. */
 function nearAnyReached(flood: { forEachCell: (visit: (x: number, z: number) => void) => void }, door: { x: number; z: number }): boolean {
@@ -533,6 +601,107 @@ if (agreeMoved.length > 0) {
 }
 notes.push(`router agreement: ${agreeAsked} points, ${agreeMoved.length} moved — ${agreeBySpace.join('; ')}`);
 
+// ------------------------------------------------------------------ 2c. off the lattice, still free
+
+/**
+ * **Wherever the rule puts her that the router could not stand her on, she can
+ * still walk away** — the review of 503bd56f's own sweep. Would-be exits at
+ * floor level over every space, each asked of the rule; every one it accepts
+ * on a spot `canStandAt` refuses (a cell the lattice stamps beside furniture,
+ * a sliver between two props) is walked away from by the body, eight ways: at
+ * least {@link WALK_AWAY} m.
+ *
+ * Only the edges are swept: a cell within {@link SWEEP_BAND} cells of a cell
+ * she cannot stand on *and* of one she can. An exit out on open floor is
+ * accepted where it is, on the lattice, and has nothing to say here; an exit
+ * in the void beyond a room's walls has nowhere to go. Every third cell of an
+ * interior's band, every sixth of the park's: about 10,600 exits on seed 5,
+ * and at that density it finds 503bd56f's sealed nooks — five exits in the
+ * Reptile House and the park put where she walks at most 0.10–0.28 m.
+ */
+const SWEEP_BAND = 3;
+let sweepAsked = 0;
+let sweepOffLattice = 0;
+const sweepBySpace: string[] = [];
+for (const visit of SPACES) {
+  settle();
+  visit.enter();
+  tick(0.3);
+  const arrival = player.position.clone();
+  // **Where she is, not where the visit meant her to be.** A walk-away that
+  // ended at a slide's mouth once carried her out of the next room into the
+  // park, and the sweep went on calling the park's floor that room's.
+  if (player.riding || spaceAt(arrival.x, arrival.z) !== visit.space) {
+    fail(
+      `off the lattice: the sweep could not stand her in ${visit.name} — she is in ${spaceAt(arrival.x, arrival.z)}` +
+        `${player.riding ? ', riding' : ''}, at (${arrival.x.toFixed(2)}, ${arrival.y.toFixed(2)}, ${arrival.z.toFixed(2)})`,
+    );
+    continue;
+  }
+  // The floor she arrived on, carried across the space: the highest surface at
+  // or below her own feet, so a dais she was spawned on does not lift the
+  // whole floor 1.2 m into the air (the castle mall's spawn does).
+  const floorAt = (x: number, z: number): number =>
+    visit.space === SPACE_GARDEN ? terrainHeight(x, z) : sample(x, z, arrival.y + 0.05);
+  const cellKey = (x: number, z: number): string => `${Math.round(x / NAV_CELL)},${Math.round(z / NAV_CELL)}`;
+  const standable = new Set<string>();
+  const refused = new Set<string>();
+  const cells: { x: number; z: number }[] = [];
+  router.forEachCellCentre(sample, (x, z, blocked) => {
+    if (spaceAt(x, z) !== visit.space) return;
+    cells.push({ x, z });
+    if (!blocked && router.canStandAt(x, z, floorAt(x, z), sample)) standable.add(cellKey(x, z));
+    else refused.add(cellKey(x, z));
+  });
+  const within = (set: Set<string>, x: number, z: number): boolean => {
+    for (let dx = -SWEEP_BAND; dx <= SWEEP_BAND; dx += 1) {
+      for (let dz = -SWEEP_BAND; dz <= SWEEP_BAND; dz += 1) if (set.has(cellKey(x + dx * NAV_CELL, z + dz * NAV_CELL))) return true;
+    }
+    return false;
+  };
+  const stride = visit.space === SPACE_GARDEN ? 6 : 3;
+  const points = cells.filter(
+    (cell) =>
+      Math.round(cell.x / NAV_CELL) % stride === 0 &&
+      Math.round(cell.z / NAV_CELL) % stride === 0 &&
+      within(standable, cell.x, cell.z) &&
+      within(refused, cell.x, cell.z),
+  );
+  let asked = 0;
+  let offLattice = 0;
+  // The rule says so when nothing within reach passes; the count is reported
+  // here instead, rather than one line per hopeless exit into a wall.
+  const warn = console.warn;
+  let hopeless = 0;
+  console.warn = (): void => {
+    hopeless += 1;
+  };
+  for (const point of points) {
+    const y = floorAt(point.x, point.z);
+    const spot = putDownAt(point.x, y, point.z);
+    asked += 1;
+    if (!spot.found || router.canStandAt(spot.x, spot.z, spot.y, sample)) continue;
+    offLattice += 1;
+    const walked = walkAway(spot.x, spot.y, spot.z, WALK_AWAY);
+    if (walked < WALK_AWAY) {
+      fail(
+        `off the lattice: ${visit.name}, an exit at (${point.x.toFixed(2)}, ${y.toFixed(2)}, ${point.z.toFixed(2)}) is put down at ` +
+          `(${spot.x.toFixed(2)}, ${spot.y.toFixed(2)}, ${spot.z.toFixed(2)}), where the router cannot stand her, and she walks ` +
+          `at most ${walked.toFixed(2)} m from there`,
+      );
+    }
+  }
+  console.warn = warn;
+  // Back where she came in, before anything ticks: the last walk-away leaves
+  // her on whatever spot it was judging, and that may be a ride's mouth.
+  player.teleportTo(arrival.x, arrival.y, arrival.z);
+  if (asked < 50) fail(`off the lattice: only ${asked} would-be exits in ${visit.name} — too few to mean anything`);
+  sweepAsked += asked;
+  sweepOffLattice += offLattice;
+  sweepBySpace.push(`${visit.name}: ${asked} exits, ${offLattice} put off the lattice, ${hopeless} with nowhere within reach`);
+}
+notes.push(`off the lattice: ${sweepAsked} would-be exits, ${sweepOffLattice} put where the router cannot stand her, each walked away from — ${sweepBySpace.join('; ')}`);
+
 // ------------------------------------------------------------------ 3. the source
 
 const SRC = new URL('../src/', import.meta.url).pathname;
@@ -638,6 +807,7 @@ function nextDayFrom(label: string, setUp: () => void): void {
   if (!petsAbed) clauses.push(`her pets were never all asleep in their own beds while she slept (${petsNow()})`);
   const out = walksOut();
   if (!out.out) clauses.push(`cannot walk to the suite's door — ${out.why}`);
+  judgeWalkAway(`Next day from ${label}: waking`);
   const following = petsFollowHer();
   if (following) clauses.push(following);
   // The key's one job, for a child who had none: the suite's own door out has
@@ -777,6 +947,7 @@ function walkAcross(visit: SpaceVisit, band: PortalBand): void {
     const out = walksOut();
     arrivals.push(`${band.what}, walked ${sign > 0 ? 'along' : 'against'} it from ${from}: now in ${to}, out=${out.out}`);
     if (!out.out) fail(`${band.what}: walked through from ${from}, put down in ${to} unable to walk out — ${out.why}`);
+    judgeWalkAway(`${band.what}, walked through from ${from}`);
   }
 }
 
@@ -819,6 +990,7 @@ function judge(what: string, before: number, holding: string, left: string, ms: 
     fail(`${what}: she was left at (${placed.x.toFixed(2)}, ${placed.z.toFixed(2)}), not where the rule put her (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
   }
   tick(1); // let a fling land
+  judgeWalkAway(`${what}: left by ${left}`);
   const out = walksOut();
   if (!out.out) {
     fail(
@@ -864,6 +1036,7 @@ for (const visit of SPACES) {
     continue;
   }
   if (!arrived.out) fail(`${visit.name}: its own arrival cannot walk out — ${arrived.why}`);
+  judgeWalkAway(`${visit.name}: its own arrival`);
 
   const ids = zonesIn(visit.space).map((zone) => zone.id);
   for (const id of ids) {
@@ -1108,6 +1281,7 @@ for (const [label, go] of [
   const out = walksOut();
   arrivals.push(`${label}: now in ${spaceAt(player.position.x, player.position.z)}, out=${out.out}`);
   if (!out.out) fail(`${label}: put her where she cannot walk out — ${out.why}`);
+  judgeWalkAway(label);
 }
 
 // The /hotel-cafe link: sat at the lobby café's middle chair — the one "Leave
@@ -1226,6 +1400,8 @@ const moved = exits.filter((exit) => exit.moved > 0);
 say(`check:exits — the rule's own clauses:\n  ${notes.filter((note) => note.startsWith('rule')).join('\n  ')}`);
 say(`check:exits — ${notes.find((note) => note.startsWith('instrument')) ?? 'instrument controls: NOT RUN'}`);
 say(`check:exits — ${notes.find((note) => note.startsWith('router agreement')) ?? 'router agreement: NOT RUN'}`);
+say(`check:exits — ${notes.find((note) => note.startsWith('off the lattice')) ?? 'off the lattice: NOT RUN'}`);
+say(`check:exits — walked away from every put-down on her own feet: the shortest walk was ${nearest.walked.toFixed(2)} m (${nearest.what}); she must get ${WALK_AWAY} m`);
 say(
   `check:exits — ${sites.size} placement call sites in src/ outside Player.ts (endRide/teleportTo/teleport/beginRide), ` +
     `${covered.length} driven here, ${undriven.length} not:\n  ` +
@@ -1240,7 +1416,7 @@ say(
 );
 say(`check:exits — arrivals:\n  ${arrivals.join('\n  ')}`);
 say(`check:exits — Next day:\n  ${nextDays.join('\n  ')}`);
-for (const note of notes.filter((note) => !note.startsWith('rule') && !note.startsWith('instrument') && !note.startsWith('router agreement'))) say(`  note: ${note}`);
+for (const note of notes.filter((note) => !note.startsWith('rule') && !note.startsWith('instrument') && !note.startsWith('router agreement') && !note.startsWith('off the lattice'))) say(`  note: ${note}`);
 if (problems.length > 0) {
   for (const problem of problems) console.error(`  ✗ ${problem}`);
   console.error(`check:exits FAILED — ${problems.length} problem(s)`);
