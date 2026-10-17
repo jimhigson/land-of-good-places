@@ -5090,6 +5090,7 @@ process.stderr.write(
       }
       drive(2, 1, 0);
       const offEnd = local();
+      // flat-ok: the hotel lobby is its own flat space at (-600, 613), floor y 0, off the sphere; her height above its one floor
       if (!(hopper.position.x - LOBBY.originX > outX) || hopper.position.y > 0.05) {
         problems.push(`probe 32: walking east off a café table's top ended at ${offEnd}, not on the foyer floor`);
       }
