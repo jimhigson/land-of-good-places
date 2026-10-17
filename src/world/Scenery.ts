@@ -31,7 +31,7 @@ import type { CollisionWorld } from './Collision';
 // **The trees are not this file's to define.** See `world/treeModel.ts`: the
 // lane the cat bus drives up plants the same trees from the same rolls, so
 // they live in a module neither scene owns and both ask.
-import { CANOPY_GREENS, FOLIAGE_GEOMETRY, fileTreeParts, foliageMaterial, makeInstanced, type InstanceItem, type RolledTree, type TreeKind, type TreePart } from './treeModel';
+import { CANOPY_GREENS, FOLIAGE_GEOMETRY, fileTreeParts, foliageMaterial, makeInstanced, partTopY, type InstanceItem, type RolledTree, type TreeKind, type TreePart } from './treeModel';
 import { type Claim } from '../boot/groundClaims';
 
 /**
@@ -510,6 +510,22 @@ export function rollBush(rng: Rng, x: number, z: number): InstanceItem[] {
   return items;
 }
 
+/**
+ * **A clump's crown over its own middle** — the highest blob surface above
+ * `(x, z)`, as a `y` in the frame {@link rollBush} rolled it in. Each blob is a
+ * unit ball scaled by its own `scale` (`Scenery`'s bush geometry), so its top
+ * `d` metres off its centre is `y + scale.y · √(1 − (d / scale.x)²)`.
+ */
+export function bushCrownY(blobs: readonly InstanceItem[], x: number, z: number): number {
+  let crown = -Infinity;
+  for (const blob of blobs) {
+    const off = Math.hypot(blob.position.x - x, blob.position.z - z) / blob.scale.x;
+    if (off >= 1) continue;
+    crown = Math.max(crown, blob.position.y + blob.scale.y * Math.sqrt(1 - off * off));
+  }
+  return crown;
+}
+
 /** One bush clump the world phase decided: its blobs, rolled once, drawn later. */
 export interface BushDecision {
   readonly x: number;
@@ -601,7 +617,13 @@ function buildFoliage(
     });
     occluderRefs.push(refs);
     const trunkRadius = 0.55 * lean;
-    const colliderId = collision.addCircle(x, z, trunkRadius);
+    // Solid to the top of its canopy — the drawn top over the trunk — a real
+    // height, measured up from the foot it was rolled standing on.
+    let treeTop = -Infinity;
+    for (const part of parts) treeTop = Math.max(treeTop, partTopY(part));
+    const colliderId = collision.kinded('tree', () =>
+      collision.addCircle(x, z, trunkRadius, yAtAltitude(x, z, treeTop - terrainHeight(x, z)), false, true),
+    );
     treeColliders.push({ id: colliderId, radius: trunkRadius });
   }
 
@@ -610,7 +632,12 @@ function buildFoliage(
   for (const clump of decisions.bushes) {
     const instanceStart = bushes.length;
     for (const blob of clump.blobs) bushes.push(blob);
-    const bushColliderId = collision.addCircle(clump.x, clump.z, BUSH_COLLIDER);
+    // Solid to its crown over the clump's middle — where she lands if she jumps
+    // onto it, and a small bush is low enough to.
+    const crown = bushCrownY(clump.blobs, clump.x, clump.z) - terrainHeight(clump.x, clump.z);
+    const bushColliderId = collision.kinded('bush', () =>
+      collision.addCircle(clump.x, clump.z, BUSH_COLLIDER, yAtAltitude(clump.x, clump.z, crown), false, true),
+    );
     bushColliders.push({ id: bushColliderId, instanceStart, instanceCount: clump.blobs.length });
     bushClumps.push({ x: clump.x, z: clump.z, radius: BUSH_COLLIDER });
   }

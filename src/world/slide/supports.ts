@@ -9,6 +9,8 @@ export const FOOT_RADIUS = 0.52;
 
 /** What the post occupies in the collision world. */
 const POST_COLLISION_RADIUS = 0.42;
+/** How far a leg is sunk into the ground, so it never floats over a dip — its top comes down with it. */
+const LEG_SINK = 0.15;
 
 export interface SlideLeg {
   readonly x: number;
@@ -56,12 +58,15 @@ export function buildSlideSupports(
     post.name = 'ginormous-slide-leg';
     post.scale.set(1, height, 1);
     // Sunk slightly, so a leg never floats above uneven ground.
-    post.position.set(leg.x, leg.ground + height / 2 - 0.15, leg.z);
+    post.position.set(leg.x, leg.ground + height / 2 - LEG_SINK, leg.z);
     post.castShadow = true;
     post.receiveShadow = true;
     group.add(post);
 
-    collision.addCircle(leg.x, leg.z, POST_COLLISION_RADIUS);
+    // Solid to its drawn top, under the slide it holds up.
+    collision.kinded('slide leg', () =>
+      collision.addCircle(leg.x, leg.z, POST_COLLISION_RADIUS, leg.top - LEG_SINK, false, true),
+    );
   }
 
   return group;

@@ -11,7 +11,7 @@ import { PALETTE } from '../../core/palette';
 import { woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
-import { standOnSphere, terrainHeight } from '../terrain';
+import { solidInFrame, standOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
@@ -57,6 +57,27 @@ const STRIPE_WIDTH = 0.3;
 const PLATFORM_OFFSET = 2.15;
 
 const CANOPY_HEIGHT = 2.9;
+
+/** The awning: wider than the platform, set towards the track, tipped to shed rain. */
+const ROOF_WIDTH = PLATFORM_WIDTH + 0.5;
+const ROOF_THICKNESS = 0.16;
+const ROOF_OFFSET = 0.1;
+const ROOF_TILT = 0.06;
+/** Its underside at its low edge, and its top at its high one, over the platform's foot. */
+const ROOF_UNDERSIDE = PLATFORM_HEIGHT + CANOPY_HEIGHT - ROOF_THICKNESS / 2 - (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
+const ROOF_TOP = PLATFORM_HEIGHT + CANOPY_HEIGHT + ROOF_THICKNESS / 2 + (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
+
+/** The bench at the back of the sheltered end: its seat and its back, in from the platform's back edge. */
+const BENCH_LENGTH = 2.0;
+const BENCH_ALONG = -1.4;
+const BENCH_SEAT_DEPTH = 0.52;
+const BENCH_SEAT_THICKNESS = 0.1;
+const BENCH_SEAT_IN = 0.55;
+const BENCH_SEAT_Y = 0.42;
+const BENCH_BACK_DEPTH = 0.1;
+const BENCH_BACK_HEIGHT = 0.44;
+const BENCH_BACK_IN = 0.32;
+const BENCH_BACK_Y = 0.66;
 
 /** The sheltered end: how much of the platform it covers, and where. */
 const CANOPY_LENGTH = 3.4;
@@ -135,6 +156,14 @@ export class Station {
     standOnSphere(this.group);
 
     this.build(options, trackSide, collision);
+  }
+
+  /** A point in the station's own frame (`across`, `along`), at `stand + yawed local` — where its colliders are counted from. */
+  private local(across: number, along: number): { x: number; z: number } {
+    return {
+      x: this.standX + across * this.cosYaw + along * this.sinYaw,
+      z: this.standZ - across * this.sinYaw + along * this.cosYaw,
+    };
   }
 
   /** The platform deck, for `WalkSurfaces.addPlatform`. */
@@ -254,21 +283,41 @@ export class Station {
       post.receiveShadow = true;
       this.group.add(post);
 
-      // Solid, so nobody walks through the canopy support.
-      collision.addCircle(
-        this.standX + postX * this.cosYaw + along * this.sinYaw,
-        this.standZ - postX * this.sinYaw + along * this.cosYaw,
-        0.22,
-      );
+      // Solid, so nobody walks through the canopy support — up to the roof.
+      const footX = this.standX + postX * this.cosYaw + along * this.sinYaw;
+      const footZ = this.standZ - postX * this.sinYaw + along * this.cosYaw;
+      const standing = solidInFrame(this.standX, this.standZ, footX, footZ, PLATFORM_HEIGHT, ROOF_TOP);
+      collision.kinded('station canopy post', () => collision.addCircle(footX, footZ, 0.22, standing.top, false, true));
     }
 
     const roof = new Mesh(
-      new BoxGeometry(PLATFORM_WIDTH + 0.5, 0.16, CANOPY_LENGTH),
+      new BoxGeometry(ROOF_WIDTH, ROOF_THICKNESS, CANOPY_LENGTH),
       roofMaterial,
     );
-    roof.position.set(trackSide * 0.1, PLATFORM_HEIGHT + CANOPY_HEIGHT, CANOPY_CENTRE);
+    roof.position.set(trackSide * ROOF_OFFSET, PLATFORM_HEIGHT + CANOPY_HEIGHT, CANOPY_CENTRE);
     // Tipped down towards the track, the way a platform awning sheds rain.
-    roof.rotation.z = trackSide * 0.06;
+    roof.rotation.z = trackSide * ROOF_TILT;
+    // A solid her head meets: far over it on the platform, but a jump reaches
+    // it. From its underside to its top, tilt and all.
+    {
+      const centre = this.local(trackSide * ROOF_OFFSET, CANOPY_CENTRE);
+      const roofSolid = solidInFrame(this.standX, this.standZ, centre.x, centre.z, ROOF_UNDERSIDE, ROOF_TOP);
+      const roofBase = solidInFrame(this.standX, this.standZ, centre.x, centre.z, ROOF_UNDERSIDE, ROOF_UNDERSIDE);
+      collision.kinded('station canopy', () =>
+        collision.addBox(
+          roofSolid.x,
+          roofSolid.z,
+          ROOF_WIDTH / 2,
+          CANOPY_LENGTH / 2,
+          Math.atan2(-this.sinYaw, this.cosYaw),
+          0,
+          roofSolid.top,
+          false,
+          true,
+          roofBase.top,
+        ),
+      );
+    }
     roof.castShadow = true;
     roof.receiveShadow = true;
     this.group.add(roof);
@@ -288,16 +337,30 @@ export class Station {
     this.group.add(valance);
 
     // --- bench ---------------------------------------------------------------
-    const benchSeat = new Mesh(new BoxGeometry(0.52, 0.1, 2.0), boardMaterial);
-    benchSeat.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.55), PLATFORM_HEIGHT + 0.42, -1.4);
+    const benchSeat = new Mesh(new BoxGeometry(BENCH_SEAT_DEPTH, BENCH_SEAT_THICKNESS, BENCH_LENGTH), boardMaterial);
+    benchSeat.position.set(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_SEAT_IN), PLATFORM_HEIGHT + BENCH_SEAT_Y, BENCH_ALONG);
     benchSeat.castShadow = false;
     benchSeat.receiveShadow = true;
     this.group.add(benchSeat);
 
-    const benchBack = new Mesh(new BoxGeometry(0.1, 0.44, 2.0), boardMaterial);
-    benchBack.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.32), PLATFORM_HEIGHT + 0.66, -1.4);
+    const benchBack = new Mesh(new BoxGeometry(BENCH_BACK_DEPTH, BENCH_BACK_HEIGHT, BENCH_LENGTH), boardMaterial);
+    benchBack.position.set(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_BACK_IN), PLATFORM_HEIGHT + BENCH_BACK_Y, BENCH_ALONG);
     benchBack.castShadow = false;
     this.group.add(benchBack);
+
+    // The bench is solid: a seat she steps up onto from the platform, and a
+    // back behind it to its own top. (It had no collider at all.)
+    {
+      const yaw = Math.atan2(-this.sinYaw, this.cosYaw);
+      const seatAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_SEAT_IN), BENCH_ALONG);
+      const seat = solidInFrame(this.standX, this.standZ, seatAt.x, seatAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_SEAT_Y + BENCH_SEAT_THICKNESS / 2);
+      const backAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_BACK_IN), BENCH_ALONG);
+      const back = solidInFrame(this.standX, this.standZ, backAt.x, backAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_BACK_Y + BENCH_BACK_HEIGHT / 2);
+      collision.kinded('station bench', () => {
+        collision.addBox(seat.x, seat.z, BENCH_SEAT_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, seat.top, false, true);
+        collision.addBox(back.x, back.z, BENCH_BACK_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, back.top, false, true);
+      });
+    }
 
     for (const along of [-2.3, -0.5] as const) {
       const leg = new Mesh(new BoxGeometry(0.44, 0.42, 0.12), postMaterial);

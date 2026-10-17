@@ -84,6 +84,16 @@ export const FOLIAGE_GEOMETRY = {
   cone: new ConeGeometry(1, 1, 10),
 };
 
+/**
+ * **The top of one part**, as a `y` in the frame its tree was rolled in — read
+ * off {@link FOLIAGE_GEOMETRY}'s own unit shapes: a trunk or a cone is one unit
+ * tall about its centre, a ball one unit in radius. The highest of a tree's is
+ * how tall its solid stands (`Scenery`'s foliage).
+ */
+export function partTopY(part: TreePart): number {
+  return part.position.y + (part.kind === 'round' ? part.scale.y : part.scale.y / 2);
+}
+
 /** The greens a canopy (or a bush) may be, picked per part. */
 export const CANOPY_GREENS = [
   PALETTE.leafMid,
