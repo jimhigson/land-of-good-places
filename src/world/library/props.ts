@@ -76,8 +76,12 @@ export function libraryKeepOuts(): KeepOut[] {
   }));
 }
 
-/** A solid's top: an absolute height (room floor 0) feet below meet and feet above clear, or `'wall'`. */
-export type PropTop = number | 'wall';
+/**
+ * A solid's top: an absolute height (room floor 0) feet below meet and feet
+ * above clear. Always a real height — the `'wall'` (to-the-ceiling) option went
+ * with Jim's ruling of 17 Oct 2026 that nothing drawn has a flag for a top.
+ */
+export type PropTop = number;
 
 /** A registered solid, room-local, with the collision world's handle — so a check can remove it and go red. */
 export interface LibrarySolid {
@@ -152,11 +156,8 @@ export class LibraryProps {
     this.checkKeepOuts(what, [{ x, z }], radius, top);
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
-    const handle =
-      top === 'wall'
-        ? this.collision.addCircle(worldX, worldZ, radius)
-        : this.collision.addCircle(worldX, worldZ, radius, top, false, true);
-    if (top !== 'wall') this.standables.push({ what, top, footprint: { x, z, radius } });
+    const handle = this.collision.addCircle(worldX, worldZ, radius, top, false, true);
+    this.standables.push({ what, top, footprint: { x, z, radius } });
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
@@ -176,10 +177,7 @@ export class LibraryProps {
    */
   wall(what: string, a: LocalPoint, b: LocalPoint, half: number, top: PropTop): WallCollider {
     this.checkKeepOuts(what, [a, b], half, top);
-    const handle =
-      top === 'wall'
-        ? this.collision.addWall(this.originX + a.x, this.originZ + a.z, this.originX + b.x, this.originZ + b.z, half)
-        : this.collision.addWall(this.originX + a.x, this.originZ + a.z, this.originX + b.x, this.originZ + b.z, half, top, false, true);
+    const handle = this.collision.addWall(this.originX + a.x, this.originZ + a.z, this.originX + b.x, this.originZ + b.z, half, top, false, true);
     this.solids.push({ what, shape: 'wall', top, points: [a, b], radius: half, handle });
     return handle;
   }
@@ -214,11 +212,8 @@ export class LibraryProps {
     this.checkBoxKeepOuts(what, footprint, top);
     const worldX = this.originX + footprint.x;
     const worldZ = this.originZ + footprint.z;
-    const handle =
-      top === 'wall'
-        ? this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0)
-        : this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true);
-    if (top !== 'wall') this.standables.push({ what, top, footprint });
+    const handle = this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true);
+    this.standables.push({ what, top, footprint });
     this.solids.push({ what, shape: 'box', top, points: corners, radius: 0, handle });
     return [handle];
   }
@@ -271,7 +266,7 @@ export class LibraryProps {
    */
   /** {@link checkKeepOuts} for a turned box: how far each keep-out's centre is outside the drawn box. */
   private checkBoxKeepOuts(what: string, footprint: BoxFootprint, top: PropTop): void {
-    if (top !== 'wall' && top <= BUILDING_STEP_UP) return;
+    if (top <= BUILDING_STEP_UP) return;
     const yaw = (footprint.facing * Math.PI) / 180;
     for (const keepOut of this.keepOuts) {
       const dx = keepOut.x - footprint.x;
@@ -288,7 +283,7 @@ export class LibraryProps {
   }
 
   private checkKeepOuts(what: string, points: readonly LocalPoint[], radius: number, top: PropTop): void {
-    if (top !== 'wall' && top <= BUILDING_STEP_UP) return;
+    if (top <= BUILDING_STEP_UP) return;
     for (const keepOut of this.keepOuts) {
       const distance =
         points.length === 1 ? Math.hypot(keepOut.x - points[0]!.x, keepOut.z - points[0]!.z) : segmentDistance(points[0]!, points[1]!, keepOut);

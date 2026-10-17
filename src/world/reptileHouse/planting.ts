@@ -126,7 +126,8 @@ export class Planting {
       const fronds: PlantInstance[] = [];
       for (let k = 0; k < 7; k += 1) fronds.push({ x, y: crown, z, yaw: (k / 7) * Math.PI * 2 + x, scale: 1, tilt: 0.45 });
       ctx.root.add(...instancedPlant('rp-palm-frond', fronds));
-      ctx.props.disc(`palm at (${x}, ${z})`, x, z, 0.45, 'wall');
+      // The trunk to its crown; the fronds over it are foliage, soft.
+      ctx.props.disc(`palm at (${x}, ${z})`, x, z, 0.45, reptilePlantTop('rp-palm-trunk'));
     }
 
     ctx.root.add(...instancedPlant('rp-fern-frond', ferns));

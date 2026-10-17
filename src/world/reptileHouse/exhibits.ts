@@ -37,8 +37,8 @@ import {
   type ReptileHandle,
   type TortoiseHandle,
 } from '../../art/models/reptiles';
-import { reptileCaseMesh, REPTILE_NURSERY_GLASS_RADIUS } from '../../art/models/reptileCasesAssets';
-import { instancedPlant, reptilePlantAnchor, reptilePlantBottom, reptilePlantMesh } from '../../art/models/reptilePlantsAssets';
+import { reptileCaseMesh, reptileCaseTop, REPTILE_NURSERY_GLASS_RADIUS } from '../../art/models/reptileCasesAssets';
+import { instancedPlant, reptilePlantAnchor, reptilePlantBottom, reptilePlantMesh, reptilePlantTop } from '../../art/models/reptilePlantsAssets';
 import { createNoodleRock, createNoodleTailMound, type NoodleRock } from '../../art/models/reptileNoodleAssets';
 import type { HallContext } from './context';
 import { asCrowd } from './exhibitCamera';
@@ -1230,7 +1230,8 @@ export class Exhibits {
       group.rotation.y = index * 1.3;
       group.add(reptileCaseMesh('rc-pier-post'), reptileCaseMesh('rc-pier-vine'));
       this.ctx.root.add(group);
-      this.ctx.props.disc(`pier post ${index}`, post.x, post.z, REPTILE_PIER_POST_RADIUS, 'wall');
+      // To the top of the post and the vine round it, measured off the kit.
+      this.ctx.props.disc(`pier post ${index}`, post.x, post.z, REPTILE_PIER_POST_RADIUS, Math.max(reptileCaseTop('rc-pier-post'), reptileCaseTop('rc-pier-vine')));
     }
   }
 
@@ -1248,7 +1249,9 @@ export class Exhibits {
         { x: REPTILE_LOG_CENTRE_X - half, z: side * wallZ },
         { x: REPTILE_LOG_CENTRE_X + half, z: side * wallZ },
         0.3,
-        'wall',
+        // To the log's own crown, measured off the kit: she walks through it,
+        // not over it — the crown is out of reach.
+        reptilePlantTop('rp-log-hollow'),
       );
     }
     for (let i = 0; i < 20; i += 1) {

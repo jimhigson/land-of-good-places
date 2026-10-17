@@ -71,8 +71,12 @@ export function reptileKeepOuts(): KeepOut[] {
   return out;
 }
 
-/** A solid's top: a world height feet below it meet and feet above it clear, or `'wall'` for always solid. */
-export type PropTop = number | 'wall';
+/**
+ * A solid's top: a world height feet below it meet and feet above it clear.
+ * Always a real height — the `'wall'` (always solid) option went with Jim's
+ * ruling of 17 Oct 2026 that nothing drawn has a flag for a top.
+ */
+export type PropTop = number;
 
 export class ReptileProps {
   readonly violations: string[] = [];
@@ -102,17 +106,12 @@ export class ReptileProps {
     this.keepOuts = reptileKeepOuts();
   }
 
-  /** A solid disc, hall-local. `top` absolute, or `'wall'`. */
+  /** A solid disc, hall-local, to its absolute `top`. */
   disc(what: string, x: number, z: number, radius: number, top: PropTop): void {
     this.checkKeepOuts(what, [{ x, z }], radius);
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
-    let handle: number;
-    if (top === 'wall') {
-      handle = this.collision.addCircle(worldX, worldZ, radius);
-    } else {
-      handle = this.collision.addCircle(worldX, worldZ, radius, top, false, true);
-    }
+    const handle = this.collision.kinded(what, () => this.collision.addCircle(worldX, worldZ, radius, top, false, true));
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
@@ -123,12 +122,7 @@ export class ReptileProps {
     const az = this.originZ + a.z;
     const bx = this.originX + b.x;
     const bz = this.originZ + b.z;
-    let handle: WallCollider;
-    if (top === 'wall') {
-      handle = this.collision.addWall(ax, az, bx, bz, half);
-    } else {
-      handle = this.collision.addWall(ax, az, bx, bz, half, top, false, true);
-    }
+    const handle: WallCollider = this.collision.kinded(what, () => this.collision.addWall(ax, az, bx, bz, half, top, false, true));
     this.solids.push({ what, shape: 'wall', top, points: [a, b], radius: half, handle });
   }
 

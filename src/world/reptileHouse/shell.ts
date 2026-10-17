@@ -6,6 +6,8 @@ import { Plate } from '../hotel/place';
 import { DOOR_HALF, WALL_HALF_DEPTH } from '../hotel/layout';
 import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
+import { solidInFrame } from '../terrain';
+import { reptileHouseTopInSector, reptileHouseTopOver } from '../../art/models/reptileHouseAssets';
 import { PALETTE } from '../../core/palette';
 import { solid, decal, softMaterial, toonMaterial } from '../../art/style/materials';
 import {
@@ -81,6 +83,16 @@ export function facadeToWorld(frame: FacadeFrame, along: number, across: number)
   };
 }
 
+/** The inverse of {@link facadeToWorld}: a world plan point in the facade's own `along`/`across`. */
+export function worldToFacade(frame: FacadeFrame, x: number, z: number): { along: number; across: number } {
+  const dx = x - frame.x;
+  const dz = z - frame.z;
+  return {
+    along: Math.sin(frame.yaw) * dx + Math.cos(frame.yaw) * dz,
+    across: Math.sin(frame.yaw + Math.PI / 2) * dx + Math.cos(frame.yaw + Math.PI / 2) * dz,
+  };
+}
+
 /** The front door's walk-through band, from the back wall out to the doormat. */
 export function reptileEntryBand(frame: FacadeFrame): PortalBand {
   const centreAlong = (REPTILE_BACK_WALL_ALONG + REPTILE_DOOR_BAND_OUTER) / 2;
@@ -147,24 +159,38 @@ export function registerReptileShellCollision(
   // clause go red without anyone editing this file to prove it.
   const walls: WallCollider[] = [];
 
+  // **Every solid to the house as it is drawn** — measured off the shipped
+  // mesh in the house's own metres (x across, z along), and read as a real top
+  // in the collider's column (`solidInFrame`: the house leans on the sphere at
+  // its own foot, as a plot does). The ring's chords and the doorway's walls
+  // are the whole building's edge, sealing what is inside, so each stands to
+  // the building's own top in its sector (`reptileHouseTopInSector`) — the
+  // wall and the dome behind the coil, not the plinth the chord runs along.
+  // The discs round the outside (the head's cheeks, the tail, the sign) stand
+  // to what is drawn over each (`reptileHouseTopOver`).
+  const realTop = (alongA: number, acrossA: number, alongB: number, acrossB: number, half: number, worldX: number, worldZ: number): number =>
+    solidInFrame(frame.x, frame.z, worldX, worldZ, 0, reptileHouseTopOver({ x: acrossA, z: alongA }, { x: acrossB, z: alongB }, half)).top;
+  const sectorTop = (alongA: number, acrossA: number, alongB: number, acrossB: number, worldX: number, worldZ: number): number =>
+    solidInFrame(frame.x, frame.z, worldX, worldZ, 0, reptileHouseTopInSector(Math.atan2(acrossA, alongA), Math.atan2(acrossB, alongB))).top;
+
   const wall = (along1: number, across1: number, along2: number, across2: number, half: number): void => {
     const a = facadeToWorld(frame, along1, across1);
     const b = facadeToWorld(frame, along2, across2);
-    walls.push(collision.addWall(a.x, a.z, b.x, b.z, half));
+    const top = sectorTop(along1, across1, along2, across2, (a.x + b.x) / 2, (a.z + b.z) / 2);
+    walls.push(collision.kinded('reptile house', () => collision.addWall(a.x, a.z, b.x, b.z, half, top, false, true)));
   };
 
   for (let face = 1; face < SHELL_SIDES; face += 1) {
-    const a1 = frame.yaw + (face - 0.5) * sector;
-    const a2 = frame.yaw + (face + 0.5) * sector;
-    walls.push(
-      collision.addWall(
-        frame.x + Math.sin(a1) * R,
-        frame.z + Math.cos(a1) * R,
-        frame.x + Math.sin(a2) * R,
-        frame.z + Math.cos(a2) * R,
-        SHELL_HALF_THICKNESS,
-      ),
-    );
+    const t1 = (face - 0.5) * sector;
+    const t2 = (face + 0.5) * sector;
+    const a1 = frame.yaw + t1;
+    const a2 = frame.yaw + t2;
+    const x1 = frame.x + Math.sin(a1) * R;
+    const z1 = frame.z + Math.cos(a1) * R;
+    const x2 = frame.x + Math.sin(a2) * R;
+    const z2 = frame.z + Math.cos(a2) * R;
+    const top = sectorTop(R * Math.cos(t1), R * Math.sin(t1), R * Math.cos(t2), R * Math.sin(t2), (x1 + x2) / 2, (z1 + z2) / 2);
+    walls.push(collision.kinded('reptile house', () => collision.addWall(x1, z1, x2, z2, SHELL_HALF_THICKNESS, top, false, true)));
   }
   for (const side of [-1, 1]) {
     wall(facadeAlong, side * JAMB_ACROSS, facadeAlong, side * (vertexAcross + 0.3), SHELL_HALF_THICKNESS);
@@ -173,10 +199,13 @@ export function registerReptileShellCollision(
   wall(REPTILE_BACK_WALL_ALONG, JAMB_ACROSS, REPTILE_BACK_WALL_ALONG, -JAMB_ACROSS, 0.35);
 
   const tail = reptileTailBase(frame);
-  collision.addCircle(tail.x, tail.z, REPTILE_TAIL_BASE_RADIUS);
+  const tailLocal = worldToFacade(frame, tail.x, tail.z);
+  const tailTop = realTop(tailLocal.along, tailLocal.across, tailLocal.along, tailLocal.across, REPTILE_TAIL_BASE_RADIUS, tail.x, tail.z);
+  collision.kinded('reptile house', () => collision.addCircle(tail.x, tail.z, REPTILE_TAIL_BASE_RADIUS, tailTop, false, true));
   for (const disc of lowDiscs) {
     const at = facadeToWorld(frame, disc.z, disc.x);
-    collision.addCircle(at.x, at.z, disc.radius);
+    const top = realTop(disc.z, disc.x, disc.z, disc.x, disc.radius, at.x, at.z);
+    collision.kinded('reptile house', () => collision.addCircle(at.x, at.z, disc.radius, top, false, true));
   }
   return walls;
 }
@@ -316,12 +345,17 @@ export function buildHallShell(root: Group, collision: CollisionWorld, surfaces:
       // Hidden, not shortened: the collider below is the same either way.
       if (hidden) wall.visible = false;
       root.add(wall);
-      collision.addWall(
-        originX + (along === 'x' ? a : x1),
-        originZ + (along === 'x' ? z1 : a),
-        originX + (along === 'x' ? b : x1),
-        originZ + (along === 'x' ? z1 : b),
-        0.3,
+      collision.kinded('reptile hall wall', () =>
+        collision.addWall(
+          originX + (along === 'x' ? a : x1),
+          originZ + (along === 'x' ? z1 : a),
+          originX + (along === 'x' ? b : x1),
+          originZ + (along === 'x' ? z1 : b),
+          0.3,
+          height,
+          false,
+          true,
+        ),
       );
     }
   }

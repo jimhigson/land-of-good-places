@@ -48,10 +48,11 @@ export interface BoothBox {
  *
  * - `front`: the counter's top — low enough to jump onto, which is why the
  *   awning (below) matters.
- * - `sides`, `back`: the side panels' and the back wall's tops. `Infinity`
- *   for a side with nothing drawn on it (a stall open at the sides keeps its
- *   old rule there: the booth is a closed box, and no wall drawn is no top to
- *   give it).
+ * - `sides`, `back`: the side panels' and the back wall's tops. A stall
+ *   open at the sides (the face-paint stall) keeps a solid there so the booth
+ *   stays a closed box round its painter, and stands it to the corner posts it
+ *   runs between: the one solid here with nothing drawn along it, and listed
+ *   as such by the solids census.
  * - `awning`: the canopy over the counter, a **banded** solid from its lowest
  *   underside to its highest top. A child stood on the counter would have her
  *   head through it, so it is what stops her getting onto the counter at all:
@@ -142,6 +143,8 @@ export const KEYCHAIN_STALL_DEPTH = 1.5;
 export const FACE_PAINT_COUNTER_BOARD_Y = 0.86;
 export const FACE_PAINT_COUNTER_TOP = FACE_PAINT_COUNTER_BOARD_Y + 0.05;
 export const FACE_PAINT_BACK_WALL_HEIGHT = 1.9;
+/** The candy-striped corner posts at the front of the booth, holding up the awning. */
+export const FACE_PAINT_POST_HEIGHT = 2.35;
 export const FACE_PAINT_AWNING_Y = 2.28;
 export const FACE_PAINT_AWNING_Z = -0.05;
 export const FACE_PAINT_AWNING_TILT = 0.2;
@@ -155,8 +158,8 @@ export const FACE_PAINT_BOOTH_BOX: BoothBox = {
   heights: {
     front: FACE_PAINT_COUNTER_TOP,
     // Open at the sides — posts at the front corners, nothing between them and
-    // the back wall — so its side walls have no drawn top to give them.
-    sides: Infinity,
+    // the back wall — so its side walls stand to the posts they run from.
+    sides: FACE_PAINT_POST_HEIGHT,
     back: FACE_PAINT_BACK_WALL_HEIGHT,
     awning: (() => {
       const halfDepth = (FACE_PAINT_STALL_DEPTH * 0.8) / 2;

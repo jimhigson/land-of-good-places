@@ -96,7 +96,7 @@ import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
-import { CollisionWorld } from '../src/world/Collision.ts';
+import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP } from '../src/core/constants.ts';
@@ -390,6 +390,15 @@ const { world, scene, camera } = quietly(() => buildHeadlessPark());
 const library = world.library;
 const collision = world.collision;
 const surfaces = world.building.surfaces;
+/**
+ * **A body standing on the garden's ground at `(x, z)`** — the walk sampler's
+ * surface there (the plinth, the step, the terrain). Every solid has its real
+ * top now, measured against the body's feet, so a march out here starts on
+ * the ground and follows it (`p.y = surfaces.sample(...)` after each step)
+ * rather than floating at y = 0 metres above the sphere and clearing the
+ * building it was sent at.
+ */
+const onGround = (x: number, z: number): Vector3 => new Vector3(x, surfaces.sample(x, z, terrainHeight(x, z) + 3), z);
 const remove = process.env['LIBRARY_CHECK_REMOVE'];
 if (remove) {
   const victims = library.solids.filter((solid) => solid.what.includes(remove));
@@ -698,10 +707,11 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     const bearing = frame.yaw + (i / 48) * Math.PI * 2;
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       marches += 1;
-      const p = new Vector3(frame.x + Math.sin(bearing) * 16, 0, frame.z + Math.cos(bearing) * 16);
+      const p = onGround(frame.x + Math.sin(bearing) * 16, frame.z + Math.cos(bearing) * 16);
       let closest = Infinity;
       for (let travelled = 0; travelled < 20; travelled += step) {
         collision.resolveMovement(p, -Math.sin(bearing) * step, -Math.cos(bearing) * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        p.y = surfaces.sample(p.x, p.z, p.y);
         const into = intoSolid(p.x, p.z);
         if (into.depth > deepest.depth) deepest = { depth: into.depth, what: into.what, bearing: (i / 48) * 360 };
         if (into.what === 'the cella') {
@@ -718,8 +728,15 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
   say(reachedShell >= marches * 0.75, `${reachedShell} of ${marches} marches reached the building (the rest met a neighbour or the doorway)`);
   note(`deepest per outside corner: ${corners.map((corner) => `${corner.name} ${Number.isFinite(atCorner.get(corner.name)!) ? atCorner.get(corner.name)!.toFixed(3) : 'not reached'}`).join(', ')}`);
 
-  // Square at the plinth's sides and back, from the lawn: she stops at its drawn edge.
+  // Square at the plinth's sides and back, from the lawn: she stops at its drawn
+  // edge — **wherever it stands proud of the ground she walks up on.** Every
+  // solid has its real top now (17 Oct 2026): where the hillside rises to the
+  // plinth's own top, there is no edge to stop her and she walks onto the stone
+  // as onto a step, which is the physics, not a hole. So a body counts as *in*
+  // the stone only with the stone's top more than the clearance grace over her
+  // feet — sinking into it, the fault this clause is for.
   let edgeMarches = 0;
+  let steppedOnto = 0;
   let worstEdge = { depth: -Infinity, at: '' };
   const intoPlinth = (x: number, z: number): number => {
     toPlan(x, z);
@@ -750,16 +767,23 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     const to = frame.foot(approach.to.x, approach.to.z);
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       edgeMarches += 1;
-      const p = new Vector3(from.x, 0, from.z);
+      const p = onGround(from.x, from.z);
       const dir = new Vector3(to.x - from.x, 0, to.z - from.z).normalize();
       for (let travelled = 0; travelled < 5; travelled += step) {
         collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        p.y = surfaces.sample(p.x, p.z, p.y);
         const depth = intoPlinth(p.x, p.z);
+        const stoneTop = frame.topY(p.x, p.z, local.x, local.z, plan.plinthTop);
+        if (depth > CORNER_ALLOWANCE && stoneTop - p.y <= JUMP_CLEARANCE_GRACE) {
+          steppedOnto += 1;
+          continue;
+        }
         if (depth > worstEdge.depth) worstEdge = { depth, at: approach.at };
       }
     }
   }
-  say(worstEdge.depth <= CORNER_ALLOWANCE, `${edgeMarches} marches square at the plinth's sides and back: deepest a body's edge got over its stone ${worstEdge.depth.toFixed(3)} m (${worstEdge.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+  say(worstEdge.depth <= CORNER_ALLOWANCE, `${edgeMarches} marches square at the plinth's sides and back: deepest a body's edge got into its stone below its top ${worstEdge.depth.toFixed(3)} m (${worstEdge.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+  note(`${steppedOnto} march step(s) went onto the plinth where the ground rises level with its top — a step, not a hole`);
 
   // From the portico — the central bay between the middle columns — at the
   // front wall either side of the door, head on at the doorway's two outside
@@ -799,10 +823,11 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       const start = frame.foot(aim.from.x, aim.from.z);
       const target = frame.foot(aim.to.x, aim.to.z);
-      const p = new Vector3(start.x, 0, start.z);
+      const p = onGround(start.x, start.z);
       const dir = new Vector3(target.x - start.x, 0, target.z - start.z).normalize();
       for (let travelled = 0; travelled < 10; travelled += step) {
         collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        p.y = surfaces.sample(p.x, p.z, p.y);
         const into = intoSolid(p.x, p.z);
         if (into.what === 'the cella' && into.depth > porticoWorst.depth) porticoWorst = { depth: into.depth, at: aim.at };
       }
@@ -815,12 +840,13 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
 
   // A sprinter through the door stops on the door leaves, inside the band.
   const start = frame.foot(0, plan.stepFrontZ + 3);
-  const p = new Vector3(start.x, 0, start.z);
+  const p = onGround(start.x, start.z);
   let crossed = false;
   for (let t = 0; t < 14; t += PLAYER_LONGEST_STEP) {
     const fx = p.x;
     const fz = p.z;
     collision.resolveMovement(p, -Math.sin(frame.yaw) * PLAYER_LONGEST_STEP, -Math.cos(frame.yaw) * PLAYER_LONGEST_STEP, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+    p.y = surfaces.sample(p.x, p.z, p.y);
     if (bandCrossed(band, fx, fz, p.x, p.z)) crossed = true;
   }
   toPlan(p.x, p.z);

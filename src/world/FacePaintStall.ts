@@ -22,6 +22,7 @@ import {
   FACE_PAINT_AWNING_Y,
   FACE_PAINT_AWNING_Z,
   FACE_PAINT_BACK_WALL_HEIGHT,
+  FACE_PAINT_POST_HEIGHT,
   FACE_PAINT_COUNTER_BOARD_Y,
   FACE_PAINT_STALL_DEPTH,
   FACE_PAINT_STALL_WIDTH,
@@ -535,7 +536,7 @@ export class FacePaintStall implements GameSystem {
     this.group.add(counterTop);
 
     // --- corner posts, candy-striped ------------------------------------------
-    const postHeight = 2.35;
+    const postHeight = FACE_PAINT_POST_HEIGHT;
     // **A post has no foot cap, because it can never be seen.** The foot stands
     // on the ground, so a closed bottom disc lies in the ground's own plane —
     // and its outline hull's copy, pushed 12 mm down and drawn `BackSide`,
