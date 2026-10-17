@@ -63,14 +63,24 @@ marking; guards stop her by real height, never a flag.
 ## Status
 - [x] (a) switch-over — DRAFT PR #722, head `feat/engine-solids-pr` = 7defc913. Local gate on the
   snapshot: check 0, test:procgen 0 (46 files, 2154 tests), build 0. Looks: /tmp/es-look/shots-a/.
-  TODO: read CI's 16 parks against main's (restarts + digests) when the PR's Parks job finishes.
+  CI run 39032883089: 89 pass, Deploy skipped (PRs). CI's 16 parks vs main's: restart, features,
+  planOrder, digest, measures all identical on 16/16. Preview:
+  https://pr-722-7defc91-land-of-good-places.blockstack.workers.dev (+ /hotel: sofas are steps now).
 - [~] (b) real heights + census. Done (each family named + kinded, meshes byte-identical, digests 16/16):
   garden walls, fountain, railway fence, stall booths, dodgems (+posts), ferris (legs, step-up deck,
   railings where drawn), water fight (pool rims, hedges, sprinkler, rack), lamps, fairy poles, trees,
   bushes, cruiser pylons, rail race trestles, slide legs, gate piers, welcome sign posts, bus shelter
   (posts, NEW bench + canopy), stations (posts, NEW bench + awning).
-  TODO: boundary wall, castle (exterior + interior), hotel, library, reptile house, ShopUnits,
-  train centre band (c), check:solids, census, hop re-measure.
+  Also done: boundary wall + pillars, castle (storeys, battlement, pavilion, turrets, curtain wall,
+  towers, shop counters, NEW decor solids: crates/woodpile/troughs/dais/throne/armour/chest/fireside
+  bench), hotel (walls, partitions, stair flanks, balustrades, tower, locked door), library (shell,
+  plinth edges w/ TopSlope, room walls; no 'wall' PropTop), reptile (shell by sector top, discs, posts,
+  log, stall, meter, palms, tortoise; no 'wall' PropTop), face-paint open sides (post height).
+  **Probes take a real y** (parkFacts, castle/hotel tower marches, gateway sweep, library/reptile
+  checks): y=0 probes cleared real tops on the sphere → seed 5 restarts all rejected until fixed.
+  Seed 5 acceptance at 95a91d32: restart 0 rejected (coplanar, as main), restart 1 accepted (= main).
+  TODO: check:solids, census (garden run: 797 tops, 24 regions, 316 s — see below), hop re-measure.
+  Left Infinity: the rail centre band (NavGrid closure; (c)), the roof slide mouth (invisible).
 - [ ] (c) guards tall
 
 ## Decisions made in (b) (with reasons)
@@ -91,3 +101,13 @@ marking; guards stop her by real height, never a flag.
 ## Notes for the paused Library tracks (-owl, -kids, -den, -books2)
 - `props.ts`: no plates, no `stand`, no `soft()`; `box()` returns `[BoxCollider]` (one filled turned
   box); `detach/attach` take walls or boxes. Keep-outs ignore solids within a step of the floor.
+
+## Census, garden, seed 5, 60 fps (at e5b4f87a, es-census.mts)
+797 tops, 24 regions, 14886 jumps, 316 s. By kind: bush 296, railway fence 166, fence post 131, pool
+rim 56, bridge parapet (unlabelled capsule 0.15) 31, fountain rim 28, dodgems barrier 24, stone wall
+19, wooden wall 16, stall booth 8, library plinth edge 3, stall awning 3 (roofs!), station canopy 2,
+dodgems car 2, ferris deck rail 2, hedge 2, dodgems tree/ferris deck/station bench/gun rack/cruiser
+pylon/fountain centrepiece/ferris leg/tree 1 each. Regions via drops: bushes (pockets), railway fence
+(-83.3, 27.4), ferris deck/rail, pool rim, wooden wall, stall booth (-43.1, -42.9).
+(c) candidates: railway fences + bridge parapets (railway), stall awnings (roofs), castle roof
+battlement (troughs → merlons → void), hotel balustrades (drop to lobby).

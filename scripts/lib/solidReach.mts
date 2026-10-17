@@ -166,6 +166,29 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
     if (!options.inSpace(solid.centreX, solid.centreZ)) return;
     solids.push(solid);
   });
+  // Bucketed on an 8 m grid by footprint, for "which solids are near here".
+  const BUCKET = 8;
+  const buckets = new Map<string, SolidView[]>();
+  for (const solid of solids) {
+    const r = solid.reach;
+    for (let bx = Math.floor((solid.centreX - r) / BUCKET); bx <= Math.floor((solid.centreX + r) / BUCKET); bx += 1) {
+      for (let bz = Math.floor((solid.centreZ - r) / BUCKET); bz <= Math.floor((solid.centreZ + r) / BUCKET); bz += 1) {
+        const key = `${bx},${bz}`;
+        let list = buckets.get(key);
+        if (!list) buckets.set(key, (list = []));
+        list.push(solid);
+      }
+    }
+  }
+  const near = (x: number, z: number, reach: number): Set<SolidView> => {
+    const found = new Set<SolidView>();
+    for (let bx = Math.floor((x - reach) / BUCKET); bx <= Math.floor((x + reach) / BUCKET); bx += 1) {
+      for (let bz = Math.floor((z - reach) / BUCKET); bz <= Math.floor((z + reach) / BUCKET); bz += 1) {
+        for (const solid of buckets.get(`${bx},${bz}`) ?? []) found.add(solid);
+      }
+    }
+    return found;
+  };
 
   const regions: { entry: Stand; via: string; has: (x: number, z: number, y: number) => boolean }[] = [];
   const first = grid.reachableFrom(options.start.x, options.start.z, options.start.y, sample);
@@ -176,13 +199,18 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   const reached = new Map<SolidView, ReachedTop>();
   let jumps = 0;
 
-  // A queue of stands to jump from, other than plain ground: tops she stood on.
-  const fromTops: ReachedTop[] = [];
+  // Tops she stood on and has not yet jumped or dropped from — each is
+  // searched from exactly once (a simulated jump between the same two things
+  // never comes out differently a second time).
+  let fresh: ReachedTop[] = [];
+  // Run-ups from the ground already simulated, so a later round only tries
+  // the ground a new region opened up.
+  const triedRunUps = new Set<string>();
 
   const markReached = (top: ReachedTop): void => {
     if (reached.has(top.solid)) return;
     reached.set(top.solid, top);
-    fromTops.push(top);
+    fresh.push(top);
   };
 
   let changed = true;
@@ -216,9 +244,12 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         const sx = o.x + o.nx * (PLAYER_RADIUS + 2.4);
         const sz = o.z + o.nz * (PLAYER_RADIUS + 2.4);
         const sy = sample(sx, sz, solid.topAt(o.x, o.z) + 2);
-        if (!groundReached(sx, sz, sy)) continue;
         // Out of any jump's reach from there: not worth a simulation.
         if (solid.topAt(o.x, o.z) - sy > 1.6) continue;
+        if (!groundReached(sx, sz, sy)) continue;
+        const key = `${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
+        if (triedRunUps.has(key)) continue;
+        triedRunUps.add(key);
         const aimX = o.x - o.nx * Math.min(solid.halfWidth, 0.6);
         const aimZ = o.z - o.nz * Math.min(solid.halfWidth, 0.6);
         for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 0.4]) {
@@ -234,10 +265,12 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       }
     }
 
-    // 3. Chains: from every top she stood on, onto any other top within a
-    //    long jump of it.
-    for (const source of [...fromTops]) {
-      for (const solid of solids) {
+    // 3 and 4, from every top first stood on since the last round.
+    const sources = fresh;
+    fresh = [];
+    for (const source of sources) {
+      // 3. Chains: onto any other top within a long jump of it.
+      for (const solid of near(source.solid.centreX, source.solid.centreZ, source.solid.reach + 6 + 8)) {
         if (reached.has(solid)) continue;
         const gap = Math.hypot(solid.centreX - source.solid.centreX, solid.centreZ - source.solid.centreZ) - solid.reach - source.solid.reach;
         if (gap > 6) continue;
@@ -271,12 +304,8 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           }
         }
       }
-    }
-
-    // 4. Drops: off every edge of every top she stood on, onto the ground
-    //    below — a new region when walking from anywhere reached does not get
-    //    there.
-    for (const source of fromTops) {
+      // 4. Drops: off every edge onto the ground below — a new region when
+      //    walking from anywhere reached does not get there.
       for (const o of outline(source.solid, 0.8)) {
         const px = o.x + o.nx * (PLAYER_RADIUS + 0.35);
         const pz = o.z + o.nz * (PLAYER_RADIUS + 0.35);
