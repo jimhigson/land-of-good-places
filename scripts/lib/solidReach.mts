@@ -218,8 +218,13 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: So
     if (landedAt >= 0 && frame >= landedAt + settleFrames) break;
   }
   if (sim.airborne) return null;
-  if (source.depthAt(sim.position.x, sim.position.z) >= -0.05 && Math.abs(sim.groundHeight - top) < 0.05) return null;
-  if (!(sim.groundHeight < top - 0.05)) return null;
+  // Measured against the top in the column she ended in, not the one she
+  // set off from: out in the park a top is a height over the planet's centre,
+  // and its world y falls away a fifth of a metre per metre outward at 44 m —
+  // so a walk that ended on the same top, further out, read as a drop off it.
+  const here = source.topAt(sim.position.x, sim.position.z);
+  if (source.depthAt(sim.position.x, sim.position.z) >= -0.05 && Math.abs(sim.groundHeight - here) < 0.05) return null;
+  if (!(sim.groundHeight < Math.min(top, here) - 0.05)) return null;
   return { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
 }
 
