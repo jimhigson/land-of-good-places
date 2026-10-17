@@ -263,6 +263,18 @@ export interface WallCollider extends SolidHeights {
    * somewhere she could stand on air. See {@link CollisionWorld.toppedSquare}.
    */
   topEnds: number;
+  /**
+   * **Where its top is drawn, against where its footprint stands** — the
+   * horizontal offset of the top from the foot, `0, 0` for a top straight
+   * over its footprint. A rigid thing stood on the sphere from its foot leans
+   * along the local up, so its top is drawn `height · up` out from the column
+   * its foot stands in: at the park's edge, 20° over, a garden wall's coping
+   * is a third of a metre out from its footprint. She bumps the footprint and
+   * stands on the top — each where it is drawn. See
+   * {@link CollisionWorld.toppedShifted}.
+   */
+  topShiftX: number;
+  topShiftZ: number;
 }
 
 /**
@@ -271,6 +283,28 @@ export interface WallCollider extends SolidHeights {
  * `topEnds` past either end. The across-the-wall reach is the footprint's and
  * {@link standsWithin}'s question.
  */
+/**
+ * **Is `(x, z)` on a wall's top?** — within its footprint and its standable
+ * band, and along its length, all measured where the top is drawn: the
+ * footprint moved by {@link WallCollider.topShiftX}/`Z`.
+ */
+function wallTopCovers(wall: Readonly<WallCollider>, x: number, z: number): boolean {
+  const px = x - wall.topShiftX;
+  const pz = z - wall.topShiftZ;
+  const ax = wall.x2 - wall.x1;
+  const az = wall.z2 - wall.z1;
+  const lengthSquared = ax * ax + az * az;
+  let t = lengthSquared < 1e-8 ? 0 : ((px - wall.x1) * ax + (pz - wall.z1) * az) / lengthSquared;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const d = Math.hypot(px - (wall.x1 + ax * t), pz - (wall.z1 + az * t));
+  return d <= wall.halfThickness && standsWithin(wall, d) && wallTopReaches(wall, px, pz);
+}
+
+/** A wall whose top stands straight over its footprint. */
+function unshifted(wall: Readonly<WallCollider>): boolean {
+  return wall.topShiftX === 0 && wall.topShiftZ === 0;
+}
+
 function wallTopReaches(wall: Readonly<WallCollider>, x: number, z: number): boolean {
   if (Number.isNaN(wall.topEnds)) return true;
   const ax = wall.x2 - wall.x1;
@@ -886,6 +920,10 @@ export class CollisionWorld {
   private currentKind = '';
   private currentTopHalf = Number.NaN;
   private currentTopEnds = Number.NaN;
+  private currentTopShiftX = 0;
+  private currentTopShiftZ = 0;
+  /** Every wall registered with a shifted top ({@link toppedShifted}). */
+  private readonly shiftedTops: WallCollider[] = [];
 
   /**
    * **Every solid `build` registers has a top `half` either side of its line**
@@ -919,6 +957,26 @@ export class CollisionWorld {
       return build();
     } finally {
       this.currentTopEnds = outer;
+    }
+  }
+
+  /**
+   * **Every wall `build` registers has its top drawn `(dx, dz)` from its
+   * footprint** — a rigid thing stood on the sphere from its foot, whose top
+   * leans out along the local up ({@link WallCollider.topShiftX}). Changes
+   * only where she can stand: what she bumps, and what a planner or a lattice
+   * reads, is the footprint as registered. Nests like {@link kinded}.
+   */
+  toppedShifted<T>(dx: number, dz: number, build: () => T): T {
+    const outerX = this.currentTopShiftX;
+    const outerZ = this.currentTopShiftZ;
+    this.currentTopShiftX = dx;
+    this.currentTopShiftZ = dz;
+    try {
+      return build();
+    } finally {
+      this.currentTopShiftX = outerX;
+      this.currentTopShiftZ = outerZ;
     }
   }
 
@@ -1053,38 +1111,40 @@ export class CollisionWorld {
     let best = -Infinity;
     const grid = this.solidGrid();
     const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
-    if (!bucket) return best;
-    for (const circle of bucket.circles) {
-      if (!circle.topIsAbsolute) continue;
-      const dx = x - circle.x;
-      const dz = z - circle.z;
-      if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
-      if (!standsWithin(circle, Math.hypot(dx, dz))) continue;
-      const top = solidTopAt(circle, x, z);
-      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
-      best = top;
+    if (bucket) {
+      for (const circle of bucket.circles) {
+        if (!circle.topIsAbsolute) continue;
+        const dx = x - circle.x;
+        const dz = z - circle.z;
+        if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
+        if (!standsWithin(circle, Math.hypot(dx, dz))) continue;
+        const top = solidTopAt(circle, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
+      for (const wall of bucket.walls) {
+        // A wall whose top is drawn away from its footprint is asked below,
+        // where its top is — not by the bucket its footprint fell in.
+        if (!wall.topIsAbsolute || !unshifted(wall)) continue;
+        if (!wallTopCovers(wall, x, z)) continue;
+        const top = solidTopAt(wall, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
+      for (const box of bucket.boxes) {
+        if (!box.topIsAbsolute) continue;
+        if (boxDepth(box, x, z, 0) < 0) continue;
+        if (!standableTop(box)) continue;
+        const top = solidTopAt(box, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
     }
-    for (const wall of bucket.walls) {
+    // The few walls with shifted tops (the garden walls), every time.
+    for (const wall of this.shiftedTops) {
       if (!wall.topIsAbsolute) continue;
-      const ax = wall.x2 - wall.x1;
-      const az = wall.z2 - wall.z1;
-      const lengthSquared = ax * ax + az * az;
-      let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const dx = x - (wall.x1 + ax * t);
-      const dz = z - (wall.z1 + az * t);
-      if (dx * dx + dz * dz > wall.halfThickness * wall.halfThickness) continue;
-      if (!standsWithin(wall, Math.hypot(dx, dz))) continue;
-      if (!wallTopReaches(wall, x, z)) continue;
+      if (!wallTopCovers(wall, x, z)) continue;
       const top = solidTopAt(wall, x, z);
-      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
-      best = top;
-    }
-    for (const box of bucket.boxes) {
-      if (!box.topIsAbsolute) continue;
-      if (boxDepth(box, x, z, 0) < 0) continue;
-      if (!standableTop(box)) continue;
-      const top = solidTopAt(box, x, z);
       if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
     }
@@ -1333,6 +1393,8 @@ export class CollisionWorld {
       halfThickness,
       ...this.heights((x1 + x2) / 2, (z1 + z2) / 2, middleTop, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
       topEnds: this.currentTopEnds,
+      topShiftX: this.currentTopShiftX,
+      topShiftZ: this.currentTopShiftZ,
     };
     if (sloped) {
       const r1 = radiusFor(x1, z1, topHeight);
@@ -1350,6 +1412,7 @@ export class CollisionWorld {
       };
     }
     this.walls.push(wall);
+    if (!unshifted(wall)) this.shiftedTops.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
     this.revisionCounter += 1;
     return wall;
@@ -1371,6 +1434,8 @@ export class CollisionWorld {
     const at = this.walls.indexOf(wall);
     if (at === -1) return;
     this.walls.splice(at, 1);
+    const shifted = this.shiftedTops.indexOf(wall);
+    if (shifted !== -1) this.shiftedTops.splice(shifted, 1);
     this.revisionCounter += 1;
   }
 
@@ -1395,6 +1460,7 @@ export class CollisionWorld {
   restoreWall(wall: WallCollider): void {
     if (this.walls.includes(wall)) return;
     this.walls.push(wall);
+    if (!unshifted(wall) && !this.shiftedTops.includes(wall)) this.shiftedTops.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, wall.halfThickness);
     this.revisionCounter += 1;
   }
@@ -1493,6 +1559,7 @@ export class CollisionWorld {
   clear(): void {
     this.circles.length = 0;
     this.walls.length = 0;
+    this.shiftedTops.length = 0;
     this.boxes.length = 0;
     this.thinnestHalfWidth = Infinity;
     this.revisionCounter += 1;
@@ -1666,12 +1733,7 @@ export class CollisionWorld {
           t = t < 0 ? 0 : t > 1 ? 1 : t;
           return wall.halfThickness - Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
         },
-        standsAt: (x, z) => {
-          let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
-          t = t < 0 ? 0 : t > 1 ? 1 : t;
-          const d = Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
-          return d <= wall.halfThickness && standsWithin(wall, d) && wallTopReaches(wall, x, z);
-        },
+        standsAt: (x, z) => wallTopCovers(wall, x, z),
         topAt: (x, z) => solidTopAt(wall, x, z),
         baseAt: (x, z) => solidBaseAt(wall, x, z),
         topIsAbsolute: wall.topIsAbsolute,

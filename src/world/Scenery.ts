@@ -22,7 +22,7 @@ import { toonMaterial } from '../art/style/materials';
 import { SKULL_RADIUS } from '../art/models/kid';
 import { TRAIN_PLAN } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
-import { groundRadiusAt, placeOnSphere, standOnSphere, terrainHeight, yAtAltitude, yAtRadius } from './terrain';
+import { groundRadiusAt, placeOnSphere, standOnSphere, terrainHeight, upAt, yAtAltitude, yAtRadius } from './terrain';
 import { COASTER_PLANS } from './coaster/plan';
 import { hidesTheArrivingBus } from './entrance/arrivalSightline';
 import { distanceToEntranceCorridor } from './entrance/roadRoute';
@@ -1120,8 +1120,16 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     // (`hopHeight`), which is what `autoHoppable` and `NavGrid`'s hop band have
     // always asked: the route lattice cannot tell a wall it may hop from one it
     // may not by where its top happens to be in the world.
+    //
+    // **And stood on where the boards' top is drawn** (`toppedShifted`): the
+    // boards stand at the midpoint and lean about their own middle
+    // (`standOnSphere`), so their top edge is drawn half their height out
+    // along the local up from the footprint she bumps.
+    const boardsUp = upAt(midX, base + run.height / 2, midZ, gardenWallUp);
     collision.kinded('wooden garden wall', () =>
-      collision.addWall(x1, z1, x2, z2, WOOD_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, base + run.height), true, true, -Infinity, false, run.height),
+      collision.toppedShifted(boardsUp.x * (run.height / 2), boardsUp.z * (run.height / 2), () =>
+        collision.addWall(x1, z1, x2, z2, WOOD_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, base + run.height), true, true, -Infinity, false, run.height),
+      ),
     );
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
@@ -1229,6 +1237,9 @@ function withoutBoxTop(geometry: BoxGeometry): BoxGeometry {
  */
 const COPING_END_OVERHANG = 0.1;
 
+/** Scratch for a garden wall's up at its midpoint. */
+const gardenWallUp = new Vector3();
+
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
 function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs: readonly WallRun[]): Group {
@@ -1308,9 +1319,21 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     // Its real top, as drawn: the coping's top, `copingTop`, a place she can
     // land on and walk along — see the wooden walls above, including why the
     // hop is still planned on the run's own height.
+    //
+    // **And stood on where the coping is drawn** (`toppedShifted`): the wall
+    // and its coping lean from their foot at the midpoint (`placeOnSphere`),
+    // so the coping's top is drawn its height out along the local up from the
+    // footprint she bumps — a third of a metre at the park's edge, where the
+    // census stood her on the wall's footprint with nothing drawn under her
+    // feet (seeds 10, 11 and 15, 64-76 m out).
+    const midGround = terrainHeight(midX, midZ);
+    const copingUp = upAt(midX, midGround, midZ, gardenWallUp);
+    const copingLift = copingTop - midGround;
     collision.kinded('stone garden wall', () =>
-      collision.toppedSquare(COPING_END_OVERHANG, () =>
-        collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, copingTop), true, true, -Infinity, false, run.height),
+      collision.toppedShifted(copingUp.x * copingLift, copingUp.z * copingLift, () =>
+        collision.toppedSquare(COPING_END_OVERHANG, () =>
+          collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, copingTop), true, true, -Infinity, false, run.height),
+        ),
       ),
     );
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
