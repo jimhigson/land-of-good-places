@@ -3543,6 +3543,7 @@ export class Hotel implements GameSystem {
         z: (minZ + maxZ) / 2 + 1.6,
         radius: 0.62,
         top: height - 0.4,
+        ledge: false,
       });
     }
 
@@ -4746,8 +4747,8 @@ export class Hotel implements GameSystem {
     // Seaweed in the corners and along the walls — this floor's crystal
     // cluster, and placed the same way.
     this.placeProps(shell, room, [
-      { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4, top: SEAWEED_TOP, ledge: false },
+      { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4, top: SEAWEED_TOP, ledge: false },
       // Moved from (-8.6, 6.4) to (-6.0, 7.2) (issue #281) — the bathroom's
       // own room now occupies exactly that corner, growing a real south wall
       // out to z = 6.8; the old spot first sat inside the doorway's
@@ -4755,10 +4756,10 @@ export class Hotel implements GameSystem {
       // inside the wall's own collider instead (the wall physically stands
       // there now — this decoration cannot). East of the bathroom's own east
       // wall (x = -7.6) instead, still low in the room's south end.
-      { prop: () => seaweed(0x60c3, 1), x: -6.0, z: 7.2, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c3, 1), x: -6.0, z: 7.2, top: SEAWEED_TOP, ledge: false },
+      { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2, top: SEAWEED_TOP, ledge: false },
+      { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6, top: SEAWEED_TOP, ledge: false },
+      { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6, top: SEAWEED_TOP, ledge: false },
       {
         // x nudged from -6.4 to -5.4 (issue #281) — sat squarely inside the
         // new bathroom doorway's clearance zone, which reaches from the
@@ -4768,12 +4769,14 @@ export class Hotel implements GameSystem {
         x: -5.4,
         z: 3.6,
         top: PLANTER_TOP,
+        ledge: false,
       },
       {
         prop: () => crystalPlanter(0x60c8, PALETTE.waterFoam, [PALETTE.bubbleSkin, PALETTE.markerSky, PALETTE.waterTop]),
         x: 6.4,
         z: 3.6,
         top: PLANTER_TOP,
+        ledge: false,
       },
     ]);
 
@@ -5665,12 +5668,14 @@ export class Hotel implements GameSystem {
       z: 7.2,
       radius: 0.6,
       top: PLANTER_TOP,
+      ledge: false,
     });
     this.props.place(shell, SUITE, crystalPlanter(0x41a1, PALETTE.markerPink), {
       x: 13.6,
       z: 7.2,
       radius: 0.6,
       top: PLANTER_TOP,
+      ledge: false,
     });
   }
 
@@ -5746,8 +5751,11 @@ export class Hotel implements GameSystem {
     const bathMat = rug(matWidth, matDepth, PALETTE.markerMint, PALETTE.blossomWhite, 1);
     bathMat.position.set(panX, 0, panZ);
     shell.add(bathMat);
+    // The pan and the basin are met, never stood on (`ledge: false`): the
+    // nook is too tight for her to stand in, so stepping down off either put
+    // her in a slot she was wedged in for good (check:solids, 17 Oct 2026).
     const pan = buildPan(0, 0);
-    this.props.place(shell, room, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7 });
+    this.props.place(shell, room, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7, ledge: false });
     const basin = buildBasin(0, 0);
     this.props.place(shell, room, basin.group, {
       x: basinX,
@@ -5755,6 +5763,7 @@ export class Hotel implements GameSystem {
       spin: basinYaw,
       radius: 0.4,
       top: 1.0,
+      ledge: false,
     });
 
     const roof = buildPrivacyRoof(
@@ -5998,6 +6007,7 @@ export class Hotel implements GameSystem {
         radius: 0.6,
         base,
         top: PLANTER_TOP,
+        ledge: false,
       });
     }
 
