@@ -6,7 +6,8 @@ import type { ShopStand } from '../building/shops/Shops';
 import { SpaceManager } from '../SpaceManager';
 import { bandCrossed, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt } from '../spaces';
+import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt, type SpaceId } from '../spaces';
+import type { OpenAreaPoint } from '../dismount';
 import type { InteractZone } from '../interact';
 import { pressZone } from '../interact';
 import { highlightObject } from '../highlight';
@@ -525,6 +526,35 @@ export class ReptileHouse implements GameSystem {
     const facing = ((at?.facing ?? REPTILE_ARRIVAL_FACING) * Math.PI) / 180;
     player.teleportTo(REPTILE_HOUSE_ORIGIN_X + x, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z + z, facing);
     this.warmExhibitCamera();
+  }
+
+  /**
+   * **The Reptile House's open area**, for the put-down rule
+   * (`world/dismount.ts`): in the hall, where she arrives through the door; on
+   * the forecourt, the doormat. World metres.
+   */
+  openArea(space: SpaceId): OpenAreaPoint[] {
+    if (space === SPACE_REPTILE_HOUSE) {
+      return [{ x: REPTILE_HOUSE_ORIGIN_X + REPTILE_ARRIVAL_X, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_ARRIVAL_Z }];
+    }
+    return [this.doormat];
+  }
+
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running** — the "Next day" button, from the hall or the forecourt. The
+   * building stops being where she is, as walking out would leave it: both
+   * rooms hidden, the exhibit shot and the keeper's words stopped. No teleport
+   * and no play bounds; the space she was taken to owns both.
+   */
+  releasePlayer(): void {
+    if (!this.inside && !this.onForecourt) return;
+    this.inside = false;
+    this.onForecourt = false;
+    this.exhibitCamera.cancel();
+    this.hallRoot.visible = false;
+    this.forecourtRoot.visible = false;
+    this.bubble.setText(null);
   }
 
   /** Out through the door: into the park at the plot's doormat, or onto the forecourt. */

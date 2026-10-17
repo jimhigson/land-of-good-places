@@ -141,6 +141,23 @@ export class MiniGameHost {
   }
 
   /**
+   * **Put the game away now** — no curtain, no result — for the "Next day"
+   * button, which takes her somewhere else behind its own iris. A no-op when
+   * nothing is open. The park is unfrozen from the next frame.
+   */
+  abandon(): void {
+    if (this.phase === 'idle') return;
+    this.game?.dispose();
+    this.game = null;
+    this.overlay.setShown(false);
+    this.overlay.clearContent();
+    this.pending = null;
+    this.pendingResult = null;
+    this.phase = 'idle';
+    this.transition.snap('opening');
+  }
+
+  /**
    * Advances the framework.
    *
    * Takes the loop's real `dt` rather than the frame context's, because the

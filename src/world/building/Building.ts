@@ -32,7 +32,8 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
+import type { OpenAreaPoint } from '../dismount';
 
 import { BallPit } from './BallPit';
 import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
@@ -55,6 +56,7 @@ import {
   dressDeck,
   PLANTER_RADIUS,
   PLANTER_TOP,
+  keepOutsFor,
   planterRing,
 } from './dressing';
 import { CastleFire } from './castleLighting';
@@ -104,6 +106,7 @@ import {
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
   LIFT_OUT_YAW,
+  LIFT_STAND_X,
   LIFT_WALL_X,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
@@ -1155,7 +1158,7 @@ export class Building implements GameSystem {
     const seat = greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
     if (!player || !seat || player.riding) return;
 
-    player.beginRide();
+    player.beginRide(this.feastHolder);
     player.setRidePose(
       floorX(CASTLE_HALL, seat.x),
       BUILDING_BASE_Y,
@@ -1227,6 +1230,9 @@ export class Building implements GameSystem {
     this.feastDish = dish.root;
   }
 
+  /** Whoever sits at the banquet is held by this, and let go by leaving it. */
+  private readonly feastHolder: RideHolder = { holding: 'a seat at the banquet', letGo: () => this.leaveFeast() };
+
   /**
    * Up from the table: she stands, and the pets come back to the line from
    * wherever they had got to.
@@ -1245,20 +1251,21 @@ export class Building implements GameSystem {
     this.petParade?.callPetsBackFromTable();
     if (!player) return;
     // **She steps back from the table as she gets up**, onto the same spot the
-    // Sit chip walked her to. Without it she stands up exactly where she was
-    // sitting, which is half inside the bench — and castle props carry no
-    // colliders, so nothing would push her out of it either. The hotel's
-    // `standUp` leaves her in the chair for the same reason and gets away with
-    // it because a hotel chair is pulled out from its table; a bench is not.
-    if (seat) {
-      player.setRidePose(
-        floorX(CASTLE_HALL, seat.standX),
-        BUILDING_BASE_Y,
-        floorZ(CASTLE_HALL, seat.standZ),
-        seat.yaw,
-      );
-    }
-    player.endRide();
+    // Sit chip walked her to: her seat is half inside the bench. (The hotel's
+    // chairs once stood her up on the seat instead, on the theory that a hotel
+    // chair is pulled out from its table; the lobby café's were not, and that
+    // was Jim's soft-lock of 17 Oct 2026. Both now go through `endRide`'s
+    // put-down rule, which checks the spot rather than the theory.)
+    player.endRide(
+      seat
+        ? {
+            x: floorX(CASTLE_HALL, seat.standX),
+            y: BUILDING_BASE_Y,
+            z: floorZ(CASTLE_HALL, seat.standZ),
+            facing: seat.yaw,
+          }
+        : { x: player.position.x, y: BUILDING_BASE_Y, z: player.position.z },
+    );
   }
 
   /** Hands the building the player, so it can carry, bounce and ride them. */
@@ -1482,6 +1489,8 @@ export class Building implements GameSystem {
   private travelTo(floor: CastleFloor): void {
     this.spaces.hop(() => {
       const player = this.player;
+      // Only while the lift still has her — see `Hotel.travelTo`, the same rule.
+      if (!player || !this.liftRide.holds(player)) return;
       if (player) {
         // Land in the destination floor's own lift alcove. Every floor's alcove
         // is at the same floor-local spot — a lift that wandered from floor to
@@ -1650,6 +1659,32 @@ export class Building implements GameSystem {
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   }
 
+  /**
+   * **A castle floor's open area**, for the put-down rule (`world/dismount.ts`):
+   * where the lift lets her out — the only way between floors — and every disc
+   * of `keepOutsFor`, the single owner of where a child must be able to stand
+   * on that floor. World metres.
+   */
+  openArea(floor: CastleFloor): OpenAreaPoint[] {
+    return [
+      { x: floorX(floor, LIFT_STAND_X), z: floorZ(floor, LIFT_DOOR_Z) },
+      ...keepOutsFor(floor.index).map((disc) => ({ x: floorX(floor, disc.x), z: floorZ(floor, disc.z) })),
+    ];
+  }
+
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running** — the "Next day" button, from inside the castle. The castle stops
+   * being where she is: its interior hidden, `inside` false, exactly as walking
+   * out would leave it. It does not teleport her or touch the play bounds; the
+   * space she was taken to owns both. A no-op if she was not in here.
+   */
+  releasePlayer(): void {
+    if (!this.inside) return;
+    this.inside = false;
+    this.interiorRoot.visible = false;
+  }
+
   // ----------------------------------------------------- which floor shows
 
   /**
@@ -1734,7 +1769,6 @@ export class Building implements GameSystem {
 
       // The chute is in world coordinates now, so there is nothing to add back.
       this.ginormousSlide.pointAt(0, this.point);
-      player.teleportTo(this.point.x, this.point.y + RIDER_LIFT, this.point.z);
       // **Not for composing her turn** — the ride hands that over whole, as a
       // quaternion (`Player.setRideFrame`), and no euler order touches it. This
       // is for the readers that take `group.rotation.y` as the way she faces
@@ -1744,6 +1778,10 @@ export class Building implements GameSystem {
       // ±90° once she is pitched. Put back in `finishRide`.
       player.group.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
+      // At the top of the chute, **once the ride has her**: a placement onto a
+      // ride is the ride's own pose, never a put-down (`Player.teleportTo`), and
+      // the top of a slide is no floor to be put down on.
+      player.setRidePose(this.point.x, this.point.y + RIDER_LIFT, this.point.z, player.facing);
       // **On her back, feet first** (Jim, 6 August 2026) — the way a child
       // actually goes down a slide, and the way the grown-up in front of her
       // has ridden all along. The ride chooses the posture; `Player` owns what
@@ -1799,8 +1837,22 @@ export class Building implements GameSystem {
     // rejection happens. Same reasoning as the two above: a counter whose doc
     // says "this descent" must be zeroed by the descent starting.
     resetChaseCeilingCounters();
-    player.beginRide();
+    player.beginRide(this.slideHolder);
   }
+
+  /**
+   * Whoever is on a slide is held by this — and let go by being at the bottom
+   * now: {@link finishRide}, the same landing every descent ends on, with its
+   * splash, its companions and its camera, just sooner.
+   */
+  private readonly slideHolder: RideHolder = {
+    holding: 'a slide',
+    letGo: () => {
+      const ride = this.ride;
+      const player = this.player;
+      if (ride && player) this.finishRide(ride, player);
+    },
+  };
 
   private advanceRide(dt: number, player: Player): void {
     const ride = this.ride;
@@ -2173,19 +2225,19 @@ export class Building implements GameSystem {
       // rest of the time — not `terrainHeight`, which is a pure function of the
       // hills and does not know the pit has been dug out of them.
       const ballsY = this.surfaces.sample(spot.x, spot.z, worldPosition.y);
-      player.setRidePose(
-        spot.x,
-        ballsY + LANDING_DROP,
-        spot.z,
-        Math.atan2(this.tangent.x, this.tangent.z),
-      );
       // Back to the default order (see `startGiantSlide`), and level: she
       // arrives feet first.
       player.group.rotation.order = 'XYZ';
       player.group.rotation.x = 0;
       // Handed back still moving, so the last thing the slide does is deliver
       // her rather than switch off. Gravity closes the {@link LANDING_DROP}.
-      player.endRide(this.tangent.x * 1.4, -0.6, this.tangent.z * 1.4);
+      player.endRide({
+        x: spot.x,
+        y: ballsY + LANDING_DROP,
+        z: spot.z,
+        facing: Math.atan2(this.tangent.x, this.tangent.z),
+        velocity: { x: this.tangent.x * 1.4, y: -0.6, z: this.tangent.z * 1.4 },
+      });
       // The balls scatter when she *hits* them, not now — `update` watches for
       // the touchdown. See {@link pendingSplash}.
       this.pendingSplash = { x: spot.x, z: spot.z, waited: 0 };
@@ -2208,13 +2260,13 @@ export class Building implements GameSystem {
       this.liveRideCamera = null;
       this.onRideChange?.(false);
     } else {
-      player.setRidePose(
-        worldPosition.x,
-        worldPosition.y,
-        worldPosition.z,
-        Math.atan2(this.tangent.x, this.tangent.z),
-      );
-      player.endRide(this.tangent.x * 3.5, 1.2, this.tangent.z * 3.5);
+      player.endRide({
+        x: worldPosition.x,
+        y: worldPosition.y,
+        z: worldPosition.z,
+        facing: Math.atan2(this.tangent.x, this.tangent.z),
+        velocity: { x: this.tangent.x * 3.5, y: 1.2, z: this.tangent.z * 3.5 },
+      });
     }
     this.ride = null;
   }

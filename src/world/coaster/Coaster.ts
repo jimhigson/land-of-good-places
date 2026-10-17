@@ -35,10 +35,8 @@ import { addOutline } from '../../art/style/materials';
 import { PALETTE } from '../../core/palette';
 import { placeOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
-import { resolveDismount } from '../dismount';
-import { PLAYER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
 import type { ParkTrain } from '../train';
 
 /**
@@ -137,8 +135,6 @@ export class Coaster implements GameSystem {
   private readonly cartMount: Group;
   /** The seat, turned to face the camera's convention. See the constructor. */
   private readonly eyeMount: Group;
-  /** Kept for {@link arrive}'s dismount safety net — see `world/dismount.ts`. */
-  private readonly collision: CollisionWorld;
   /** Kept so `buildTrack`'s pylon search can ask each real, already-built
    * bridge's own footprint — see that method's own note. */
   private readonly train: ParkTrain;
@@ -165,7 +161,6 @@ export class Coaster implements GameSystem {
 
   constructor(collision: CollisionWorld, train: ParkTrain, options: CoasterOptions) {
     this.options = options;
-    this.collision = collision;
     this.train = train;
     this.name = options.plan.name;
     this.playerStaysVisible = options.camera === 'chase';
@@ -284,11 +279,14 @@ export class Coaster implements GameSystem {
     }
   }
 
+  /** Whoever rides the coaster is held by this — and let go by arriving back now. */
+  private readonly holder: RideHolder = { holding: 'the coaster', letGo: () => this.arrive() };
+
   /** The stall's interact press lands here instead of opening the 2D game. */
   requestBoard(): boolean {
     if (this.riding || !this.player || this.phase !== 'waiting') return false;
     this.riding = true;
-    this.player.beginRide();
+    this.player.beginRide(this.holder);
     this.onRideChange?.(true);
     this.phase = 'chain';
     this.speed = CHAIN_SPEED;
@@ -383,18 +381,12 @@ export class Coaster implements GameSystem {
     if (this.riding && this.player) {
       this.riding = false;
       // The planned exit (`coaster/plan.ts`) — beside the station, clear of
-      // every plot blocker — with the runtime safety net on top (see
+      // every plot blocker — checked by `endRide`'s put-down rule (see
       // `world/dismount.ts`): this used to put a rider 40% of the way from
       // the booth's own centre towards its doormat, which is still inside
       // the booth's four walls and trapped her there for good.
-      const { x, z } = resolveDismount(
-        this.collision,
-        this.options.plan.exitX,
-        this.options.plan.exitZ,
-        PLAYER_RADIUS,
-      );
-      this.player.setRidePose(x, terrainHeight(x, z), z, 0);
-      this.player.endRide();
+      const { exitX: x, exitZ: z } = this.options.plan;
+      this.player.endRide({ x, y: terrainHeight(x, z), z, facing: 0 });
       this.onRideChange?.(false);
     }
   }

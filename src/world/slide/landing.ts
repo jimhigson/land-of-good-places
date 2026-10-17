@@ -26,8 +26,9 @@
  * is scooped `BALL_PIT_DEPTH` down, so it lowers the floor without lowering the
  * chute, leaving 1.34 m of headroom for a 2.12 m child.
  *
- * `resolveDismount` could never have rescued it either. It pushes a rider out of
- * things in the **collision world**, and the chute is not in it — you are meant
+ * The dismount safety net (`resolveDismount` then, the put-down rule in
+ * `world/dismount.ts` now) could never have rescued it either. It keeps a rider
+ * out of things in the **collision world**, and the chute is not in it — you are meant
  * to be able to walk underneath the ride. Only its legs are solid
  * (`supports.ts`). The safety net was real and was watching the wrong thing.
  *

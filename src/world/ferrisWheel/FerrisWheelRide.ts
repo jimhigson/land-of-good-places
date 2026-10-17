@@ -1,11 +1,10 @@
 import { Group, Raycaster, Vector2, Vector3 } from 'three';
 import { clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { RideCamera } from '../../core/RideCamera';
-import { PLAYER_RADIUS, VIEWMODEL_LAYER } from '../../core/constants';
+import { VIEWMODEL_LAYER } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
 import type { CollisionWorld } from '../Collision';
-import { resolveDismount } from '../dismount';
 import { liftFromGround, terrainHeight, tiltToSphere } from '../terrain';
 import { placedEntry } from '../parkLayout';
 import { createCloudBand, type CloudBand } from './clouds';
@@ -247,14 +246,17 @@ export class FerrisWheelRide implements GameSystem {
   private readonly carPoint = new Vector3();
   private readonly boardZ: number;
 
-  private readonly collision: CollisionWorld;
   private readonly world: FerrisWorldHooks;
 
   constructor(
-    collision: CollisionWorld,
+    /**
+     * Unused since the dismount safety net moved into `Player.endRide` (the
+     * put-down rule asks her own collision world). Kept in the signature so the
+     * wheel is still built the way every ride is.
+     */
+    _collision: CollisionWorld,
     world: FerrisWorldHooks,
   ) {
-    this.collision = collision;
     this.world = world;
     const wheel = placedEntry('ferrisWheel');
     this.boardX = wheel.x;
@@ -382,6 +384,9 @@ export class FerrisWheelRide implements GameSystem {
     this.player = player;
   }
 
+  /** Whoever rides the wheel is held by this — and let go by the ride ending now. */
+  private readonly holder: RideHolder = { holding: 'the ferris wheel', letGo: () => this.leave() };
+
   requestBoard(): boolean {
     if (this.riding || !this.player) return false;
     this.riding = true;
@@ -397,7 +402,7 @@ export class FerrisWheelRide implements GameSystem {
     // Another place entirely, and never meant to be seen from this one.
     this.world.setElsewhereVisible(false);
 
-    this.player.beginRide();
+    this.player.beginRide(this.holder);
     this.onRideChange?.(true);
     this.rideView?.board();
 
@@ -571,14 +576,9 @@ export class FerrisWheelRide implements GameSystem {
     this.cardTime = -1;
     window.removeEventListener('pointerdown', this.onPointerDown, true);
 
-    const { x, z } = resolveDismount(
-      this.collision,
-      FERRIS_WHEEL_EXIT.x,
-      FERRIS_WHEEL_EXIT.z,
-      PLAYER_RADIUS,
-    );
-    this.player?.teleportTo(x, terrainHeight(x, z), z);
-    this.player?.endRide();
+    // The wheel's planned exit — checked by `endRide`'s put-down rule.
+    const { x, z } = FERRIS_WHEEL_EXIT;
+    this.player?.endRide({ x, y: terrainHeight(x, z), z });
     this.onMoment?.({ kind: 'end' });
 
     if (this.onRideChange) this.onRideChange(false);

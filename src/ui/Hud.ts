@@ -52,6 +52,7 @@ export class Hud {
   private readonly debugPill: HTMLElement;
   private readonly backpackButton: HTMLButtonElement;
   private readonly lookButton: HTMLButtonElement;
+  private readonly nextDayButton: HTMLButtonElement;
   private readonly promptPill: HTMLElement;
   private readonly hintToggle: HTMLButtonElement;
   private readonly keyHint: HTMLElement;
@@ -61,6 +62,7 @@ export class Hud {
   private menuOpen = false;
   private backpackHandler: (() => void) | null = null;
   private lookHandler: (() => void) | null = null;
+  private nextDayHandler: (() => void) | null = null;
   /** See {@link setLookAvailable}. Starts true: she spawns on her own feet. */
   private lookAvailable = true;
   /** See {@link setMenuAvailable}. Starts true: she spawns on her own feet. */
@@ -144,6 +146,22 @@ export class Hud {
       this.lookHandler?.();
     });
 
+    // "Next day" — a way out of anywhere (Jim, 17 Oct 2026: *"a 'manual
+    // rescue' feature like in the menu an option that says 'next day' and then
+    // you wake up in the hotel bed"*). Wherever she is and whatever she is
+    // stuck in, it is tomorrow morning and she wakes up in her own bed. The
+    // handler is injected like the backpack's: the HUD knows nothing about
+    // beds.
+    this.nextDayButton = document.createElement('button');
+    this.nextDayButton.type = 'button';
+    this.nextDayButton.className = 'pill pill--next-day';
+    this.nextDayButton.setAttribute('aria-label', 'Next day: wake up in your bed');
+    this.nextDayButton.innerHTML = '<span class="emoji">🌅</span><span>Next day</span>';
+    this.nextDayButton.addEventListener('click', () => {
+      this.nextDayButton.blur();
+      this.nextDayHandler?.();
+    });
+
     // The controls help. It used to be a small "?" disc floating over the
     // bottom-left of the park, which the family had pressed by accident once
     // too often (GAME_DESIGN.md's SELECTION RULE entry, 28 July 2026: *"move
@@ -165,7 +183,14 @@ export class Hud {
       this.setHintOpen(!this.hintOpen);
     });
 
-    this.menuItems.append(this.parkPill, this.moneyPill, this.backpackButton, this.lookButton, this.hintToggle);
+    this.menuItems.append(
+      this.parkPill,
+      this.moneyPill,
+      this.backpackButton,
+      this.lookButton,
+      this.nextDayButton,
+      this.hintToggle,
+    );
     this.menu.append(this.menuButton, this.menuItems);
     top.append(this.menu);
     this.applyMenu();
@@ -228,6 +253,11 @@ export class Hud {
   /** Who to tell when the "Look" pill is pressed. */
   setLookHandler(handler: () => void): void {
     this.lookHandler = handler;
+  }
+
+  /** Who to tell when the "Next day" pill is pressed. */
+  setNextDayHandler(handler: () => void): void {
+    this.nextDayHandler = handler;
   }
 
   /**

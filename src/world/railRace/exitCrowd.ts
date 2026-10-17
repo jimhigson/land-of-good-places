@@ -4,7 +4,7 @@ import { applyWalk } from '../../art/style/asset';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { terrainHeight } from '../terrain';
 import { faceOnGround } from '../up';
-import { resolveDismountGroup, type OccupiedSpot } from '../dismount';
+import { resolveDismountGroup, type OccupiedSpot } from '../dismountGroup';
 import type { CollisionWorld } from '../Collision';
 
 /**

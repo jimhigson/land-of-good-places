@@ -1,4 +1,4 @@
-import type { Player } from '../../entities/Player';
+import type { Player, RideExit, RideHolder } from '../../entities/Player';
 import {
   liftDoorOpenness,
   LIFT_COMING_SECONDS,
@@ -163,8 +163,19 @@ export class LiftRide implements LiftPanelSource {
   private stepFacing = 0;
   private travelled = false;
 
+  /** Who has her while she is in the car — see `RideHolder`. */
+  private readonly holder: RideHolder = { holding: 'the castle lift', letGo: () => this.letGo() };
+
   constructor(deps: LiftRideDeps) {
     this.deps = deps;
+  }
+
+  /**
+   * True while this lift has her — the castle's portal asks before it poses her
+   * in a new alcove, so a ride she was let off half way never moves her again.
+   */
+  holds(player: Player): boolean {
+    return player.rideHolder === this.holder;
   }
 
   // ------------------------------------------------------------- the seam
@@ -312,7 +323,7 @@ export class LiftRide implements LiftPanelSource {
         }
         if (this.phaseT < LIFT_COMING_SECONDS) return;
         this.deps.cancelWalk();
-        player.beginRide();
+        player.beginRide(this.holder);
         // Boarding starts from wherever she actually stopped walking — she is
         // standing in the lobby and the glide draws her in.
         this.beginStep(
@@ -345,7 +356,7 @@ export class LiftRide implements LiftPanelSource {
         this.updateStep(player, dt);
         if (this.stepT >= 1) {
           this.phase = 'away';
-          player.endRide();
+          player.endRide({ x: this.stepTo.x, y: this.stepTo.y, z: this.stepTo.z, facing: this.stepFacing });
         }
         return;
       }
@@ -353,6 +364,24 @@ export class LiftRide implements LiftPanelSource {
   }
 
   // ------------------------------------------------------------ internals
+
+  /**
+   * Off the lift **now**, wherever it had got to — out into the lift lobby of
+   * the floor she is on, the same step-out an ordinary arrival ends on.
+   */
+  private letGo(): void {
+    const player = this.deps.player();
+    if (!player) return;
+    const floor = this.deps.currentFloor();
+    this.phase = 'away';
+    this.travelled = true;
+    player.endRide(floor ? this.stepOut(floor, player.position.y) : { x: player.position.x, y: player.position.y, z: player.position.z });
+  }
+
+  /** The lift lobby of `floor`, facing out — where every ride in this lift gets off. */
+  private stepOut(floor: CastleFloor, y: number): RideExit {
+    return { x: floorX(floor, LIFT_STAND_X), y, z: floorZ(floor, LIFT_DOOR_Z), facing: LIFT_OUT_YAW };
+  }
 
   /** True while *we* are the ride posing the character. */
   private ridingUs(): boolean {

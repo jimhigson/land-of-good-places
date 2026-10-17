@@ -216,6 +216,11 @@ export class Shopping implements GameSystem {
     this.drawer.close();
   }
 
+  /** Every shop panel and the backpack put away — the "Next day" button's tidy-up. */
+  closeAll(): void {
+    this.closeUi();
+  }
+
   /**
    * Buys one thing, hatches it if it was an egg, and eats it if it was food.
    *

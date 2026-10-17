@@ -1,4 +1,4 @@
-import type { Player } from '../../entities/Player';
+import type { Player, RideExit, RideHolder } from '../../entities/Player';
 import type {
   FloorInfo,
   LiftPanelSource,
@@ -54,8 +54,19 @@ export class HotelLift implements LiftPanelSource {
 
   private readonly deps: HotelLiftDeps;
 
+  /** Who has her while she is in the car — see `RideHolder`. */
+  private readonly holder: RideHolder = { holding: 'the hotel lift', letGo: () => this.letGo() };
+
   constructor(deps: HotelLiftDeps) {
     this.deps = deps;
+  }
+
+  /**
+   * True while this lift has her — the hotel's portal asks before it poses her
+   * in a new alcove, so a ride she was let off half way never moves her again.
+   */
+  holds(player: Player): boolean {
+    return player.rideHolder === this.holder;
   }
 
   // -------------------------------------------------------------- the seam
@@ -210,7 +221,7 @@ export class HotelLift implements LiftPanelSource {
         // construction — the alcove faces the room, so a straight glide from
         // anywhere in reach passes through it.
         this.deps.cancelWalk();
-        player.beginRide();
+        player.beginRide(this.holder);
         this.step.fromX = player.position.x;
         this.step.fromZ = player.position.z;
         this.step.toX = room.originX + LIFT_CAR_X - room.halfX;
@@ -246,7 +257,7 @@ export class HotelLift implements LiftPanelSource {
         );
         if (t >= 1) {
           this.phase = 'away';
-          player.endRide();
+          player.endRide({ x: this.step.toX, y: this.step.y, z: this.step.toZ, facing: Math.PI / 2 });
         }
         return;
       }
@@ -259,14 +270,47 @@ export class HotelLift implements LiftPanelSource {
     return this.phase === 'aboard' || this.phase === 'going' || this.phase === 'alighting';
   }
 
+  /**
+   * Off the lift **now**, wherever it had got to — out of the alcove into the
+   * room she is in, the same step-out an ordinary arrival ends on. Before the
+   * portal fires that is the room she pressed the button in; after it, the
+   * floor she went to.
+   */
+  private letGo(): void {
+    const player = this.deps.player();
+    if (!player) return;
+    const room = this.deps.currentRoom();
+    this.phase = 'away';
+    this.travelled = true;
+    player.endRide(
+      room ? this.stepOut(room, player.position.y) : { x: player.position.x, y: player.position.y, z: player.position.z },
+    );
+  }
+
+  /**
+   * **Where this lift lets her off in `room`**, world metres: the end of the
+   * step out of its alcove. The one owner — every ride gets off here, and the
+   * hotel names it as a point of the room's open area (`Hotel.openArea`).
+   */
+  landing(room: HotelRoom): { readonly x: number; readonly z: number } {
+    return { x: room.originX + LIFT_CAR_X - room.halfX + 3.4, z: room.originZ + (room.liftZ ?? 0) };
+  }
+
+  /** The step out of `room`'s alcove, as an exit — {@link landing}, facing into the room. */
+  private stepOut(room: HotelRoom, y: number): RideExit {
+    const { x, z } = this.landing(room);
+    return { x, y, z, facing: Math.PI / 2 };
+  }
+
   private beginAlight(room: HotelRoom): void {
     const player = this.deps.player();
     if (!player) return;
+    const out = this.stepOut(room, player.position.y);
     this.step.fromX = room.originX + LIFT_CAR_X - room.halfX;
     this.step.fromZ = room.originZ + (room.liftZ ?? 0);
-    this.step.toX = room.originX + LIFT_CAR_X - room.halfX + 3.4;
-    this.step.toZ = room.originZ + (room.liftZ ?? 0);
-    this.step.y = player.position.y;
+    this.step.toX = out.x;
+    this.step.toZ = out.z;
+    this.step.y = out.y;
     this.phase = 'alighting';
     this.phaseT = 0;
   }

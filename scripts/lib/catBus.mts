@@ -179,19 +179,26 @@ export async function catBus(
     scriptedWalk = 0;
     readonly position = new Vector3();
     readonly poses: { x: number; y: number; z: number; posture: string }[] = [];
-    readonly teleports: { x: number; y: number; z: number }[] = [];
+    /**
+     * Every place she was put down, in order: the exit `endRide` was handed —
+     * `Player.endRide` puts her there, through its put-down rule, so the
+     * hand-over at the gate *is* that exit — and any `teleportTo`.
+     */
+    readonly putDowns: { x: number; y: number; z: number }[] = [];
     beginRides = 0;
     endRides = 0;
 
-    beginRide(): void {
+    beginRide(_holder: { readonly holding: string; letGo(): void }): void {
       this.riding = true;
       this.ridePosture = 'seated';
       this.beginRides += 1;
     }
 
-    endRide(): void {
+    endRide(exit: { readonly x: number; readonly y: number; readonly z: number }): void {
       this.riding = false;
       this.endRides += 1;
+      this.position.set(exit.x, exit.y, exit.z);
+      this.putDowns.push({ x: exit.x, y: exit.y, z: exit.z });
     }
 
     setScriptedWalk(speed: number): void {
@@ -205,7 +212,7 @@ export async function catBus(
 
     teleportTo(x: number, y: number, z: number, _facing?: number): void {
       this.position.set(x, y, z);
-      this.teleports.push({ x, y, z });
+      this.putDowns.push({ x, y, z });
     }
 
     nudge(): void {}
@@ -1064,7 +1071,7 @@ export async function catBus(
   // --- 7. the player -------------------------------------------------------
   check(player.beginRides === 1, `the player boarded ${player.beginRides} times, expected once`);
   check(player.endRides === 1, `the player was handed the controls ${player.endRides} times, expected once`);
-  const handover = player.teleports[player.teleports.length - 1];
+  const handover = player.putDowns[player.putDowns.length - 1];
   check(handover !== undefined, 'the player was never put down at the end of the arrival');
   if (handover) {
     const drift = Math.hypot(handover.x - ENTRANCE_PLAYER_X, handover.z - ENTRANCE_PLAYER_Z);
