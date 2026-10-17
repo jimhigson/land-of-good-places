@@ -31,6 +31,11 @@
  *    listener that records which pill the click landed on and stops it there,
  *    so nothing actually opens.
  *
+ * And that **nothing else of the HUD shows in the open drawer** — no chip or
+ * other pill over it, under it or in the gaps between its pills (QA on PR
+ * #721 found "Have breakfast" peeking out between the Cute-o-dex and the Map
+ * at 667×375).
+ *
  * And then, the Cute-o-dex opened from it, that **the shut ☰ button is under
  * the book**, as it always was: the open drawer is lifted over the HUD's bottom
  * row, and the first try at that lifted the shut button over every panel too.
@@ -169,6 +174,44 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
       }
     }
 
+    // Nothing else of the HUD shows in the open drawer's area — over it, under
+    // it, or in the gaps between its pills: no chip, no other pill. The
+    // drawer's area is the box round all its pills; a chip there, even one
+    // the drawer covers in part, shows between them.
+    const intruders: string[] = await page.evaluate(() => {
+      const pills = [...document.querySelectorAll('#hud-menu-items > *')].map((element) => element.getBoundingClientRect());
+      const shownPills = pills.filter((box) => box.width > 0 && box.height > 0);
+      if (shownPills.length === 0) return [];
+      const area = {
+        left: Math.min(...shownPills.map((box) => box.left)),
+        top: Math.min(...shownPills.map((box) => box.top)),
+        right: Math.max(...shownPills.map((box) => box.right)),
+        bottom: Math.max(...shownPills.map((box) => box.bottom)),
+      };
+      const shown = (element: Element): boolean => {
+        for (let at: Element | null = element; at; at = at.parentElement) {
+          const style = getComputedStyle(at);
+          if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.05) return false;
+        }
+        return true;
+      };
+      return [...document.querySelectorAll('.action-chip, .pill')]
+        .filter((element) => !element.closest('#hud-menu-items') && !element.closest('.pill--menu'))
+        .filter((element) => {
+          const box = element.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && box.left < area.right && box.right > area.left && box.top < area.bottom && box.bottom > area.top;
+        })
+        .filter(shown)
+        .map((element) => {
+          const box = element.getBoundingClientRect();
+          const name = (element.textContent ?? '').replace(/\s+/g, ' ').trim() || element.className;
+          return `${name} (x ${box.left.toFixed(0)}–${box.right.toFixed(0)}, y ${box.top.toFixed(0)}–${box.bottom.toFixed(0)})`;
+        });
+    });
+    for (const intruder of intruders) {
+      failures.push(`${viewport.name}: ${intruder} shows in the open menu, between its pills`);
+    }
+
     // A tap at each pill's centre: which pill did the click land on? Caught on
     // the way down and stopped, so nothing opens and the menu stays open.
     await page.evaluate(() => {
@@ -182,7 +225,7 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
       };
       window.addEventListener('click', record.menuReachCatch, { capture: true });
     });
-    const lines: string[] = [];
+    const lines: string[] = [intruders.length > 0 ? `${intruders.length} OTHER UI IN THE DRAWER` : 'nothing else in the drawer'];
     for (const item of items) {
       const where = `${item.name} at x ${item.left.toFixed(0)}–${item.right.toFixed(0)}, y ${item.top.toFixed(0)}–${item.bottom.toFixed(0)}`;
       const onScreen = item.left >= 0 && item.top >= 0 && item.right <= screen.width && item.bottom <= screen.height;

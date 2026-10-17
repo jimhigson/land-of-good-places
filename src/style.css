@@ -426,6 +426,16 @@ body {
   z-index: 6;
 }
 
+/* And while it is open, the chips that float over whatever she is beside step
+   back altogether. Covered by the drawer they still peeked out between its
+   pills — on a phone held sideways at 667×375, "Have breakfast" showed in the
+   gap between the Cute-o-dex and the Map — and a child choosing from the menu
+   should see the menu and nothing else to press. They come back the moment it
+   shuts. `check:served-menu-reach` holds this. */
+[data-menu-open='true'] .action-chips {
+  visibility: hidden;
+}
+
 /* Deliberately taller and roomier than a plain pill: it is now the only thing
    up here, and it is the first button a six-year-old goes for. */
 .pill--menu {

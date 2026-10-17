@@ -377,6 +377,9 @@ export class Hud {
   /** The single place the menu's one flag reaches the DOM. */
   private applyMenu(): void {
     this.menu.dataset.open = this.menuOpen ? 'true' : 'false';
+    // On the whole HUD too, so what floats over the park steps back while
+    // she chooses from the menu — see `[data-menu-open]` in `style.css`.
+    this.root.dataset.menuOpen = this.menuOpen ? 'true' : 'false';
     this.menuButton.setAttribute('aria-expanded', this.menuOpen ? 'true' : 'false');
     this.menuButton.setAttribute('aria-label', this.menuOpen ? 'Close the menu' : 'Open the menu');
     this.menuButton.innerHTML =
