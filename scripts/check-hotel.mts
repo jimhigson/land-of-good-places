@@ -123,6 +123,7 @@ import { walkableGroundAt } from '../src/world/building/surfaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { HOTEL_LOBBY_Z, HOTEL_ORIGIN_X } from '../src/core/constants.ts';
 import {
+  TABLE_TOP,
   TOWER_DOOR_HALF,
   TOWER_FACADE_ALONG,
   RECEPTION_X,
@@ -4985,6 +4986,120 @@ process.stderr.write(
   `probe 31 reachability — ${roomsFlooded} room(s) flooded, ${roomsSkipped} asserting nothing:\n` +
     reachSummaries.map((line) => `    ${line}\n`).join(''),
 );
+
+// ---------------------------- 32. a hop gets her out of the café strip, and onto a table
+/**
+ * **The way out over the table** (Jim, 17 October 2026: *"if she could jump on
+ * the table it'd be easy to get out anyway"*).
+ *
+ * The lobby café's two tables stand close enough to the west wall that the
+ * strip between them is a pocket a walking child cannot leave — main's "Leave
+ * breakfast" put her in it from the chairs `lobby-a-1` and `lobby-b-1`
+ * (measured in Chrome on 58165723: stood up at local (−11.26, 9.74), then four
+ * arrow keys held 3 s each and a tap, and she never left). The put-down rule
+ * (`world/dismount.ts`) now never puts her there; she can still *get* there,
+ * by hopping onto a table and stepping off its far side. So a hop must get her
+ * back out, and a table must be somewhere she can stand. This asks both, with
+ * a real `Player` stepped by its own `update` and a real stick and jump, on the
+ * built lobby:
+ *
+ * - **(a) the premise**, so this cannot pass vacuously: from the middle of the
+ *   strip, walking each of eight ways for 3 s never reaches the room. If the café
+ *   is ever re-laid so it does, the probe says so on stderr and asserts nothing;
+ * - **(b) a hop toward the room** — the stick held east, jump pressed once —
+ *   lands her east of the tables, out in the foyer;
+ * - **(c) the table is standable**: stood on its top she stays at
+ *   `TABLE_TOP`, and walking on east she steps off into the open.
+ *
+ * The tables are found in the built hotel — the lobby's two 0.6 m props west of
+ * x −9.5 in the foyer (`propKeepOuts`, the list the guests walk round) — never
+ * typed here.
+ */
+{
+  const tables = hotel.propKeepOuts
+    .filter((disc) => disc.room === LOBBY && disc.radius === 0.6 && disc.x < -9.5 && disc.z > 5 && disc.z < 14)
+    .sort((a, b) => b.z - a.z);
+  const tableA = tables[0];
+  if (tables.length !== 2 || !tableA) {
+    problems.push(`probe 32: expected the lobby café's two tables, found ${tables.length} — the probe cannot find what it measures`);
+  } else {
+    const hopCamera = new IsoCamera();
+    const hopper = quietly(() => new Player(collision, hopCamera, new Vector3(LOBBY.originX, 0, LOBBY.originZ)));
+    world.building.attachPlayer(hopper);
+    hotel.attachPlayer(hopper as never);
+    hopper.teleportTo(LOBBY.originX - 6, 0, LOBBY.originZ + tableA.z, 0);
+    hotel.adoptRestoredPlayer();
+    let hopElapsed = 5000;
+    const drive = (seconds: number, dx: number, dz: number, jumpAt = -1): void => {
+      const len = Math.hypot(dx, dz) || 1;
+      const moveX = dx || dz ? (dx / len) * hopCamera.right.x + (dz / len) * hopCamera.right.z : 0;
+      const moveY = dx || dz ? (dx / len) * hopCamera.forward.x + (dz / len) * hopCamera.forward.z : 0;
+      let wasDown = false;
+      for (let t = 0; t < seconds; t += 1 / 60) {
+        const down = jumpAt >= 0 && t >= jumpAt && t < jumpAt + 0.1;
+        const pressed = down && !wasDown;
+        wasDown = down;
+        const input = { moveX, moveY, isDown: (key: string) => key === 'jump' && down, justPressed: (key: string) => key === 'jump' && pressed };
+        hopElapsed += 1 / 60;
+        hopper.update({ dt: 1 / 60, elapsed: hopElapsed, input } as never);
+      }
+    };
+    // Raw placement on purpose: the put-down rule would (rightly) refuse the strip.
+    const place = (localX: number, y: number, localZ: number): void => {
+      hopper.position.set(LOBBY.originX + localX, y, LOBBY.originZ + localZ);
+      hopper.previousPosition.copy(hopper.position);
+      hopper.launch(0);
+      drive(0.3, 0, 0);
+    };
+    // East of the tables, out in the foyer: past table A's east edge by her width.
+    const outX = tableA.x + tableA.radius + PLAYER_RADIUS;
+    const stripX = tableA.x - 1.6;
+    const local = (): string =>
+      `(${(hopper.position.x - LOBBY.originX).toFixed(2)}, ${hopper.position.y.toFixed(2)}, ${(hopper.position.z - LOBBY.originZ).toFixed(2)})`;
+
+    // (a) The premise.
+    let walkedOut = 0;
+    for (let k = 0; k < 8; k += 1) {
+      place(stripX, 0, tableA.z);
+      const a = (k / 8) * Math.PI * 2;
+      drive(3, Math.sin(a), Math.cos(a));
+      if (hopper.position.x - LOBBY.originX > outX) walkedOut += 1;
+    }
+    if (walkedOut > 0) {
+      process.stderr.write(
+        `probe 32 ASSERTS NOTHING: from the café strip at local (${stripX.toFixed(2)}, ${tableA.z.toFixed(2)}) ` +
+          `${walkedOut} of 8 walks reach the room, so it is no longer the pocket this probe was written for\n`,
+      );
+    } else {
+      // (b) The hop: stick toward the room, jump pressed once.
+      place(stripX, 0, tableA.z);
+      drive(3, 1, 0, 0.05);
+      const hopEnd = local();
+      if (!(hopper.position.x - LOBBY.originX > outX)) {
+        problems.push(
+          `probe 32: a hop toward the room from the café strip at local (${stripX.toFixed(2)}, ${tableA.z.toFixed(2)}) ` +
+            `ended at ${hopEnd} — still behind the tables (the room starts at x ${outX.toFixed(2)})`,
+        );
+      }
+      // (c) The table is somewhere to stand, and to step off.
+      place(tableA.x, TABLE_TOP, tableA.z);
+      drive(1, 0, 0);
+      const onTop = hopper.position.y;
+      if (Math.abs(onTop - TABLE_TOP) > 0.02) {
+        problems.push(`probe 32: stood on a café table's top she is at y ${onTop.toFixed(3)}, not its ${TABLE_TOP} m top`);
+      }
+      drive(2, 1, 0);
+      const offEnd = local();
+      if (!(hopper.position.x - LOBBY.originX > outX) || hopper.position.y > 0.05) {
+        problems.push(`probe 32: walking east off a café table's top ended at ${offEnd}, not on the foyer floor`);
+      }
+      process.stderr.write(
+        `probe 32: the café strip at local (${stripX.toFixed(2)}, ${tableA.z.toFixed(2)}) is a walking pocket (0 of 8 walks out); ` +
+          `one hop toward the room ends at ${hopEnd}; on table A's top she stands at y ${onTop.toFixed(3)} and walks off to ${offEnd}\n`,
+      );
+    }
+  }
+}
 
 // ----------------------------------------------------------------- report
 

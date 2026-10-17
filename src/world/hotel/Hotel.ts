@@ -356,8 +356,11 @@ const PICTURE_GLASS_MARGIN = 0.15;
  */
 const PICTURE_WALL_INSET = 0.31;
 
-/** The breakfast tables' flat top, metres — the asset's own figure. */
-const TABLE_TOP = 0.74;
+/**
+ * The breakfast tables' flat top, metres — the asset's own figure. Exported
+ * for `check:hotel`, which stands a child on one and hops her over one.
+ */
+export const TABLE_TOP = 0.74;
 
 /** The food moment: how long the camera takes to arrive, and how long it stays. */
 const FOOD_EASE_SECONDS = 2.5;
