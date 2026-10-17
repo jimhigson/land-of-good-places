@@ -151,15 +151,28 @@ const AUTO_HOP_LOOKAHEAD = 0.5;
  * metres, and for how long, seconds, before she is put down somewhere she
  * fits — see the wedge section of {@link Player.update}.
  *
- * `resolve` ends in exact contact, and an escort out of a deep overlap walks
- * her out at `Collision.ts`'s `MAX_DEPENETRATION_SPEED` in a handful of frames;
- * so overlap that is still there, and still this deep, half a second later is
- * neither of those. It is a wedge: a gap narrower than she is, between things
- * too tall to step over, that a hop dropped her into — and no walk gets her
- * out of one.
+ * `resolve` ends in exact contact, so overlap that is still this deep half a
+ * second later is not ordinary contact. Mostly it is a wedge: a gap narrower
+ * than she is, between things too tall to step over, that a hop dropped her
+ * into — and no walk gets her out of one.
+ *
+ * It can also be the tail of a deep escort. An escort walks her out at
+ * `Collision.ts`'s `MAX_DEPENETRATION_SPEED`, 3 m/s, so an overlap of more than
+ * about 1.5 m takes longer than this — the tortoise's bay or the library owl's
+ * capsule is added at runtime, and if she is standing where it lands, that is
+ * the depth she starts at. Then the rescue cuts the escort short and puts her
+ * down clear at once, which is where the escort was taking her anyway.
  */
 const WEDGE_DEPTH = 0.05;
 const WEDGE_SECONDS = 0.5;
+/**
+ * **The longest a wedge waits before it tries again, seconds.** When the rule
+ * finds nowhere within reach to put her, it says so and leaves her where she
+ * is; asking again every half second would say so twice a second, each time
+ * after a full search. So each failure doubles the wait, up to this, and
+ * being free of the wedge resets it.
+ */
+const WEDGE_RETRY_MAX_SECONDS = 8;
 
 /**
  * ---------------------------------------------------------------------------
@@ -573,11 +586,37 @@ export class Player implements GameSystem {
   /** How long she has been wedged inside something solid, seconds — see {@link WEDGE_SECONDS}. */
   private wedgedFor = 0;
   /**
+   * How long the current wedge must last before it lets go of her, seconds:
+   * {@link WEDGE_SECONDS}, doubled after each time the rule found nowhere to
+   * put her, up to {@link WEDGE_RETRY_MAX_SECONDS}.
+   */
+  private wedgeWait = WEDGE_SECONDS;
+  /**
    * How many times a wedge has let go of her — put her down because she had
    * been stuck inside something solid too long. Read by `check:hotel`'s probe
-   * 33, which says how many of its walks out of a pocket needed this.
+   * 33, which says how many of its walks out of a pocket needed this, and by
+   * `check:exits`, which fails if ordinary walking ever needs it.
    */
   wedgeRescues = 0;
+  /**
+   * Where the last wedge held her, how deep, and how long after she last came
+   * down from a hop or a drop it took hold (`Infinity` if she had not) — for a
+   * check that has to say where a rescue fired, and whether it was a wedge
+   * she landed in.
+   */
+  lastWedge: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly depth: number;
+    readonly afterLanding: number;
+  } | null = null;
+  /** Seconds on her feet since she last came down from a real hop or drop — see {@link lastWedge}. */
+  private sinceLanding = Infinity;
+  /** How long the current time in the air has lasted, seconds. */
+  private airborneFor = 0;
+  /** {@link sinceLanding} at the moment the current wedge took hold. */
+  private wedgeTookHold = Infinity;
   /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
   private readonly face: FaceLife;
   private ridingFlag = false;
@@ -1490,15 +1529,36 @@ export class Player implements GameSystem {
     // through the one rule (`world/dismount.ts`): the nearest spot her body is
     // clear and she can walk out of. On her feet only — mid-hop she may pass
     // through a prop's footprint on her way over it.
-    if (!this.airborne && this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0) > WEDGE_DEPTH) {
+    // A landing is coming down from a real hop or drop — not the instant
+    // re-landing of a put-down (`launch(0)`), which is no time in the air.
+    if (this.airborne) {
+      this.airborneFor += dt;
+    } else {
+      this.sinceLanding = this.airborneFor > 0.1 ? 0 : this.sinceLanding + dt;
+      this.airborneFor = 0;
+    }
+    const wedgeDepth = this.airborne ? 0 : this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0);
+    if (wedgeDepth > WEDGE_DEPTH) {
+      if (this.wedgedFor === 0) this.wedgeTookHold = this.sinceLanding;
       this.wedgedFor += dt;
-      if (this.wedgedFor >= WEDGE_SECONDS) {
+      if (this.wedgedFor >= this.wedgeWait) {
         this.wedgedFor = 0;
         this.wedgeRescues += 1;
+        this.lastWedge = {
+          x: this.position.x,
+          y: this.position.y,
+          z: this.position.z,
+          depth: wedgeDepth,
+          afterLanding: this.wedgeTookHold,
+        };
         this.teleportTo(this.position.x, groundY, this.position.z);
+        // Nowhere within reach: the rule has said so and left her be. Wait
+        // longer before asking again — see `WEDGE_RETRY_MAX_SECONDS`.
+        this.wedgeWait = this.lastPutDown?.found === false ? Math.min(this.wedgeWait * 2, WEDGE_RETRY_MAX_SECONDS) : WEDGE_SECONDS;
       }
     } else {
       this.wedgedFor = 0;
+      this.wedgeWait = WEDGE_SECONDS;
     }
 
     // A little sparkle the moment the jump actually carries her over a wall's
