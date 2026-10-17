@@ -93,19 +93,16 @@ flagged. B rule bypassed → clauses b/c/e + a-1, b-1, garden painting. C1 no cl
 C2 corridor → 16 ✗. C3 never wakes → 16 ✗. C4 wrong bed → 16 ✗. C5 no key → keyless ✗.
 D (check:hotel probe 32) table without a top → hop ends (-11.42, 0, 10.60), top y 0.000.
 
-## Status
+## Status (17 Oct, end of the engineering pass)
 - [x] fix 1 rule + every caller (62 sites, 52 driven, 10 named); check:exits OK
 - [x] fix 2 proven on main (probe 32); no code change but exporting TABLE_TOP
 - [x] fix 3 Next day, checked from 12 spaces + keyless + 3 mid-ride + mid-flight
 - [x] /hotel-cafe deep link, driven by check:exits; NOT_DRIVEN keyed by code, not line
-- [x] red proofs A-D + two controls re-run on db54d3fe → /tmp/hotel-unstick/red2/, pasted in the PR
-- [x] seed-5 park built for the final hash 2f37b38c (restart 1, digest 2ee2b3fc87c6b269)
-- [x] Chrome look on the branch (dev :5894, killed): /hotel-cafe, Jim's key route, Next day — frames on
-  qa-screenshots/pr721/ (raw.githubusercontent.com/jimhigson/land-of-good-places/qa-screenshots/pr721/…)
-- [x] pnpm run build exit 0
-- [ ] pnpm run check (first run: check:flat-primitives flagged probe 32's y threshold → flat-ok, 1ae0c00e;
-  re-running → /tmp/hotel-unstick/check-full-2.log)
-- [ ] test:procgen — CI is the gate (other seeds' parks are not built locally)
-- [ ] PR #721 is a DRAFT: body source /tmp/hotel-unstick/pr-body.md (PREVIEW_LINE left to fill from the
-  newest "Deploy PR preview" comment + /hotel-cafe); then `gh pr edit 721 --body-file`, `gh pr ready 721`
-- [ ] CI green on the final head; remove worktrees hotel-unstick-red and (at the very end) hotel-unstick
+- [x] red proofs A-E + controls (pasted in PR #721's body)
+- [x] Chrome look on the branch — frames on qa-screenshots/pr721/
+- [x] local, on b98cc234 with seed 5 built for its hash 7b220c83: `pnpm run check` exit 0,
+  `pnpm run build` exit 0. The full run found two things, both fixed: check:flat-primitives (probe 32's
+  floor threshold → flat-ok with reason) and check:cat-bus (its recording player ignored endRide's exit).
+- [ ] test:procgen and every CI job: PR #721's CI is the gate (other seeds' parks are not built locally)
+- [ ] PR #721 is a DRAFT until CI is green; body source /tmp/hotel-unstick/pr-body.md; the preview link
+  comes from the newest "Deploy PR preview" comment, + /hotel-cafe
