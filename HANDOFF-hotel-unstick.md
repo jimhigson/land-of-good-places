@@ -93,16 +93,25 @@ flagged. B rule bypassed → clauses b/c/e + a-1, b-1, garden painting. C1 no cl
 C2 corridor → 16 ✗. C3 never wakes → 16 ✗. C4 wrong bed → 16 ✗. C5 no key → keyless ✗.
 D (check:hotel probe 32) table without a top → hop ends (-11.42, 0, 10.60), top y 0.000.
 
-## Status (17 Oct, end of the engineering pass)
-- [x] fix 1 rule + every caller (62 sites, 52 driven, 10 named); check:exits OK
-- [x] fix 2 proven on main (probe 32); no code change but exporting TABLE_TOP
-- [x] fix 3 Next day, checked from 12 spaces + keyless + 3 mid-ride + mid-flight
-- [x] /hotel-cafe deep link, driven by check:exits; NOT_DRIVEN keyed by code, not line
-- [x] red proofs A-E + controls (pasted in PR #721's body)
-- [x] Chrome look on the branch — frames on qa-screenshots/pr721/
-- [x] local, on b98cc234 with seed 5 built for its hash 7b220c83: `pnpm run check` exit 0,
-  `pnpm run build` exit 0. The full run found two things, both fixed: check:flat-primitives (probe 32's
-  floor threshold → flat-ok with reason) and check:cat-bus (its recording player ignored endRide's exit).
-- [ ] test:procgen and every CI job: PR #721's CI is the gate (other seeds' parks are not built locally)
-- [ ] PR #721 is a DRAFT until CI is green; body source /tmp/hotel-unstick/pr-body.md; the preview link
-  comes from the newest "Deploy PR preview" comment, + /hotel-cafe
+## Review of #721 (comment 6234387718, "changes requested") — answered on this branch
+1. Key's reason was false: without it she is locked OUT of her suite once she leaves it (the
+   suite's door out has no lock; the corridor's door in is suiteLock). Hotel comment + check
+   clause (keyless Next day → out to the corridor → back in) — 6f76d4e2. Red: no key → locked out.
+2. Pets unchecked: check:exits builds a real Parade like Game (hotel + castle wired, router set),
+   buys two pets before the park; asserts asleep in their beds while she sleeps and at her heels
+   3 s after she wakes — 6f76d4e2. Found Next day woke her before pets from the park reached bed:
+   nap(bed, petsAsleep=true) enters their bedtime at its end. Red: M3 (standPetsDown after nap).
+3. Flood ≠ router: NavGrid.around (same lattice over a window, same rebuild code) + floodFrom;
+   copies (routeStamp, routeBlocked, navLattice.ts) deleted; World.routeConnectors/
+   routeBridgeCovers/putDownSpace one owner — 7a948d2e. New clause 2b: 2,946 standable points the
+   router walks out of, 0 moved; on the copy 38 of 322 bridge points moved (≤ 2.00 m).
+Minors: hotel landings named (1aa734ae), window cells exported (7a948d2e), parkFacts passes
+putDownSpace (7a948d2e), restore order (1aa734ae), /spawn logs a move (7ffe107e).
+Finding: with 2 pets the suite's bedroom-0 pet bed sits 0.63 m from the painting's stand spot
+(overlap 0.84 m); the rule moves her 1.00 m off it on "See the painting"'s exit.
+
+## Status
+- [x] the three items + minors, pushed; check:exits OK, check:hotel OK (LGP_PARK_FILE=CI's 7b220c83 park)
+- [ ] reds: /tmp/hotel-unstick/red3 (K, P-M3, P-follow, control), red4 (A, B, G) in hotel-unstick-red
+- [ ] local seed-5 park for 43ad19ac (build-parks-7.log), then full `pnpm run check`
+- [ ] CI green on the final head; preview /hotel-cafe loaded; PR body + review answer comment
