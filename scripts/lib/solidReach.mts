@@ -82,6 +82,18 @@ export interface ReachResult {
   readonly jumps: number;
   /** True when `until` said yes and the search stopped there. */
   readonly stopped: boolean;
+  /** What the search spent, by stage: wall-clock milliseconds and simulations run — for the coverage line, and for whoever has to make it faster. */
+  readonly cost: ReachCost;
+}
+
+/** The stages of {@link reachWithJumps}, in the order each round runs them. */
+export type ReachStage = 'step' | 'jump' | 'over' | 'chain' | 'drop';
+export interface ReachCost {
+  readonly ms: Record<ReachStage, number>;
+  /** Her own movement, simulated: run-and-jumps per stage, walk-offs and walk-backs (`joinsMain`). */
+  readonly sims: Record<'jump' | 'over' | 'chain' | 'walkOff' | 'joinsMain', number>;
+  /** Run-and-jumps aimed at each kind of solid (stages 2, 2b and 3), and how many of those kinds' solids they reached or cleared. */
+  readonly byKind: ReadonlyMap<string, { sims: number; won: number }>;
 }
 
 /** Points round a solid's outline, each with the outward direction there. */
@@ -295,6 +307,29 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
 
   const reached = new Map<SolidView, ReachedTop>();
   let jumps = 0;
+  const byKind = new Map<string, { sims: number; won: number }>();
+  const cost = {
+    ms: { step: 0, jump: 0, over: 0, chain: 0, drop: 0 },
+    sims: { jump: 0, over: 0, chain: 0, walkOff: 0, joinsMain: 0 },
+    byKind,
+  };
+  const aimedAt = (solid: SolidView, won: boolean): void => {
+    const key = solid.kind || solid.owner || solid.shape;
+    let entry = byKind.get(key);
+    if (!entry) byKind.set(key, (entry = { sims: 0, won: 0 }));
+    if (won) entry.won += 1;
+    else entry.sims += 1;
+  };
+  let clock = performance.now();
+  const spent = (stage: ReachStage): void => {
+    const now = performance.now();
+    cost.ms[stage] += now - clock;
+    clock = now;
+  };
+  const walksBack = (from: Stand): boolean => {
+    cost.sims.joinsMain += 1;
+    return joinsMain(options, groundReached, from, fps);
+  };
 
   // Tops she stood on and has not yet jumped or dropped from — each is
   // searched from exactly once (a simulated jump between the same two things
@@ -348,6 +383,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       }
     }
 
+    spent('step');
     // 2. Jumps from the ground beside a solid onto it.
     for (const solid of solids) {
       if (stopped) break;
@@ -373,8 +409,11 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           const aimZ = o.z - o.nz * Math.min(solid.halfWidth, 0.6);
           for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 0.4]) {
             jumps += 1;
+            cost.sims.jump += 1;
+            aimedAt(solid, false);
             const landed = runAndJump(options, { x: sx, z: sz, y: sy }, aimX, aimZ, jumpAt, fps);
             if (landed && standsOn(solid, landed)) {
+              aimedAt(solid, true);
               markReached({ solid, top: landed.y, how: 'jump', at: landed, from: { x: sx, z: sz, y: sy } });
               changed = true;
               done = true;
@@ -385,6 +424,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       }
     }
 
+    spent('jump');
     // 2b. Jumps over a solid, to ground beyond it that nothing has reached
     //     yet — a bush, a rim, a low wall between her and a pocket. Leaves
     //     are not a ledge, so no stage above lands her on a bush; this is how
@@ -418,11 +458,14 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           triedRunUps.add(key);
           for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 2.3]) {
             jumps += 1;
+            cost.sims.over += 1;
+            aimedAt(solid, false);
             const landed = runAndJump(options, { x: sx, z: sz, y: sy }, lx, lz, jumpAt, fps);
             if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
             over = true;
+            aimedAt(solid, true);
             // Over, and somewhere new: her walking first, then her lattice, as a drop's.
-            if (joinsMain(options, groundReached, landed, fps)) break;
+            if (walksBack(landed)) break;
             const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
             const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
             regions.push({ entry: landed, via: `a jump over ${solid.kind || solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
@@ -434,6 +477,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       }
     }
 
+    spent('over');
     // 3 and 4, from every top first stood on since the last round.
     const sources = fresh;
     fresh = [];
@@ -466,8 +510,11 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         if (source.solid.depthAt(bx, bz) < 0) continue;
         for (const jumpAt of [Math.max(0.3, bestD - 0.3), bestD + 0.6]) {
           jumps += 1;
+          cost.sims.chain += 1;
+          aimedAt(solid, false);
           const landed = runAndJump(options, start, solid.centreX, solid.centreZ, jumpAt, fps);
           if (landed && standsOn(solid, landed)) {
+            aimedAt(solid, true);
             markReached({ solid, top: landed.y, how: 'chain', at: landed, from: start });
             changed = true;
             break;
@@ -478,13 +525,15 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       //    past the edge stops her) and comes down on whatever is below — a
       //    new region when walking from anywhere reached does not get there,
       //    and her own walking cannot rejoin the start from it either.
+      spent('chain');
       for (const o of outline(source.solid, 0.8)) {
+        cost.sims.walkOff += 1;
         const landed = walkOff(options, source.solid, o, fps);
         if (!landed) continue;
         if (groundReached(landed.x, landed.z, landed.y)) continue;
         // Her own walking first — cheap, local, and the common answer: she
         // came down beside ground already reached and walks onto it.
-        if (joinsMain(options, groundReached, landed, fps)) continue;
+        if (walksBack(landed)) continue;
         // Then her lattice from where she landed: if it walks into ground
         // already reached, this is the same place by another door.
         const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
@@ -503,11 +552,12 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           break;
         }
       }
+      spent('drop');
     }
     say(`  round ${round}: ${reached.size} tops, ${regions.length} region(s), ${jumps} jumps simulated`);
   }
 
-  return { tops: [...reached.values()], regions, groundReached, jumps, stopped };
+  return { tops: [...reached.values()], regions, groundReached, jumps, stopped, cost };
 }
 
 /** Within one step of `fromY` at (x, z) — the reach her walking spends. */

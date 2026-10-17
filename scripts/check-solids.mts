@@ -48,7 +48,7 @@ import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { indexDrawnTops } from './lib/drawnTops.mts';
-import { reachWithJumps, joinsMain, runAndJump, type ReachedTop, type Stand } from './lib/solidReach.mts';
+import { reachWithJumps, joinsMain, runAndJump, type ReachCost, type ReachedTop, type Stand } from './lib/solidReach.mts';
 import { SimPlayer } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
@@ -99,6 +99,13 @@ function say(ok: boolean, line: string): void {
 }
 function note(line: string): void {
   process.stderr.write(`check:solids — ${line}\n`);
+}
+/** A search's spend, by stage, for a coverage line: seconds, and the simulations each stage ran. */
+function costLine(cost: ReachCost): string {
+  const stages = Object.entries(cost.ms).map(([stage, ms]) => `${stage} ${(ms / 1000).toFixed(0)} s`).join(', ');
+  const sims = Object.entries(cost.sims).map(([kind, n]) => `${kind} ${n}`).join(', ');
+  const kinds = [...cost.byKind].sort((a, b) => b[1].sims - a[1].sims).slice(0, 8).map(([kind, k]) => `${kind} ${k.sims}/${k.won}`).join(', ');
+  return `${stages} (simulated: ${sims}; jumps aimed/won by kind: ${kinds})`;
 }
 
 /**
@@ -382,6 +389,7 @@ if (SKIP_CENSUS) {
       entry.how.set(top.how, (entry.how.get(top.how) ?? 0) + 1);
     }
     console.log(`  ${run.name}: ${result.tops.length} tops reached, ${result.regions.length - 1} region(s) she can drop into, ${result.jumps} jumps simulated, ${((performance.now() - t0) / 1000).toFixed(0)} s`);
+    note(`clause 4, ${run.name}: ${costLine(result.cost)}`);
     for (const [kind, entry] of [...byKind].sort((a, b) => b[1].n - a[1].n)) {
       console.log(`    ${String(entry.n).padStart(4)}  ${kind.padEnd(34)} [${[...entry.how].map(([h, n]) => `${h} ${n}`).join(', ')}]  ${run.link(entry.example.at)}`);
     }
@@ -718,6 +726,8 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
   let clusters = 0;
   let dropOff = 0;
   let searched = 0;
+  const slowest: { at: Stand; n: number; ms: number; how: string }[] = [];
+  const t8 = performance.now();
   for (const key of cells.keys()) {
     if (seen.has(key)) continue;
     clusters += 1;
@@ -761,24 +771,34 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
     searched += 1;
     let out = false;
     const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+    const t0 = performance.now();
+    let how = 'walked out';
     try {
-      out = outside(lowest) || reachWithJumps({
-        collision,
-        sample,
-        grid,
-        start: lowest,
-        inSpace: (x, z) => spaceAt(x, z) === SPACE_GARDEN && Math.hypot(x - lowest.x, z - lowest.z) < 16,
-        fps: 60,
-        until: outside,
-      }).stopped;
+      if (outside(lowest)) out = true;
+      else {
+        const result = reachWithJumps({
+          collision,
+          sample,
+          grid,
+          start: lowest,
+          inSpace: (x, z) => spaceAt(x, z) === SPACE_GARDEN && Math.hypot(x - lowest.x, z - lowest.z) < 16,
+          fps: 60,
+          until: outside,
+        });
+        out = result.stopped;
+        how = costLine(result.cost);
+      }
     } catch {
       out = false;
     }
+    slowest.push({ at: lowest, n: members.length, ms: performance.now() - t0, how });
     if (!out) shut.push({ at: lowest, n: members.length });
   }
   const parkLink = (at: Stand): string => `/spawn?pos=${at.x.toFixed(1)},${at.z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
   say(shut.length === 0, `${cells.size} places open to the sky off the walk, in ${clusters} clusters (${dropOff} she steps or drops straight off): ${shut.length} she cannot leave${shut.length ? ` — ${shut.slice(0, 6).map((s) => `${s.n} cells at ${parkLink(s.at)}, ${altitudeAt(s.at.x, s.at.y, s.at.z).toFixed(2)} m up`).join('; ')}` : ''}`);
   note(`clause 8 searched the park on a ${STEP} m grid, where her body fits with nothing over her (${searched} cluster(s) needed her jumps to find a way out); a pocket under a canopy, flown into sideways, is not in it`);
+  slowest.sort((a, b) => b.ms - a.ms);
+  note(`clause 8 spent ${((performance.now() - t8) / 1000).toFixed(0)} s on its clusters; the slowest: ${slowest.slice(0, 6).map((s) => `${(s.ms / 1000).toFixed(1)} s for ${s.n} cells at (${s.at.x.toFixed(1)}, ${s.at.z.toFixed(1)}) — ${s.how}`).join('; ')}`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');
