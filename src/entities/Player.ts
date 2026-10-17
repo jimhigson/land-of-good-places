@@ -21,10 +21,11 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { carryReference, stepCeilingAt } from '../world/building/surfaces';
-import { standingHeight, walkingOntoStep } from '../world/standing';
+import { riseUnder, standingHeight, walkingOntoStep } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
+import { KID_HEIGHT } from '../art/models/kidHeight';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { poseRailRaceRider, type RiderPose } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
@@ -881,7 +882,7 @@ export class Player implements GameSystem {
     // though an escalator's per-frame shove is far too small to reach even one
     // extra sub-step: a moving walkway that ever carried her a wall's width in
     // a frame should not be able to carry her through one.
-    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance);
+    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance, Infinity, undefined, undefined, KID_HEIGHT);
     this.group.position.copy(this.position);
   }
 
@@ -1218,6 +1219,10 @@ export class Player implements GameSystem {
         if (following) reference = groundY;
       },
       stepping ? (x, z) => stepCeilingAt(x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
+      // Her whole body, feet to the top of her head: a solid that begins above
+      // her (a canopy, the underside of a rail's deck) meets her only once her
+      // head is up there with it.
+      KID_HEIGHT,
     );
 
     // An escort runs until the pushing stops, not until it goes quiet.
@@ -1329,7 +1334,7 @@ export class Player implements GameSystem {
       } else {
         this.verticalVelocity -= GRAVITY * dt;
       }
-      this.position.y += this.verticalVelocity * dt;
+      this.rise(dt);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1343,7 +1348,7 @@ export class Player implements GameSystem {
     } else if (this.airborne) {
       this.wornJetpack?.setThrust(0);
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
+      this.rise(dt);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1498,6 +1503,11 @@ export class Player implements GameSystem {
     if (!world) return;
     if (this.hopRings.root.parent !== world) world.add(this.hopRings.root);
     this.hopRings.burst(this.position.x, this.position.y - 0.05, this.position.z, 0.4);
+  }
+
+  /** One frame of vertical motion in the air; her head stops at an underside — `riseUnder`, its one owner. */
+  private rise(dt: number): void {
+    this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
   }
 
   /**

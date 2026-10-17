@@ -7,6 +7,7 @@ import {
 } from '../../core/constants';
 import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
 import { separatedByHeight, type CollisionWorld } from '../../world/Collision';
+import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { terrainHeight } from '../../world/terrain';
 import { faceOnGround } from '../../world/up';
 import type { GroundSampler } from '../Player';
@@ -312,7 +313,7 @@ export class NpcCharacter {
     // the same way it caps an ordinary frame's — `this.previousPosition`
     // still holds where the script left her, from `setScriptedPose`'s own
     // copy, so it is the right "before" to measure the escape against.
-    this.collision.resolve(this.position, NPC_RADIUS);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT);
     this.boundEscape(this.previousPosition);
     this.previousPosition.copy(this.position);
     this.avatar.rig.root.position.copy(this.position);
@@ -691,7 +692,7 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
-    this.collision.resolve(this.position, NPC_RADIUS);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT);
     this.boundEscape(this.previousPosition);
 
     // Trust the resolved position over the intended one, so walking into a wall

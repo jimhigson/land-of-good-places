@@ -138,6 +138,7 @@ import { Parade } from '../src/entities/parade/Parade.ts';
 import { TELEPORT_GAP } from '../src/entities/parade/trail.ts';
 import { ACCEPTANCE_SCOPE } from './lib/checkScope.mts';
 import { standingAt } from './lib/standable.mts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { BUILDING_STEP_UP } from '../src/core/constants.ts';
 import { hotelTowerFindings } from './lib/hotelTower.mts';
 
@@ -991,7 +992,9 @@ if (!mezzanine) {
       const startX = LOBBY.originX + edge.x1 + ux * along - edge.outwardX * 0.9;
       const startZ = LOBBY.originZ + edge.z1 + uz * along - edge.outwardZ * 0.9;
       // Walk her off it the way the game moves her: many small steps, each
-      // one resolved, not one 0.6 m teleport.
+      // one resolved, not one 0.6 m teleport — and as the body she is, as tall
+      // as `KID_HEIGHT`, because a banded rail meets her once her head is
+      // above its base.
       const body = new Vector3(startX, edge.deckHeight, startZ);
       for (let step = 0; step < 30; step += 1) {
         collision.resolveMovement(
@@ -1001,6 +1004,9 @@ if (!mezzanine) {
           PLAYER_RADIUS,
           0,
           1 / 60,
+          undefined,
+          undefined,
+          KID_HEIGHT,
         );
       }
       // How far past the edge line she ended up, along the outward normal.
@@ -1028,11 +1034,14 @@ if (!mezzanine) {
     // five edges that were perfectly correct. The band is the property that
     // actually decides it, and it cannot be confounded. (That the arch is
     // genuinely walkable end to end is probe 6's axis walk, above.)
-    if (edge.base <= JUMP_APEX_HEIGHT) {
+    // A banded solid meets a body once her head is above its base, so the
+    // question is whether a ground jump puts her head up there: her height
+    // plus the jump's apex.
+    if (edge.base <= KID_HEIGHT + JUMP_APEX_HEIGHT) {
       problems.push(
-        `${edge.what} is banded at ${edge.base.toFixed(2)} m, within reach of a ground jump ` +
-          `(apex ${JUMP_APEX_HEIGHT.toFixed(2)} m) — it would be an invisible wall under the ` +
-          `overhang, which is the exact disease baseHeight exists to cure`,
+        `${edge.what} is banded at ${edge.base.toFixed(2)} m, within reach of a ground jump's ` +
+          `head (${KID_HEIGHT.toFixed(2)} m tall, apex ${JUMP_APEX_HEIGHT.toFixed(2)} m) — it would be an ` +
+          `invisible wall under the overhang, which is the exact disease baseHeight exists to cure`,
       );
     }
   }

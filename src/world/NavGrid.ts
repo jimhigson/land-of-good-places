@@ -916,8 +916,8 @@ export class NavGrid {
     // *beneath* the overhang — the lobby's walk-through arch — at every
     // level. See `Collision.ts`'s `baseHeight` header.
     this.collision.forEachCircle(
-      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute) => {
-        const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
+      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight) => {
+        const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
         if (this.walksOnto(topHeight, topIsAbsolute, x, z, sample)) return;
         this.stampCircle(
@@ -929,8 +929,8 @@ export class NavGrid {
       },
     );
     this.collision.forEachWall(
-      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute) => {
-        const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
+      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight) => {
+        const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
         if (this.walksOnto(topHeight, topIsAbsolute, (x1 + x2) / 2, (z1 + z2) / 2, sample)) return;
         this.stampSegment(
@@ -948,8 +948,8 @@ export class NavGrid {
     // The outline is stamped as the four edges the old `addRectangle` walls
     // were, with the very same arithmetic, so every cell round a box is the
     // cell it always was; the core's own cells are then filled.
-    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, centre) => {
-      const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
+    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, centre, hopHeight) => {
+      const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
       if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
       if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample)) return;
       const into = hoppable ? this.hopBand : this.blocked;

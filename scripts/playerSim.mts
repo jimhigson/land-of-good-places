@@ -35,7 +35,8 @@
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
 import { carryReference, stepCeilingAt } from '../src/world/building/surfaces.ts';
-import { standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { riseUnder, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
@@ -274,11 +275,12 @@ export class SimPlayer {
         dt,
         this.groundSubstepping ? onStep : undefined,
         stepCeiling,
+        KID_HEIGHT,
       );
     } else {
       this.position.x += deltaX;
       this.position.z += deltaZ;
-      result = this.collision.resolve(this.position, this.radius, this.hopClearance, dt, stepCeiling);
+      result = this.collision.resolve(this.position, this.radius, this.hopClearance, dt, stepCeiling, KID_HEIGHT);
     }
 
     this.clearedWall = result.clearedWall;
@@ -333,7 +335,7 @@ export class SimPlayer {
     let hopHeight = 0;
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
+      this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
       // The landing. Its absence is what made the earlier rig over-count.
       if (this.position.y <= groundY) {
         this.position.y = groundY;

@@ -1,6 +1,8 @@
 import { Vector3 } from 'three';
 import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
 import { riseBetween } from './building/stepReach';
+import { GROUND_SPHERE_RADIUS } from '../core/constants';
+import { SPACE_GARDEN, spaceAt } from './spaces';
 
 /**
  * Deliberately simple solid-object handling.
@@ -98,13 +100,24 @@ import { riseBetween } from './building/stepReach';
  * the honest price of the lattice staying two-dimensional.
  */
 
-interface CircleCollider {
-  /** Assigned by {@link CollisionWorld.addCircle}, so a caller can name this
-   * exact registration again later — see {@link CollisionWorld.removeCircle}. */
-  id: number;
-  x: number;
-  z: number;
-  radius: number;
+/**
+ * **A solid's heights** — what every collider kind carries beyond its shape.
+ *
+ * A solid is a 3-D body: a footprint, a bottom and a top. The top is where her
+ * feet come to rest when she is over it (`highestTopAt`), and the sides are
+ * what she bumps into below it; the bottom is where it begins, so she walks
+ * under a canopy and her head meets its underside (`ceilingAt`).
+ *
+ * **Heights are taken where they are asked.** Indoors up is `+Y` and a height
+ * is a world `y`. Out in the park the ground is a sphere and up is away from
+ * its centre, so a top given as a world `y` at the solid's own reference point
+ * is held as a **radius** from the planet's centre (`topRadius`) and read back
+ * as the world `y` of that sphere over whatever column is asked — the leaned,
+ * flat top the solid is drawn with, to a few centimetres over a 6 m wall —
+ * rather than one number that is right at the solid's centre and a third of a
+ * metre wrong at its ends on the park's steep far side.
+ */
+interface SolidHeights {
   topHeight: number;
   autoHoppable: boolean;
   topIsAbsolute: boolean;
@@ -114,6 +127,33 @@ interface CircleCollider {
   navStamped: boolean;
   /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
   owner: string;
+  /** What kind of thing it is — "garden wall", "lamp post" — where the registration was scoped ({@link CollisionWorld.kinded}); `''` otherwise. */
+  kind: string;
+  /**
+   * The absolute top as a distance from the planet's centre, for a solid out in
+   * the park (see the interface doc); `NaN` indoors, for a relative top, or for
+   * one with no top at all.
+   */
+  topRadius: number;
+  /** The base the same way: a radius in the park, `NaN` otherwise. */
+  baseRadius: number;
+  /**
+   * How tall the solid is above the ground it stands on, for the one question
+   * asked in those terms: whether a hop is *planned* over it
+   * ({@link autoHopClears}, `NavGrid`'s hop band, the auto-hop lookahead). A
+   * relative top is its own; an absolute one says it when registered as
+   * hoppable, and is `NaN` otherwise (nothing plans a hop over it).
+   */
+  hopHeight: number;
+}
+
+interface CircleCollider extends SolidHeights {
+  /** Assigned by {@link CollisionWorld.addCircle}, so a caller can name this
+   * exact registration again later — see {@link CollisionWorld.removeCircle}. */
+  id: number;
+  x: number;
+  z: number;
+  radius: number;
 }
 
 /**
@@ -133,21 +173,12 @@ interface CircleCollider {
  * called solid — measured: a march at one stopped at -1.270 m with the fix and
  * walked on to +3.000 m without it.
  */
-export interface WallCollider {
+export interface WallCollider extends SolidHeights {
   x1: number;
   z1: number;
   x2: number;
   z2: number;
   halfThickness: number;
-  topHeight: number;
-  autoHoppable: boolean;
-  topIsAbsolute: boolean;
-  /** World Y below which this collider does not exist. See the header. */
-  baseHeight: number;
-  /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
-  navStamped: boolean;
-  /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
-  owner: string;
 }
 
 /**
@@ -168,7 +199,7 @@ export interface WallCollider {
  * faces at `half + rounding`, their corners quarter-circles of `rounding` — so
  * nothing a child walks *round* moved; only the inside stopped being hollow.
  */
-export interface BoxCollider {
+export interface BoxCollider extends SolidHeights {
   cx: number;
   cz: number;
   halfX: number;
@@ -177,15 +208,50 @@ export interface BoxCollider {
   cos: number;
   sin: number;
   rounding: number;
-  topHeight: number;
-  autoHoppable: boolean;
-  topIsAbsolute: boolean;
-  /** World Y below which this collider does not exist. See the header. */
-  baseHeight: number;
-  /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
-  navStamped: boolean;
-  /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
-  owner: string;
+}
+
+/**
+ * **A world `y` at the solid's reference point, held as its distance from the
+ * planet's centre** — or `NaN` where heights are plain `y` (indoors, or a
+ * height that is not a place: relative, infinite). See {@link SolidHeights}.
+ */
+function radiusFor(x: number, z: number, y: number): number {
+  if (!Number.isFinite(y) || spaceAt(x, z) !== SPACE_GARDEN) return Number.NaN;
+  const cy = y + GROUND_SPHERE_RADIUS;
+  if (cy <= 0) return Number.NaN;
+  return Math.hypot(x, cy, z);
+}
+
+/** The world `y` of the sphere of `radius` over column `(x, z)`, the inverse of {@link radiusFor}. */
+function yOnRadius(radius: number, x: number, z: number): number {
+  const above = radius * radius - x * x - z * z;
+  return above > 0 ? Math.sqrt(above) - GROUND_SPHERE_RADIUS : -Infinity;
+}
+
+/**
+ * **A solid's absolute top over column `(x, z)`, world `y`** — the one place a
+ * top is read, by the mover, the ground sampler and every measure. `NaN` for a
+ * relative top (a height above whoever asks, so no place at all) and
+ * `Infinity` for a solid that has no top.
+ */
+export function solidTopAt(solid: Readonly<SolidHeights>, x: number, z: number): number {
+  if (!solid.topIsAbsolute) return Number.NaN;
+  return Number.isNaN(solid.topRadius) ? solid.topHeight : yOnRadius(solid.topRadius, x, z);
+}
+
+/** A solid's base over column `(x, z)`, world `y` — `-Infinity` for one that stands on the ground. */
+export function solidBaseAt(solid: Readonly<SolidHeights>, x: number, z: number): number {
+  return Number.isNaN(solid.baseRadius) ? solid.baseHeight : yOnRadius(solid.baseRadius, x, z);
+}
+
+/**
+ * Is this solid **banded** — does it begin above the ground, a rail on an
+ * overhanging deck or a canopy over a bench? A planning query about the ground
+ * (`isClearCircle`, `solidDepthAt`) does not count one, and the route lattice
+ * does not stamp one unless told to (`navStamped`).
+ */
+function banded(solid: Readonly<SolidHeights>): boolean {
+  return Number.isFinite(solid.baseHeight);
 }
 
 /**
@@ -455,14 +521,20 @@ const SHALLOW_OVERLAP = 0.5;
  * - `'solid'`: it pushes.
  */
 function contactWith(
-  collider: { readonly baseHeight: number; readonly topHeight: number; readonly topIsAbsolute: boolean },
+  collider: Readonly<SolidHeights>,
   position: Vector3,
   clearance: number,
   stepCeiling = -Infinity,
+  moverHeight = 0,
 ): 'absent' | 'cleared' | 'stepped' | 'solid' {
-  if (position.y < collider.baseHeight) return 'absent';
-  if (clearsTop(collider.topHeight, collider.topIsAbsolute ? position.y : clearance)) return 'cleared';
-  if (collider.topIsAbsolute && collider.topHeight <= stepCeiling) return 'stepped';
+  // Below its base — her head under a canopy's underside, under the landing's
+  // rail — it is not there at all. A mover with no height (a planning probe)
+  // is a point at its feet, as every collider used to see every mover.
+  if (banded(collider) && position.y + moverHeight <= solidBaseAt(collider, position.x, position.z)) return 'absent';
+  if (!collider.topIsAbsolute) return clearsTop(collider.topHeight, clearance) ? 'cleared' : 'solid';
+  const top = solidTopAt(collider, position.x, position.z);
+  if (position.y + JUMP_CLEARANCE_GRACE >= top) return 'cleared';
+  if (top <= stepCeiling) return 'stepped';
   return 'solid';
 }
 
@@ -668,6 +740,56 @@ export class CollisionWorld {
     }
   }
 
+  /** The kind every collider registered now is filed under — see {@link kinded}. */
+  private currentKind = '';
+
+  /**
+   * **Files every collider `build` registers as one kind of thing** — "garden
+   * wall", "lamp post", "castle bench" — so a measure can say what a solid is
+   * when it reports one (`check:solids`' census groups by it). Nests: the
+   * innermost kind wins. Changes nothing about how anything collides.
+   */
+  kinded<T>(kind: string, build: () => T): T {
+    const outer = this.currentKind;
+    this.currentKind = kind;
+    try {
+      return build();
+    } finally {
+      this.currentKind = outer;
+    }
+  }
+
+  /**
+   * The heights record every registration shares — {@link SolidHeights}.
+   * `(x, z)` is the solid's reference point, where its top and base were
+   * measured; out in the park both are held as radii from there.
+   */
+  private heights(
+    x: number,
+    z: number,
+    topHeight: number,
+    autoHoppable: boolean,
+    topIsAbsolute: boolean,
+    baseHeight: number,
+    navStamped: boolean,
+    hopHeight: number,
+  ): SolidHeights {
+    return {
+      topHeight,
+      autoHoppable,
+      topIsAbsolute,
+      baseHeight,
+      navStamped,
+      owner: this.currentOwner,
+      kind: this.currentKind,
+      topRadius: topIsAbsolute ? radiusFor(x, z, topHeight) : Number.NaN,
+      baseRadius: radiusFor(x, z, baseHeight),
+      // A relative top is its own hop height; an absolute one plans no hop
+      // unless it says how tall it stands.
+      hopHeight: !topIsAbsolute ? topHeight : hopHeight,
+    };
+  }
+
   /**
    * **How deep (x, z) stands inside the deepest ground-standing solid** —
    * metres inside a circle's rim or a wall's band, the larger of the two;
@@ -685,7 +807,7 @@ export class CollisionWorld {
     const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
     if (!bucket) return { depth, what, owner };
     for (const circle of bucket.circles) {
-      if (circle.baseHeight > 0) continue;
+      if (banded(circle)) continue;
       if (owners && !owners.has(circle.owner)) continue;
       const here = circle.radius - Math.hypot(x - circle.x, z - circle.z);
       if (here > depth) {
@@ -695,7 +817,7 @@ export class CollisionWorld {
       }
     }
     for (const wall of bucket.walls) {
-      if (wall.baseHeight > 0) continue;
+      if (banded(wall)) continue;
       if (owners && !owners.has(wall.owner)) continue;
       const abx = wall.x2 - wall.x1;
       const abz = wall.z2 - wall.z1;
@@ -711,7 +833,7 @@ export class CollisionWorld {
       }
     }
     for (const box of bucket.boxes) {
-      if (box.baseHeight > 0) continue;
+      if (banded(box)) continue;
       if (owners && !owners.has(box.owner)) continue;
       const here = boxDepth(box, x, z, 0);
       if (here > depth) {
@@ -753,17 +875,15 @@ export class CollisionWorld {
     if (!bucket) return best;
     for (const circle of bucket.circles) {
       if (!circle.topIsAbsolute) continue;
-      const top = circle.topHeight;
-      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       const dx = x - circle.x;
       const dz = z - circle.z;
       if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
+      const top = solidTopAt(circle, x, z);
+      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
     }
     for (const wall of bucket.walls) {
       if (!wall.topIsAbsolute) continue;
-      const top = wall.topHeight;
-      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
@@ -772,14 +892,55 @@ export class CollisionWorld {
       const dx = x - (wall.x1 + ax * t);
       const dz = z - (wall.z1 + az * t);
       if (dx * dx + dz * dz > wall.halfThickness * wall.halfThickness) continue;
+      const top = solidTopAt(wall, x, z);
+      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
     }
     for (const box of bucket.boxes) {
       if (!box.topIsAbsolute) continue;
-      const top = box.topHeight;
-      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       if (boxDepth(box, x, z, 0) < 0) continue;
+      const top = solidTopAt(box, x, z);
+      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
+    }
+    return best;
+  }
+
+  /**
+   * **The lowest underside over `(x, z)` at or above `fromY`** — world `y`, or
+   * `Infinity` where nothing hangs over the point. Where a rising head stops:
+   * `Player` asks it from the top of her head as she jumps, so a canopy over a
+   * bench is a ceiling she bumps rather than a slab her head passes through.
+   * Only banded solids have an underside; everything else stands on the
+   * ground and is met side-on.
+   */
+  ceilingAt(x: number, z: number, fromY: number): number {
+    let best = Infinity;
+    const grid = this.solidGrid();
+    const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
+    if (!bucket) return best;
+    const consider = (solid: SolidHeights): void => {
+      if (!banded(solid)) return;
+      const base = solidBaseAt(solid, x, z);
+      if (base >= fromY && base < best) best = base;
+    };
+    for (const circle of bucket.circles) {
+      const dx = x - circle.x;
+      const dz = z - circle.z;
+      if (dx * dx + dz * dz <= circle.radius * circle.radius) consider(circle);
+    }
+    for (const wall of bucket.walls) {
+      const ax = wall.x2 - wall.x1;
+      const az = wall.z2 - wall.z1;
+      const lengthSquared = ax * ax + az * az;
+      let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const dx = x - (wall.x1 + ax * t);
+      const dz = z - (wall.z1 + az * t);
+      if (dx * dx + dz * dz <= wall.halfThickness * wall.halfThickness) consider(wall);
+    }
+    for (const box of bucket.boxes) {
+      if (boxDepth(box, x, z, 0) >= 0) consider(box);
     }
     return best;
   }
@@ -818,11 +979,11 @@ export class CollisionWorld {
     for (const circle of this.circles) {
       // A ground-plane planning query: a banded collider (baseHeight above the
       // ground) is not solid to anything standing here.
-      if (circle.baseHeight > 0) continue;
+      if (banded(circle)) continue;
       if (Math.hypot(x - circle.x, z - circle.z) < radius + circle.radius) return false;
     }
     for (const wall of this.walls) {
-      if (wall.baseHeight > 0) continue;
+      if (banded(wall)) continue;
       const abx = wall.x2 - wall.x1;
       const abz = wall.z2 - wall.z1;
       const lengthSq = abx * abx + abz * abz || 1;
@@ -832,7 +993,7 @@ export class CollisionWorld {
       if (Math.hypot(x - cx, z - cz) < radius + wall.halfThickness) return false;
     }
     for (const box of this.boxes) {
-      if (box.baseHeight > 0) continue;
+      if (banded(box)) continue;
       if (boxDepth(box, x, z, radius) > 0) return false;
     }
     return true;
@@ -912,6 +1073,7 @@ export class CollisionWorld {
     topIsAbsolute = false,
     baseHeight = -Infinity,
     navStamped = false,
+    hopHeight = Number.NaN,
   ): number {
     const id = this.nextCircleId;
     this.nextCircleId += 1;
@@ -920,12 +1082,7 @@ export class CollisionWorld {
       x,
       z,
       radius,
-      topHeight,
-      autoHoppable,
-      topIsAbsolute,
-      baseHeight,
-      navStamped,
-      owner: this.currentOwner,
+      ...this.heights(x, z, topHeight, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
     });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
@@ -974,6 +1131,7 @@ export class CollisionWorld {
     topIsAbsolute = false,
     baseHeight = -Infinity,
     navStamped = false,
+    hopHeight = Number.NaN,
   ): WallCollider {
     const wall: WallCollider = {
       x1,
@@ -981,12 +1139,7 @@ export class CollisionWorld {
       x2,
       z2,
       halfThickness,
-      topHeight,
-      autoHoppable,
-      topIsAbsolute,
-      baseHeight,
-      navStamped,
-      owner: this.currentOwner,
+      ...this.heights((x1 + x2) / 2, (z1 + z2) / 2, topHeight, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
     };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
@@ -1076,6 +1229,7 @@ export class CollisionWorld {
     autoHoppable = false,
     topIsAbsolute = false,
     baseHeight = -Infinity,
+    hopHeight = Number.NaN,
   ): BoxCollider {
     const box: BoxCollider = {
       cx,
@@ -1085,12 +1239,7 @@ export class CollisionWorld {
       cos: yaw === 0 ? 1 : Math.cos(yaw),
       sin: yaw === 0 ? 0 : Math.sin(yaw),
       rounding,
-      topHeight,
-      autoHoppable,
-      topIsAbsolute,
-      baseHeight,
-      navStamped: false,
-      owner: this.currentOwner,
+      ...this.heights(cx, cz, topHeight, autoHoppable, topIsAbsolute, baseHeight, false, hopHeight),
     };
     this.boxes.push(box);
     // The narrowest band a mover could hope to skip in one frame: its thin
@@ -1154,6 +1303,7 @@ export class CollisionWorld {
       baseHeight: number,
       navStamped: boolean,
       topIsAbsolute: boolean,
+      hopHeight: number,
     ) => void,
   ): void {
     for (const circle of this.circles) {
@@ -1166,6 +1316,7 @@ export class CollisionWorld {
         circle.baseHeight,
         circle.navStamped,
         circle.topIsAbsolute,
+        circle.hopHeight,
       );
     }
   }
@@ -1182,6 +1333,7 @@ export class CollisionWorld {
       baseHeight: number,
       navStamped: boolean,
       topIsAbsolute: boolean,
+      hopHeight: number,
     ) => void,
   ): void {
     for (const wall of this.walls) {
@@ -1196,6 +1348,7 @@ export class CollisionWorld {
         wall.baseHeight,
         wall.navStamped,
         wall.topIsAbsolute,
+        wall.hopHeight,
       );
     }
   }
@@ -1221,6 +1374,7 @@ export class CollisionWorld {
       navStamped: boolean,
       topIsAbsolute: boolean,
       centre: readonly [number, number],
+      hopHeight: number,
     ) => void,
   ): void {
     for (const box of this.boxes) {
@@ -1237,6 +1391,7 @@ export class CollisionWorld {
         box.navStamped,
         box.topIsAbsolute,
         [box.cx, box.cz],
+        box.hopHeight,
       );
     }
   }
@@ -1337,6 +1492,7 @@ export class CollisionWorld {
     dt = Infinity,
     onStep?: (position: Vector3) => void,
     stepCeiling?: StepCeiling,
+    moverHeight = 0,
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     const distance = Math.hypot(deltaX, deltaZ);
     const limit = this.maxSafeStep(radius);
@@ -1348,13 +1504,13 @@ export class CollisionWorld {
     let clearedWall = false;
     let escorting = false;
     let corrected = false;
-    let depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling);
+    let depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight);
     for (let step = 0; step < steps; step += 1) {
       const fromX = position.x;
       const fromZ = position.z;
       position.x += stepX;
       position.z += stepZ;
-      let result = this.resolve(position, radius, clearance, stepDt, stepCeiling);
+      let result = this.resolve(position, radius, clearance, stepDt, stepCeiling, moverHeight);
       // **The pinch guard: a step may not leave her deeper in stone than it
       // found her.** `resolve` pushes out of each collider in turn, twice.
       // Between two colliders closer together than she is wide — a lamp post
@@ -1367,12 +1523,12 @@ export class CollisionWorld {
       // who cannot squeeze through would — and `resolve` is asked there with
       // no movement, so an escort already under way still progresses.
       // `check:castle-towers` marches 48 bearings at every turret.
-      const depthAfter = this.deepestSolidOverlap(position, radius, clearance, stepCeiling);
+      const depthAfter = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight);
       if (depthAfter > Math.max(depthBefore, 0) + PINCH_TOLERANCE) {
         position.x = fromX;
         position.z = fromZ;
-        result = this.resolve(position, radius, clearance, stepDt, stepCeiling);
-        depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling);
+        result = this.resolve(position, radius, clearance, stepDt, stepCeiling, moverHeight);
+        depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight);
       } else {
         depthBefore = depthAfter;
       }
@@ -1465,14 +1621,14 @@ export class CollisionWorld {
    * ({@link contactWith}); the soft park boundary is not stone and is not
    * counted. Read-only — the measuring half of `resolveMovement`'s pinch guard.
    */
-  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling): number {
+  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling, moverHeight = 0): number {
     let deepest = 0;
     const stepHere = stepCeiling ? stepCeiling(position.x, position.z) : -Infinity;
     for (const circle of this.circles) {
       const minimum = circle.radius + radius;
       const depth = minimum - Math.hypot(position.x - circle.x, position.z - circle.z);
       if (depth <= deepest) continue;
-      if (contactWith(circle, position, clearance, stepHere) !== 'solid') continue;
+      if (contactWith(circle, position, clearance, stepHere, moverHeight) !== 'solid') continue;
       deepest = depth;
     }
     for (const wall of this.walls) {
@@ -1486,13 +1642,13 @@ export class CollisionWorld {
         wall.halfThickness + radius -
         Math.hypot(position.x - (wall.x1 + ax * t), position.z - (wall.z1 + az * t));
       if (depth <= deepest) continue;
-      if (contactWith(wall, position, clearance, stepHere) !== 'solid') continue;
+      if (contactWith(wall, position, clearance, stepHere, moverHeight) !== 'solid') continue;
       deepest = depth;
     }
     for (const box of this.boxes) {
       const depth = boxDepth(box, position.x, position.z, radius);
       if (depth <= deepest) continue;
-      if (contactWith(box, position, clearance, stepHere) !== 'solid') continue;
+      if (contactWith(box, position, clearance, stepHere, moverHeight) !== 'solid') continue;
       deepest = depth;
     }
     return deepest;
@@ -1504,6 +1660,7 @@ export class CollisionWorld {
     clearance = 0,
     dt = Infinity,
     stepCeiling?: StepCeiling,
+    moverHeight = 0,
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     let clearedAny = false;
     // Asked once, where she is as this call begins: a push moves her by her
@@ -1545,7 +1702,7 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        const contact = contactWith(circle, position, clearance, stepHere);
+        const contact = contactWith(circle, position, clearance, stepHere, moverHeight);
         if (contact === 'absent' || contact === 'stepped') continue;
         if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
@@ -1578,7 +1735,7 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        const contact = contactWith(wall, position, clearance, stepHere);
+        const contact = contactWith(wall, position, clearance, stepHere, moverHeight);
         if (contact === 'absent' || contact === 'stepped') continue;
         if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
@@ -1608,7 +1765,7 @@ export class CollisionWorld {
         const reading = readBox(box, position.x, position.z);
         const depth = box.rounding + radius - reading.distance + reading.inside;
         if (depth <= 0) continue; // not overlapping at all
-        const contact = contactWith(box, position, clearance, stepHere);
+        const contact = contactWith(box, position, clearance, stepHere, moverHeight);
         if (contact === 'absent' || contact === 'stepped') continue;
         if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
@@ -1674,7 +1831,7 @@ export class CollisionWorld {
    */
   wouldAutoHopClear(position: Vector3, radius: number, apexClearance: number): boolean {
     for (const circle of this.circles) {
-      if (!circle.autoHoppable || !autoHopClears(circle.topHeight, apexClearance)) continue;
+      if (!circle.autoHoppable || !autoHopClears(circle.hopHeight, apexClearance)) continue;
       const dx = position.x - circle.x;
       const dz = position.z - circle.z;
       const minimum = circle.radius + radius;
@@ -1682,7 +1839,7 @@ export class CollisionWorld {
     }
 
     for (const wall of this.walls) {
-      if (!wall.autoHoppable || !autoHopClears(wall.topHeight, apexClearance)) continue;
+      if (!wall.autoHoppable || !autoHopClears(wall.hopHeight, apexClearance)) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
@@ -1696,7 +1853,7 @@ export class CollisionWorld {
     }
 
     for (const box of this.boxes) {
-      if (!box.autoHoppable || !autoHopClears(box.topHeight, apexClearance)) continue;
+      if (!box.autoHoppable || !autoHopClears(box.hopHeight, apexClearance)) continue;
       if (boxDepth(box, position.x, position.z, radius) > 0) return true;
     }
 
@@ -1794,64 +1951,37 @@ export class CollisionWorld {
     };
 
     let demoted = 0;
+    // **A hop is planned on the solid's own height above its ground** (its
+    // `hopHeight`), never on its top: an absolute top is a height in the world,
+    // which says nothing about how tall a wall is to a child standing beside it.
+    // A hoppable solid with no hop height, or with a banded base the planner
+    // cannot see, is demoted — the one repair that cannot make anything worse.
+    const demote = (solid: SolidHeights, where: string, halfWidth: number): void => {
+      if (!Number.isFinite(solid.hopHeight) && Number.isFinite(solid.topHeight) && solid.topIsAbsolute) {
+        problems.push(`${where} is autoHoppable with an absolute top and no hop height, which is unsupported`);
+      } else if (banded(solid)) {
+        problems.push(`${where} is autoHoppable with a banded base, which is unsupported`);
+      } else if (!inspect(solid.hopHeight, halfWidth, where)) {
+        return;
+      }
+      solid.autoHoppable = false;
+      demoted += 1;
+    };
     for (const circle of this.circles) {
       if (!circle.autoHoppable) continue;
-      const where = `the hoppable circle at [${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}]`;
-      if (circle.topIsAbsolute) {
-        // The hop planner reasons in relative clearances; an absolute top in
-        // its arithmetic would be nonsense — see the header.
-        problems.push(`${where} is autoHoppable with an absolute top, which is unsupported`);
-        circle.autoHoppable = false;
-        demoted += 1;
-        continue;
-      }
-      if (Number.isFinite(circle.baseHeight)) {
-        // Same reasoning for a banded base: the planner cannot see one.
-        problems.push(`${where} is autoHoppable with a banded base, which is unsupported`);
-        circle.autoHoppable = false;
-        demoted += 1;
-        continue;
-      }
-      if (inspect(circle.topHeight, circle.radius, where)) {
-        circle.autoHoppable = false;
-        demoted += 1;
-      }
+      demote(circle, `the hoppable circle at [${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}]`, circle.radius);
     }
     for (const wall of this.walls) {
       if (!wall.autoHoppable) continue;
-      const where =
-        `the hoppable wall [${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)}] → ` +
-        `[${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}]`;
-      if (wall.topIsAbsolute) {
-        problems.push(`${where} is autoHoppable with an absolute top, which is unsupported`);
-        wall.autoHoppable = false;
-        demoted += 1;
-        continue;
-      }
-      if (Number.isFinite(wall.baseHeight)) {
-        problems.push(`${where} is autoHoppable with a banded base, which is unsupported`);
-        wall.autoHoppable = false;
-        demoted += 1;
-        continue;
-      }
-      if (inspect(wall.topHeight, wall.halfThickness, where)) {
-        wall.autoHoppable = false;
-        demoted += 1;
-      }
+      demote(
+        wall,
+        `the hoppable wall [${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)}] → [${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}]`,
+        wall.halfThickness,
+      );
     }
     for (const box of this.boxes) {
       if (!box.autoHoppable) continue;
-      const where = `the hoppable box at [${box.cx.toFixed(1)}, ${box.cz.toFixed(1)}]`;
-      if (box.topIsAbsolute || Number.isFinite(box.baseHeight)) {
-        problems.push(`${where} is autoHoppable with an absolute top or a banded base, which is unsupported`);
-        box.autoHoppable = false;
-        demoted += 1;
-        continue;
-      }
-      if (inspect(box.topHeight, Math.min(box.halfX, box.halfZ) + box.rounding, where)) {
-        box.autoHoppable = false;
-        demoted += 1;
-      }
+      demote(box, `the hoppable box at [${box.cx.toFixed(1)}, ${box.cz.toFixed(1)}]`, Math.min(box.halfX, box.halfZ) + box.rounding);
     }
 
     // A demotion changes the map `NavGrid` bakes, so it has to invalidate the

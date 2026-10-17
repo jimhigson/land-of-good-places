@@ -1,3 +1,4 @@
+import type { Vector3 } from 'three';
 import type { CollisionWorld } from './Collision';
 import { carryReference, stepCeilingAt } from './building/stepReach';
 import { PLAYER_RADIUS } from '../core/constants';
@@ -71,4 +72,28 @@ export function walkingOntoStep(
   const aheadZ = z + dirZ * STEP_LOOKAHEAD;
   const ceiling = stepCeilingAt(aheadX, aheadZ, carryReference(x, z, reference, aheadX, aheadZ));
   return collision.highestTopAt(aheadX, aheadZ, ceiling) > -Infinity;
+}
+
+/**
+ * **One frame of vertical motion in the air, and a head that stops at an
+ * underside** — moves `position.y` by `velocity·dt` and returns the vertical
+ * velocity she keeps.
+ *
+ * A solid that begins above the ground (a canopy, a deck's rail) is a ceiling
+ * to a body moving up into it: rising, the top of her head (`bodyHeight` above
+ * her feet) may not pass the lowest underside over her
+ * (`CollisionWorld.ceilingAt`), and meeting one takes her upward speed away,
+ * so she drops back rather than standing with her head through a roof. The
+ * sides of such a solid are the lateral rule's (`resolve`, given her height);
+ * this is the one direction that rule cannot see. `Player` and
+ * `scripts/playerSim.mts` both rise through here.
+ */
+export function riseUnder(collision: CollisionWorld, position: Vector3, velocity: number, dt: number, bodyHeight: number): number {
+  const head = position.y + bodyHeight;
+  position.y += velocity * dt;
+  if (velocity <= 0) return velocity;
+  const ceiling = collision.ceilingAt(position.x, position.z, head - 1e-6);
+  if (position.y + bodyHeight <= ceiling) return velocity;
+  position.y = ceiling - bodyHeight;
+  return 0;
 }
