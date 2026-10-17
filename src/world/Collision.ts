@@ -529,10 +529,13 @@ export function clearsTop(topHeight: number, clearance: number): boolean {
  * 3. **So the honest limit depends on the footprint**, and is far below the
  *    apex. Measured (`scripts/measure-hop-clearance.mts`, worst case over
  *    20–120 fps, walk and sprint, approach angles 0–40°, every phase of the
- *    frame clock): 1.100 m across the 0.22 m-thick wooden walls, 1.045 m
- *    across the 0.34 m stone ones, 0.879 m across a 0.60 m one. Square-on at
- *    60 fps the stone figure is 1.176 m — the low numbers are the corners, and
- *    the corners are what a route has to be planned for.
+ *    frame clock): 1.057 m across the 0.22 m-thick wooden walls, 1.028 m
+ *    across the 0.34 m stone ones, 0.833 m across a 0.60 m one (re-measured
+ *    17 Oct 2026, after a jump's flight began carrying her height over the
+ *    planet's curve and taking off from the ground under her — the corners
+ *    at 20–30 fps came down by up to 5 cm). Square-on at 60 fps the stone
+ *    figure is 1.176 m — the low numbers are the corners, and the corners are
+ *    what a route has to be planned for.
  *
  * A wall above this but below the old 1.4312 m did not merely feel bad. Either
  * the wall went solid again underneath her mid-footprint and *ejected* her out
@@ -543,7 +546,7 @@ export function clearsTop(topHeight: number, clearance: number): boolean {
  * `[3,19]→[-4,20]` was exactly that, and `NavGrid` had started routing over it.
  *
  * 1.00 m sits below the measured limit for every wall thickness the park
- * actually uses. It keeps every low garden wall hoppable — 0.7, 0.85 and 0.95 m,
+ * actually uses (the worst, 1.028 m, across the stone walls). It keeps every low garden wall hoppable — 0.7, 0.85 and 0.95 m,
  * both materials, eight walls — and drops the four the flight never honestly
  * managed: 1.15, 1.2, 1.2 and 1.25 m. {@link
  * CollisionWorld.checkHoppableColliders} enforces at boot that no registered
@@ -582,9 +585,11 @@ export const HOP_APEX_TOLERANCE = 0.001;
  *
  * A straight line fitted *underneath* every measured point (see the table in
  * {@link MAX_AUTO_HOP_HEIGHT}), so it is a lower bound on the truth everywhere,
- * not a best fit through it: at 1.54 m of crossing it reads 1.112 against a
- * measured 1.112, at 1.92 m it reads 0.998 against a measured 1.045, at 2.44 m
- * it reads 0.842 against a measured 0.879.
+ * not a best fit through it: at 1.54 m of crossing it reads 1.058 against a
+ * measured 1.062, at 1.92 m it reads 0.962 against a measured 1.028, at 2.44 m
+ * it reads 0.831 against a measured 0.833 (re-measured 17 Oct 2026, see
+ * {@link MAX_AUTO_HOP_HEIGHT}; the old line, 1.574 − 0.3·crossing, stood up to
+ * 5 cm over the new corners at 20 fps).
  *
  * Used only by the boot check. The predicate itself stays a flat ceiling,
  * because a route's idea of what is hoppable should not quietly change with the
@@ -592,7 +597,7 @@ export const HOP_APEX_TOLERANCE = 0.001;
  * collider fat enough to fall below it, which is precisely what this catches.
  */
 export function measuredHopCeiling(crossing: number): number {
-  return 1.574 - 0.3 * crossing;
+  return 1.446 - 0.252 * crossing;
 }
 
 /**
