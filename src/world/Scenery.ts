@@ -1155,20 +1155,22 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     // inside it — and a banded solid is one the planner, the route lattice and
     // the crowd's hop band never read, so the park and its routes are the ones
     // they were; only what stands over the boards is new.
+    //
+    // Only where the post stands over its boards: a run up a steep bank is
+    // drawn from its lower end's ground, so at the upper end its boards and
+    // its post can be buried in the hill, and a band from the boards' top to
+    // a crown below it is no solid at all (seed 12: base 0.08 m, top -0.04 m
+    // over the ground — a ceiling over the wall's own top).
     const crown = corner.top + CAP_RADIUS * CAP_SQUASH;
-    collision.kinded('wooden wall post', () =>
-      collision.toppedNarrow(roundTopHalf(CAP_RADIUS), () =>
-        collision.addCircle(
-          corner.x,
-          corner.z,
-          POST_FOOT_RADIUS,
-          yAtAltitude(corner.x, corner.z, crown - terrainHeight(corner.x, corner.z)),
-          false,
-          true,
-          yAtRadius(corner.x, corner.z, corner.boards),
+    const postTop = yAtAltitude(corner.x, corner.z, crown - terrainHeight(corner.x, corner.z));
+    const postBase = yAtRadius(corner.x, corner.z, corner.boards);
+    if (postTop > postBase + CAP_RADIUS * CAP_SQUASH) {
+      collision.kinded('wooden wall post', () =>
+        collision.toppedNarrow(roundTopHalf(CAP_RADIUS), () =>
+          collision.addCircle(corner.x, corner.z, POST_FOOT_RADIUS, postTop, false, true, postBase),
         ),
-      ),
-    );
+      );
+    }
   }
 
   return group;
