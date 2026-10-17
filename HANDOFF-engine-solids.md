@@ -156,3 +156,7 @@ no-headroom need the census run.
 - Decisions: interior drops onto the same room's floor (hotel gallery) are physics, not escapes —
   listed for Jim (raising the balustrade = the hotel's authored rail height, shared with stairs).
 - Open: stall roofs (awning reached via booth walls / bushes), bush launch pads (crowns to 2.1 m).
+- 1ad50ede: seed 9 restart 0 at (c) (0170dc95) was REJECTED by check:coplanar alone — top rail (level
+  at the bay's mean) in the plane of the downhill post's cap where a bay rises 17 cm (8.2 mm, 0.006 m²).
+  Fix: rails pitched post to post (match their TopSlope solid). Re-attempt seed 9 r0 after it.
+  Any mesh change: run `es-fencecop.mts` (check:coplanar's sweep on the fence group) before a PR push.
