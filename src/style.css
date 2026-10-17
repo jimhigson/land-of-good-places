@@ -414,6 +414,10 @@ body {
 
 .hud-menu {
   position: relative;
+  /* Over the bottom row: the drawer is only open while a child is choosing
+     from it, and on a phone held sideways its second column reaches down
+     beside the hop button and the chips. */
+  z-index: 2;
 }
 
 /* Deliberately taller and roomier than a plain pill: it is now the only thing
@@ -452,12 +456,27 @@ body {
   }
 }
 
+/* **Every pill on the screen, on every screen.** On a phone held sideways one
+   column ran off the bottom: QA on PR #721 measured the Cute-o-dex at
+   y 379–427 of a 390 px screen, an 11 px sliver with no icon, and the Map
+   wholly below it (that half was already so on main). So the column stops at
+   the bottom of the screen and the rest wraps into a second column beside it
+   (`flex-wrap`, from `.hud-row`), rather than scrolling: a six-year-old
+   sees every choice at once and presses the one she wants, and there is no
+   hidden half of the menu that only a swipe she does not know about would
+   show her. Its height is the screen's, less the drawer's own top (the HUD's
+   padding, the 3rem menu pill and the 0.5rem gap) and the HUD's bottom
+   padding — `check:served-menu-reach` measures every pill on-screen and
+   tappable at a phone either way up and at a desktop. */
 .hud-menu-items {
   position: absolute;
   top: calc(100% + 0.5rem);
   left: 0;
   flex-direction: column;
   align-items: flex-start;
+  align-content: flex-start;
+  max-height: calc(100vh - 5.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 5.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   gap: 0.5rem;
   opacity: 0;
   transform: translateY(-0.375rem);
