@@ -1215,6 +1215,16 @@ export const STAIR_RAIL_RADIUS = 4.93;
  */
 export const STAIR_RAIL_HEIGHT = 0.86;
 
+/**
+ * Half the width of a handrail's top, the stair's and the gallery's alike —
+ * the swept rail in `hotel_build.py` is a few centimetres across. Its solid is
+ * a balustrade fattened to be met square; its top is this, an edge and not a
+ * ledge (`CollisionWorld.toppedNarrow`): she leans on a handrail, she does not
+ * walk along it (the census stood her on them, 17 Oct 2026, and from them on
+ * the partitions and into the toilet).
+ */
+export const HANDRAIL_HALF_WIDTH = 0.04;
+
 export interface GrandStaircaseHandle extends AssetHandle {
   /** Which way it turns as you climb it. @see createGrandStaircase */
   readonly handedness: StairHandedness;

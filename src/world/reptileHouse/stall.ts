@@ -137,7 +137,10 @@ export class ReptileStall {
     // Each to its own drawn top: the counter to the plank across it, the back
     // panel to its edge.
     ctx.props.wall('the stall counter', local(-COUNTER_HALF_WIDTH, COUNTER_Z), local(COUNTER_HALF_WIDTH, COUNTER_Z), COUNTER_DEPTH / 2 + 0.05, COUNTER_BOARD_Y + COUNTER_BOARD_THICKNESS / 2);
-    ctx.props.wall('the stall back panel', local(-COUNTER_HALF_WIDTH, BACK_PANEL_Z), local(COUNTER_HALF_WIDTH, BACK_PANEL_Z), 0.3, BACK_PANEL_HEIGHT);
+    // The panel's solid is fattened to be met square; its drawn edge is 10 cm,
+    // an edge and not a ledge — it was the stair from the counter onto the
+    // planting beds (`check:solids`, 17 Oct 2026).
+    ctx.props.wall('the stall back panel', local(-COUNTER_HALF_WIDTH, BACK_PANEL_Z), local(COUNTER_HALF_WIDTH, BACK_PANEL_Z), 0.3, BACK_PANEL_HEIGHT, BACK_PANEL_THICKNESS / 2);
 
     // The Noodle-o-meter.
     const meter = createNoodleMeter();

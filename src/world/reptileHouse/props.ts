@@ -115,14 +115,20 @@ export class ReptileProps {
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
-  /** A filled capsule between two hall-local points. `half` is the half-thickness. */
-  wall(what: string, a: LocalPoint, b: LocalPoint, half: number, top: PropTop): void {
+  /**
+   * A filled capsule between two hall-local points. `half` is the
+   * half-thickness; `topHalf`, when the thing is drawn thinner than its solid
+   * (a panel), is how much of its top is drawn — `CollisionWorld.toppedNarrow`.
+   */
+  wall(what: string, a: LocalPoint, b: LocalPoint, half: number, top: PropTop, topHalf = Number.NaN): void {
     this.checkKeepOuts(what, [a, b], half);
     const ax = this.originX + a.x;
     const az = this.originZ + a.z;
     const bx = this.originX + b.x;
     const bz = this.originZ + b.z;
-    const handle: WallCollider = this.collision.kinded(what, () => this.collision.addWall(ax, az, bx, bz, half, top, false, true));
+    const handle: WallCollider = this.collision.kinded(what, () =>
+      this.collision.toppedNarrow(topHalf, () => this.collision.addWall(ax, az, bx, bz, half, top, false, true)),
+    );
     this.solids.push({ what, shape: 'wall', top, points: [a, b], radius: half, handle });
   }
 

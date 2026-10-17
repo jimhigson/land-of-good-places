@@ -22,6 +22,7 @@ import {
   FACE_PAINT_AWNING_Y,
   FACE_PAINT_AWNING_Z,
   FACE_PAINT_BACK_WALL_HEIGHT,
+  FACE_PAINT_BACK_WALL_THICKNESS,
   FACE_PAINT_POST_HEIGHT,
   FACE_PAINT_COUNTER_BOARD_Y,
   FACE_PAINT_STALL_DEPTH,
@@ -521,7 +522,7 @@ export class FacePaintStall implements GameSystem {
     const boardMaterial = toonMaterial(PALETTE.woodLight);
 
     // --- back wall + counter -------------------------------------------------
-    const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, FACE_PAINT_BACK_WALL_HEIGHT, 0.14, 3, 0.06), creamMaterial));
+    const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, FACE_PAINT_BACK_WALL_HEIGHT, FACE_PAINT_BACK_WALL_THICKNESS, 3, 0.06), creamMaterial));
     back.position.set(0, FACE_PAINT_BACK_WALL_HEIGHT / 2, -0.85);
     this.group.add(back);
     addOutline(back, 0.016);

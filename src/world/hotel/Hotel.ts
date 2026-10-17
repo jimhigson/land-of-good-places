@@ -70,6 +70,7 @@ import {
   STAIR_INNER_RADIUS,
   STAIR_OUTER_RADIUS,
   STAIR_RAIL_HEIGHT,
+  HANDRAIL_HALF_WIDTH,
   STAIR_RAIL_RADIUS,
   STAIR_RISE,
   STAIR_SWEEP,
@@ -3653,7 +3654,7 @@ export class Hotel implements GameSystem {
           const b = stair.fromAngle + (sweep * (i + 1)) / segments;
           const highestTread = Math.min(flight.treads - 1, Math.floor(((i + 1) / segments) * flight.treads - 1e-9));
           const railTop = flight.treadTop(highestTread) + STAIR_RAIL_HEIGHT;
-          this.collision.kinded('hotel stair flank', () =>
+          this.collision.kinded('hotel stair flank', () => this.collision.toppedNarrow(HANDRAIL_HALF_WIDTH, () =>
             this.collision.addWall(
               room.originX + stair.centreX - Math.sin(a) * radius,
               room.originZ + stair.centreZ + Math.cos(a) * radius,
@@ -3664,7 +3665,7 @@ export class Hotel implements GameSystem {
               false,
               true,
             ),
-          );
+          ));
         }
       }
     }
@@ -3711,7 +3712,7 @@ export class Hotel implements GameSystem {
       const flankX = room.originX + straight.centreX + flankSign * straight.flankX;
       const going = (straight.frontZ - maxZ) / grand.treads;
       for (let i = 0; i < grand.treads; i += 1) {
-        this.collision.kinded('hotel stair flank', () =>
+        this.collision.kinded('hotel stair flank', () => this.collision.toppedNarrow(HANDRAIL_HALF_WIDTH, () =>
           this.collision.addWall(
             flankX,
             room.originZ + straight.frontZ - going * i,
@@ -3724,7 +3725,7 @@ export class Hotel implements GameSystem {
             landing.height - RAIL_BASE_DROP,
             true,
           ),
-        );
+        ));
       }
     }
 
@@ -3743,7 +3744,7 @@ export class Hotel implements GameSystem {
     // rail she could see and fell to the lobby floor.
     // To the handrail's own height over the deck it guards.
     for (const edge of mezzanineGuardedEdges(plan, STAIR_RAIL_RADIUS)) {
-      this.collision.kinded('hotel balustrade', () =>
+      this.collision.kinded('hotel balustrade', () => this.collision.toppedNarrow(HANDRAIL_HALF_WIDTH, () =>
         this.collision.addWall(
           room.originX + edge.x1,
           room.originZ + edge.z1,
@@ -3755,7 +3756,7 @@ export class Hotel implements GameSystem {
           true,
           edge.base,
         ),
-      );
+      ));
     }
 
     // --- the ways between the levels, declared for the router ---------------

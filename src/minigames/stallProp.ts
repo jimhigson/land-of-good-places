@@ -27,6 +27,7 @@ import {
   MINI_GAME_AWNING_Z,
   MINI_GAME_BACK_WALL_HEIGHT,
   MINI_GAME_COUNTER_BOARD_Y,
+  MINI_GAME_PANEL_THICKNESS,
   MINI_GAME_SIDE_PANEL_DEPTH,
   MINI_GAME_SIDE_PANEL_HEIGHT,
   MINI_GAME_SIDE_PANEL_Z,
@@ -98,14 +99,14 @@ export function createStallProp(definition: StallDefinition): StallProp {
   // --- back wall and side panels -------------------------------------------
   // Heights from the booth's one owner (`boothFootprint.ts`), so the wall a
   // child bumps and the wall she sees are one number.
-  const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, MINI_GAME_BACK_WALL_HEIGHT, 0.18, 3, 0.07), creamMaterial));
+  const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, MINI_GAME_BACK_WALL_HEIGHT, MINI_GAME_PANEL_THICKNESS, 3, 0.07), creamMaterial));
   back.position.set(0, MINI_GAME_BACK_WALL_HEIGHT / 2, -1.1);
   root.add(back);
   addOutline(back, 0.02);
 
   for (const side of [-1, 1] as const) {
     const panel = solid(
-      new Mesh(new RoundedBoxGeometry(0.18, MINI_GAME_SIDE_PANEL_HEIGHT, MINI_GAME_SIDE_PANEL_DEPTH, 3, 0.07), creamMaterial),
+      new Mesh(new RoundedBoxGeometry(MINI_GAME_PANEL_THICKNESS, MINI_GAME_SIDE_PANEL_HEIGHT, MINI_GAME_SIDE_PANEL_DEPTH, 3, 0.07), creamMaterial),
     );
     panel.position.set(side * (halfWidth - 0.09), MINI_GAME_SIDE_PANEL_HEIGHT / 2, MINI_GAME_SIDE_PANEL_Z);
     root.add(panel);

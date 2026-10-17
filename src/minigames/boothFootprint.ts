@@ -74,6 +74,13 @@ export interface BoothHeights {
    * Oct 2026).
    */
   readonly sideFront?: number;
+  /**
+   * The drawn half-thickness of the back wall and the side panels, where they
+   * are panels: a top that thin is an edge she cannot put her feet on
+   * (`CollisionWorld.toppedNarrow`), so the panels a booth is built of are
+   * never a stair from its counter to its roof (the census, 17 Oct 2026).
+   */
+  readonly panelHalf?: number;
   /** A round canopy (a parasol), local-frame centre and radius, banded from `base` to `top`. */
   readonly canopy?: { readonly x: number; readonly z: number; readonly radius: number; readonly base: number; readonly top: number };
   readonly awning?: {
@@ -100,6 +107,8 @@ export const MINI_GAME_SIDE_PANEL_HEIGHT = 2.3;
 /** The side panels' middle and depth, booth-local `z` — they stop 0.6 m short of the counter's line. */
 export const MINI_GAME_SIDE_PANEL_Z = -0.2;
 export const MINI_GAME_SIDE_PANEL_DEPTH = 1.9;
+/** How thick the back wall and the side panels are drawn. */
+export const MINI_GAME_PANEL_THICKNESS = 0.18;
 export const MINI_GAME_BACK_WALL_HEIGHT = 2.5;
 export const MINI_GAME_AWNING_Y = 2.72;
 export const MINI_GAME_AWNING_Z = 0.15;
@@ -134,6 +143,7 @@ export const MINI_GAME_BOOTH_BOX: BoothBox = {
     sides: MINI_GAME_SIDE_PANEL_HEIGHT,
     back: MINI_GAME_BACK_WALL_HEIGHT,
     sideFront: MINI_GAME_SIDE_PANEL_Z + MINI_GAME_SIDE_PANEL_DEPTH / 2,
+    panelHalf: MINI_GAME_PANEL_THICKNESS / 2,
     awning: tiltedAwning(2.1),
   },
 };
@@ -157,6 +167,8 @@ export const KEYCHAIN_STALL_DEPTH = 1.5;
 export const FACE_PAINT_COUNTER_BOARD_Y = 0.86;
 export const FACE_PAINT_COUNTER_TOP = FACE_PAINT_COUNTER_BOARD_Y + 0.05;
 export const FACE_PAINT_BACK_WALL_HEIGHT = 1.9;
+/** How thick the face-paint booth's back wall is drawn. */
+export const FACE_PAINT_BACK_WALL_THICKNESS = 0.14;
 /** The candy-striped corner posts at the front of the booth, holding up the awning. */
 export const FACE_PAINT_POST_HEIGHT = 2.35;
 export const FACE_PAINT_AWNING_Y = 2.28;
@@ -171,6 +183,7 @@ export const FACE_PAINT_BOOTH_BOX: BoothBox = {
   wallHalfThickness: 0.25,
   heights: {
     front: FACE_PAINT_COUNTER_TOP,
+    panelHalf: FACE_PAINT_BACK_WALL_THICKNESS / 2,
     // Open at the sides — posts at the front corners, nothing between them and
     // the back wall — so its side walls stand to the posts they run from.
     sides: FACE_PAINT_POST_HEIGHT,
@@ -305,9 +318,12 @@ export function addBoothCollision(
   const toWorld = (lx: number, lz: number): [number, number] => [x + lx * cos + lz * sin, z - lx * sin + lz * cos];
   return collision.ownedBy('booth', () =>
     collision.kinded('stall booth', () => {
-      const solids: (WallCollider | BoxCollider)[] = [wall(frontLeft, frontRight, h.front), wall(backLeft, backRight, h.back)];
+      // The back wall and the side panels, narrow-topped where they are panels.
+      const panel = (a: [number, number], b: [number, number], height: number): WallCollider =>
+        h.panelHalf === undefined ? wall(a, b, height) : collision.toppedNarrow(h.panelHalf, () => wall(a, b, height));
+      const solids: (WallCollider | BoxCollider)[] = [wall(frontLeft, frontRight, h.front), panel(backLeft, backRight, h.back)];
       if (h.sideFront === undefined) {
-        solids.push(wall(frontLeft, backLeft, h.sides), wall(frontRight, backRight, h.sides));
+        solids.push(panel(frontLeft, backLeft, h.sides), panel(frontRight, backRight, h.sides));
       } else {
         // Each side's whole length is one solid to the counter's height —
         // the very wall the booth claims, end for end, which is how
@@ -316,7 +332,7 @@ export function addBoothCollision(
         // Split in two instead, the claim matched no collider and every
         // restart with a booth in it was rejected.
         for (const [side, front, back] of [[-1, frontLeft, backLeft], [1, frontRight, backRight]] as const) {
-          solids.push(wall(front, back, h.front), wall(back, toWorld(side * box.halfWidth, h.sideFront), h.sides));
+          solids.push(wall(front, back, h.front), panel(back, toWorld(side * box.halfWidth, h.sideFront), h.sides));
         }
       }
       if (h.filled) {

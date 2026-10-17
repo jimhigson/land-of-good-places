@@ -59,6 +59,9 @@ const RAIL_CENTRE = 0.62;
 const TOP_RAIL_CENTRE = 1.62;
 const RAIL_DEPTH = 0.1;
 const RAIL_TOP = TOP_RAIL_CENTRE + RAIL_DEPTH / 2;
+/** A rail's drawn width, and a post's drawn top radius: what of each she could put a foot on — not enough (`FOOT_HALF_WIDTH`). */
+const RAIL_WIDTH = 0.09;
+const POST_TOP_RADIUS = 0.09;
 // Re-exported so existing importers keep one obvious home for it; the value
 // itself lives in the leaf module (see clearance.ts's own note).
 export { STATION_GAP } from './clearance';
@@ -308,14 +311,18 @@ export function buildRailFence(
     // The rail runs from one post's top to the other's, so its solid's top
     // does too: one end each (`TopSlope`), where the posts' own feet differ.
     const topAt = (p: Post): number => yAtAltitude(p.x, p.z, p.y + RAIL_TOP - terrainHeight(p.x, p.z));
+    // Fattened to be met square; stood on only where drawn — a 9 cm rail is
+    // an edge, not a ledge, so she jumps over a fence and never perches on it.
     collision.kinded('railway fence', () =>
-      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, topAt(a), false, true, -Infinity, false, Number.NaN, topAt(b)),
+      collision.toppedNarrow(RAIL_WIDTH / 2, () =>
+        collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, topAt(a), false, true, -Infinity, false, Number.NaN, topAt(b)),
+      ),
     );
   };
   /** A post at `p`, its own solid: the rail's ends stand on it. */
   const addFencePost = (p: Post): void => {
     collision.kinded('railway fence post', () =>
-      collision.addCircle(p.x, p.z, POST_RADIUS, yAtAltitude(p.x, p.z, POST_TOP), false, true),
+      collision.toppedNarrow(POST_TOP_RADIUS, () => collision.addCircle(p.x, p.z, POST_RADIUS, yAtAltitude(p.x, p.z, POST_TOP), false, true)),
     );
   };
   const link = (a: Post, b: Post) => {
@@ -472,8 +479,8 @@ export function buildRailFence(
 
   const postMaterial = toonMaterial(PALETTE.stonePink);
   const railMaterial = toonMaterial(PALETTE.stonePinkLight);
-  const postMesh = new InstancedMesh(new CylinderGeometry(0.09, POST_RADIUS, POST_LENGTH, 6), postMaterial, posts.length);
-  const railMesh = new InstancedMesh(new BoxGeometry(0.09, RAIL_DEPTH, 1), railMaterial, rails.length * 2);
+  const postMesh = new InstancedMesh(new CylinderGeometry(POST_TOP_RADIUS, POST_RADIUS, POST_LENGTH, 6), postMaterial, posts.length);
+  const railMesh = new InstancedMesh(new BoxGeometry(RAIL_WIDTH, RAIL_DEPTH, 1), railMaterial, rails.length * 2);
   postMesh.castShadow = false;
   railMesh.castShadow = false;
 
