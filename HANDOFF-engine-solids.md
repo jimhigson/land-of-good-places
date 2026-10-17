@@ -160,3 +160,20 @@ no-headroom need the census run.
   at the bay's mean) in the plane of the downhill post's cap where a bay rises 17 cm (8.2 mm, 0.006 m²).
   Fix: rails pitched post to post (match their TopSlope solid). Re-attempt seed 9 r0 after it.
   Any mesh change: run `es-fencecop.mts` (check:coplanar's sweep on the fence group) before a PR push.
+
+## (c) state at 62c2ce75 (21:15, 17 Oct)
+- check:solids split: `--part=core` (check:solids: clauses 1,3,5,7 + census of every building + jet
+  pack report; 68 s) and `--part=park` (check:solids-park: park census + 2 + 6; 3m50s). Both in
+  check:shard-3 (CI 55 s at b; local 49 s → CI ≈ local ×1.1). chain-coverage ok (95 leaves).
+- Old clause 8 (open to the sky) REMOVED as an assertion: it failed on the strip beyond the railway's far
+  fence (708 cells) = a place only the jet pack reaches, and she flies out (canFlyHere anywhere in the
+  park while worn). Now a stderr report. Proof sky-trap gone.
+- Census speed: 705 s → 201 s (2b skips far sides past the leash/inside solids; 2/3 skip tops past the
+  leash (boundary wall); missed jumps end early (verticalVelocity<0 & below top); walk-off stops at the
+  landing). Same 617 tops; regions vary (36–78, all leavable) — they are mostly the lattice's blind band.
+- Fence rails: each end = its post's own leaned point (6cba00e3). check:coplanar (real, b's parks in
+  /tmp/es-parks-b, `/tmp/es-restamp-parks-b.sh`) OK on 16 seeds; control at 72f273af found seed 3.
+- Stone walls: toppedSquare(COPING_END_OVERHANG); wooden wall posts: own banded solids (72f273af).
+  Clause 2 park: 241 landings, 0 off.
+- Remaining: proofs (/tmp/es-proofs), gate (check/test:procgen/build + sweep:fountain-hop), seed 9 r0 +
+  seed 3 attempts, look, PR head push, CI, preview, PR body, final report.
