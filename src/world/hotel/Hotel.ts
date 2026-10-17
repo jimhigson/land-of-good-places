@@ -601,8 +601,9 @@ const CHAIR_SEAT_Y = 0.42;
  *
  * Approximate on purpose — a seeded crystal cluster varies a little — but
  * approximately *true*, where the old `Infinity` default made every one an
- * unjumpable pillar (probe 11). All well above `JUMP_APEX_HEIGHT`'s reach or
- * flagged `stand: false`, so none of them is a landing surface either way.
+ * unjumpable pillar (probe 11). A top is somewhere to land if her jump can
+ * reach it, and these, at 1.4-1.5 m, are just past it: physics, not a flag,
+ * is what keeps her out of the crystals.
  */
 const CLUSTER_TOP = 1.4;
 const PLANTER_TOP = 1.5;
@@ -1302,7 +1303,7 @@ export class Hotel implements GameSystem {
     this.lighting = new HotelLighting();
     this.hotelRoot.add(this.lighting.group);
 
-    this.props = new HotelProps(collision, surfaces);
+    this.props = new HotelProps(collision);
     for (const room of ROOMS) this.buildRoomShell(room);
     if (!saveFlags.hasHotelKey()) {
       this.suiteLock = collision.addWall(
@@ -3516,7 +3517,6 @@ export class Hotel implements GameSystem {
         z: (minZ + maxZ) / 2 + 1.6,
         radius: 0.62,
         top: height - 0.4,
-        stand: false,
       });
     }
 
@@ -3855,7 +3855,6 @@ export class Hotel implements GameSystem {
       // The statue's real height — far above any jump, so no plate; honest
       // rather than Infinity so probe 11's pillar sweep stays meaningful.
       top: statue.height,
-      stand: false,
     });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
     // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
@@ -3956,7 +3955,6 @@ export class Hotel implements GameSystem {
       // The asset's own measured height (counter plus key board). No plate:
       // the counter is not the top of the asset, so there is no honest floor.
       top: desk.height,
-      stand: false,
     });
     const reception = createKeeper({ colour: PALETTE.flowerRed, hair: PALETTE.markerPink });
     // The receptionist is a person, and people in this park are scenery-soft
@@ -4040,7 +4038,6 @@ export class Hotel implements GameSystem {
         z: 6.4 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
         radius: 0.36,
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -4530,7 +4527,7 @@ export class Hotel implements GameSystem {
       arch.position.set(x, 0, -2.6);
       shell.add(arch);
       for (const side of [-1, 1]) {
-        this.props.footprint(room, { x: x + side * 1.6, z: -2.6, radius: 0.22, top: 2.5, stand: false });
+        this.props.footprint(room, { x: x + side * 1.6, z: -2.6, radius: 0.22, top: 2.5 });
       }
     }
 
@@ -4549,7 +4546,6 @@ export class Hotel implements GameSystem {
         halfZ: 0.31,
         // Bobbles top out around a metre; a hedge's top is foliage, not floor.
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -4849,19 +4845,20 @@ export class Hotel implements GameSystem {
     spots.forEach(([x, z], index) => {
       const bed = createHotelBed();
       repaintPart(bed.root, 'bed-blanket', ART.rainbow[index * 2] ?? PALETTE.markerMint);
-      // **Soft on purpose.** A bed is a `WalkSurfaces` platform — Eleri's
-      // "sleep, or go jumpy jumpy!" — and `Collision`'s height rule is fed
-      // the player's height above *the sampler's* ground, which is 0 when she
-      // is stood on the mattress. A wall round its edge would therefore shove
-      // her straight back off the thing she climbed onto. See `place.ts`'s
-      // header: anything you can stand on is placed soft.
+      // **Solid, like everything she can see** — and so somewhere to land:
+      // Eleri's "sleep, or go jumpy jumpy!" is a hop onto the mattress now.
+      // A bed used to be the one piece of furniture placed soft, a walkable
+      // plate with no body, because a wall round a hollow box would have
+      // caught her at its rim; a box is filled now and its top is where her
+      // feet come to rest (`world/standing.ts`), so the bed is one solid like
+      // the sofa beside it. Its keep-out and the nap's stand spot in front of
+      // it (`interactZones`) are unchanged.
       this.props.place(shell, SUITE, bed.root, {
         x,
         z,
         halfX: SUITE_BED_HALF_X,
         halfZ: SUITE_BED_HALF_Z,
         top: BED_MATTRESS_TOP,
-        solid: false,
       });
       const id = `bed-${index}`;
       // The tucked blanket she naps under, in the bed's own rainbow, hidden
@@ -4872,26 +4869,16 @@ export class Hotel implements GameSystem {
       blanket.visible = false;
       shell.add(blanket);
       this.beds.push({ x: SUITE.originX + x, z: SUITE.originZ + z, id, blanket, bedIndex: index });
-      this.surfaces.addPlatform(
-        new Plate(
-          BED_MATTRESS_TOP,
-          SUITE.originX + x - SUITE_BED_HALF_X,
-          SUITE.originX + x + SUITE_BED_HALF_X,
-          SUITE.originZ + z - SUITE_BED_HALF_Z,
-          SUITE.originZ + z + SUITE_BED_HALF_Z,
-        ),
-      );
     });
 
     // A bedside table and its little crystal lamp beside each bed. The lamp
-    // is the top, and a lamp is not a floor.
+    // is the top.
     for (const x of SUITE_BEDSIDE_X) {
       this.props.place(shell, SUITE, bedsideTable(), {
         x,
         z: SUITE_BEDSIDE_Z,
         radius: SUITE_BEDSIDE_RADIUS,
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -5606,7 +5593,6 @@ export class Hotel implements GameSystem {
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,
       top: tv.height,
-      stand: false,
     });
 
     // The low table between them, with the Game Boy on it.
@@ -5632,14 +5618,12 @@ export class Hotel implements GameSystem {
       z: 7.2,
       radius: 0.6,
       top: PLANTER_TOP,
-      stand: false,
     });
     this.props.place(shell, SUITE, crystalPlanter(0x41a1, PALETTE.markerPink), {
       x: 13.6,
       z: 7.2,
       radius: 0.6,
       top: PLANTER_TOP,
-      stand: false,
     });
   }
 
@@ -5724,7 +5708,6 @@ export class Hotel implements GameSystem {
       spin: basinYaw,
       radius: 0.4,
       top: 1.0,
-      stand: false,
     });
 
     const roof = buildPrivacyRoof(
@@ -5947,7 +5930,6 @@ export class Hotel implements GameSystem {
         radius: 0.36,
         base: height,
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -5969,7 +5951,6 @@ export class Hotel implements GameSystem {
         radius: 0.6,
         base,
         top: PLANTER_TOP,
-        stand: false,
       });
     }
 
@@ -6059,7 +6040,6 @@ export class Hotel implements GameSystem {
         top: item.top,
         // The scatter props are crystals, seaweed and tufts: real heights,
         // never floors, so none of them offers a landing plate.
-        stand: false,
       });
     }
   }

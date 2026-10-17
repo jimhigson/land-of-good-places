@@ -20,7 +20,8 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
-import { carryReference } from '../world/building/surfaces';
+import { carryReference, stepCeilingAt } from '../world/building/surfaces';
+import { standingHeight, walkingOntoStep } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
@@ -1182,6 +1183,26 @@ export class Player implements GameSystem {
     let groundY = reference;
     let fromX = this.position.x;
     let fromZ = this.position.z;
+    // --- stepping up onto a solid --------------------------------------------
+    // A solid's top within one step of the surface she stands on is climbed
+    // exactly as a deck of that height is — walking into a 0.44 m bench puts
+    // her on it, as walking into the castle's porch always did. Only while she
+    // is walking *into* one (`walkingOntoStep` looks just past her front edge),
+    // so walking past a bench she brushes its side instead of sinking into it.
+    // The reach is the sampler's own, asked from the same carried reference
+    // the sampler below is asked from, so every top the lateral rule lets her
+    // climb onto is a top she is then stood on.
+    const stepping =
+      following &&
+      inputLength > 1e-4 &&
+      walkingOntoStep(
+        this.collision,
+        this.position.x,
+        this.position.z,
+        this.moveDirection.x / inputLength,
+        this.moveDirection.z / inputLength,
+        reference,
+      );
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -1196,6 +1217,7 @@ export class Player implements GameSystem {
         groundY = this.groundAt(at.x, at.z, reference);
         if (following) reference = groundY;
       },
+      stepping ? (x, z) => stepCeilingAt(x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
     );
 
     // An escort runs until the pushing stops, not until it goes quiet.
@@ -1478,8 +1500,16 @@ export class Player implements GameSystem {
     this.hopRings.burst(this.position.x, this.position.y - 0.05, this.position.z, 0.4);
   }
 
+  /**
+   * Where her feet come to rest at `(x, z)`, reached from `y`: the ground
+   * there, or the top of a solid she is over, whichever is higher and within
+   * a step — {@link standingHeight}, the one owner of that rule. A bench, a
+   * crate or a garden wall is somewhere to land because it is solid; nothing
+   * marks a floor on top of it.
+   */
   private groundAt(x: number, z: number, y: number): number {
-    return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+    const ground = this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+    return standingHeight(ground, this.collision, x, z, y);
   }
 
   /**

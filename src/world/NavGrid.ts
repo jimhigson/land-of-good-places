@@ -888,6 +888,32 @@ export class NavGrid {
         );
       },
     );
+    // Filled boxes, stamped whole — their insides included, because there is
+    // no inside: a box is solid right through (`Collision.ts`'s `BoxCollider`).
+    // The outline is stamped as the four edges the old `addRectangle` walls
+    // were, with the very same arithmetic, so every cell round a box is the
+    // cell it always was; the core's own cells are then filled.
+    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped) => {
+      const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
+      if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+      const into = hoppable ? this.hopBand : this.blocked;
+      for (let i = 0; i < 4; i += 1) {
+        const a = corners[i] as readonly [number, number];
+        const b = corners[(i + 1) % 4] as readonly [number, number];
+        this.stampSegment(a[0], a[1], b[0], b[1], rounding + this.walkerRadius, into);
+      }
+      let minX = Infinity;
+      let minZ = Infinity;
+      let maxX = -Infinity;
+      let maxZ = -Infinity;
+      for (const [x, z] of corners) {
+        minX = Math.min(minX, x);
+        minZ = Math.min(minZ, z);
+        maxX = Math.max(maxX, x);
+        maxZ = Math.max(maxZ, z);
+      }
+      this.stampRegion(minX, minZ, maxX, maxZ, inCore, into);
+    });
 
     // Bridges (Decision 8): a cell a deck or ramp covers is exempt from
     // everything just stamped, however it got blocked — the rail fence
@@ -1071,6 +1097,31 @@ export class NavGrid {
     this.pointZ = new Float32Array(size);
     this.pointY = new Float32Array(size);
     this.pointRigid = new Uint8Array(size);
+  }
+
+  /**
+   * Marks every cell, within the given bound, whose centre `inside` accepts —
+   * for a shape with no simpler stamp of its own (a filled box).
+   */
+  private stampRegion(
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+    inside: (x: number, z: number) => boolean,
+    into: Uint8Array,
+  ): void {
+    const fromX = Math.max(0, this.columnOf(minX));
+    const toX = Math.min(this.cells - 1, this.columnOf(maxX));
+    const fromZ = Math.max(0, this.rowOf(minZ));
+    const toZ = Math.min(this.cells - 1, this.rowOf(maxZ));
+    for (let cz = fromZ; cz <= toZ; cz += 1) {
+      const z = this.originZ + cz * CELL;
+      const row = cz * this.cells;
+      for (let cx = fromX; cx <= toX; cx += 1) {
+        if (inside(this.originX + cx * CELL, z)) into[row + cx] = 1;
+      }
+    }
   }
 
   /** Marks every cell whose centre is within `radius` of a point in `into`. */

@@ -855,7 +855,7 @@ export class ParkMap {
         this.close();
         return;
       }
-      if (!this.isReachable(wx, wz)) {
+      if (!this.isReachable(wx, y, wz)) {
         this.showRefusal(event.clientX, event.clientY, "Can't walk there!");
         return;
       }
@@ -870,7 +870,7 @@ export class ParkMap {
       this.close();
       return;
     }
-    if (!this.isReachable(wx, wz)) {
+    if (!this.isReachable(wx, y, wz)) {
       this.showRefusal(event.clientX, event.clientY, "Can't walk there!");
       return;
     }
@@ -885,9 +885,15 @@ export class ParkMap {
    * point and see how far it has to be pushed to stop overlapping anything.
    * Barely moved at all means clear ground; shoved a real distance means a
    * wall, a ride's fence, or outside the park/floor's soft boundary.
+   *
+   * **Asked at the ground's own height, `y`.** A solid states its top as a
+   * height in the world, and out in the park the ground stands around 14 m
+   * below y = 0 on the planet's curve — so a probe at y = 0 is a probe ten
+   * metres above every bench and wall in the park, and every one of them
+   * clears it. The probe stands where her feet would.
    */
-  private isReachable(x: number, z: number): boolean {
-    const probe = new Vector3(x, 0, z);
+  private isReachable(x: number, y: number, z: number): boolean {
+    const probe = new Vector3(x, y, z);
     this.deps.world.collision.resolve(probe, PLAYER_RADIUS);
     const dx = probe.x - x;
     const dz = probe.z - z;

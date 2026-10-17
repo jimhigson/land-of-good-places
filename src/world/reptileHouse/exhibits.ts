@@ -373,8 +373,8 @@ export class Exhibits {
   }
 
   private registerShape(id: string, shape: ExhibitShape, top: number): void {
-    if (shape.kind === 'disc') this.ctx.props.disc(`${id}'s enclosure`, shape.centre.x, shape.centre.z, shape.radius, top, { stand: false });
-    else this.ctx.props.wall(`${id}'s enclosure`, shape.a, shape.b, shape.half, top, { stand: false });
+    if (shape.kind === 'disc') this.ctx.props.disc(`${id}'s enclosure`, shape.centre.x, shape.centre.z, shape.radius, top);
+    else this.ctx.props.wall(`${id}'s enclosure`, shape.a, shape.b, shape.half, top);
   }
 
   // ---------------------------------------------------------- glass cases
@@ -1172,7 +1172,7 @@ export class Exhibits {
     const over = rock.snoutReach - REPTILE_ISLAND_COLLIDER_RADIUS;
     if (over > 0) {
       const at = (REPTILE_ISLAND_COLLIDER_RADIUS + rock.snoutReach) / 2;
-      this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.15, 1.3, { stand: false });
+      this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.15, 1.3);
     }
     const headAt: LocalPoint = { x: rock.head.position.x, z: rock.head.position.z };
     return {
@@ -1302,7 +1302,7 @@ export class Exhibits {
     soil.position.y = 0.9;
     group.add(soil);
     group.add(...instancedPlant('rp-banana-leaf', [0, 1, 2].map((i) => ({ x: 0, y: 0.88, z: 0, yaw: i * 2.1 + 0.5, scale: 1.2 }))));
-    this.ctx.props.disc('the foyer pot', FOYER_POT.x, FOYER_POT.z, FOYER_POT_RADIUS, 2.4, { stand: false });
+    this.ctx.props.disc('the foyer pot', FOYER_POT.x, FOYER_POT.z, FOYER_POT_RADIUS, 2.4);
     const baby = createSnake({ length: 0.3, radius: 0.05, colourway: 'rainbow', seed: 1700, pool: this.ctx.babies });
     baby.root.position.set(0.1, 0.75, 0.25);
     baby.root.rotation.y = 0.3;

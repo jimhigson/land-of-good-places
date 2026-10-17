@@ -982,29 +982,6 @@ export function greatHallSolids(deck: number): readonly HallSolid[] {
   return solids;
 }
 
-/**
- * The part of the banquet a jump can **land on**: each run, whole, at
- * {@link GREAT_HALL_TABLE_HEIGHT}.
- *
- * **The same footprint as {@link greatHallSolids}, deliberately.** The obvious
- * version of this returned the table's own measured half-width, so the floor
- * she stands on would be the wood she can see — and it opens a soft-lock: a
- * `CollisionWorld` rectangle is hollow, a body inside one is never pushed out
- * (measured: eleven seconds without moving), and walking off a narrow plate
- * drops her onto the flagstones *inside* the run. Covering the run edge to edge
- * is what makes the inside unreachable rather than merely unpleasant. See
- * `Building.ts`'s `banquetTables` for the full argument and the two fixes that
- * did not work.
- *
- * The pets' table is excluded because it does not need this: at 0.45 m
- * half-width it is narrower than a child's own 0.62 m radius, so a body inside
- * it is pushed clear by its own walls. `check:hall-solid` measures that rather
- * than taking it on trust.
- */
-export function greatHallTableTops(deck: number): readonly HallSolid[] {
-  return greatHallSolids(deck).filter((solid) => solid.top === CASTLE_TABLE_TOP);
-}
-
 /** Every place at the pets' table. See {@link PetPlace}. */
 export function greatHallPetPlaces(deck: number): readonly PetPlace[] {
   const table = greatHallPetTable(deck);

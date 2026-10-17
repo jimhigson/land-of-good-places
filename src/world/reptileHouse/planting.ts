@@ -186,7 +186,7 @@ export class Planting {
       kept.push(cell.point);
     }
     for (const [index, point] of kept.entries()) {
-      this.ctx.props.disc(`bed '${bed.id}' disc ${index}`, point.x, point.z, radius, REPTILE_BED_TOP, { stand: false });
+      this.ctx.props.disc(`bed '${bed.id}' disc ${index}`, point.x, point.z, radius, REPTILE_BED_TOP);
     }
 
     // The edge: one capsule per outline edge, its axis `EDGE_HALF` inside the
@@ -215,7 +215,6 @@ export class Planting {
         { x: b.x + n.x * EDGE_HALF - t.x * backB, z: b.z + n.z * EDGE_HALF - t.z * backB },
         EDGE_HALF,
         REPTILE_BED_TOP,
-        { stand: false },
       );
     }
   }
