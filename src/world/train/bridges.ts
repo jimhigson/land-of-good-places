@@ -780,7 +780,7 @@ function buildParapetRailing(walls: readonly BridgeWall[]): Group {
   const along = new Vector3();
   const up = new Vector3();
   const across = new Vector3();
-  const yAxis = new Vector3(0, 1, 0);
+  const yAxis = new Vector3(0, 1, 0); // flat-ok: the post geometry's own (object-local) axis, turned onto the post's radial line
   posts.forEach((post, index) => {
     along.subVectors(post.head, post.foot);
     const length = along.length();
