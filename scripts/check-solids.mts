@@ -562,10 +562,17 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
    * seat she stands on is not what she stands on.
    */
   const FEET = 0.14 + FOOT_HALF_WIDTH;
+  /**
+   * **Leaves are not what she stands on** (the planters ruling): a wall or a
+   * post with a bush grown over it is measured to its own top, not to the
+   * puff of leaves beside her feet (seed 12: "0.34 m sunk into the drawn
+   * bushes", standing on a garden wall).
+   */
+  const FOLIAGE = /^(bushes|tree-canopies|tree-cones|treeline-canopies)(\[|$)/;
   const underFeet = (x: number, z: number, from: number): { y: number; name: string } | null => {
     let best: { y: number; name: string } | null = null;
     for (const [dx, dz] of [[0, 0], [FEET, 0], [-FEET, 0], [0, FEET], [0, -FEET], [FEET * Math.SQRT1_2, FEET * Math.SQRT1_2], [-FEET * Math.SQRT1_2, FEET * Math.SQRT1_2], [FEET * Math.SQRT1_2, -FEET * Math.SQRT1_2], [-FEET * Math.SQRT1_2, -FEET * Math.SQRT1_2]] as const) {
-      const hit = drawn.topAt(x + dx, z + dz, from - 1.2, 2, 1.2 + 0.4);
+      const hit = drawn.topAt(x + dx, z + dz, from - 1.2, 2, 1.2 + 0.4, FOLIAGE);
       // Carried to her own column at its distance from the planet's centre,
       // so the comparison below is still in her one column.
       const y = hit ? carryReference(x + dx, z + dz, hit.y, x, z) : Number.NaN;

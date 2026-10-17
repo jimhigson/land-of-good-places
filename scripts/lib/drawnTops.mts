@@ -24,8 +24,12 @@ interface Entry {
 }
 
 export interface DrawnTopIndex {
-  /** The highest drawn surface over `(x, z)` between `floor` and `floor + span`, ignoring anything starting above `floor + startAbove`. */
-  topAt(x: number, z: number, floor: number, span?: number, startAbove?: number): { y: number; name: string } | null;
+  /**
+   * The highest drawn surface over `(x, z)` between `floor` and `floor + span`,
+   * ignoring anything starting above `floor + startAbove`, and any mesh whose
+   * own name `exclude` matches.
+   */
+  topAt(x: number, z: number, floor: number, span?: number, startAbove?: number, exclude?: RegExp): { y: number; name: string } | null;
   readonly meshes: number;
 }
 
@@ -87,7 +91,7 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
   const origin = new Vector3();
   return {
     meshes: entries.length,
-    topAt(x, z, floor, span = 40, startAbove = Infinity) {
+    topAt(x, z, floor, span = 40, startAbove = Infinity, exclude) {
       const cell = grid.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`);
       if (!cell) return null;
       origin.set(x, floor + span, z);
@@ -98,6 +102,7 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
         if (x < entry.box.min.x - 0.01 || x > entry.box.max.x + 0.01 || z < entry.box.min.z - 0.01 || z > entry.box.max.z + 0.01) continue;
         if (entry.box.max.y < floor + 0.02) continue; // flat-ok: a world-box cull before the exact ray, conservative in both directions
         if (entry.box.min.y > floor + startAbove) continue; // flat-ok: the same world-box cull
+        if (exclude && exclude.test(entry.name.split('<')[0] ?? '')) continue;
         for (const hit of ray.intersectObject(entry.mesh, false)) {
           if (hit.point.y > floor + 0.02 && (!best || hit.point.y > best.y)) best = { y: hit.point.y, name: entry.name };
         }
