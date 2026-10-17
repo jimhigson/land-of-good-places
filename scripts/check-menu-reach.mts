@@ -15,7 +15,9 @@
  * measured it, because nothing had ever opened the menu on a short screen.
  *
  * So this opens it, in a real Chromium against the served game, at each
- * {@link VIEWPORTS} size, and for every pill the drawer shows asks three things:
+ * {@link VIEWPORTS} size, and for every pill the drawer shows asks three things
+ * (a label — the park's name, the purse — only the first: it is read, not
+ * pressed, and lets a tap through to the park):
  *
  * 1. **all of it is on the screen** — its whole box inside the viewport, not a
  *    sliver of it;
@@ -62,6 +64,8 @@ const MUST_SHOW = ['pill--backpack', 'pill--next-day', 'pill--help', 'pill--dex'
 interface Item {
   readonly name: string;
   readonly classes: string;
+  /** A button (the park's name and the purse are labels, not things to press). */
+  readonly pressable: boolean;
   readonly left: number;
   readonly top: number;
   readonly right: number;
@@ -123,6 +127,7 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
           return {
             name: (element.textContent ?? '').replace(/\s+/g, ' ').trim() || element.getAttribute('aria-label') || '?',
             classes: element.className,
+            pressable: element instanceof HTMLButtonElement || element.getAttribute('role') === 'button',
             left: box.left,
             top: box.top,
             right: box.right,
@@ -162,6 +167,13 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
       if (!onScreen) {
         failures.push(`${viewport.name}: ${where} is not all on the ${screen.width}×${screen.height} screen`);
         lines.push(`${item.name} OFF-SCREEN`);
+        continue;
+      }
+      // A label (the park's name, the purse) is read, not pressed: on the
+      // screen is all it owes. `pointer-events: none` lets a tap through it
+      // to the park, which is the point of it.
+      if (!item.pressable) {
+        lines.push(`${item.name} (a label, y ${item.top.toFixed(0)}–${item.bottom.toFixed(0)})`);
         continue;
       }
       if (!item.hitsItself) {
