@@ -32,7 +32,8 @@ import {
  * Shaped like the Sky Cruiser's board/arrive (`coaster/Coaster.ts`) with the
  * tree climb's iso-camera loop (`TreeClimbing.ts`): `Player.beginRide` hands
  * her to us, every frame is one `setRidePose` at the seat's world position,
- * `endRide` after a `resolveDismount` on the stand spot. No camera override —
+ * `endRide` at the stand spot, which the put-down rule checks
+ * (`world/dismount.ts`). No camera override —
  * the fixed iso camera follows `player.position` on its own, and the HUD
  * hides itself while `player.riding`.
  *
@@ -41,8 +42,8 @@ import {
  * should jump off its back and return to normal play."* So mid-lap a jump,
  * any stick or key movement, or a tap anywhere (`Game`'s tap handler, the
  * tree climb's "tap means come down" branch) is {@link dismount}: a hop off
- * the shell onto clear floor beside the tortoise (`resolveDismount`, never
- * into a kerb or a case), `Player.endRide` the same frame, and the tortoise
+ * the shell onto clear floor beside the tortoise (`Player.endRide`'s put-down
+ * rule, never into a kerb or a case) the same frame, and the tortoise
  * plods the rest of its lap back to the bay on its own. GAME_DESIGN's
  * CONTROL rule: pressing left means go left — here it means get off and go
  * left, which is the same thing one frame later.
@@ -78,7 +79,7 @@ export interface RideInput {
 /** A nudge off the shell: sideways, up a little, and she is walking. */
 const HOP_OFF_SIDE = 1.2;
 const HOP_OFF_UP = 3;
-/** Where she lands, beside the tortoise's flank, before `resolveDismount` has its say. */
+/** Where she lands, beside the tortoise's flank, before the put-down rule has its say. */
 const DISMOUNT_BESIDE = 1.7;
 
 export class TortoiseRide {

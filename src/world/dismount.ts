@@ -511,17 +511,16 @@ export interface OccupiedSpot {
 }
 
 /**
- * The same question for a *group*: several bodies stepping off together, none
- * of them standing inside the geometry and none of them standing inside each
- * other.
+ * **Where a group of cosmetic riders steps off** — the Rail Race's crowd of
+ * racers: several bodies stepping off together, none of them standing inside
+ * the geometry and none of them standing inside each other.
  *
- * {@link resolveDismount} is stateless and single-point — ask it three times
- * and it hands back the same answer three times, which is precisely wrong for
- * a crowd. This wraps it with the one extra rule a crowd needs: a candidate is
- * only accepted if it also clears everybody already placed, the caller's own
- * `occupied` list included. That list is how the player keeps her personal
- * space; she is put down first and passed in here, so nobody can ever appear
- * standing on top of her.
+ * Not the player's rule: she is put down by {@link putDownSpot} (through
+ * `Player.endRide`), first, and passed in here in `occupied`, so nobody can
+ * ever appear standing on top of her. A single-point search asked three times
+ * hands back the same answer three times, which is precisely wrong for a crowd,
+ * so a candidate here is only accepted if it is clear of the geometry *and* of
+ * everybody already placed, the caller's own `occupied` list included.
  *
  * Bodies are placed in the order asked for, each one starting its own search
  * from a point fanned around `preferredX/Z`, so the result reads as a little
@@ -574,7 +573,7 @@ export function resolveDismountGroup(
       }
     }
 
-    // Same contract as `resolveDismount`: say so loudly, hand back the best
+    // Same contract as `putDownSpot`: say so loudly, hand back the best
     // guess, never drop a body on the floor. These are cosmetic characters, so
     // the worst case is two of them overlapping for a few seconds — never a
     // player stuck in anything.

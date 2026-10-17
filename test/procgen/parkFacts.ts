@@ -1416,7 +1416,7 @@ export interface ParkFacts {
    * chute's mouth and world tangent, then sampling the **built** walk surface
    * under the answer — so this is the runtime result reproduced, not a
    * paraphrase of it. The same tactic `railRaceExitFitsTheParty` uses when it
-   * calls the real `resolveDismount` rather than modelling one.
+   * asks the real put-down rule (`putDownPlayer`) rather than modelling one.
    *
    * `groundY` comes from `WalkSurfaces.sample`, the sampler her own feet use,
    * and not from `terrainHeight`: the pit is scooped out of the hills and
