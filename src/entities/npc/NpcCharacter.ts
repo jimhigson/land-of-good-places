@@ -96,6 +96,12 @@ export class NpcCharacter {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * Where her feet left the ground for the hop (or the drop) she is in — the
+   * height a solid's top is cleared from (`CollisionWorld.resolve`'s `feetY`):
+   * the crowd never stands on a top, so a hop must never carry it over one.
+   */
+  private takeoffY = 0;
   private expression: Expression = 'neutral';
 
   // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
@@ -313,7 +319,7 @@ export class NpcCharacter {
     // the same way it caps an ordinary frame's — `this.previousPosition`
     // still holds where the script left her, from `setScriptedPose`'s own
     // copy, so it is the right "before" to measure the escape against.
-    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
     this.previousPosition.copy(this.position);
     this.avatar.rig.root.position.copy(this.position);
@@ -412,6 +418,11 @@ export class NpcCharacter {
   /** Nudges the walk cycle at spawn so children are not in lockstep. */
   setWalkPhase(phase: number): void {
     this.walkPhase = phase;
+  }
+
+  /** The height her feet count from when clearing a top — see {@link takeoffY}. */
+  private clearsFrom(): number {
+    return this.airborne ? Math.min(this.position.y, this.takeoffY) : this.position.y;
   }
 
   /**
@@ -692,7 +703,7 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
-    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
 
     // Trust the resolved position over the intended one, so walking into a wall
@@ -731,12 +742,14 @@ export class NpcCharacter {
 
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
       this.airborne = true;
+      this.takeoffY = this.position.y;
       this.verticalVelocity = 0;
     }
 
     if (this.intent.hop && !this.airborne) {
       this.verticalVelocity = NPC_JUMP_SPEED;
       this.airborne = true;
+      this.takeoffY = this.position.y;
     }
 
     if (this.airborne) {

@@ -537,7 +537,8 @@ const SHALLOW_OVERLAP = 0.5;
  *   the landing rail over the open archway. See the header.
  * - `'cleared'`: over its footprint but jumped clear above it. Absolute tops
  *   compare against the mover's real feet height, so a prop she is stood on
- *   holds still under her — see the header.
+ *   holds still under her — see the header. `feetY` is that height: her own
+ *   `y`, unless the mover says otherwise (the crowd — see `resolve`).
  * - `'stepped'`: a top she is stepping up onto — no higher than
  *   `stepCeiling`, the one-step reach her ground sampler spends at this point
  *   (see {@link StepCeiling}). Not jumped over and not pushed: she is
@@ -550,6 +551,7 @@ function contactWith(
   clearance: number,
   stepCeiling = -Infinity,
   moverHeight = 0,
+  feetY = position.y,
 ): 'absent' | 'cleared' | 'stepped' | 'solid' {
   // Below its base — her head under a canopy's underside, under the landing's
   // rail — it is not there at all. A mover with no height (a planning probe)
@@ -557,7 +559,7 @@ function contactWith(
   if (banded(collider) && position.y + moverHeight <= solidBaseAt(collider, position.x, position.z)) return 'absent';
   if (!collider.topIsAbsolute) return clearsTop(collider.topHeight, clearance) ? 'cleared' : 'solid';
   const top = solidTopAt(collider, position.x, position.z);
-  if (position.y + JUMP_CLEARANCE_GRACE >= top) return 'cleared';
+  if (feetY + JUMP_CLEARANCE_GRACE >= top) return 'cleared';
   if (top <= stepCeiling) return 'stepped';
   return 'solid';
 }
@@ -1665,6 +1667,17 @@ export class CollisionWorld {
    * the player's grounded movement don't need to change anything to keep
    * working.
    *
+   * `feetY` is the height a solid with a real (absolute) top is cleared from:
+   * the mover's own `y` unless it says otherwise. **The crowd says otherwise.**
+   * Only she and her parade stand on tops; an NPC walks the ground layer and
+   * nothing else, so a giggle-hop that carried one over a bench or a fence rail
+   * would put it down *inside* that footprint, to be shoved back out — a jolt
+   * `check:jitter` exists to catch. So an NPC clears from the ground it hopped
+   * off, and a top it could not have stepped over standing there stays a wall
+   * to it at any height of its hop. With every outdoor top Infinity or relative,
+   * as it was before solids had real tops, this changed nothing; it is what
+   * keeps the crowd walking exactly as it did once they have them.
+   *
    * Resolving in a couple of passes stops the player squeezing through corners
    * where two colliders meet. Returns `true` if at least one collider was
    * skipped this call purely because the mover jumped clear over it — Player
@@ -1764,6 +1777,7 @@ export class CollisionWorld {
     dt = Infinity,
     stepCeiling?: StepCeiling,
     moverHeight = 0,
+    feetY = position.y,
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     let clearedAny = false;
     // Asked once, where she is as this call begins: a push moves her by her
@@ -1805,7 +1819,7 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        const contact = contactWith(circle, position, clearance, stepHere, moverHeight);
+        const contact = contactWith(circle, position, clearance, stepHere, moverHeight, feetY);
         if (contact === 'absent' || contact === 'stepped') continue;
         if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
@@ -1838,7 +1852,7 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        const contact = contactWith(wall, position, clearance, stepHere, moverHeight);
+        const contact = contactWith(wall, position, clearance, stepHere, moverHeight, feetY);
         if (contact === 'absent' || contact === 'stepped') continue;
         if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
@@ -1868,7 +1882,7 @@ export class CollisionWorld {
         const reading = readBox(box, position.x, position.z);
         const depth = box.rounding + radius - reading.distance + reading.inside;
         if (depth <= 0) continue; // not overlapping at all
-        const contact = contactWith(box, position, clearance, stepHere, moverHeight);
+        const contact = contactWith(box, position, clearance, stepHere, moverHeight, feetY);
         if (contact === 'absent' || contact === 'stepped') continue;
         if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
