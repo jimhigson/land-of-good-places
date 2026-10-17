@@ -705,7 +705,7 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
       const y = standingHeight(sample(x, z, 1e3), collision, x, z, 1e3);
       if (!Number.isFinite(y)) continue;
       body.set(x, y, z);
-      if (collision.deepestSolidOverlap(body, PLAYER_RADIUS * 0.9, 0, undefined, KID_HEIGHT) > 0.02) continue;
+      if (collision.deepestSolidOverlap(body, PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02) continue;
       if (collision.ceilingAt(x, z, y + 1e-3) < Infinity) continue;
       if (main(x, z, y)) continue;
       cells.set(keyOf(Math.round(x / STEP), Math.round(z / STEP)), { x, z, y });
@@ -716,6 +716,7 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
   const shut: { at: Stand; n: number }[] = [];
   let clusters = 0;
   let dropOff = 0;
+  let searched = 0;
   for (const [key, first] of cells) {
     if (seen.has(key)) continue;
     clusters += 1;
@@ -738,11 +739,17 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
           }
           continue;
         }
-        // A neighbour on the walk, no higher than a step up: off she goes.
-        const nx = (i + di) * STEP;
-        const nz = (j + dj) * STEP;
-        const ny = sample(nx, nz, cell.y + 0.62);
-        if (!edgeOut && ny <= cell.y + 0.62 && main(nx, nz, ny)) edgeOut = true;
+        // Ground on the walk within a metre, no higher than a step up: off she goes.
+        if (edgeOut) continue;
+        for (const reach of [1, 2]) {
+          const nx = (i + di * reach) * STEP;
+          const nz = (j + dj * reach) * STEP;
+          const ny = sample(nx, nz, cell.y + 0.62);
+          if (ny <= cell.y + 0.62 && main(nx, nz, ny)) {
+            edgeOut = true;
+            break;
+          }
+        }
       }
     }
     if (edgeOut) {
@@ -750,6 +757,7 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
       continue;
     }
     const lowest = members.reduce((a, b) => (b.y < a.y ? b : a));
+    searched += 1;
     let out = false;
     const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
     try {
@@ -769,7 +777,7 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
   }
   const parkLink = (at: Stand): string => `/spawn?pos=${at.x.toFixed(1)},${at.z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
   say(shut.length === 0, `${cells.size} places open to the sky off the walk, in ${clusters} clusters (${dropOff} she steps or drops straight off): ${shut.length} she cannot leave${shut.length ? ` — ${shut.slice(0, 6).map((s) => `${s.n} cells at ${parkLink(s.at)}, ${altitudeAt(s.at.x, s.at.y, s.at.z).toFixed(2)} m up`).join('; ')}` : ''}`);
-  note(`clause 8 searched the park on a ${STEP} m grid, where her body fits with nothing over her; a pocket under a canopy, flown into sideways, is not in it`);
+  note(`clause 8 searched the park on a ${STEP} m grid, where her body fits with nothing over her (${searched} cluster(s) needed her jumps to find a way out); a pocket under a canopy, flown into sideways, is not in it`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');

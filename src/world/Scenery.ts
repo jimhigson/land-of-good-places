@@ -556,6 +556,12 @@ export interface SceneryDecisions {
 export const TREE_TRUNK_CLAIM = 0.6;
 /** Radius of the collider a clump registers, and so the ground it occupies. */
 export const BUSH_COLLIDER = 0.85;
+/**
+ * The highest a bush's solid stands: within her jump from flat ground (1.23 m
+ * apex, 0.15 m grace) wherever she is in the park, so every bush is
+ * somewhere she can climb onto — and out of a thicket by. Above it, leaves.
+ */
+export const BUSH_CORE_TOP = 1.2;
 
 /** The ground a tree claims — its trunk. One owner for the builder and a prebuilt park. */
 export function treeClaim(x: number, z: number): Claim {
@@ -632,12 +638,16 @@ function buildFoliage(
   for (const clump of decisions.bushes) {
     const instanceStart = bushes.length;
     for (const blob of clump.blobs) bushes.push(blob);
-    // Solid to its crown over the clump's middle — where she lands if she jumps
-    // onto it, and a small bush is low enough to. She stands *in* its leaves
-    // (the planters ruling), and that is also how she climbs out of a ring of
-    // bushes: 1.7 m across, a bush is too wide to jump clean over, so a bush
-    // she could not stand on was a pen she could not leave (17 Oct 2026).
-    const crown = bushCrownY(clump.blobs, clump.x, clump.z) - terrainHeight(clump.x, clump.z);
+    // **Solid to its dense heart, never higher than she can climb** — its
+    // crown over the clump's middle, or `BUSH_CORE_TOP`, whichever is lower —
+    // and above that she stands *in* its leaves (the planters ruling: leaves
+    // are what she brushes through). A bush is 1.7 m across, too wide to
+    // jump clean over, and the park plants them in thickets: solid to a 2 m
+    // crown, the low bush she climbed in by was the only way out, and five
+    // thickets on seed 5 were pens she could not leave (check:solids, 17 Oct
+    // 2026). Every bush a step she can always get up onto, a thicket is a
+    // place she walks out of across its tops.
+    const crown = Math.min(BUSH_CORE_TOP, bushCrownY(clump.blobs, clump.x, clump.z) - terrainHeight(clump.x, clump.z));
     const bushColliderId = collision.kinded('bush', () =>
       collision.addCircle(clump.x, clump.z, BUSH_COLLIDER, yAtAltitude(clump.x, clump.z, crown), false, true),
     );
