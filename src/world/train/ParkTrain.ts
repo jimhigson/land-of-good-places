@@ -14,9 +14,8 @@ import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
 import { rideFrame } from '../rail/sweptRail';
 import { computeCrossings, type LevelCrossing } from './crossings';
-import { buildRailFence } from './fence';
+import { GUARD_RAIL_WIDTH, RAILWAY_GUARD_TOP, buildRailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
-import { COPING_TOP_INSET } from '../../art/models/bridgeStones';
 import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
 import {
@@ -286,14 +285,31 @@ export class ParkTrain implements GameSystem, TrainService {
     this.group.add(built.group);
     for (const rail of built.guardRails) {
       // A masonry parapet/spandrel wall: solid from the ground (blocks a
-      // walker beside the bridge), with an ABSOLUTE top at the local road
-      // surface plus the parapet (stops a walker on the hump stepping over
-      // the side) — see `bridges.ts`'s `BridgeWall`.
-      // Its top is the coping's face, inset from the wall's sides
-      // (`COPING_TOP_INSET`), from one end's height to the other's.
+      // walker beside the bridge), with an ABSOLUTE top — see `bridges.ts`'s
+      // `BridgeWall`.
+      //
+      // **Its top is the railing's, at the railway's guard height over the
+      // road** (`RAILWAY_GUARD_TOP`, from one end's road to the other's), and
+      // nobody stands on it: a rail is an edge, not a ledge. The coping under
+      // the railing is inside the solid. The coping alone was a top she
+      // jumped onto from the road and stepped off on the far side, down onto
+      // the track between the fences (`bridges.ts`'s `buildParapetRailing`).
       collision.kinded('bridge parapet', () =>
-        collision.toppedNarrow(BRIDGE_WALL_THICKNESS / 2 - COPING_TOP_INSET, () =>
-          collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true, -Infinity, false, Number.NaN, rail.topHeightEnd),
+        collision.toppedNarrow(GUARD_RAIL_WIDTH / 2, () =>
+          collision.addWall(
+            rail.x1,
+            rail.z1,
+            rail.x2,
+            rail.z2,
+            BRIDGE_WALL_THICKNESS / 2,
+            Math.max(rail.topHeight, rail.surface + RAILWAY_GUARD_TOP),
+            false,
+            true,
+            -Infinity,
+            false,
+            Number.NaN,
+            Math.max(rail.topHeightEnd, rail.surfaceEnd + RAILWAY_GUARD_TOP),
+          ),
         ),
       );
     }

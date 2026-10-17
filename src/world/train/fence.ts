@@ -54,13 +54,27 @@ const POST_RADIUS = 0.11;
 const POST_LENGTH = 1.75;
 const POST_MIDDLE = 0.88;
 const POST_TOP = POST_MIDDLE + POST_LENGTH / 2;
-/** The rails: the lower bar's centre and the top rail's above the ground, and a rail's own depth, so the top is `RAIL_TOP`. */
+/**
+ * A guard rail's own section — its drawn width and depth — for the fence's
+ * rails and the bridges' railings alike (`bridges.ts`). Its width is what of
+ * it she could put a foot on: not enough (`FOOT_HALF_WIDTH`).
+ */
+export const GUARD_RAIL_WIDTH = 0.09;
+export const GUARD_RAIL_DEPTH = 0.1;
+/** The rails: the lower bar's centre and the top rail's above the ground, so the top is `RAIL_TOP`. */
 const RAIL_CENTRE = 0.62;
 const TOP_RAIL_CENTRE = 1.62;
-const RAIL_DEPTH = 0.1;
+const RAIL_DEPTH = GUARD_RAIL_DEPTH;
 const RAIL_TOP = TOP_RAIL_CENTRE + RAIL_DEPTH / 2;
-/** A rail's drawn width, and a post's drawn top radius: what of each she could put a foot on — not enough (`FOOT_HALF_WIDTH`). */
-const RAIL_WIDTH = 0.09;
+/**
+ * **The railway's guard height** — the fence's top rail's top over the ground,
+ * and the top of the railing along each bridge's parapets over the road
+ * (`bridges.ts`): wherever she could otherwise get onto the line, this is how
+ * high what stops her stands. One owner.
+ */
+export const RAILWAY_GUARD_TOP = RAIL_TOP;
+const RAIL_WIDTH = GUARD_RAIL_WIDTH;
+/** A post's drawn top radius: what of it she could put a foot on — not enough (`FOOT_HALF_WIDTH`). */
 const POST_TOP_RADIUS = 0.09;
 // Re-exported so existing importers keep one obvious home for it; the value
 // itself lives in the leaf module (see clearance.ts's own note).

@@ -2,7 +2,9 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CylinderGeometry,
   Group,
+  InstancedMesh,
   Matrix4,
   Mesh,
   Quaternion,
@@ -55,7 +57,8 @@ function decideBridgeFootprints(crossings: readonly LevelCrossing[], real: RealW
   return solver.bridgeFootprints(crossings, real);
 }
 import { TRACK_CLEARANCE } from './route';
-import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
+import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
+import { GUARD_RAIL_DEPTH, GUARD_RAIL_WIDTH, RAILWAY_GUARD_TOP } from './fence';
 import { terrainHeight } from '../terrain';
 import { Geo, altitude, scratchGeo, worldYAtAltitude } from '../geo';
 import { PALETTE } from '../../core/palette';
@@ -482,6 +485,12 @@ export interface BridgeWall {
    */
   readonly topHeight: number;
   readonly topHeightEnd: number;
+  /**
+   * The road surface's world height beside `(x1, z1)` and `(x2, z2)` — what
+   * the parapet's railing stands its guard height over (`RAILWAY_GUARD_TOP`).
+   */
+  readonly surface: number;
+  readonly surfaceEnd: number;
 }
 
 export interface Bridge {
@@ -684,6 +693,116 @@ export function buildBridges(
   }
 
   return { group, bridges, platforms, guardRails };
+}
+
+/** How far a railing post stands over its rail's top — the fence's own margin, so no rail's top lies in a post cap's plane. */
+const RAILING_POST_OVER = 0.085;
+const RAILING_POST_RADIUS = 0.05;
+/** How far a railing post's foot is set down into the coping it stands on. */
+const RAILING_POST_SEAT = 0.03;
+/** A railing post at every `RAILING_POST_EVERY`th parapet piece's end — a post every metre and a half or so. */
+const RAILING_POST_EVERY = 3;
+
+/**
+ * **The railing along a bridge's parapets: the railway's guard, carried over
+ * the line** (the engine rework, 17 Oct 2026). Every solid has its real top
+ * now, and a parapet's coping — 0.72 m over the road at the feet, 1.37 m at
+ * the crown — is a top she can jump onto from the road and step off on the
+ * far side of, down onto the track between the fences, which since (c) are
+ * taller than she can climb back over. The census found it on ten of the
+ * fifteen other seeds. A guard stops her by being taller than she can reach,
+ * so the parapet carries a rail at the railway's guard height
+ * (`RAILWAY_GUARD_TOP`, the fence's own) over the road, on slender posts:
+ * see-through, so a child walking on the bridge is not hidden by it
+ * (GAME_DESIGN.md), and drawn exactly where its solid is — wherever the
+ * parapet has one (`walls`), one rail per piece from end to end.
+ *
+ * World-space: each point is its column's coping top lifted along the radial
+ * up to the radius the rail stands at there, which is how the collider holds
+ * the same height (`topIsAbsolute`, a radius).
+ */
+function buildParapetRailing(walls: readonly BridgeWall[]): Group {
+  const group = new Group();
+  group.name = 'parapet-railing';
+  const centre = new Vector3(0, -GROUND_SPHERE_RADIUS, 0);
+  /** The point on the radial line through `(x, y, z)` that stands at the radius of `(x, toY, z)`. */
+  const lift = (x: number, y: number, z: number, toY: number, into: Vector3): Vector3 => {
+    const from = into.set(x, y, z).sub(centre);
+    const r = Math.hypot(x, toY + GROUND_SPHERE_RADIUS, z);
+    return from.multiplyScalar(r / from.length()).add(centre);
+  };
+  const railCentre = RAILWAY_GUARD_TOP - GUARD_RAIL_DEPTH / 2;
+  const posts: { foot: Vector3; head: Vector3 }[] = [];
+  const rails: { from: Vector3; to: Vector3 }[] = [];
+  let runIndex = 0;
+  let previous: BridgeWall | null = null;
+  // A post stands a few centimetres down into the coping, so no light shows
+  // under it where the coping's weathered top falls away from its middle.
+  const postAt = (x: number, z: number, top: number, surface: number): void => {
+    posts.push({ foot: lift(x, top, z, top - RAILING_POST_SEAT, new Vector3()), head: lift(x, top, z, surface + RAILWAY_GUARD_TOP + RAILING_POST_OVER, new Vector3()) });
+  };
+  for (const wall of walls) {
+    const joined = previous !== null && Math.hypot(wall.x1 - previous.x2, wall.z1 - previous.z2) < 1e-6;
+    if (!joined) {
+      // A run's first post, and the last one of the run before it.
+      if (previous) postAt(previous.x2, previous.z2, previous.topHeightEnd, previous.surfaceEnd);
+      runIndex = 0;
+      postAt(wall.x1, wall.z1, wall.topHeight, wall.surface);
+    } else if (runIndex % RAILING_POST_EVERY === 0) {
+      postAt(wall.x1, wall.z1, wall.topHeight, wall.surface);
+    }
+    rails.push({
+      from: lift(wall.x1, wall.topHeight, wall.z1, wall.surface + railCentre, new Vector3()),
+      to: lift(wall.x2, wall.topHeightEnd, wall.z2, wall.surfaceEnd + railCentre, new Vector3()),
+    });
+    runIndex += 1;
+    previous = wall;
+  }
+  if (previous) postAt(previous.x2, previous.z2, previous.topHeightEnd, previous.surfaceEnd);
+  if (posts.length === 0) return group;
+
+  const postMesh = new InstancedMesh(new CylinderGeometry(RAILING_POST_RADIUS, RAILING_POST_RADIUS, 1, 6), toonMaterial(PALETTE.stonePink), posts.length);
+  const railMesh = new InstancedMesh(new BoxGeometry(GUARD_RAIL_WIDTH, GUARD_RAIL_DEPTH, 1), toonMaterial(PALETTE.stonePinkLight), rails.length);
+  postMesh.name = 'railing-posts';
+  railMesh.name = 'railing-rails';
+  postMesh.castShadow = false;
+  railMesh.castShadow = false;
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const scale = new Vector3();
+  const position = new Vector3();
+  const along = new Vector3();
+  const up = new Vector3();
+  const across = new Vector3();
+  const yAxis = new Vector3(0, 1, 0);
+  posts.forEach((post, index) => {
+    along.subVectors(post.head, post.foot);
+    const length = along.length();
+    rotation.setFromUnitVectors(yAxis, along.divideScalar(length));
+    position.addVectors(post.foot, post.head).multiplyScalar(0.5);
+    matrix.compose(position, rotation, scale.set(1, length, 1));
+    postMesh.setMatrixAt(index, matrix);
+  });
+  const basis = new Matrix4();
+  rails.forEach((rail, index) => {
+    position.addVectors(rail.from, rail.to).multiplyScalar(0.5);
+    along.subVectors(rail.to, rail.from);
+    const length = along.length();
+    along.divideScalar(length);
+    // Its width level across the bridge: up is the radial up at its middle,
+    // squared off against its length.
+    up.copy(position).sub(centre).normalize();
+    across.crossVectors(up, along).normalize();
+    up.crossVectors(along, across).normalize();
+    basis.makeBasis(across, up, along);
+    rotation.setFromRotationMatrix(basis);
+    matrix.compose(position, rotation, scale.set(1, 1, length));
+    railMesh.setMatrixAt(index, matrix);
+  });
+  postMesh.instanceMatrix.needsUpdate = true;
+  railMesh.instanceMatrix.needsUpdate = true;
+  group.add(postMesh, railMesh);
+  return group;
 }
 
 interface OneBridge {
@@ -1094,15 +1213,18 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
         let pieceX = previous.x;
         let pieceZ = previous.z;
         let pieceTop = drawnTop(topA, previous.x, previous.z);
+        let pieceSurface = topA;
         for (let k = 1; k <= PARAPET_PIECES; k += 1) {
           const t = k / PARAPET_PIECES;
           const x = previous.x + (point.x - previous.x) * t;
           const z = previous.z + (point.z - previous.z) * t;
-          const top = k === PARAPET_PIECES ? drawnTop(topB, point.x, point.z) : drawnTop(surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t), x, z);
-          walls.push({ x1: pieceX, z1: pieceZ, x2: x, z2: z, topHeight: pieceTop, topHeightEnd: top });
+          const surface = k === PARAPET_PIECES ? topB : surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t);
+          const top = drawnTop(surface, x, z);
+          walls.push({ x1: pieceX, z1: pieceZ, x2: x, z2: z, topHeight: pieceTop, topHeightEnd: top, surface: pieceSurface, surfaceEnd: surface });
           pieceX = x;
           pieceZ = z;
           pieceTop = top;
+          pieceSurface = surface;
         }
       }
       previous = point;
@@ -1110,6 +1232,8 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       if (clamped >= lengthPos) break;
     }
   }
+
+  bridgeGroup.add(buildParapetRailing(walls));
 
   // --- the walkable surface -------------------------------------------------
   // One height-varying platform for the whole hump. Its own footprint is
