@@ -119,7 +119,19 @@ castle floors + hotel lobby + library + reptile hall; guards climbed / railway /
 too-tall, ghost, no-bounds proved red (fast clauses, SOLIDS_SKIP_CENSUS=1). low-top, low-fence, trap,
 no-headroom need the census run.
 
-## (c) in progress (uncommitted at time of writing — see git status)
+## (c) in progress
+- **ROOT CAUSE of guards still climbed after the fence raise (306b5218): the planet's lean.** Flight
+  integrated world y while she moved in plan, so the ground fell away under an outward jump: bare
+  planet (es-leanreach.mts), sprint-jump outwards reached 2.37 m @44 m from centre, 2.84 @60, 3.1 @70+
+  (1.23 in the middle). No guard height could hold. Fix: airborne, her y is carried by
+  `carryReference` per sub-step (Player, playerSim, NpcCharacter + takeoffY). Now 1.10–1.41 m
+  everywhere (spread = damp lag over the ground running downhill; kept — snapping down would dip her).
+- Same commit: a jump takes off from max(drawn y, ground): uphill the damped y lags UNDER the ground
+  and the jump landed on frame 1 — sprint-jumping inward did nothing past ~38 m (walk ~55 m). Pre-existing.
+- Fence trace before the fix (es-fencefrom.mts): 124 of the fence tops reached "from the ground".
+- SOLIDS_SPACES=park (etc.) runs the census over named spaces (dev switch, notes what it skipped).
+- Jet pack (PARK_FLY_CEILING 12 m) now meets real tops: it can land on fence tops and roofs under
+  12 m. The rail centre band (Infinity) and the soft bounds still hold at every height. List for Jim.
 - Railway fence raised: posts 0.95 → 1.75 m, a top rail at 1.62 (top 1.67) over the old knee rail.
 - Castle roof: soft edge at the battlement's outer face (+ lift alcove) — `floorBounds.ts`
   `castleFloorBounds` (one owner; NPC journey asks it too). The invisible slide-mouth wall is gone.
