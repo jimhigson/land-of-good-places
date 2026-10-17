@@ -361,6 +361,8 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   const beyond = new Vector3();
   /** Tops a walk-off brought her down from. */
   const walkedOffFrom = new Set<SolidView>();
+  /** Regions whose entry she has hopped from (stage 2a), each once. */
+  const hoppedFrom = new Set<object>();
   const byKind = new Map<string, { sims: number; won: number }>();
   const cost = {
     ms: { step: 0, jump: 0, over: 0, chain: 0, drop: 0 },
@@ -477,6 +479,49 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
               done = true;
               break;
             }
+          }
+        }
+      }
+    }
+
+    // 2a. Hops from where she came down. A drop into a pocket — between two
+    //     bushes and a wall, a body's width wide — leaves her lattice no cell
+    //     to run up from, so stage 2's run-ups, laid out from each face along
+    //     its own normal, never stand in it. From the very spot she landed on,
+    //     she hops at whatever stands within a few metres of her (seed 5: off
+    //     a bush into such a gap and straight back onto the next bush, which
+    //     the census had called a trap).
+    for (const region of regions) {
+      if (stopped) break;
+      if (hoppedFrom.has(region)) continue;
+      hoppedFrom.add(region);
+      const from = region.entry;
+      for (const solid of near(from.x, from.z, 3)) {
+        if (stopped) break;
+        if (reached.has(solid)) continue;
+        const gap = -solid.depthAt(from.x, from.z);
+        if (gap > 2.5 || solid.topAt(solid.centreX, solid.centreZ) - from.y > 1.6) continue;
+        // The face nearest her, and a little in from it.
+        let best: { x: number; z: number } | null = null;
+        let bestD = Infinity;
+        for (const o of outline(solid, 0.4)) {
+          const d = Math.hypot(o.x - from.x, o.z - from.z);
+          if (d < bestD) {
+            bestD = d;
+            best = { x: o.x - o.nx * Math.min(solid.halfWidth, 0.3), z: o.z - o.nz * Math.min(solid.halfWidth, 0.3) };
+          }
+        }
+        if (!best || collision.playBounds.distanceToEdge(best.x, best.z) < PLAYER_RADIUS) continue;
+        for (const jumpAt of [0.3, 0.8, 1.3]) {
+          jumps += 1;
+          cost.sims.jump += 1;
+          aimedAt(solid, false);
+          const landed = runAndJump(options, from, best.x, best.z, jumpAt, fps, solid);
+          if (landed && standsOn(solid, landed)) {
+            aimedAt(solid, true);
+            markReached({ solid, top: landed.y, how: 'jump', at: landed, from });
+            changed = true;
+            break;
           }
         }
       }
