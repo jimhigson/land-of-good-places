@@ -53,7 +53,10 @@ export async function castleTowerFindings(park: HeadlessPark): Promise<CastleTow
 
   /** Marches a player-sized body at (tx, tz) from `from` m out; closest approach. */
   const marchAt = (tx: number, tz: number, bearing: number, step: number, from: number): number => {
+    // Her feet on the ground she is walking over, step by step: a solid's real
+    // top is measured against them (`Collision.ts`'s `contactWith`).
     const probe = new Vector3(tx + Math.sin(bearing) * from, 0, tz + Math.cos(bearing) * from);
+    probe.y = park.sample(probe.x, probe.z, 0);
     let closest = Infinity;
     for (let travelled = 0; travelled < from + 4; travelled += step) {
       collision.resolveMovement(
@@ -64,6 +67,7 @@ export async function castleTowerFindings(park: HeadlessPark): Promise<CastleTow
         0,
         MAX_FRAME_DELTA,
       );
+      probe.y = park.sample(probe.x, probe.z, probe.y);
       closest = Math.min(closest, Math.hypot(probe.x - tx, probe.z - tz));
     }
     return closest;
@@ -190,7 +194,7 @@ export async function castleTowerFindings(park: HeadlessPark): Promise<CastleTow
    * up to half a stride either side of it.
    */
   const marchTo = (tx: number, tz: number, fromX: number, fromZ: number): number => {
-    const probe = new Vector3(fromX, 0, fromZ);
+    const probe = new Vector3(fromX, park.sample(fromX, fromZ, 0), fromZ);
     const total = Math.hypot(tx - fromX, tz - fromZ) || 1;
     let closest = Math.hypot(probe.x - tx, probe.z - tz);
     for (let travelled = 0; travelled < total + 4; travelled += PLAYER_LONGEST_STEP) {
@@ -205,6 +209,7 @@ export async function castleTowerFindings(park: HeadlessPark): Promise<CastleTow
         0,
         MAX_FRAME_DELTA,
       );
+      probe.y = park.sample(probe.x, probe.z, probe.y);
       closest = Math.min(closest, Math.hypot(probe.x - tx, probe.z - tz));
     }
     return closest;

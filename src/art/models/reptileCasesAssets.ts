@@ -100,6 +100,11 @@ function casesKit(): ReturnType<typeof loadReptileKit> {
 }
 
 /** One dressed masonry part, positioned by the caller. */
+/** A case-kit part's top, metres above its origin — what its solid stands to. */
+export function reptileCaseTop(name: string): number {
+  return partBox(casesKit().part(name)).maxY;
+}
+
 export function reptileCaseMesh(name: string): Mesh {
   return casesKit().mesh(name);
 }

@@ -16,7 +16,7 @@ import {
 } from 'three';
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
-import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
+import { placeOnSphere, terrainHeight, tiltToSphere, upAt, yAtAltitude } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 import { WALKABLE_GAP } from '../core/constants';
@@ -378,9 +378,12 @@ export class FairyLights implements GameSystem {
         // the points it returns — so the drawing must come from the same call
         // or the guard is measuring a cable the park does not hang.
         anchors[i] = fairyAnchorAt(x, z, new Vector3());
-        // **A pole is solid, in the same place it is drawn.** Nothing derives a
+        // **A pole is solid, in the same place it is drawn** — and up to the top
+        // of its knob, a real height (far over her reach). Nothing derives a
         // collider from a mesh here, so the two are only ever together on purpose.
-        collision.addCircle(x, z, POLE_RADIUS);
+        collision.kinded('fairy light pole', () =>
+          collision.addCircle(x, z, POLE_RADIUS, yAtAltitude(x, z, POLE_HEIGHT + KNOB_RISE + KNOB_RADIUS), false, true),
+        );
         poleNumber += 1;
       }
 

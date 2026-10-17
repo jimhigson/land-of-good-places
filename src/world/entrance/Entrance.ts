@@ -18,7 +18,7 @@ import {
   woodTexture,
 } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
-import { standOnSphere, terrainHeight } from '../terrain';
+import { solidInFrame, standOnSphere, terrainHeight, yAtAltitude } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
@@ -94,6 +94,23 @@ const WELCOME_SIGN_YAW = Math.PI * 0.25;
 const WELCOME_SIGN_POST_OFFSETS = [-1.9, 1.9] as const;
 /** Collision radius of each post, as actually built below. */
 const WELCOME_SIGN_POST_RADIUS = 0.35;
+/** The sign's board: the height of its middle, and how tall it is. */
+const WELCOME_SIGN_BOARD_Y = 2.6;
+const WELCOME_SIGN_BOARD_HEIGHT = 1.9;
+
+/**
+ * The bus shelter: its posts (the canopy sits on top of them), its canopy —
+ * offset towards the road, tilted to shed rain — and the bench beneath it.
+ */
+const SHELTER_POST_HEIGHT = 2.3;
+const SHELTER_CANOPY_X = 0.3;
+const SHELTER_CANOPY_WIDTH = 1.6;
+const SHELTER_CANOPY_THICKNESS = 0.14;
+const SHELTER_CANOPY_LENGTH = 2.3;
+const SHELTER_CANOPY_TILT = 0.1;
+const SHELTER_BENCH_LENGTH = 1.4;
+const SHELTER_BENCH_HEIGHT = 0.42;
+const SHELTER_BENCH_DEPTH = 0.5;
 /** Half the board's own width (it is 4.4 m across), for sampling its far corners. */
 const WELCOME_SIGN_BOARD_HALF_WIDTH = 2.2;
 
@@ -337,7 +354,9 @@ export class Entrance implements GameSystem {
     // rendered without them. The bus's own paws (below, and on the bus) are
     // untouched.
     for (const foot of arch.feet) {
-      collision.addCircle(foot.x, foot.z, arch.footRadius);
+      collision.kinded('park gate pier', () =>
+        collision.addCircle(foot.x, foot.z, arch.footRadius, yAtAltitude(foot.x, foot.z, arch.footTop), false, true),
+      );
     }
 
     // --- the welcome sign ----------------------------------------------------
@@ -371,33 +390,81 @@ export class Entrance implements GameSystem {
     shelter.position.set(shelterX, shelterGround, shelterZ);
     this.group.add(shelter);
 
-    const shelterPostGeometry = new CylinderGeometry(0.14, 0.16, 2.3, 8);
+    const shelterPostGeometry = new CylinderGeometry(0.14, 0.16, SHELTER_POST_HEIGHT, 8);
     for (const dz of [-1, 1] as const) {
       const post = new Mesh(shelterPostGeometry, woodMaterial);
-      post.position.set(0, 1.15, dz * 0.9);
+      post.position.set(0, SHELTER_POST_HEIGHT / 2, dz * 0.9);
       post.castShadow = true;
       post.receiveShadow = true;
       shelter.add(post);
       // The collider is asked of the plan, not of `post.position`, which is
       // now local to the shelter. Collision is a flat (x, z) world either way.
-      collision.addCircle(shelterX, shelterZ + dz * 0.9, 0.2);
+      // Solid up to the canopy it holds.
+      collision.kinded('bus shelter post', () =>
+        collision.addCircle(
+          shelterX,
+          shelterZ + dz * 0.9,
+          0.2,
+          yAtAltitude(shelterX, shelterZ + dz * 0.9, SHELTER_POST_HEIGHT),
+          false,
+          true,
+        ),
+      );
     }
 
     const canopy = new Mesh(
-      new BoxGeometry(1.6, 0.14, 2.3),
+      new BoxGeometry(SHELTER_CANOPY_WIDTH, SHELTER_CANOPY_THICKNESS, SHELTER_CANOPY_LENGTH),
       toonMaterial(PALETTE.buildingTrim),
     );
-    canopy.position.set(0.3, 2.3, 0);
-    canopy.rotation.z = 0.1;
+    canopy.position.set(SHELTER_CANOPY_X, SHELTER_POST_HEIGHT, 0);
+    canopy.rotation.z = SHELTER_CANOPY_TILT;
     canopy.castShadow = true;
     canopy.receiveShadow = true;
     shelter.add(canopy);
 
-    const bench = new Mesh(new BoxGeometry(1.4, 0.42, 0.5), woodMaterial);
-    bench.position.set(0, 0.21, 0);
+    const bench = new Mesh(new BoxGeometry(SHELTER_BENCH_LENGTH, SHELTER_BENCH_HEIGHT, SHELTER_BENCH_DEPTH), woodMaterial);
+    bench.position.set(0, SHELTER_BENCH_HEIGHT / 2, 0);
     bench.castShadow = true;
     bench.receiveShadow = true;
     shelter.add(bench);
+
+    // The bench is a solid she steps up onto, and the canopy a solid her head
+    // meets: its underside (lowest at its low edge, 3 cm over her head) to its
+    // top, so she walks under it and bumps it jumping — and, with her head
+    // inside it, cannot stand on the bench beneath it (`solidStepCeiling`).
+    // Each where the shelter's lean draws it (`solidInFrame`).
+    {
+      const seat = solidInFrame(shelterX, shelterZ, shelterX, shelterZ, 0, SHELTER_BENCH_HEIGHT);
+      collision.kinded('bus shelter bench', () =>
+        collision.addBox(seat.x, seat.z, SHELTER_BENCH_LENGTH / 2, SHELTER_BENCH_DEPTH / 2, 0, 0, seat.top, false, true),
+      );
+      const slope = (SHELTER_CANOPY_WIDTH / 2) * Math.sin(SHELTER_CANOPY_TILT);
+      const half = (SHELTER_CANOPY_THICKNESS / 2) * Math.cos(SHELTER_CANOPY_TILT);
+      const underside = SHELTER_POST_HEIGHT - half - slope;
+      const roof = solidInFrame(
+        shelterX,
+        shelterZ,
+        shelterX + SHELTER_CANOPY_X,
+        shelterZ,
+        underside,
+        SHELTER_POST_HEIGHT + half + slope,
+      );
+      const roofBase = solidInFrame(shelterX, shelterZ, shelterX + SHELTER_CANOPY_X, shelterZ, underside, underside);
+      collision.kinded('bus shelter canopy', () =>
+        collision.addBox(
+          roof.x,
+          roof.z,
+          SHELTER_CANOPY_WIDTH / 2,
+          SHELTER_CANOPY_LENGTH / 2,
+          0,
+          0,
+          roof.top,
+          false,
+          true,
+          roofBase.top,
+        ),
+      );
+    }
 
     // The little "Bus Stop 🚌" lollipop went with every other sign, and its
     // post went with it rather than being left standing on the verge holding
@@ -542,15 +609,23 @@ export class Entrance implements GameSystem {
       const post = solid(new Mesh(postGeometry, toonMaterial(PALETTE.wood)));
       post.position.set(offset, 1.3, 0);
       signGroup.add(post);
-      collision.addCircle(
-        signX + Math.cos(WELCOME_SIGN_YAW) * offset,
-        signZ - Math.sin(WELCOME_SIGN_YAW) * offset,
-        WELCOME_SIGN_POST_RADIUS,
+      // Solid up to the top of the board it carries — the drawn top over it.
+      const postX = signX + Math.cos(WELCOME_SIGN_YAW) * offset;
+      const postZ = signZ - Math.sin(WELCOME_SIGN_YAW) * offset;
+      collision.kinded('welcome sign post', () =>
+        collision.addCircle(
+          postX,
+          postZ,
+          WELCOME_SIGN_POST_RADIUS,
+          yAtAltitude(postX, postZ, WELCOME_SIGN_BOARD_Y + WELCOME_SIGN_BOARD_HEIGHT / 2),
+          false,
+          true,
+        ),
       );
     }
 
-    const board = solid(new Mesh(new BoxGeometry(4.4, 1.9, 0.16), toonMaterial(PALETTE.woodLight)));
-    board.position.y = 2.6;
+    const board = solid(new Mesh(new BoxGeometry(4.4, WELCOME_SIGN_BOARD_HEIGHT, 0.16), toonMaterial(PALETTE.woodLight)));
+    board.position.y = WELCOME_SIGN_BOARD_Y;
     signGroup.add(board);
     addOutline(board, 0.02);
 

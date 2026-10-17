@@ -3,7 +3,7 @@ import { PALETTE } from '../core/palette';
 import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
-import { placeOnSphere, terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight, yAtAltitude } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -193,7 +193,8 @@ export class LampPosts implements GameSystem {
     for (const [x, z] of positions) {
       const ground = terrainHeight(x, z);
       this.lampPositions.push(new Vector3(x, ground, z));
-      collision.addCircle(x, z, LAMP_RADIUS);
+      // Solid to the top of its finial — far over her reach, and a real height.
+      collision.kinded('lamp post', () => collision.addCircle(x, z, LAMP_RADIUS, yAtAltitude(x, z, LAMP_TOP), false, true));
     }
     const count = this.lampPositions.length;
 
@@ -205,20 +206,20 @@ export class LampPosts implements GameSystem {
     const capMaterial = toonMaterial(PALETTE.stonePinkDark);
     const finialMaterial = toonMaterial(PALETTE.stonePink);
 
-    const baseGeometry = new CylinderGeometry(0.16, 0.23, 0.28, 8);
-    const shaftGeometry = new CylinderGeometry(0.09, 0.13, 2.35, 8);
+    const baseGeometry = new CylinderGeometry(0.16, 0.23, BASE_HEIGHT, 8);
+    const shaftGeometry = new CylinderGeometry(0.09, 0.13, SHAFT_LENGTH, 8);
     const curlGeometry = new TorusGeometry(0.15, 0.045, 6, 12);
-    const housingGeometry = new CylinderGeometry(0.3, 0.34, 0.55, 6);
-    const capGeometry = new ConeGeometry(0.38, 0.34, 6);
-    const finialGeometry = new SphereGeometry(0.09, 10, 8);
+    const housingGeometry = new CylinderGeometry(0.3, 0.34, HOUSING_HEIGHT, 6);
+    const capGeometry = new ConeGeometry(0.38, CAP_HEIGHT, 6);
+    const finialGeometry = new SphereGeometry(FINIAL_RADIUS, 10, 8);
 
     const baseY = 0.14;
-    const shaftY = 0.28 + 2.35 / 2;
-    const curlLowY = 0.28 + 2.35 * 0.38;
-    const curlHighY = 0.28 + 2.35 * 0.78;
-    const housingY = 0.28 + 2.35 + 0.55 / 2;
-    const capY = 0.28 + 2.35 + 0.55 + 0.34 / 2;
-    const finialY = 0.28 + 2.35 + 0.55 + 0.34 + 0.09;
+    const shaftY = BASE_HEIGHT + SHAFT_LENGTH / 2;
+    const curlLowY = BASE_HEIGHT + SHAFT_LENGTH * 0.38;
+    const curlHighY = BASE_HEIGHT + SHAFT_LENGTH * 0.78;
+    const housingY = BASE_HEIGHT + SHAFT_LENGTH + HOUSING_HEIGHT / 2;
+    const capY = BASE_HEIGHT + SHAFT_LENGTH + HOUSING_HEIGHT + CAP_HEIGHT / 2;
+    const finialY = FINIAL_Y;
 
     const baseMesh = instanceAt(baseGeometry, poleMaterial, this.lampPositions, baseY, count);
     const shaftMesh = instanceAt(shaftGeometry, poleMaterial, this.lampPositions, shaftY, count);
@@ -395,6 +396,16 @@ export class LampPosts implements GameSystem {
 
 /** The lamp's own collider radius, as registered below. */
 export const LAMP_RADIUS = 0.22;
+
+/** A lamp's parts, foot to finial: the base, the shaft, the lantern's housing and its cap, and the ball on top. */
+const BASE_HEIGHT = 0.28;
+const SHAFT_LENGTH = 2.35;
+const HOUSING_HEIGHT = 0.55;
+const CAP_HEIGHT = 0.34;
+const FINIAL_RADIUS = 0.09;
+const FINIAL_Y = BASE_HEIGHT + SHAFT_LENGTH + HOUSING_HEIGHT + CAP_HEIGHT + FINIAL_RADIUS;
+/** The top of the finial: the lamp's real height, which its solid stands to. */
+const LAMP_TOP = FINIAL_Y + FINIAL_RADIUS;
 
 /**
  * Every lamp in the park, walked off the **real** path network.

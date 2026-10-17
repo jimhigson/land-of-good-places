@@ -578,7 +578,6 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
   const desk = LIBRARY_FURNITURE.find((piece) => piece.kind === 'desk');
   const deskSize = libraryDeskSize();
   const tables = LIBRARY_FURNITURE.filter((piece) => piece.kind === 'sideTable');
-  const lamps = LIBRARY_FURNITURE.filter((piece) => piece.kind === 'readingLamp');
   const tableSize = librarySideTableSize();
   const lampSize = libraryReadingLampSize();
   const on = (a: LocalPoint, b: LocalPoint): boolean => Math.hypot(a.x - b.x, a.z - b.z) < 0.05;
@@ -631,7 +630,7 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         const lamp = createLibraryFloorLamp();
         place(piece, lamp.root, 0, lamp);
         const size = libraryFloorLampSize();
-        props.disc(piece.id, piece.at.x, piece.at.z, size.radius, size.height, { stand: false });
+        props.disc(piece.id, piece.at.x, piece.at.z, size.radius, size.height);
         break;
       }
       case 'readingLamp': {
@@ -639,16 +638,16 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         const base = standsOn(piece);
         place(piece, lamp.root, base, lamp);
         // Solid like everything drawn: a jump onto the desk, or over a side
-        // table, meets the lamp on it. Its shade is no floor.
-        props.disc(piece.id, piece.at.x, piece.at.z, lampSize.radius, base + lampSize.height, { stand: false });
+        // table, meets the lamp on it — and a jump high enough lands on it.
+        props.disc(piece.id, piece.at.x, piece.at.z, lampSize.radius, base + lampSize.height);
         break;
       }
       case 'sideTable': {
         place(piece, createLibrarySideTable().root, 0);
-        // A lamp stands on it, so its honest top is the lamp's, and it is no
-        // floor (hotel/place.ts's lamp-topped table).
-        const lit = lamps.some((lamp) => on(lamp.at, piece.at));
-        props.disc(piece.id, piece.at.x, piece.at.z, tableSize.radius, tableSize.top + (lit ? lampSize.height : 0), { stand: false });
+        // The table's own top; a lamp on it is its own solid
+        // (`readingLamp`, above), so the tabletop round the lamp's foot is
+        // somewhere to land and the lamp is something to bump.
+        props.disc(piece.id, piece.at.x, piece.at.z, tableSize.radius, tableSize.top);
         break;
       }
       case 'rug': {
@@ -665,7 +664,9 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         place(piece, createLibraryCushion(CUSHION_CLOTH[cushion % CUSHION_CLOTH.length]!).root, 0);
         cushion += 1;
         const size = libraryCushionSize();
-        props.soft(piece.id, size.top, piece.at.x, piece.at.z, size.radius);
+        // Solid, like everything she can see: a cushion is a low soft lump to
+        // hop onto, not a floor with no body.
+        props.disc(piece.id, piece.at.x, piece.at.z, size.radius, size.top);
         break;
       }
       case 'sconce': {

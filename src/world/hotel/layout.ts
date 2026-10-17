@@ -263,19 +263,23 @@ export const CONNECTOR_APPROACH = 1.2;
 
 /**
  * How far below its deck's walking surface a banded balustrade collider's
- * base sits (`Collision.ts`'s `baseHeight`).
+ * base sits (`Collision.ts`'s `baseHeight`) — **none: a rail stands on its
+ * deck.**
  *
- * Deep enough that a walker whose damped `y` briefly dips below the deck
- * plane — stepping off a flight's last tread, landing from a bounce — is
- * still held by the rail; far above anything a ground jump reaches
- * (`JUMP_APEX_HEIGHT` is 1.28 m, and the lowest banded base in the lobby is
- * 3.34 m). A walker between those two heights does not exist in this game:
- * the levels are 0, 3.84 and 5.44, and nothing walkable sits between.
+ * It was half a metre, when a banded collider met a mover by her *feet*: a
+ * walker whose damped `y` dipped below the deck plane (stepping off a flight's
+ * last tread, landing from a bounce) had to be under the base to still be
+ * held. Since the engine rework a mover is a body as tall as she is
+ * (`KID_HEIGHT`), and a banded solid meets her once her **head** is above its
+ * base — everyone stood on the deck, however her feet are damped, and nobody
+ * under it. With the old half metre her head would have met the landing's rail
+ * at the top of a jump from the arch below (her head reaches 3.40 m, the base
+ * was 3.34 m); at the deck's own surface (3.84 m) nothing below can reach it.
  *
  * Here rather than in `Hotel.ts` because the edge schedule below is the one
  * owner of which edges are guarded, and `check:hotel` reads that schedule.
  */
-export const RAIL_BASE_DROP = 0.5;
+export const RAIL_BASE_DROP = 0;
 
 /**
  * The direction from any point in the world **towards the camera**.

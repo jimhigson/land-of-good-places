@@ -13,7 +13,7 @@
  * (CLAUDE.md: two agents got clean, decisive, entirely wrong answers from
  * flood fills that were measuring the wrong thing):
  *
- *  1. The fill instrument sees a sealed pocket (a hollow rectangle in a world
+ *  1. The fill instrument sees a sealed pocket (a pen of four walls in a world
  *     of its own) and, in a hall with nothing but its four walls, reaches the
  *     middle of the lagoon.
  *  2. A flood fill at the player's radius from the arrival reaches every
@@ -77,6 +77,7 @@ import { BackSide, Group, InstancedMesh, Matrix4, Mesh, Box3, Vector3, type Buff
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { clearsTop, CollisionWorld } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
@@ -191,14 +192,28 @@ function reached(result: Fill, x: number, z: number): boolean {
   return false;
 }
 
-/** March a body from `from` towards `to` in `step`s; returns where it ended. */
-function march(collision: CollisionWorld, from: Vector3, to: Vector3, step: number, travel = 12): Vector3 {
+/**
+ * March a body from `from` towards `to` in `step`s; returns where it ended.
+ * `ground`, given, is the surface under her as she goes — out in the garden,
+ * where every solid's real top is measured against her feet and the ground is
+ * metres below y = 0; indoors the hall's floor is y = 0 and she stays on it.
+ */
+function march(
+  collision: CollisionWorld,
+  from: Vector3,
+  to: Vector3,
+  step: number,
+  travel = 12,
+  ground?: (x: number, z: number, y: number) => number,
+): Vector3 {
   const p = from.clone();
   const dir = to.clone().sub(from);
   dir.y = 0;
   dir.normalize();
+  if (ground) p.y = ground(p.x, p.z, terrainHeight(p.x, p.z) + 3);
   for (let t = 0; t < travel; t += step) {
     collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+    if (ground) p.y = ground(p.x, p.z, p.y);
   }
   return p;
 }
@@ -222,11 +237,20 @@ console.log('CONTROL — the fill instrument:');
   // exists to find.
   const control = new CollisionWorld();
   buildHallShell(new Group(), control, new WalkSurfaces());
-  control.addRectangle(OX, OZ, 3, 3, 0.3);
+  // A pen: four walls round an empty square, the one kind of sealed pocket
+  // there can be now a rectangle is a filled box.
+  for (const [ax, az, bx, bz] of [
+    [-3, -3, 3, -3],
+    [3, -3, 3, 3],
+    [3, 3, -3, 3],
+    [-3, 3, -3, -3],
+  ] as const) {
+    control.addWall(OX + ax, OZ + az, OX + bx, OZ + bz, 0.3);
+  }
   const seen = fill(control, OX + REPTILE_ARRIVAL_X, OZ + REPTILE_ARRIVAL_Z);
   const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
   say(seen.reached.size > 10000, `the fill floods the empty hall: ${seen.reached.size} cells reached`);
-  say(pockets.length > 50 && !reached(seen, OX, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a hollow rectangle are unreachable`);
+  say(pockets.length > 50 && !reached(seen, OX, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a pen of four walls are unreachable`);
   say(!seen.clear.has(key(...cellOf(OX, OZ + 30))), 'nothing off the plate counts as floor');
 
   // And with nothing but the walls, every exhibit's middle is reachable —
@@ -246,6 +270,8 @@ console.log('CONTROL — the fill instrument:');
 const { world, scene } = quietly(() => buildHeadlessPark());
 const house = world.reptileHouse;
 const collision = world.collision;
+/** The garden's walk sampler — the ground a march round the outside stands on. */
+const gardenGround = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
 const remove = process.env['REPTILE_CHECK_REMOVE'];
 if (remove) {
   const victim = house.solids.find((solid) => solid.what.includes(remove));
@@ -489,7 +515,9 @@ console.log('\nFACADE — the shell is solid from 32 bearings but the doorway:')
     const bearing = frame.yaw + (i / 32) * Math.PI * 2;
     const offAxis = Math.abs(Math.atan2(Math.sin(bearing - frame.yaw), Math.cos(bearing - frame.yaw)));
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+      // On the ground she walks over, step by step — see `march`.
       const probe = new Vector3(frame.x + Math.sin(bearing) * 14, 0, frame.z + Math.cos(bearing) * 14);
+      probe.y = gardenGround(probe.x, probe.z, terrainHeight(probe.x, probe.z) + 3);
       let closest = Infinity;
       let closestNotByDoor = Infinity;
       let byDoor = false;
@@ -497,6 +525,7 @@ console.log('\nFACADE — the shell is solid from 32 bearings but the doorway:')
         const fromAlong = alongOf(probe.x, probe.z);
         const fromAcross = acrossOf(probe.x, probe.z);
         collision.resolveMovement(probe, -Math.sin(bearing) * step, -Math.cos(bearing) * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        probe.y = gardenGround(probe.x, probe.z, probe.y);
         const toAlong = alongOf(probe.x, probe.z);
         const toAcross = acrossOf(probe.x, probe.z);
         if (!byDoor && fromAlong >= facade && toAlong < facade) {
@@ -523,7 +552,7 @@ console.log('\nFACADE — the shell is solid from 32 bearings but the doorway:')
   const band = reptileEntryBand(frame);
   const start = facadeToWorld(frame, REPTILE_DOOR_BAND_OUTER + 3, 0);
   const probe = new Vector3(start.x, 0, start.z);
-  const end = march(collision, probe, new Vector3(frame.x, 0, frame.z), PLAYER_LONGEST_STEP, 8);
+  const end = march(collision, probe, new Vector3(frame.x, 0, frame.z), PLAYER_LONGEST_STEP, 8, gardenGround);
   const stoppedAt = alongOf(end.x, end.z);
   say(
     stoppedAt > REPTILE_BACK_WALL_ALONG && stoppedAt < (REPTILE_BACK_WALL_ALONG + REPTILE_DOOR_BAND_OUTER) / 2 + 2,

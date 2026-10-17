@@ -189,7 +189,7 @@ export class ReptileHouse implements GameSystem {
     this.hallRoot.visible = false;
     this.hallRoot.add(new ReptileLighting(0, 0).group);
     buildHallShell(this.hallRoot, collision, surfaces);
-    this.props = new ReptileProps(collision, surfaces, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
+    this.props = new ReptileProps(collision, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
     const atlas = new SignAtlas();
     this.hearts = new SpritePuffs(this.hallRoot, 12);
     this.hallRoot.add(this.bubble.sprite);

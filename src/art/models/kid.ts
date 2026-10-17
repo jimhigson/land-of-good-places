@@ -138,16 +138,8 @@ export const KID_HIP_HEIGHT = 0.36;
  */
 export const KID_REACH_HEIGHT = 1.04;
 
-/**
- * Total height in metres, measured to the top of the hair.
- *
- * The **default** style's height. Since hair styles landed, a kid's real height
- * varies with what she is wearing — spikes reach a good 0.2 m higher than a bob
- * — so every handle carries its own measured `height` and that is what a name
- * label must use. This constant survives for callers that only need a rough
- * idea of how big a child is.
- */
-export const KID_HEIGHT = 2.12;
+/** The default style's height to the top of the hair — see `kidHeight.ts`, its one owner. */
+export { KID_HEIGHT } from './kidHeight';
 
 /**
  * **Where a standing child's eyes are, above her feet, in metres.**

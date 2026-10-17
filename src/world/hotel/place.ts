@@ -1,7 +1,6 @@
 import type { Group, Object3D } from 'three';
 import type { CollisionWorld } from '../Collision';
-import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
-import { JUMP_APEX_HEIGHT } from '../../entities/Player';
+import type { MovingPlatform } from '../building/surfaces';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { doorwayClearanceZones, type DoorwayZone, type HotelRoom } from './layout';
 
@@ -18,60 +17,62 @@ import { doorwayClearanceZones, type DoorwayZone, type HotelRoom } from './layou
  * have noticed: the two facts were never the same fact.
  *
  * So every prop in this hotel now goes through {@link HotelProps.place}, which
- * takes **one** footprint and hands it to **three** consumers:
+ * takes **one** footprint and hands it to **two** consumers:
  *
  * 1. the shared {@link CollisionWorld}, so a child meets the statue rather
- *    than walking through it;
- * 2. the guest keep-out list, so nobody strolls into it either;
- * 3. the shared {@link WalkSurfaces}, so a prop with a flat top a jump can
- *    reach is somewhere she can *land* — see the next section.
+ *    than walking through it — and, because the solid states its real top,
+ *    lands on it when a jump carries her over it;
+ * 2. the guest keep-out list, so nobody strolls into it either.
  *
  * They cannot disagree, because there is nothing to disagree *with*: forget to
- * describe a prop's footprint and it is invisible to all three, which is a
- * failure a six-year-old finds in one visit rather than one that hides in a
- * table of numbers. This is CLAUDE.md's "one owner; everyone else asks",
- * applied to the thing that file names as the repo's most common bug.
+ * describe a prop's footprint and it is invisible to both, which is a failure
+ * a six-year-old finds in one visit rather than one that hides in a table of
+ * numbers. This is CLAUDE.md's "one owner; everyone else asks", applied to the
+ * thing that file names as the repo's most common bug.
  *
- * ## Solid AND standable — the rule Jim asked for
+ * ## Solid, and so landable — the rule Jim asked for
  *
  * Live play, 7 Aug 2026: *"I can't even jump onto a sofa that's much less
  * tall than my jump — I should be able to jump onto any solid item that's not
- * too high, here and elsewhere in the game."* The old registration made every
- * prop an infinitely tall pillar (the `topHeight = Infinity` default), and
- * the relative height scheme could not have fixed it: a collider's relative
- * top is compared against clearance above *the sampler's* ground, so a child
- * already stood on a sofa is at clearance 0 and its own edge would shove her
- * off — the law that forced the beds to be registered soft.
+ * too high, here and elsewhere in the game."* And on 17 Oct 2026, the general
+ * form: *"anything should be jumpable with no special 'floor' being marked to
+ * make it so."*
  *
- * So a prop's collider is registered with an **absolute** top
+ * So a prop's collider is registered with its **real, absolute** top
  * (`Collision.ts`'s `topIsAbsolute`): solid to feet below it, air to feet
- * above it, and still beneath the feet standing on it. Every {@link PropPlan}
- * must therefore say how tall its prop really is (`top` — required, so the
- * pillar bug cannot come back by omission), and anything whose flat top is
- * within {@link JUMP_APEX_HEIGHT} of its base gets a walkable plate at
- * exactly that height. A crystal or a hedge opts out with `stand: false` —
- * its *collider* still has the real top, there is simply no floor up there.
+ * above it, and — because a solid's top is somewhere to land
+ * (`CollisionWorld.highestTopAt`, asked by `world/standing.ts`) — still
+ * beneath the feet standing on it. There used to be a third consumer here, a
+ * walkable plate laid on every prop a jump could reach, and a `stand: false`
+ * to leave one off a hedge; both are gone. Whether she can stand on a crystal
+ * is a question for her legs and its height, not for a flag. Every
+ * {@link PropPlan} must therefore say how tall its prop really is (`top` —
+ * required, so the pillar bug cannot come back by omission).
  *
  * ## Two rules the footprints obey
  *
  * **Generous-light, never generous-heavy.** A footprint is the prop's *visual*
  * size and never a metre more. The cost of brushing through the corner of a
  * planter is nothing; the cost of a child wedged between a table and a wall is
- * the game. Where a prop is long — a counter, a desk, a sofa — the rectangle
- * is registered *inset* by its own half-thickness (see
- * {@link WALL_HALF_THICKNESS}) so the collider lands exactly on the visual
- * edge rather than a fifth of a metre outside it.
+ * the game. Where a prop is long — a counter, a desk, a sofa — the box is
+ * registered *inset* by its own rounding (see {@link WALL_HALF_THICKNESS}) so
+ * its outline lands exactly on the visual edge rather than a fifth of a metre
+ * outside it.
  *
- * **A prop that is its own floor is placed soft.** The suite's beds are pure
- * `WalkSurfaces` platforms — Eleri's "sleep, or go jumpy jumpy!" — with
- * `solid: false` and no collider at all, because a bed is for bouncing across
- * and even an absolute-top wall at its edge would catch her mid-bounce at the
- * mattress rim. `solid: false` keeps only the keep-out (and whatever platform
- * its own dressing code registers).
+ * **A rectangle is a filled box.** It used to be four walls round a hollow
+ * middle a body inside was never pushed out of; `CollisionWorld.addRectangle`
+ * now registers one solid box, so there is no inside to argue about.
+ *
+ * **`solid: false` is a keep-out with no body** — the people behind the
+ * counters (scenery-soft, as every person in this park is), a stair tread's
+ * keep-out, a partition whose wall is registered by its own builder. It is not
+ * a way to make furniture walkable: the suite's beds were the last thing that
+ * used it that way, and they are solid now, like everything else she can see.
  */
 
 /**
- * Half-thickness of the walls a rectangular footprint is built from.
+ * The rounding of a rectangular prop's box — how far its solid reaches past
+ * the inset rectangle on every side.
  *
  * Kept at 0.2 rather than something hair-thin for one measured reason:
  * `CollisionWorld.maxSafeStep` divides the *thinnest* collider in the whole
@@ -164,14 +165,6 @@ function effectiveHalfExtents(
   return { halfX: halfX * c + halfZ * s, halfZ: halfX * s + halfZ * c };
 }
 
-/**
- * A round prop's standing plate is this fraction of its collider radius, per
- * side — between the inscribed square (0.71, gaps at the compass points) and
- * the circumscribed one (1.0, floating corners). Slightly floaty corners on a
- * table read better than falling off a plate while visibly on the table.
- */
-const ROUND_PLATE_FRACTION = 0.75;
-
 /** A static walkable plate — a room floor, a mattress top, a sofa seat. */
 export class Plate implements MovingPlatform {
   readonly surfaceY: number;
@@ -239,29 +232,18 @@ export interface PropPlan {
   /**
    * The prop's top, metres above its own base — **required**, because the
    * default that let a sofa be an infinitely tall pillar is exactly the bug
-   * this file exists to prevent (see the header). For a standable prop this
-   * is the surface her feet occupy (a sofa's seat, not its backrest); for
-   * anything pointy it is the honest overall height, with {@link stand}
-   * false.
+   * this file exists to prevent (see the header). It is the top of the solid,
+   * and so where her feet come to rest if a jump carries her over it.
    */
   readonly top: number;
   /**
    * Height of the floor this prop stands on — the mezzanine deck for the
-   * gallery's furniture. Both the collider top and the standing plate are at
-   * `base + top`; the jump-reachability test uses `top` alone, because she
-   * jumps from the same floor the prop stands on.
+   * gallery's furniture. The collider's top is at `base + top`.
    */
   readonly base?: number;
   /**
-   * `false` for a prop whose top is real but is not a floor — crystals,
-   * hedges, seaweed, a lamp-topped table. The collider keeps the honest
-   * height; there is simply no plate to land on, so a jump that clears the
-   * top slides off rather than standing in the foliage.
-   */
-  readonly stand?: false;
-  /**
-   * `false` for anything that is also a floor — see the header. Everything
-   * else is solid, because that is the rule Jim asked for.
+   * `false` for a keep-out with no body — see the header's last rule. Never
+   * for furniture: everything she can see is solid.
    */
   readonly solid?: boolean;
 }
@@ -275,7 +257,6 @@ export class HotelProps {
   private readonly keepOuts: RoomKeepOut[] = [];
 
   private readonly collision: CollisionWorld;
-  private readonly surfaces: WalkSurfaces;
 
   /**
    * Every solid footprint {@link footprint} found sitting in a doorway's
@@ -292,12 +273,8 @@ export class HotelProps {
    *  for, rather than once per prop placed in it. */
   private readonly doorwayZonesByRoom = new Map<HotelRoom, readonly DoorwayZone[]>();
 
-  constructor(
-    collision: CollisionWorld,
-    surfaces: WalkSurfaces,
-  ) {
+  constructor(collision: CollisionWorld) {
     this.collision = collision;
-    this.surfaces = surfaces;
   }
 
   /** The whole keep-out list, once the rooms are dressed. */
@@ -364,29 +341,26 @@ export class HotelProps {
     if (solid) this.checkDoorwayClearance(room, plan);
 
     if (plan.radius !== undefined) {
-      if (solid) {
-        this.collision.addCircle(worldX, worldZ, plan.radius, worldTop, false, true);
-        this.standable(plan, worldX, worldZ, plan.radius * ROUND_PLATE_FRACTION, plan.radius * ROUND_PLATE_FRACTION, worldTop);
-      }
+      if (solid) this.collision.addCircle(worldX, worldZ, plan.radius, worldTop, false, true);
       this.keepOuts.push({ room, x: plan.x, z: plan.z, radius: plan.radius });
       return;
     }
 
     // {@link effectiveHalfExtents} — the box a rotated rectangle actually
-    // occupies, or the plain box unrotated. Every consumer below (the
-    // collider, the standing plate, the guest keep-out) uses this, not the
-    // raw `plan.halfX`/`plan.halfZ`, so a `spin` can never make one of them
-    // disagree with what the model visually covers.
+    // occupies, or the plain box unrotated. Both consumers below (the solid
+    // and the guest keep-out) use this, not the raw `plan.halfX`/`plan.halfZ`,
+    // so a `spin` can never make one of them disagree with what the model
+    // visually covers.
     const { halfX, halfZ } = effectiveHalfExtents(
       plan.halfX ?? 0.5,
       plan.halfZ ?? 0.5,
       plan.spin,
     );
     if (solid) {
-      // Inset by the wall's own half-thickness, so the four walls' outer faces
-      // land on the visual edge rather than {@link WALL_HALF_THICKNESS} beyond
-      // it. Floored well above zero so a shallow prop still makes a rectangle
-      // rather than a degenerate one.
+      // One filled box, inset by its own rounding so its outline lands on the
+      // visual edge rather than {@link WALL_HALF_THICKNESS} beyond it. Floored
+      // well above zero so a shallow prop still makes a box rather than a
+      // degenerate one.
       this.collision.addRectangle(
         worldX,
         worldZ,
@@ -397,7 +371,6 @@ export class HotelProps {
         false,
         true,
       );
-      this.standable(plan, worldX, worldZ, halfX, halfZ, worldTop);
     }
     this.coverWithDiscs(room, plan.x, plan.z, halfX, halfZ);
   }
@@ -429,28 +402,6 @@ export class HotelProps {
             : `${halfX * 2}×${halfZ * 2} m footprint${plan.spin ? ' (rotated)' : ''}`),
       );
     }
-  }
-
-  /**
-   * The standing plate on top of a mountable prop — the third consumer of the
-   * one footprint (see the header). Nothing is added for a prop that opted
-   * out (`stand: false`) or whose top the jump cannot reach from the floor it
-   * shares with her; the threshold is the game's own {@link JUMP_APEX_HEIGHT}
-   * rather than a number invented here.
-   */
-  private standable(
-    plan: PropPlan,
-    worldX: number,
-    worldZ: number,
-    halfX: number,
-    halfZ: number,
-    worldTop: number,
-  ): void {
-    if (plan.stand === false) return;
-    if (plan.top > JUMP_APEX_HEIGHT) return;
-    this.surfaces.addPlatform(
-      new Plate(worldTop, worldX - halfX, worldX + halfX, worldZ - halfZ, worldZ + halfZ),
-    );
   }
 
   /**

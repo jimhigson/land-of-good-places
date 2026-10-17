@@ -129,7 +129,8 @@ export class TortoiseRide {
     this.length = this.loop.getLength();
 
     const [front, back] = parkedCapsule();
-    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, 'wall');
+    // To the top of her shell — the drawn tortoise, a real height.
+    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, shell.max.y); // flat-ok: the same box the seat above is set from; the hall is flat (floor y 0, off the sphere)
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
     this.bay = this.parkedSolid.handle as WallCollider;
     this.park();

@@ -1,3 +1,4 @@
+import { terrainHeight } from '../src/world/terrain.ts';
 /**
  * Walk every DRAWN ribbon with `poiGraph`'s own clearance test and report
  * every stretch a child cannot walk, naming the collider that blocks it and
@@ -28,7 +29,7 @@ const PAVED_CLEARANCE = NPC_RADIUS - 0.02;
 const CLEARANCE = 0.7;
 const probe = new Vector3();
 const clear = (x: number, z: number): boolean => {
-  probe.set(x, bridgeHeightAt(bridges, x, z) ?? 0, z);
+  probe.set(x, bridgeHeightAt(bridges, x, z) ?? terrainHeight(x, z), z); // the ground, not y = 0: real tops
   collision.resolve(probe, isOnPath(x, z, 0) ? PAVED_CLEARANCE : CLEARANCE);
   return (probe.x - x) ** 2 + (probe.z - z) ** 2 < 1e-6;
 };

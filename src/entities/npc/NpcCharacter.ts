@@ -6,7 +6,8 @@ import {
   PLAYER_TURN_SPEED,
 } from '../../core/constants';
 import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
-import type { CollisionWorld } from '../../world/Collision';
+import { separatedByHeight, type CollisionWorld } from '../../world/Collision';
+import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { terrainHeight } from '../../world/terrain';
 import { faceOnGround } from '../../world/up';
 import type { GroundSampler } from '../Player';
@@ -95,6 +96,12 @@ export class NpcCharacter {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * Where her feet left the ground for the hop (or the drop) she is in — the
+   * height a solid's top is cleared from (`CollisionWorld.resolve`'s `feetY`):
+   * the crowd never stands on a top, so a hop must never carry it over one.
+   */
+  private takeoffY = 0;
   private expression: Expression = 'neutral';
 
   // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
@@ -312,7 +319,7 @@ export class NpcCharacter {
     // the same way it caps an ordinary frame's — `this.previousPosition`
     // still holds where the script left her, from `setScriptedPose`'s own
     // copy, so it is the right "before" to measure the escape against.
-    this.collision.resolve(this.position, NPC_RADIUS);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
     this.previousPosition.copy(this.position);
     this.avatar.rig.root.position.copy(this.position);
@@ -411,6 +418,11 @@ export class NpcCharacter {
   /** Nudges the walk cycle at spawn so children are not in lockstep. */
   setWalkPhase(phase: number): void {
     this.walkPhase = phase;
+  }
+
+  /** The height her feet count from when clearing a top — see {@link takeoffY}. */
+  private clearsFrom(): number {
+    return this.airborne ? Math.min(this.position.y, this.takeoffY) : this.position.y;
   }
 
   /**
@@ -521,6 +533,9 @@ export class NpcCharacter {
     // standing — shoving it "apart" from a passer-by at ground level would
     // knock it out of setClimbPose's next call for nothing visible in return.
     if (this.climbingFlag || other.climbingFlag) return;
+    // One above the other — a guest on the hotel landing and one walking
+    // under it — are not in each other's way. See `separatedByHeight`.
+    if (separatedByHeight(this.position.x, this.position.y, this.position.z, other.position.x, other.position.y, other.position.z)) return;
 
     // **A scripted child cannot be pushed, but must still push.**
     //
@@ -688,7 +703,7 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
-    this.collision.resolve(this.position, NPC_RADIUS);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
 
     // Trust the resolved position over the intended one, so walking into a wall
@@ -727,12 +742,14 @@ export class NpcCharacter {
 
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
       this.airborne = true;
+      this.takeoffY = this.position.y;
       this.verticalVelocity = 0;
     }
 
     if (this.intent.hop && !this.airborne) {
       this.verticalVelocity = NPC_JUMP_SPEED;
       this.airborne = true;
+      this.takeoffY = this.position.y;
     }
 
     if (this.airborne) {

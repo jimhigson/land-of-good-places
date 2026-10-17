@@ -5,11 +5,17 @@ import { addOutline, softMaterial, solid } from '../../art/style/materials';
 import { INTERIOR_HALF_X, INTERIOR_HALF_Z, PARADE_MEMBER_RADIUS } from '../../core/constants';
 import { createPetBowl } from '../../art/models/hotelAssets';
 import {
+  CASTLE_ARMOUR_TOP,
   CASTLE_BENCH_HALF_LENGTH,
   CASTLE_BENCH_HALF_WIDTH,
   CASTLE_BENCH_SEAT,
+  CASTLE_CHEST_FOOTPRINT,
   CASTLE_DAIS_HEIGHT,
+  CASTLE_PLINTH_FOOTPRINT,
   CASTLE_PLINTH_TOP,
+  CASTLE_THRONE_BACK,
+  CASTLE_THRONE_SEAT,
+  type CastleFootprint,
   CASTLE_TABLE_HALF_LENGTH,
   CASTLE_TABLE_HALF_WIDTH,
   CASTLE_TABLE_TOP,
@@ -982,29 +988,6 @@ export function greatHallSolids(deck: number): readonly HallSolid[] {
   return solids;
 }
 
-/**
- * The part of the banquet a jump can **land on**: each run, whole, at
- * {@link GREAT_HALL_TABLE_HEIGHT}.
- *
- * **The same footprint as {@link greatHallSolids}, deliberately.** The obvious
- * version of this returned the table's own measured half-width, so the floor
- * she stands on would be the wood she can see — and it opens a soft-lock: a
- * `CollisionWorld` rectangle is hollow, a body inside one is never pushed out
- * (measured: eleven seconds without moving), and walking off a narrow plate
- * drops her onto the flagstones *inside* the run. Covering the run edge to edge
- * is what makes the inside unreachable rather than merely unpleasant. See
- * `Building.ts`'s `banquetTables` for the full argument and the two fixes that
- * did not work.
- *
- * The pets' table is excluded because it does not need this: at 0.45 m
- * half-width it is narrower than a child's own 0.62 m radius, so a body inside
- * it is pushed clear by its own walls. `check:hall-solid` measures that rather
- * than taking it on trust.
- */
-export function greatHallTableTops(deck: number): readonly HallSolid[] {
-  return greatHallSolids(deck).filter((solid) => solid.top === CASTLE_TABLE_TOP);
-}
-
 /** Every place at the pets' table. See {@link PetPlace}. */
 export function greatHallPetPlaces(deck: number): readonly PetPlace[] {
   const table = greatHallPetTable(deck);
@@ -1118,15 +1101,64 @@ const THRONE_FROM_WALL = 2.8;
 const ARMOUR_FROM_AXIS = 4.2;
 
 /**
- * Stands the great hall's furniture on `deck`.
+ * **A solid a castle prop is**, in its deck's own local metres — handed back by
+ * whoever draws the prop (`dressGreatHall`, `castleDecor.ts`'s `dressCastle`)
+ * and registered by `Building.ts`'s `registerDecorCollision`, so the solid is
+ * asked of the very numbers the prop was placed with. A box about `(x, z)`,
+ * turned by the prop's own `rotation.y`, standing to `top` over the deck.
+ *
+ * Jim, 17 Oct 2026: anything drawn is solid, and anything solid is landable.
+ * The castle's dressing used to be the one place with no colliders at all —
+ * by choice once the floors split (#377/#380), and nobody had asked. This is
+ * the asking.
+ */
+export interface CastleDecorSolid {
+  readonly kind: string;
+  readonly x: number;
+  readonly z: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  readonly yaw: number;
+  readonly top: number;
+}
+
+/**
+ * The solid a measured prop footprint stands as, with the prop's origin at
+ * `(x, z)` turned by `yaw`, standing to `top` over the deck.
+ */
+export function footprintSolid(
+  kind: string,
+  footprint: Pick<CastleFootprint, 'minX' | 'maxX' | 'minZ' | 'maxZ'>,
+  x: number,
+  z: number,
+  yaw: number,
+  top: number,
+): CastleDecorSolid {
+  const midX = (footprint.minX + footprint.maxX) / 2;
+  const midZ = (footprint.minZ + footprint.maxZ) / 2;
+  return {
+    kind,
+    x: x + midX * Math.cos(yaw) + midZ * Math.sin(yaw),
+    z: z - midX * Math.sin(yaw) + midZ * Math.cos(yaw),
+    halfX: (footprint.maxX - footprint.minX) / 2,
+    halfZ: (footprint.maxZ - footprint.minZ) / 2,
+    yaw,
+    top,
+  };
+}
+
+/**
+ * Stands the great hall's furniture on `deck`, and hands back the solids it
+ * stood there (see {@link CastleDecorSolid}).
  *
  * Called by `castleDecor.ts`'s `dressCastle` so that everything here lands
  * inside `check:castle`'s prop assertions for free — they walk the built group
  * and ask nothing about what a prop *is*.
  */
-export function dressGreatHall(deck: number, floor: Group): void {
+export function dressGreatHall(deck: number, floor: Group): CastleDecorSolid[] {
   const plan = greatHallPlan(deck);
-  if (!plan) return;
+  if (!plan) return [];
+  const solids: CastleDecorSolid[] = [];
 
   const group = new Group();
   group.name = castleFurnitureGroupName(deck);
@@ -1137,6 +1169,9 @@ export function dressGreatHall(deck: number, floor: Group): void {
 
   const throneZ = wallZ + inward * THRONE_FROM_WALL;
   group.add(dais(axisX, throneZ));
+  // The dais is a step up; the throne on it a seat to stand on and a back to
+  // its spire, each its own solid.
+  solids.push({ kind: 'throne dais', x: axisX, z: throneZ, halfX: DAIS_HALF_X, halfZ: DAIS_HALF_Z, yaw: 0, top: CASTLE_DAIS_HEIGHT });
 
   const throne = createCastleThrone();
   throne.root.position.set(axisX, CASTLE_DAIS_HEIGHT, throneZ);
@@ -1144,6 +1179,10 @@ export function dressGreatHall(deck: number, floor: Group): void {
   // north wall looks down the hall at the door with no rotation at all.
   throne.root.rotation.y = inward > 0 ? 0 : Math.PI;
   group.add(throne.root);
+  solids.push(
+    footprintSolid('throne', CASTLE_THRONE_SEAT, axisX, throneZ, throne.root.rotation.y, CASTLE_DAIS_HEIGHT + CASTLE_THRONE_SEAT.top),
+    footprintSolid('throne back', CASTLE_THRONE_BACK, axisX, throneZ, throne.root.rotation.y, CASTLE_DAIS_HEIGHT + CASTLE_THRONE_BACK.top),
+  );
 
   // A guard of honour flanking the approach, rather than two suits of armour
   // pushed into the corners where nobody walks past them.
@@ -1155,6 +1194,17 @@ export function dressGreatHall(deck: number, floor: Group): void {
   // flank the feast rather than growing out of the end of a bench.
   for (const along of [4.3, 8.1]) {
     group.add(...armourOnPlinth(axisX + ARMOUR_FROM_AXIS, wallZ + inward * along, inward));
+    // The plinth, and the knight standing on it to the top of his plume.
+    solids.push(
+      footprintSolid(
+        'armour on its plinth',
+        CASTLE_PLINTH_FOOTPRINT,
+        axisX + ARMOUR_FROM_AXIS,
+        wallZ + inward * along,
+        0,
+        CASTLE_PLINTH_TOP + CASTLE_ARMOUR_TOP,
+      ),
+    );
   }
 
   group.add(...feast(plan, deck));
@@ -1176,14 +1226,33 @@ export function dressGreatHall(deck: number, floor: Group): void {
     // along the hearth wall.
     fireside.root.rotation.y = Math.PI / 2;
     group.add(fireside.root);
+    solids.push(
+      footprintSolid(
+        'fireside bench',
+        {
+          minX: -CASTLE_BENCH_HALF_WIDTH,
+          maxX: CASTLE_BENCH_HALF_WIDTH,
+          minZ: -CASTLE_BENCH_HALF_LENGTH,
+          maxZ: CASTLE_BENCH_HALF_LENGTH,
+        },
+        fireside.root.position.x,
+        fireside.root.position.z,
+        fireside.root.rotation.y,
+        CASTLE_BENCH_SEAT,
+      ),
+    );
   }
 
   const chest = createCastleChest();
   chest.root.position.set(axisX + 9.5, 0, wallZ + inward * 3.4);
   chest.root.rotation.y = inward > 0 ? 0 : Math.PI;
   group.add(chest.root);
+  solids.push(
+    footprintSolid('treasure chest', CASTLE_CHEST_FOOTPRINT, chest.root.position.x, chest.root.position.z, chest.root.rotation.y, CASTLE_CHEST_FOOTPRINT.top),
+  );
 
   floor.add(group);
+  return solids;
 }
 
 /**

@@ -16,6 +16,7 @@ import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
 import type { AnchorPlots } from '../../world/AnchorPlots';
+import { solidInFrame } from '../../world/terrain';
 import type { CollisionWorld } from '../../world/Collision';
 import type { FrameContext, GameSystem } from '../../core/types';
 import { createCar } from './car';
@@ -54,6 +55,20 @@ export interface DodgemsPlot extends GameSystem {
  * Returns a small system: the only thing that moves is the fairy lights, and
  * they twinkle on `elapsed` like the rest of the park's lighting.
  */
+/** The barrier's rail ring: its centre's height above the rink, and its tube's radius — its top is the barrier's. */
+const BARRIER_RAIL_Y = 1.0;
+const BARRIER_RAIL_TUBE = 0.14;
+/** The fake tree's plinth top, and the top of its canopy (the tallest blob's crown), above the rink. */
+const FAKE_TREE_PLINTH_TOP = 0.4;
+const FAKE_TREE_TOP = 3.4 + 0.5 + 1.7 * 0.88;
+/** The parked car (`car.ts`): its tub's rim, and its seat back's top and how far behind the car's middle it stands. */
+const CAR_TUB_TOP = 0.66 + 0.46;
+const CAR_SEAT_TOP = 1.16 + 0.36;
+const CAR_SEAT_Z = -0.6;
+/** The light posts round the rink: their height (the flag sits on top) and their foot's radius. */
+const POST_HEIGHT = 3.4;
+const POST_FOOT_RADIUS = 0.14;
+
 export function buildDodgemsPlot(
   anchorPlots: AnchorPlots,
   collision: CollisionWorld,
@@ -138,16 +153,17 @@ export function buildDodgemsPlot(
     root.add(pad);
 
     // Solid: a child should bounce off the outside of the ride, not walk
-    // through the bumper wall. Collision is in WORLD space, not plot-local.
+    // through the bumper wall. Its top is the rail ring's, which runs along the
+    // pads' tops, and it stands where the pad is drawn (`solidInFrame`).
     const half = 1.05;
     const tx = -Math.sin(angle) * half;
     const tz = Math.cos(angle) * half;
-    collision.addWall(
-      centreX + x - tx,
-      centreZ + z - tz,
-      centreX + x + tx,
-      centreZ + z + tz,
-      0.32,
+    const barrierTop = deck + BARRIER_RAIL_Y + BARRIER_RAIL_TUBE;
+    const a = solidInFrame(centreX, centreZ, centreX + x - tx, centreZ + z - tz, deck, barrierTop);
+    const b = solidInFrame(centreX, centreZ, centreX + x + tx, centreZ + z + tz, deck, barrierTop);
+    const middle = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, deck, barrierTop);
+    collision.kinded('dodgems barrier', () =>
+      collision.addWall(a.x, a.z, b.x, b.z, 0.32, middle.top, false, true),
     );
   }
 
@@ -156,7 +172,7 @@ export function buildDodgemsPlot(
     toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.85 }),
   );
   const bulbGeometry = new SphereGeometry(0.16, 10, 8);
-  const postGeometry = new CylinderGeometry(0.11, 0.14, 3.4, 8);
+  const postGeometry = new CylinderGeometry(0.11, POST_FOOT_RADIUS, POST_HEIGHT, 8);
   const bulbs: Mesh[] = [];
 
   for (let i = 0; i < 8; i += 1) {
@@ -165,8 +181,13 @@ export function buildDodgemsPlot(
     const x = Math.cos(angle) * (RINK_RADIUS + 0.9);
     const z = Math.sin(angle) * (RINK_RADIUS + 0.9);
     const post = solid(new Mesh(postGeometry, woodMaterial));
-    post.position.set(x, 1.7, z);
+    post.position.set(x, POST_HEIGHT / 2, z);
     root.add(post);
+    // A post she can see is a post she bumps into — up to its top, under the flag.
+    const standing = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, 0, POST_HEIGHT);
+    collision.kinded('dodgems post', () =>
+      collision.addCircle(standing.x, standing.z, POST_FOOT_RADIUS, standing.top, false, true),
+    );
 
     const flag = decal(new Mesh(new ConeGeometry(0.24, 0.62, 3), bulbMaterials[i % 4] ?? padA));
     flag.position.set(x, 3.6, z);
@@ -196,10 +217,10 @@ export function buildDodgemsPlot(
   }
 
   const railRing = solid(
-    new Mesh(new TorusGeometry(RINK_RADIUS + 0.45, 0.14, 8, 72), railMaterial),
+    new Mesh(new TorusGeometry(RINK_RADIUS + 0.45, BARRIER_RAIL_TUBE, 8, 72), railMaterial),
   );
   railRing.rotation.x = Math.PI / 2;
-  railRing.position.y = deck + 1.0;
+  railRing.position.y = deck + BARRIER_RAIL_Y;
   root.add(railRing);
 
   // --- the entrance doorway ---------------------------------------------------
@@ -219,7 +240,16 @@ export function buildDodgemsPlot(
   const tree = buildStaticTree(rng);
   tree.position.y = deck;
   root.add(tree);
-  collision.addCircle(centreX, centreZ, 1.9);
+  // Its yellow plinth, a step up from the rink, and the trunk standing on it
+  // up to the top of the canopy: two solids, each to its own drawn top.
+  {
+    const plinth = solidInFrame(centreX, centreZ, centreX, centreZ, deck, deck + FAKE_TREE_PLINTH_TOP);
+    const trunk = solidInFrame(centreX, centreZ, centreX, centreZ, deck, deck + FAKE_TREE_TOP);
+    collision.kinded('dodgems tree', () => {
+      collision.addCircle(plinth.x, plinth.z, 1.9, plinth.top, false, true);
+      collision.addCircle(trunk.x, trunk.z, 0.8, trunk.top, false, true);
+    });
+  }
 
   // --- a parked car ---------------------------------------------------------
   // RiPika is already sitting in one, waiting. It is the single strongest hint
@@ -232,11 +262,26 @@ export function buildDodgemsPlot(
   );
   parked.root.rotation.y = -gapAngle + 0.6;
   root.add(parked.root);
-  collision.addCircle(
-    centreX + parked.root.position.x,
-    centreZ + parked.root.position.z,
-    1.1,
-  );
+  // The car's tub, to its rim, and its seat's high back behind the driver —
+  // each its own solid (the driver is a person, and people are soft).
+  {
+    const carX = centreX + parked.root.position.x;
+    const carZ = centreZ + parked.root.position.z;
+    const yaw = parked.root.rotation.y;
+    const tub = solidInFrame(centreX, centreZ, carX, carZ, deck, deck + CAR_TUB_TOP);
+    const seat = solidInFrame(
+      centreX,
+      centreZ,
+      carX + Math.sin(yaw) * CAR_SEAT_Z,
+      carZ + Math.cos(yaw) * CAR_SEAT_Z,
+      deck,
+      deck + CAR_SEAT_TOP,
+    );
+    collision.kinded('dodgems car', () => {
+      collision.addCircle(tub.x, tub.z, 1.1, tub.top, false, true);
+      collision.addCircle(seat.x, seat.z, 0.5, seat.top, false, true);
+    });
+  }
 
   return {
     name: 'dodgemsPlot',
@@ -292,9 +337,9 @@ function buildStaticTree(rng: Rng): Group {
   const appleMaterial = toonMaterial(PALETTE.flowerRed);
 
   const plinth = solid(
-    new Mesh(new CylinderGeometry(1.75, 1.95, 0.4, 20), toonMaterial(PALETTE.markerLemon)),
+    new Mesh(new CylinderGeometry(1.75, 1.95, FAKE_TREE_PLINTH_TOP, 20), toonMaterial(PALETTE.markerLemon)),
   );
-  plinth.position.y = 0.2;
+  plinth.position.y = FAKE_TREE_PLINTH_TOP / 2;
   tree.add(plinth);
   addOutline(plinth, 0.026);
 

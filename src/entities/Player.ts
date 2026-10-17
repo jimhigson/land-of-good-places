@@ -21,9 +21,11 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
+import { riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
+import { KID_HEIGHT } from '../art/models/kidHeight';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { poseRailRaceRider, type RiderPose } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
@@ -880,7 +882,7 @@ export class Player implements GameSystem {
     // though an escalator's per-frame shove is far too small to reach even one
     // extra sub-step: a moving walkway that ever carried her a wall's width in
     // a frame should not be able to carry her through one.
-    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance);
+    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance, Infinity, undefined, undefined, KID_HEIGHT);
     this.group.position.copy(this.position);
   }
 
@@ -1182,6 +1184,26 @@ export class Player implements GameSystem {
     let groundY = reference;
     let fromX = this.position.x;
     let fromZ = this.position.z;
+    // --- stepping up onto a solid --------------------------------------------
+    // A solid's top within one step of the surface she stands on is climbed
+    // exactly as a deck of that height is — walking into a 0.44 m bench puts
+    // her on it, as walking into the castle's porch always did. Only while she
+    // is walking *into* one (`walkingOntoStep` looks just past her front edge),
+    // so walking past a bench she brushes its side instead of sinking into it.
+    // The reach is the sampler's own, asked from the same carried reference
+    // the sampler below is asked from, so every top the lateral rule lets her
+    // climb onto is a top she is then stood on.
+    const stepping =
+      following &&
+      inputLength > 1e-4 &&
+      walkingOntoStep(
+        this.collision,
+        this.position.x,
+        this.position.z,
+        this.moveDirection.x / inputLength,
+        this.moveDirection.z / inputLength,
+        reference,
+      );
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -1196,6 +1218,11 @@ export class Player implements GameSystem {
         groundY = this.groundAt(at.x, at.z, reference);
         if (following) reference = groundY;
       },
+      stepping ? (x, z) => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
+      // Her whole body, feet to the top of her head: a solid that begins above
+      // her (a canopy, the underside of a rail's deck) meets her only once her
+      // head is up there with it.
+      KID_HEIGHT,
     );
 
     // An escort runs until the pushing stops, not until it goes quiet.
@@ -1307,7 +1334,7 @@ export class Player implements GameSystem {
       } else {
         this.verticalVelocity -= GRAVITY * dt;
       }
-      this.position.y += this.verticalVelocity * dt;
+      this.rise(dt);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1321,7 +1348,7 @@ export class Player implements GameSystem {
     } else if (this.airborne) {
       this.wornJetpack?.setThrust(0);
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
+      this.rise(dt);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1478,8 +1505,33 @@ export class Player implements GameSystem {
     this.hopRings.burst(this.position.x, this.position.y - 0.05, this.position.z, 0.4);
   }
 
+  /** One frame of vertical motion in the air; her head stops at an underside — `riseUnder`, its one owner. */
+  private rise(dt: number): void {
+    this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
+  }
+
+  /**
+   * Where her feet come to rest at `(x, z)`, reached from `y`: the ground
+   * there, or the top of a solid she is over, whichever is higher and within
+   * a step — {@link standingHeight}, the one owner of that rule. A bench, a
+   * crate or a garden wall is somewhere to land because it is solid; nothing
+   * marks a floor on top of it.
+   */
   private groundAt(x: number, z: number, y: number): number {
-    return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+    const ground = this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+    return standingHeight(ground, this.collision, x, z, y);
+  }
+
+  /**
+   * **Where feet come to rest at `(x, z)`, reached from `y`, by her rule** —
+   * the ground there or the top of a solid, whichever is higher within a step
+   * ({@link groundAt}). Public for the one thing that walks where she walks
+   * and must stand where she stood: her parade, which retraces her steps
+   * (`Parade.groundAt`), so a companion following her up onto a bed is on the
+   * bed rather than inside it.
+   */
+  standingAt(x: number, z: number, y: number): number {
+    return this.groundAt(x, z, y);
   }
 
   /**

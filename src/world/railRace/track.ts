@@ -23,7 +23,7 @@ import { addOutline, decal, solid, toonMaterial } from '../../art/style/material
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
 import { duckBarPose } from './barReach';
-import { terrainHeight } from '../terrain';
+import { planetRadiusAt, terrainHeight, yAtRadius } from '../terrain';
 import { archFeet } from './arch';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import type { CollisionWorld } from '../Collision';
@@ -1727,14 +1727,17 @@ function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3,
   // through — the same "a gap you cannot walk into at 5 cm a step you may still
   // tunnel into" reasoning CLAUDE.md applies to walls.
   const steps = Math.max(0, Math.ceil(lean / (Math.min(footRadius, topRadius) / 2)));
+  // Every circle in the chain is the same post, so each stands to the post's
+  // own top — where it meets the track — read in that circle's column.
+  const topRadiusFromCentre = planetRadiusAt(top.x, top.y, top.z);
   for (let i = 0; i <= steps; i += 1) {
     // `steps` is 0 for a post that does not lean, and `0 / 0` would be `NaN` —
     // which would place a circle at `NaN, NaN` and silently register nothing.
     const t = steps === 0 ? 0 : (i / steps) * reach;
-    collision.addCircle(
-      foot.x + (top.x - foot.x) * t,
-      foot.z + (top.z - foot.z) * t,
-      footRadius + (topRadius - footRadius) * t,
+    const x = foot.x + (top.x - foot.x) * t;
+    const z = foot.z + (top.z - foot.z) * t;
+    collision.kinded('rail race trestle', () =>
+      collision.addCircle(x, z, footRadius + (topRadius - footRadius) * t, yAtRadius(x, z, topRadiusFromCentre), false, true),
     );
   }
 }

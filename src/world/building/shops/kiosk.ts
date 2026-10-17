@@ -15,6 +15,8 @@ import {
   BACK_PANEL_HEIGHT,
   BACK_PANEL_THICKNESS,
   BACK_PANEL_Z,
+  COUNTER_BOARD_THICKNESS,
+  COUNTER_BOARD_Y,
   COUNTER_HALF_WIDTH,
   COUNTER_Z,
   SHELF_HALF_WIDTH,
@@ -102,8 +104,8 @@ export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
 
   // A pale top plank, overhanging a little. It is the one edge the player's eye
   // follows along the whole row of shops, so it is the same on every one.
-  const top = fitting(new BoxGeometry(COUNTER_HALF_WIDTH * 2 + 0.24, 0.12, 0.86), cream);
-  top.position.set(0, 0.98, COUNTER_Z);
+  const top = fitting(new BoxGeometry(COUNTER_HALF_WIDTH * 2 + 0.24, COUNTER_BOARD_THICKNESS, 0.86), cream);
+  top.position.set(0, COUNTER_BOARD_Y, COUNTER_Z);
   group.add(top);
 
   // --- shelving -----------------------------------------------------------

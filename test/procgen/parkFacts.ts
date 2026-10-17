@@ -3010,14 +3010,22 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     return Math.hypot(point.x - x, point.z - z);
   };
 
+  // **Probed at the ground, not at y = 0** — `scripts/lib/parkFindings.mts`'s
+  // `isStandable` made the same move first, for the fence seams under a bridge
+  // deck. Since every solid has its real top (17 Oct 2026), `resolve` measures
+  // a top against the probe's feet, and over most of the sphere the ground is
+  // metres below y = 0: a probe at 0 cleared the park gate's own piers and
+  // called the ground in front of them standable. The ground here is the walk
+  // sampler's — the terrain, or a bridge deck where one stands.
   const probe = new Vector3();
+  const groundY = (x: number, z: number): number => world.building.surfaces.sample(x, z, 0);
   const isStandable = (x: number, z: number, radius = 0.62): boolean => {
-    probe.set(x, 0, z);
+    probe.set(x, groundY(x, z), z);
     world.collision.resolve(probe, radius);
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };
   const pushedTo = (x: number, z: number, radius = 0.62): { x: number; z: number } => {
-    probe.set(x, 0, z);
+    probe.set(x, groundY(x, z), z);
     world.collision.resolve(probe, radius);
     return { x: probe.x, z: probe.z };
   };

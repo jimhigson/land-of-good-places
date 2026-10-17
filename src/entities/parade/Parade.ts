@@ -9,7 +9,6 @@ import type { PetSlideLink, SlideSeat, SlideSeatFor } from '../../world/slide/pe
 
 /** Scratch for {@link Parade.nearestRiderBodyCentre}, so a per-frame call allocates nothing. */
 const SLIDE_BODY_BOX = new Box3();
-import { terrainHeight } from '../../world/terrain';
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
 import type { Player } from '../Player';
@@ -871,9 +870,14 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     this.routeTo(member, point, dt);
   }
 
+  /**
+   * Where a companion's feet come to rest: **where hers would** —
+   * `Player.standingAt`, the ground or the top of a solid within a step. The
+   * line retraces her steps, so when she walked up onto a bed or a bench, the
+   * point a companion is aiming at is on top of it, and so is the companion.
+   */
   private groundAt(x: number, z: number, y: number): number {
-    const sampler = this.player.groundSampler;
-    return sampler ? sampler(x, z, y) : terrainHeight(x, z);
+    return this.player.standingAt(x, z, y);
   }
 
   private rippleHop(): void {

@@ -35,6 +35,8 @@
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
 import { carryReference } from '../src/world/building/surfaces.ts';
+import { riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
@@ -202,7 +204,7 @@ export class SimPlayer {
    * ground together, so a run does not begin with a manufactured lag.
    */
   placeOnGround(x: number, z: number): void {
-    const y = this.ground ? this.ground(x, z, Infinity) : 0;
+    const y = this.sampleGround(x, z, Infinity);
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
     this.groundHeight = y;
@@ -252,6 +254,16 @@ export class SimPlayer {
       if (following) reference = groundY;
     };
 
+    // `Player.update`'s step up onto a solid, name for name: only walking
+    // *into* one (the point past her front edge), from the same reference.
+    const stepping =
+      following &&
+      inputLength > 1e-4 &&
+      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference);
+    const stepCeiling = stepping
+      ? (x: number, z: number): number => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z))
+      : undefined;
+
     let result;
     if (this.substepping) {
       result = this.collision.resolveMovement(
@@ -262,11 +274,13 @@ export class SimPlayer {
         this.hopClearance,
         dt,
         this.groundSubstepping ? onStep : undefined,
+        stepCeiling,
+        KID_HEIGHT,
       );
     } else {
       this.position.x += deltaX;
       this.position.z += deltaZ;
-      result = this.collision.resolve(this.position, this.radius, this.hopClearance, dt);
+      result = this.collision.resolve(this.position, this.radius, this.hopClearance, dt, stepCeiling, KID_HEIGHT);
     }
 
     this.clearedWall = result.clearedWall;
@@ -321,7 +335,7 @@ export class SimPlayer {
     let hopHeight = 0;
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
+      this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
       // The landing. Its absence is what made the earlier rig over-count.
       if (this.position.y <= groundY) {
         this.position.y = groundY;
@@ -337,8 +351,11 @@ export class SimPlayer {
   }
 
   /**
-   * The ground under a point, from the caller's sampler — or the flat y = 0
-   * world when there isn't one.
+   * Where her feet come to rest at a point: the caller's ground (or the flat
+   * y = 0 world when there isn't one), or the top of a solid she is over,
+   * whichever is higher and within a step — `world/standing.ts`'s
+   * `standingHeight`, the very function `Player.groundAt` asks, so the rig
+   * lands where she lands.
    *
    * Whether the answer is the *right* one is deliberately the harness's
    * question, not this class's: only the harness knows where it put the deck,
@@ -346,6 +363,7 @@ export class SimPlayer {
    * the failure that a legitimate descent cannot trip.
    */
   private sampleGround(x: number, z: number, expected: number): number {
-    return this.ground ? this.ground(x, z, expected) : 0;
+    const ground = this.ground ? this.ground(x, z, expected) : 0;
+    return standingHeight(ground, this.collision, x, z, expected);
   }
 }

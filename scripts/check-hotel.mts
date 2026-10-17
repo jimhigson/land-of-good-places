@@ -56,6 +56,7 @@ import './headless-canvas.mjs';
 import { BackSide, Box3, Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
+import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
@@ -136,6 +137,9 @@ import { Parade } from '../src/entities/parade/Parade.ts';
 // clause jumps by an amount the game agrees is a jump. See its use below.
 import { TELEPORT_GAP } from '../src/entities/parade/trail.ts';
 import { ACCEPTANCE_SCOPE } from './lib/checkScope.mts';
+import { standingAt } from './lib/standable.mts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
+import { BUILDING_STEP_UP } from '../src/core/constants.ts';
 import { hotelTowerFindings } from './lib/hotelTower.mts';
 
 /**
@@ -502,7 +506,11 @@ if (deflection(chairX, chairZ) < 0.1) {
 //  * solid from the floor (the existing mustBeSolid probes above);
 //  * **yielding to feet on its top** — a probe stood at the prop's own top
 //    height is not pushed, which is what lets her stand there;
-//  * **standable** — `WalkSurfaces.sample` offers a surface on it.
+//  * **standable** — her feet, asked the way `Player` asks them
+//    (`world/standing.ts`: the walk sampler's ground or the top of a solid
+//    she is over), come to rest on its top. Since the engine rework there is
+//    no plate laid on a prop: the solid's own top is the surface, so this is
+//    asked of the solid itself.
 // Plus a sweep: no circle collider inside any hotel room may be infinitely
 // tall, so the next prop placed cannot regress to a pillar silently.
 //
@@ -529,7 +537,7 @@ for (const [what, x, z, top] of mustBeMountable) {
         `sideways — solid and standable are still fighting each other`,
     );
   }
-  const surface = world.building.surfaces.sample(x, z, top + 0.5);
+  const surface = standingAt(collision, (px, pz, py) => world.building.surfaces.sample(px, pz, py), x, z, top + 0.5);
   if (surface < top - 0.05) {
     problems.push(
       `${what} has no standing surface: sample says ${surface.toFixed(2)} m where its top is ` +
@@ -556,18 +564,28 @@ if (infinitePillars > 0) {
 // Read off `layout.ts` rather than copied: these three pairs used to live here
 // as literals, and the day the suite became four rooms every one of them went
 // stale at once — six failures about beds that had simply moved.
+//
+// **A bed is solid, and somewhere to stand** — it used to be the one piece of
+// furniture placed soft (a walkable plate with no body), and this clause held
+// it soft. Since the engine rework a bed is one filled solid like the sofa: it
+// stops a child on the floor, holds still under feet on its mattress, and its
+// mattress is within one step of the floor, so she walks up onto it exactly as
+// she always could — Eleri's jumpy-jumpy, with no plate laid on top.
 for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
   const what = `bed ${index + 1}`;
   const x = SUITE.originX + spot[0];
   const z = SUITE.originZ + spot[1];
-  if (deflection(x, z) > 0.01) {
-    problems.push(
-      `${what} is solid — it is a walk surface, so a child stood on it would be shoved off ` +
-        `(see world/hotel/place.ts). Jumpy-jumpy is Eleri's.`,
-    );
+  if (deflection(x, z) < 0.1) {
+    problems.push(`${what} is not solid — a child on the floor walks straight through it (see world/hotel/place.ts)`);
   }
-  const top = world.building.surfaces.sample(x, z, 1);
-  if (top < 0.4) problems.push(`${what} has no standing surface — sample says ${top.toFixed(2)} m`);
+  if (deflectionAt(x, BED_MATTRESS_TOP + 0.05, z) > 0.01) {
+    problems.push(`${what} pushes a child stood on its mattress sideways — solid and standable are fighting`);
+  }
+  const top = standingAt(collision, (px, pz, py) => world.building.surfaces.sample(px, pz, py), x, z, 0);
+  if (top < BED_MATTRESS_TOP - 0.05) problems.push(`${what} has no top she can step up onto from the floor — her feet come to rest at ${top.toFixed(2)} m`);
+  if (BED_MATTRESS_TOP > BUILDING_STEP_UP) {
+    problems.push(`${what}'s mattress is ${BED_MATTRESS_TOP.toFixed(2)} m, past one ${BUILDING_STEP_UP} m step — she can no longer walk up onto it`);
+  }
 
   // **Each bed is in its own bedroom**, not in a partition. The suite's
   // internal walls and its beds are two lists in `layout.ts`, and nothing but
@@ -575,7 +593,9 @@ for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
   // half inside a wall, looking almost right from above and unusable from
   // inside. Measured against the built collision world, so it is about where
   // the wall actually went.
-  if (deflection(x, z + 1.3) > 0.01 && deflection(x, z - 1.3) > 0.01) {
+  // Asked with her feet just over the mattress, so the bed's own body is
+  // jumped clear and only something taller — a partition — can answer.
+  if (deflectionAt(x, BED_MATTRESS_TOP + 0.05, z + 1.3) > 0.01 && deflectionAt(x, BED_MATTRESS_TOP + 0.05, z - 1.3) > 0.01) {
     problems.push(
       `${what} is boxed in at (${spot[0]}, ${spot[1]}) — solid within 1.3 m on both sides, so it ` +
         `is standing in a partition rather than in a bedroom`,
@@ -972,7 +992,9 @@ if (!mezzanine) {
       const startX = LOBBY.originX + edge.x1 + ux * along - edge.outwardX * 0.9;
       const startZ = LOBBY.originZ + edge.z1 + uz * along - edge.outwardZ * 0.9;
       // Walk her off it the way the game moves her: many small steps, each
-      // one resolved, not one 0.6 m teleport.
+      // one resolved, not one 0.6 m teleport — and as the body she is, as tall
+      // as `KID_HEIGHT`, because a banded rail meets her once her head is
+      // above its base.
       const body = new Vector3(startX, edge.deckHeight, startZ);
       for (let step = 0; step < 30; step += 1) {
         collision.resolveMovement(
@@ -982,6 +1004,9 @@ if (!mezzanine) {
           PLAYER_RADIUS,
           0,
           1 / 60,
+          undefined,
+          undefined,
+          KID_HEIGHT,
         );
       }
       // How far past the edge line she ended up, along the outward normal.
@@ -1009,11 +1034,14 @@ if (!mezzanine) {
     // five edges that were perfectly correct. The band is the property that
     // actually decides it, and it cannot be confounded. (That the arch is
     // genuinely walkable end to end is probe 6's axis walk, above.)
-    if (edge.base <= JUMP_APEX_HEIGHT) {
+    // A banded solid meets a body once her head is above its base, so the
+    // question is whether a ground jump puts her head up there: her height
+    // plus the jump's apex.
+    if (edge.base <= KID_HEIGHT + JUMP_APEX_HEIGHT) {
       problems.push(
-        `${edge.what} is banded at ${edge.base.toFixed(2)} m, within reach of a ground jump ` +
-          `(apex ${JUMP_APEX_HEIGHT.toFixed(2)} m) — it would be an invisible wall under the ` +
-          `overhang, which is the exact disease baseHeight exists to cure`,
+        `${edge.what} is banded at ${edge.base.toFixed(2)} m, within reach of a ground jump's ` +
+          `head (${KID_HEIGHT.toFixed(2)} m tall, apex ${JUMP_APEX_HEIGHT.toFixed(2)} m) — it would be an ` +
+          `invisible wall under the overhang, which is the exact disease baseHeight exists to cure`,
       );
     }
   }
@@ -2768,18 +2796,12 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
     const routeParade = new Parade(walker as never, routeWorld.collision, routeCamera);
     routeScene.add(routeParade.group);
     // Both wire-ups `Game.ts` makes, and only those: the hotel seam, and the
-    // route map. The map is **the player's own grid**, built here with exactly
-    // the arguments `Game.ts` gives it — a companion-sized one was tried in
-    // #602 and deleted in #605 (see `petRoute.ts` for the timings), and the
-    // parade is handed the same instance the player walks on.
+    // route map. The map is **the player's own grid**, from the one owner
+    // `Game.ts` builds it from (`playerLattice.ts`) — a companion-sized one
+    // was tried in #602 and deleted in #605 (see `petRoute.ts` for the
+    // timings), and the parade is handed the same instance the player walks on.
     routeHotel.petParade = routeParade;
-    const routeGrid = new NavGrid(
-      routeWorld.collision,
-      PLAYER_RADIUS,
-      JUMP_APEX_HEIGHT,
-      () => routeWorld.building.surfaces.connectors,
-      (x, z) => routeWorld.train.bridges.some((bridge) => bridge.covers(x, z)),
-    );
+    const routeGrid = playerNavGrid(routeWorld);
     routeParade.setNavGrid(routeGrid);
 
     // ---- the suite's own **built** partitions, off the collision world.
@@ -4794,13 +4816,16 @@ if (!lobbyShellForDisco) {
  * room this ticket was not about, and moving lobby or garden furniture is Jim's
  * call and wants its own eyes on it. Measured islands, at the time of writing:
  *
- * - `hotel.lobby` — 2.5 m² at local x -11.75..-10.75, z 9.85..12.35;
- *   1.5 m² at x -10.25..-8.75, z 7.35..7.85; and a symmetric 0.8 m² pair in the
- *   far corners at x ±11.75, z -24.15..-23.15.
  * - `hotel.garden` — 3.0 m² at local x 9.85..11.35, z -6.75..-5.75.
+ *
+ * `hotel.lobby`'s 22 cells (5.6 m² in four nooks round its sofas and corner
+ * planters) went on 17 Oct 2026 with the engine rework, and its entry with
+ * them: the lattice she walks with (`playerLattice.ts`) climbs a sofa as she
+ * does, and this probe had been reading every room's levels a room's width
+ * away from the cell it was asking about (a room-local sampler handed to a
+ * lattice that asks in world metres) — fixed in the same change.
  */
 const KNOWN_UNREACHABLE_CELLS: Readonly<Record<string, number>> = {
-  'hotel.lobby': 22,
   'hotel.garden': 12,
 };
 
@@ -4823,12 +4848,21 @@ for (const room of ROOMS) {
   const entryLocalZ = (westGap[0] + westGap[1]) / 2;
 
   collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, room.originX, room.originZ));
-  const grid = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, () => world.building.surfaces.connectors);
+  // The router she walks with — her own lattice, which stands on a bed or a
+  // bench within a step as the engine does (`playerLattice.ts`).
+  const grid = playerNavGrid(world);
 
   const sampleAt = (lx: number, lz: number): number =>
     world.building.surfaces.sample(room.originX + lx, room.originZ + lz, 3);
+  // **The lattice's own sampler is a world one.** `sampleAt` above takes room-
+  // local metres; this probe used to hand *it* to the lattice, which asks in
+  // world metres, so every level was read a room's width away from the cell it
+  // was for. It passed only because a one-level room reads the same wrong
+  // floor everywhere — and stopped passing the day the lattice began asking
+  // the ground under a bed whether the bed is a step (engine-solids).
+  const worldSample = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
   const standable = (lx: number, lz: number): boolean =>
-    grid.canStandAt(room.originX + lx, room.originZ + lz, sampleAt(lx, lz), sampleAt);
+    grid.canStandAt(room.originX + lx, room.originZ + lz, sampleAt(lx, lz), worldSample);
 
   // The lattice over this room's own floor, in local metres.
   const columns = Math.floor((room.halfX * 2) / REACH_CELL);
@@ -4941,7 +4975,7 @@ for (const room of ROOMS) {
     grid.findRoute(
       room.originX + entryLocalX, room.originZ + entryLocalZ, entryWorldY,
       room.originX + lx, room.originZ + lz, sampleAt(lx, lz),
-      sampleAt, routeOut,
+      worldSample, routeOut,
     );
     if (!grid.lastRouteReachedGoal) confirmed += 1;
   }
@@ -4991,7 +5025,7 @@ process.stderr.write(
 console.log(
   `check:hotel — ${npcs.all.length} children (${hotel.residents.length} of them hotel residents), ` +
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
-    `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
+    `${mustBeSolid.length + 1} props solid, 3 beds solid and walked up onto; ` +
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
     `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
     `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +

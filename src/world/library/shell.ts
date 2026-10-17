@@ -4,7 +4,7 @@ import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { Plate } from '../hotel/place';
 import { segmentsMinusGaps, cornerClosedSpans } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
-import { placeOnSphere } from '../terrain';
+import { placeOnSphere, planetRadiusAt, yAtRadius } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { solid, toonMaterial } from '../../art/style/materials';
 import { LIBRARY_INTERIOR_LIFT } from './lighting';
@@ -99,6 +99,17 @@ export class LibraryFrame {
   foot(localX: number, localZ: number): { x: number; z: number } {
     const p = this.toWorld(localX, 0, localZ, this.scratch);
     return { x: p.x, z: p.z };
+  }
+
+  /**
+   * **A building-local height as a solid's real top, in world column
+   * `(x, z)`** — the drawn point's own radius from the planet's centre, read
+   * back in the collider's column, so a solid's top is where the leaning
+   * stone's is.
+   */
+  topY(x: number, z: number, localX: number, localZ: number, height: number): number {
+    const p = this.toWorld(localX, height, localZ, this.scratch);
+    return yAtRadius(x, z, planetRadiusAt(p.x, p.y, p.z));
   }
 
   /**
@@ -236,10 +247,22 @@ export interface LibraryShellSolids {
  *   the full-width steps: the one way up, the way the paths arrive.
  */
 export function registerLibraryShellCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): LibraryShellSolids {
-  const add = (list: WallCollider[], x1: number, z1: number, x2: number, z2: number, half: number): void => {
+  // Every solid to its real top, in the building's own leaning frame
+  // (`LibraryFrame.topY`): the cella and its corners to the building's height,
+  // the plinth's edges to the plinth's top — a step where its riser is one,
+  // a side to bump where the ground falls away under it.
+  // A top at each end, so a long edge's top runs with the drawn stone rather
+  // than drifting off it along the sphere (`TopSlope`).
+  const add = (list: WallCollider[], x1: number, z1: number, x2: number, z2: number, half: number, height = plan.height): void => {
     const a = frame.foot(x1, z1);
     const b = frame.foot(x2, z2);
-    list.push(collision.addWall(a.x, a.z, b.x, b.z, half));
+    const topA = frame.topY(a.x, a.z, x1, z1, height);
+    const topB = frame.topY(b.x, b.z, x2, z2, height);
+    list.push(
+      collision.kinded(height === plan.height ? 'library walls' : 'library plinth edge', () =>
+        collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, -Infinity, false, Number.NaN, topB),
+      ),
+    );
   };
   const H = SHELL_HALF;
   const t = EDGE_HALF;
@@ -280,13 +303,14 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
 
   const edges: WallCollider[] = [];
   const px = plan.plinthHalfX - t;
-  add(edges, px, plan.stepFrontZ - t, px, plan.plinthBackZ + t, t);
-  add(edges, px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, t);
-  add(edges, -px, plan.plinthBackZ + t, -px, plan.stepFrontZ - t, t);
+  add(edges, px, plan.stepFrontZ - t, px, plan.plinthBackZ + t, t, plan.plinthTop);
+  add(edges, px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, t, plan.plinthTop);
+  add(edges, -px, plan.plinthBackZ + t, -px, plan.stepFrontZ - t, t, plan.plinthTop);
 
   const columns = plan.columns.map((column) => {
     const at = frame.foot(column.x, column.z);
-    return collision.addCircle(at.x, at.z, column.radius);
+    const top = frame.topY(at.x, at.z, column.x, column.z, plan.height);
+    return collision.kinded('library column', () => collision.addCircle(at.x, at.z, column.radius, top, false, true));
   });
   return { walls, corners, edges, columns };
 }
@@ -401,12 +425,17 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
       if (hidden) box.visible = false;
       root.add(box);
       walls.push(
-        collision.addWall(
-          originX + (along === 'x' ? a : x1),
-          originZ + (along === 'x' ? z1 : a),
-          originX + (along === 'x' ? b : x1),
-          originZ + (along === 'x' ? z1 : b),
-          LIBRARY_WALL_HALF,
+        collision.kinded('library room wall', () =>
+          collision.addWall(
+            originX + (along === 'x' ? a : x1),
+            originZ + (along === 'x' ? z1 : a),
+            originX + (along === 'x' ? b : x1),
+            originZ + (along === 'x' ? z1 : b),
+            LIBRARY_WALL_HALF,
+            LIBRARY_WALL_HEIGHT,
+            false,
+            true,
+          ),
         ),
       );
     }

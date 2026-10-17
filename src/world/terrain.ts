@@ -226,6 +226,19 @@ export function altitudeAt(x: number, y: number, z: number): number {
 }
 
 /**
+ * **The world `y` in column `(x, z)` of the sphere `radius` from the planet's
+ * centre** — for a height that belongs to something other than the ground under
+ * this column: a rigid thing leaned on the sphere at its own centre (the
+ * fountain's rim, a station's platform) holds one radius across its whole
+ * footprint, whatever the terrain under each part of it does. `-Infinity` past
+ * the horizon, where no column reaches that radius.
+ */
+export function yAtRadius(x: number, z: number, radius: number): number {
+  const above = radius * radius - x * x - z * z;
+  return above > 0 ? Math.sqrt(above) - GROUND_SPHERE_RADIUS : -Infinity;
+}
+
+/**
  * **The world `y` at which a point in this column stands `altitude` metres above
  * the ground** — the inverse of {@link altitudeAt} that keeps `(x, z)` fixed.
  *
@@ -411,4 +424,59 @@ export function unplaceFromSphere(
   const footX = dx * ground;
   const footZ = dz * ground;
   return target.set(footX, terrainHeight(footX, footZ) + (radius - ground), footZ);
+}
+
+const _frameTilt = /* @__PURE__ */ new Quaternion();
+const _framePoint = /* @__PURE__ */ new Vector3();
+
+/** Where a solid built into a leaned frame goes in the world — see {@link solidInFrame}. */
+export interface FramedSolid {
+  /** The world column its middle is drawn in. */
+  readonly x: number;
+  readonly z: number;
+  /** Its top's world `y` in that column: where she lands on it. */
+  readonly top: number;
+}
+
+/**
+ * **Where a solid standing in a leaned frame really is: the column it is drawn
+ * in, and its real top there.** The one owner of turning a rigid group's own
+ * numbers into a collider, so a solid stands where its mesh does.
+ *
+ * The frame is any group stood on the sphere at its own ground point — an
+ * anchor plot (`AnchorPlots`), the bus shelter — so its origin is the ground at
+ * `(frameX, frameZ)` and its `+Y` the local up there ({@link standOnSphere}).
+ * Colliders in such frames have always been registered at `frame + local`,
+ * which is where the mesh would be if the frame did not lean — and it does, by
+ * the sphere's tilt there. Measured on seed 5: a point 10 m from a plot's
+ * centre is drawn **0.64 m** from `frame + local` at the dodgems, 0.70 m at the
+ * ferris wheel, 0.71 m at the water fight. Once a solid's top is somewhere she
+ * can land, that is the difference between standing on a rail and standing on
+ * the air beside it — so the footprint goes in the column the solid's middle
+ * (half-way up it) is drawn in.
+ *
+ * The top is the drawn top's own radius from the planet's centre,
+ * `hypot(R + top, localX, localZ)` with `R` the frame's ground radius — exact,
+ * because the frame is rigid — read back as a world `y` in that column.
+ *
+ * `x`, `z` are the `frame + local` position such a group already computes;
+ * `base` and `top` are heights in the frame's own up.
+ */
+export function solidInFrame(
+  frameX: number,
+  frameZ: number,
+  x: number,
+  z: number,
+  base: number,
+  top: number,
+): FramedSolid {
+  const ground = terrainHeight(frameX, frameZ);
+  const localX = x - frameX;
+  const localZ = z - frameZ;
+  tiltToSphere(frameX, ground, frameZ, _frameTilt);
+  _framePoint.set(localX, (base + top) / 2, localZ).applyQuaternion(_frameTilt);
+  const worldX = frameX + _framePoint.x;
+  const worldZ = frameZ + _framePoint.z;
+  const radius = Math.hypot(groundRadiusAt(frameX, frameZ) + top, localX, localZ);
+  return { x: worldX, z: worldZ, top: yAtRadius(worldX, worldZ, radius) };
 }

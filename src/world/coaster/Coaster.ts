@@ -33,7 +33,7 @@ import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
 import { addOutline } from '../../art/style/materials';
 import { PALETTE } from '../../core/palette';
-import { placeOnSphere, terrainHeight } from '../terrain';
+import { placeOnSphere, planetRadiusAt, terrainHeight, yAtRadius } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import { resolveDismount } from '../dismount';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -624,8 +624,12 @@ export class Coaster implements GameSystem {
       matrix.compose(position, rotation, stretch);
       pylons.setMatrixAt(index, matrix);
       // Registered here rather than inside the planner, so a pure function stays
-      // pure and the collision world gains a post exactly once.
-      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS);
+      // pure and the collision world gains a post exactly once. Solid up to
+      // where it meets the track: a real height, read in the foot's column.
+      const pylonTopY = yAtRadius(spot.x, spot.z, planetRadiusAt(pylonTop.x, pylonTop.y, pylonTop.z));
+      collision.kinded('sky cruiser pylon', () =>
+        collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS, pylonTopY, false, true),
+      );
     });
     pylons.instanceMatrix.needsUpdate = true;
     // The pylons cast too: they are what plants the track on the ground, and

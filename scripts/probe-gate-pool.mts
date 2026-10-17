@@ -44,7 +44,7 @@ if (!gate || gate.posts.length !== 2) {
 
   const probe = new Vector3();
   const standable = (x: number, z: number): boolean => {
-    probe.set(x, 0, z);
+    probe.set(x, park.sample(x, z, 0), z); // at the ground: a solid's real top is measured against her feet
     park.world.collision.resolve(probe, PLAYER_RADIUS);
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };

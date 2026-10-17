@@ -18,6 +18,7 @@ import { TAU, clamp01 } from '../../core/mathUtils';
 import { addOutline, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import { gameStore } from '../../state';
 import { groundInPlot } from '../../world/AnchorPlots';
+import { solidInFrame } from '../../world/terrain';
 import type { AnchorDefinition } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 
@@ -81,6 +82,22 @@ const HANG = 1.5;
 
 /** How far apart the two rims sit along the axle. */
 const RIM_GAP = 1.05;
+
+/** A leg's radius at its foot, and the solid round the foot (and the bottom of its leg). */
+const LEG_FOOT_RADIUS = 0.34;
+const FOOT_SOLID_RADIUS = 0.85;
+
+/** The boarding deck: its platform's size and corner rounding, and its two railings. */
+const DECK_WIDTH = 3.2;
+const DECK_HEIGHT = 0.44;
+const DECK_LENGTH = 4.2;
+const DECK_ROUNDING = 0.12;
+const DECK_RAIL_TUBE = 0.09;
+const DECK_RAIL_LENGTH = 3.1;
+const DECK_RAIL_Y = 1.05;
+const DECK_RAIL_Z = 2;
+/** A railing's solid half-width: the rail and its posts (0.12 m), and a little for the hand. */
+const DECK_RAIL_COLLISION_HALF = 0.15;
 
 /** Gondolas, spokes and rim lamps all come in this many. */
 const CARS = 12;
@@ -189,7 +206,7 @@ export function createFerrisWheelProp(
       const foot = new Vector3(sx * footSpreadX, footY + 0.1, sz * footSpreadZ);
       const span = top.clone().sub(foot);
 
-      const leg = solid(new Mesh(new CylinderGeometry(0.19, 0.34, span.length(), 10), frame));
+      const leg = solid(new Mesh(new CylinderGeometry(0.19, LEG_FOOT_RADIUS, span.length(), 10), frame));
       leg.position.copy(foot).addScaledVector(span, 0.5);
       leg.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), span.clone().normalize());
       root.add(leg);
@@ -201,7 +218,14 @@ export function createFerrisWheelProp(
       pad.position.set(sx * footSpreadX, footY + 0.17, sz * footSpreadZ);
       root.add(pad);
 
-      collision.addCircle(footWorldX, footWorldZ, 0.85);
+      // The foot and the bottom of its leg, as one solid: its top is how high
+      // the leg has climbed by the time it leaves the foot's footprint (its
+      // centre line, plus its own girth there) — the drawn top over the circle.
+      const legRise = span.y * (FOOT_SOLID_RADIUS / Math.hypot(span.x, span.z)) + LEG_FOOT_RADIUS;
+      const standing = solidInFrame(centreX, centreZ, footWorldX, footWorldZ, footY, foot.y + legRise);
+      collision.kinded('ferris wheel leg', () =>
+        collision.addCircle(standing.x, standing.z, FOOT_SOLID_RADIUS, standing.top, false, true),
+      );
     }
   }
 
@@ -343,31 +367,64 @@ export function createFerrisWheelProp(
   const [deckWorldX, deckWorldZ] = toWorld(deckX, 0);
   deck.position.y = groundInPlot(centreX, centreZ, deckWorldX - centreX, deckWorldZ - centreZ);
 
-  const platform = solid(new Mesh(new RoundedBoxGeometry(3.2, 0.44, 4.2, 3, 0.12), woodMaterial));
-  platform.position.y = 0.22;
+  const platform = solid(
+    new Mesh(new RoundedBoxGeometry(DECK_WIDTH, DECK_HEIGHT, DECK_LENGTH, 3, DECK_ROUNDING), woodMaterial),
+  );
+  platform.position.y = DECK_HEIGHT / 2;
   deck.add(platform);
   addOutline(platform, 0.02);
 
   for (const sz of [-1, 1] as const) {
-    const rail = solid(new Mesh(new CylinderGeometry(0.09, 0.09, 3.1, 8), trim));
+    const rail = solid(new Mesh(new CylinderGeometry(DECK_RAIL_TUBE, DECK_RAIL_TUBE, DECK_RAIL_LENGTH, 8), trim));
     rail.rotation.z = Math.PI / 2;
-    rail.position.set(0, 1.05, sz * 2);
+    rail.position.set(0, DECK_RAIL_Y, sz * DECK_RAIL_Z);
     deck.add(rail);
 
     for (const sx of [-1, 1] as const) {
       const postMesh = solid(new Mesh(new CylinderGeometry(0.1, 0.12, 1.05, 8), cream));
-      postMesh.position.set(sx * 1.45, 0.66, sz * 2);
+      postMesh.position.set(sx * 1.45, 0.66, sz * DECK_RAIL_Z);
       deck.add(postMesh);
     }
   }
 
-  // The deck is solid along its two long edges; the open ends are how you get on.
-  const [railAX, railAZ] = toWorld(deckX - 1.6, -2.1);
-  const [railBX, railBZ] = toWorld(deckX - 1.6, 2.1);
-  const [railCX, railCZ] = toWorld(deckX + 1.6, -2.1);
-  const [railDX, railDZ] = toWorld(deckX + 1.6, 2.1);
-  collision.addWall(railAX, railAZ, railBX, railBZ, 0.3);
-  collision.addWall(railCX, railCZ, railDX, railDZ, 0.3);
+  // The deck is a solid she steps up onto (it is no higher than a step), and
+  // its two railings are solid to their tops. They run along the deck's
+  // `±Z` edges, where they are drawn, the cars coming down between them; the
+  // open `±X` ends are how you get on.
+  //
+  // These walls used to stand on the *other* two edges — across the open ends,
+  // where nothing is drawn — while the railings she could see had no collider:
+  // an invisible wall across the way on, and a pair of railings she walked
+  // straight through.
+  const deckY = deck.position.y;
+  {
+    const platformSolid = solidInFrame(centreX, centreZ, deckWorldX, deckWorldZ, deckY, deckY + DECK_HEIGHT);
+    collision.kinded('ferris deck', () =>
+      collision.addBox(
+        platformSolid.x,
+        platformSolid.z,
+        DECK_WIDTH / 2 - DECK_ROUNDING,
+        DECK_LENGTH / 2 - DECK_ROUNDING,
+        -wheelYaw,
+        DECK_ROUNDING,
+        platformSolid.top,
+        false,
+        true,
+      ),
+    );
+    const railTop = deckY + DECK_RAIL_Y + DECK_RAIL_TUBE;
+    for (const sz of [-1, 1] as const) {
+      const [ax, az] = toWorld(deckX - DECK_RAIL_LENGTH / 2, sz * DECK_RAIL_Z);
+      const [bx, bz] = toWorld(deckX + DECK_RAIL_LENGTH / 2, sz * DECK_RAIL_Z);
+      const [mx, mz] = toWorld(deckX, sz * DECK_RAIL_Z);
+      const a = solidInFrame(centreX, centreZ, ax, az, deckY, railTop);
+      const b = solidInFrame(centreX, centreZ, bx, bz, deckY, railTop);
+      const middle = solidInFrame(centreX, centreZ, mx, mz, deckY, railTop);
+      collision.kinded('ferris deck rail', () =>
+        collision.addWall(a.x, a.z, b.x, b.z, DECK_RAIL_COLLISION_HALF, middle.top, false, true),
+      );
+    }
+  }
 
   // --------------------------------------------------------------- animation
   // Every vector here is allocated once: this runs twelve times a frame, and a
