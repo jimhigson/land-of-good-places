@@ -34,8 +34,8 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
-import { carryReference, stepCeilingAt } from '../src/world/building/surfaces.ts';
-import { riseUnder, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { carryReference } from '../src/world/building/surfaces.ts';
+import { riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
@@ -261,7 +261,7 @@ export class SimPlayer {
       inputLength > 1e-4 &&
       walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference);
     const stepCeiling = stepping
-      ? (x: number, z: number): number => stepCeilingAt(x, z, carryReference(fromX, fromZ, reference, x, z))
+      ? (x: number, z: number): number => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z))
       : undefined;
 
     let result;

@@ -20,8 +20,8 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
-import { carryReference, stepCeilingAt } from '../world/building/surfaces';
-import { riseUnder, standingHeight, walkingOntoStep } from '../world/standing';
+import { carryReference } from '../world/building/surfaces';
+import { riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
@@ -1218,7 +1218,7 @@ export class Player implements GameSystem {
         groundY = this.groundAt(at.x, at.z, reference);
         if (following) reference = groundY;
       },
-      stepping ? (x, z) => stepCeilingAt(x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
+      stepping ? (x, z) => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
       // Her whole body, feet to the top of her head: a solid that begins above
       // her (a canopy, the underside of a rail's deck) meets her only once her
       // head is up there with it.

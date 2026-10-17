@@ -15,7 +15,8 @@ import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
-import { plotSolid, type AnchorPlots } from '../../world/AnchorPlots';
+import type { AnchorPlots } from '../../world/AnchorPlots';
+import { solidInFrame } from '../../world/terrain';
 import type { CollisionWorld } from '../../world/Collision';
 import type { FrameContext, GameSystem } from '../../core/types';
 import { createCar } from './car';
@@ -153,14 +154,14 @@ export function buildDodgemsPlot(
 
     // Solid: a child should bounce off the outside of the ride, not walk
     // through the bumper wall. Its top is the rail ring's, which runs along the
-    // pads' tops, and it stands where the pad is drawn (`plotSolid`).
+    // pads' tops, and it stands where the pad is drawn (`solidInFrame`).
     const half = 1.05;
     const tx = -Math.sin(angle) * half;
     const tz = Math.cos(angle) * half;
     const barrierTop = deck + BARRIER_RAIL_Y + BARRIER_RAIL_TUBE;
-    const a = plotSolid(centreX, centreZ, centreX + x - tx, centreZ + z - tz, deck, barrierTop);
-    const b = plotSolid(centreX, centreZ, centreX + x + tx, centreZ + z + tz, deck, barrierTop);
-    const middle = plotSolid(centreX, centreZ, centreX + x, centreZ + z, deck, barrierTop);
+    const a = solidInFrame(centreX, centreZ, centreX + x - tx, centreZ + z - tz, deck, barrierTop);
+    const b = solidInFrame(centreX, centreZ, centreX + x + tx, centreZ + z + tz, deck, barrierTop);
+    const middle = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, deck, barrierTop);
     collision.kinded('dodgems barrier', () =>
       collision.addWall(a.x, a.z, b.x, b.z, 0.32, middle.top, false, true),
     );
@@ -183,7 +184,7 @@ export function buildDodgemsPlot(
     post.position.set(x, POST_HEIGHT / 2, z);
     root.add(post);
     // A post she can see is a post she bumps into — up to its top, under the flag.
-    const standing = plotSolid(centreX, centreZ, centreX + x, centreZ + z, 0, POST_HEIGHT);
+    const standing = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, 0, POST_HEIGHT);
     collision.kinded('dodgems post', () =>
       collision.addCircle(standing.x, standing.z, POST_FOOT_RADIUS, standing.top, false, true),
     );
@@ -242,8 +243,8 @@ export function buildDodgemsPlot(
   // Its yellow plinth, a step up from the rink, and the trunk standing on it
   // up to the top of the canopy: two solids, each to its own drawn top.
   {
-    const plinth = plotSolid(centreX, centreZ, centreX, centreZ, deck, deck + FAKE_TREE_PLINTH_TOP);
-    const trunk = plotSolid(centreX, centreZ, centreX, centreZ, deck, deck + FAKE_TREE_TOP);
+    const plinth = solidInFrame(centreX, centreZ, centreX, centreZ, deck, deck + FAKE_TREE_PLINTH_TOP);
+    const trunk = solidInFrame(centreX, centreZ, centreX, centreZ, deck, deck + FAKE_TREE_TOP);
     collision.kinded('dodgems tree', () => {
       collision.addCircle(plinth.x, plinth.z, 1.9, plinth.top, false, true);
       collision.addCircle(trunk.x, trunk.z, 0.8, trunk.top, false, true);
@@ -267,8 +268,8 @@ export function buildDodgemsPlot(
     const carX = centreX + parked.root.position.x;
     const carZ = centreZ + parked.root.position.z;
     const yaw = parked.root.rotation.y;
-    const tub = plotSolid(centreX, centreZ, carX, carZ, deck, deck + CAR_TUB_TOP);
-    const seat = plotSolid(
+    const tub = solidInFrame(centreX, centreZ, carX, carZ, deck, deck + CAR_TUB_TOP);
+    const seat = solidInFrame(
       centreX,
       centreZ,
       carX + Math.sin(yaw) * CAR_SEAT_Z,

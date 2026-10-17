@@ -17,7 +17,8 @@ import { PALETTE } from '../../core/palette';
 import { TAU, clamp01 } from '../../core/mathUtils';
 import { addOutline, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import { gameStore } from '../../state';
-import { groundInPlot, plotSolid } from '../../world/AnchorPlots';
+import { groundInPlot } from '../../world/AnchorPlots';
+import { solidInFrame } from '../../world/terrain';
 import type { AnchorDefinition } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 
@@ -221,7 +222,7 @@ export function createFerrisWheelProp(
       // the leg has climbed by the time it leaves the foot's footprint (its
       // centre line, plus its own girth there) — the drawn top over the circle.
       const legRise = span.y * (FOOT_SOLID_RADIUS / Math.hypot(span.x, span.z)) + LEG_FOOT_RADIUS;
-      const standing = plotSolid(centreX, centreZ, footWorldX, footWorldZ, footY, foot.y + legRise);
+      const standing = solidInFrame(centreX, centreZ, footWorldX, footWorldZ, footY, foot.y + legRise);
       collision.kinded('ferris wheel leg', () =>
         collision.addCircle(standing.x, standing.z, FOOT_SOLID_RADIUS, standing.top, false, true),
       );
@@ -397,7 +398,7 @@ export function createFerrisWheelProp(
   // straight through.
   const deckY = deck.position.y;
   {
-    const platformSolid = plotSolid(centreX, centreZ, deckWorldX, deckWorldZ, deckY, deckY + DECK_HEIGHT);
+    const platformSolid = solidInFrame(centreX, centreZ, deckWorldX, deckWorldZ, deckY, deckY + DECK_HEIGHT);
     collision.kinded('ferris deck', () =>
       collision.addBox(
         platformSolid.x,
@@ -416,9 +417,9 @@ export function createFerrisWheelProp(
       const [ax, az] = toWorld(deckX - DECK_RAIL_LENGTH / 2, sz * DECK_RAIL_Z);
       const [bx, bz] = toWorld(deckX + DECK_RAIL_LENGTH / 2, sz * DECK_RAIL_Z);
       const [mx, mz] = toWorld(deckX, sz * DECK_RAIL_Z);
-      const a = plotSolid(centreX, centreZ, ax, az, deckY, railTop);
-      const b = plotSolid(centreX, centreZ, bx, bz, deckY, railTop);
-      const middle = plotSolid(centreX, centreZ, mx, mz, deckY, railTop);
+      const a = solidInFrame(centreX, centreZ, ax, az, deckY, railTop);
+      const b = solidInFrame(centreX, centreZ, bx, bz, deckY, railTop);
+      const middle = solidInFrame(centreX, centreZ, mx, mz, deckY, railTop);
       collision.kinded('ferris deck rail', () =>
         collision.addWall(a.x, a.z, b.x, b.z, DECK_RAIL_COLLISION_HALF, middle.top, false, true),
       );

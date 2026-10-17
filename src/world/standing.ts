@@ -2,6 +2,7 @@ import type { Vector3 } from 'three';
 import type { CollisionWorld } from './Collision';
 import { carryReference, stepCeilingAt } from './building/stepReach';
 import { PLAYER_RADIUS } from '../core/constants';
+import { KID_HEIGHT } from '../art/models/kidHeight';
 
 /**
  * **Where her feet come to rest at `(x, z)`, reached from height `y`** — the
@@ -23,7 +24,8 @@ import { PLAYER_RADIUS } from '../core/constants';
  * The reach is {@link stepCeilingAt}'s, the same one the walk sampler spends,
  * measured from the same reference — so a top is in reach exactly when a deck
  * at that height would be, and a jump that has carried her feet within a step
- * of a top, over it, puts her on it.
+ * of a top, over it, puts her on it — and only where she fits under whatever
+ * hangs over it ({@link solidStepCeiling}).
  *
  * Deliberately **not** what the route lattice, the crowd or the park generator
  * stand on. They ask the walk sampler alone (`WalkSurfaces.sample`), the
@@ -33,8 +35,28 @@ import { PLAYER_RADIUS } from '../core/constants';
  * HANDOFF-engine-solids.md, "who stands on what".
  */
 export function standingHeight(ground: number, collision: CollisionWorld, x: number, z: number, y: number): number {
-  const top = collision.highestTopAt(x, z, stepCeilingAt(x, z, y));
+  const top = collision.highestTopAt(x, z, solidStepCeiling(collision, x, z, y));
   return top > ground ? top : ground;
+}
+
+/**
+ * **The highest solid top she can step or come down onto at `(x, z)`, from
+ * `reference`** — one step's reach ({@link stepCeilingAt}, the walk sampler's
+ * own), and no higher than leaves room for her whole body under whatever hangs
+ * over the point (`CollisionWorld.ceilingAt`, the underside her rising head
+ * stops at in {@link riseUnder}).
+ *
+ * **Headroom.** A bench under a bus shelter's canopy, a cart under its
+ * parasol: a top she cannot stand on without her head inside the solid above
+ * it is not somewhere to stand. Measured against the reach rather than after
+ * it, so the lateral rule (`resolve`'s `'stepped'`), her feet
+ * ({@link standingHeight}) and her lattice all refuse the same tops — such a
+ * top is a side she bumps, not a step she takes and is then shoved off by the
+ * thing over it. The one owner of the rule for everything that stands on
+ * solids.
+ */
+export function solidStepCeiling(collision: CollisionWorld, x: number, z: number, reference: number): number {
+  return Math.min(stepCeilingAt(x, z, reference), collision.ceilingAt(x, z, reference) - KID_HEIGHT);
 }
 
 /**
@@ -70,7 +92,7 @@ export function walkingOntoStep(
 ): boolean {
   const aheadX = x + dirX * STEP_LOOKAHEAD;
   const aheadZ = z + dirZ * STEP_LOOKAHEAD;
-  const ceiling = stepCeilingAt(aheadX, aheadZ, carryReference(x, z, reference, aheadX, aheadZ));
+  const ceiling = solidStepCeiling(collision, aheadX, aheadZ, carryReference(x, z, reference, aheadX, aheadZ));
   return collision.highestTopAt(aheadX, aheadZ, ceiling) > -Infinity;
 }
 

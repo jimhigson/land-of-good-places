@@ -2,8 +2,8 @@ import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
-import { stepCeilingAt, stepReferenceFor, withinStep } from './building/stepReach';
-import { standingHeight } from './standing';
+import { stepReferenceFor, withinStep } from './building/stepReach';
+import { solidStepCeiling, standingHeight } from './standing';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
@@ -680,7 +680,7 @@ export class NavGrid {
   private walksOnto(topHeight: number, topIsAbsolute: boolean, x: number, z: number, sample: GroundSampler): boolean {
     if (!this.standsOnSolids || !topIsAbsolute || !Number.isFinite(topHeight)) return false;
     const ground = sample(x, z, topHeight);
-    return topHeight <= stepCeilingAt(x, z, ground);
+    return topHeight <= solidStepCeiling(this.collision, x, z, ground);
   }
 
   /**

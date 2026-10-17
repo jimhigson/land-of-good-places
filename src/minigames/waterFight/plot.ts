@@ -11,7 +11,8 @@ import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
-import { groundInPlot, plotSolid, type AnchorPlots } from '../../world/AnchorPlots';
+import { groundInPlot, type AnchorPlots } from '../../world/AnchorPlots';
+import { solidInFrame } from '../../world/terrain';
 import type { CollisionWorld } from '../../world/Collision';
 
 /**
@@ -189,7 +190,7 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
       const from = (i / segments) * TAU;
       const to = ((i + 1) / segments) * TAU;
       const at = (angle: number) =>
-        plotSolid(centreX, centreZ, centreX + x + Math.cos(angle) * radius, centreZ + z + Math.sin(angle) * radius, y, rimTop);
+        solidInFrame(centreX, centreZ, centreX + x + Math.cos(angle) * radius, centreZ + z + Math.sin(angle) * radius, y, rimTop);
       const a = at(from);
       const b = at(to);
       const middle = at((from + to) / 2);
@@ -212,7 +213,7 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
     root.add(body);
     addOutline(body, 0.02);
     // Solid to the tops of the puffs along its crown.
-    const hedge = plotSolid(centreX, centreZ, centreX + x, centreZ + z, y, y + HEDGE_PUFF_Y + HEDGE_PUFF_RADIUS * HEDGE_PUFF_SQUASH);
+    const hedge = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, y, y + HEDGE_PUFF_Y + HEDGE_PUFF_RADIUS * HEDGE_PUFF_SQUASH);
     collision.kinded('water fight hedge', () =>
       collision.addRectangle(hedge.x, hedge.z, extent, 0.55, 0.35, hedge.top, false, true),
     );
@@ -243,7 +244,7 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   root.add(sprinklerHead);
   // Solid, to the top of its head — a post she can see is one she bumps into.
   {
-    const sprinkler = plotSolid(centreX, centreZ, centreX + sprinklerX, centreZ + sprinklerZ, sprinklerY, sprinklerY + 0.85 + 0.2 * 0.7);
+    const sprinkler = solidInFrame(centreX, centreZ, centreX + sprinklerX, centreZ + sprinklerZ, sprinklerY, sprinklerY + 0.85 + 0.2 * 0.7);
     collision.kinded('water fight sprinkler', () =>
       collision.addCircle(sprinkler.x, sprinkler.z, SPRINKLER_SOLID_RADIUS, sprinkler.top, false, true),
     );
@@ -304,7 +305,7 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   bar.position.set(rackX, rackY + 1.42, rackZ);
   root.add(bar);
   {
-    const rack = plotSolid(centreX, centreZ, centreX + rackX, centreZ + rackZ, rackY, rackY + RACK_LEG_HEIGHT);
+    const rack = solidInFrame(centreX, centreZ, centreX + rackX, centreZ + rackZ, rackY, rackY + RACK_LEG_HEIGHT);
     collision.kinded('water gun rack', () => collision.addCircle(rack.x, rack.z, 0.9, rack.top, false, true));
   }
 
