@@ -81,7 +81,7 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
     }
   }
   const ray = new Raycaster();
-  const down = new Vector3(0, -1, 0);
+  const down = new Vector3(0, -1, 0); // flat-ok: a solid's top is asked per world column (`CollisionWorld`'s tops are), so the oracle looks straight down that column
   const origin = new Vector3();
   return {
     meshes: entries.length,
@@ -89,13 +89,13 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
       const cell = grid.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`);
       if (!cell) return null;
       origin.set(x, floor + span, z);
-      ray.set(origin, down);
+      ray.set(origin, down); // flat-ok: down the column the collider's top is read in — see `down`
       ray.far = span - 0.02;
       let best: { y: number; name: string } | null = null;
       for (const entry of cell) {
         if (x < entry.box.min.x - 0.01 || x > entry.box.max.x + 0.01 || z < entry.box.min.z - 0.01 || z > entry.box.max.z + 0.01) continue;
-        if (entry.box.max.y < floor + 0.02) continue;
-        if (entry.box.min.y > floor + startAbove) continue;
+        if (entry.box.max.y < floor + 0.02) continue; // flat-ok: a world-box cull before the exact ray, conservative in both directions
+        if (entry.box.min.y > floor + startAbove) continue; // flat-ok: the same world-box cull
         for (const hit of ray.intersectObject(entry.mesh, false)) {
           if (hit.point.y > floor + 0.02 && (!best || hit.point.y > best.y)) best = { y: hit.point.y, name: entry.name };
         }
