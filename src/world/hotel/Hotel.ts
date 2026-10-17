@@ -601,6 +601,27 @@ const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
 const CHAIR_SEAT_Y = 0.42;
 
 /**
+ * **The lobby café's two tables**, room-local, and the spin that sets their
+ * chairs — `dressLobby` stands them here, and `check:hotel` reads them. z
+ * carries `LOBBY_FOYER_GROWTH` with the rest of the foyer.
+ *
+ * **Table A stands clear of the wall** (QA on PR #721, 17 Oct 2026). It stood
+ * at x −10.2 with its chairs north and south, and between them and the west
+ * wall that left a strip no walking child could leave: the north chair stood
+ * 1.21 m short of the reception partition, against a child 1.24 m wide, and
+ * the south one closer still to table B's. "Leave breakfast" put her in it on
+ * `main`; this PR's put-down rule stopped that, and still QA hopped into it 3
+ * times in 7 from the room, or walked off the table's north end into it, and
+ * once in, only Next day got her out on a phone. So the table is half a metre
+ * further from the wall and turned like table B, chairs east and west: the
+ * strip behind it is 1.68 m wide all along, and opens north of the table onto
+ * a 1.95 m channel to the room — floor she walks out of, not a pocket.
+ * `check:hotel` probe 33 attacks every pocket in the hotel to hold that.
+ */
+export const CAFE_TABLE_A = { x: -9.7, z: 9.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, spin: 1.35 } as const;
+export const CAFE_TABLE_B = { x: -10.3, z: 7.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, spin: 1.35 } as const;
+
+/**
  * How long after the "Next day" iris reaches its middle she wakes up, seconds:
  * the iris opening on her asleep in bed, then a beat to see her there in the
  * morning before `Hotel.wakeNap` stands her up. A tap or a hop wakes her
@@ -4198,9 +4219,10 @@ export class Hotel implements GameSystem {
     // The breakfast corner — "breakfast ... at the ground floor". Two tables
     // only (the *room* full of them is Floor 1 now), tucked in the south-west
     // corner by the west windows, where a café by the glass belongs — not
-    // scattered mid-floor where they read as lost furniture. z carries
-    // `LOBBY_FOYER_GROWTH` with the rest of the foyer.
-    this.placeBreakfastTable(shell, LOBBY, -10.2, 9.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 'lobby-a', 0.15);
+    // scattered mid-floor where they read as lost furniture — but table A a
+    // clear strip of floor out from the wall, never a pocket: see
+    // {@link CAFE_TABLE_A}.
+    this.placeBreakfastTable(shell, LOBBY, CAFE_TABLE_A.x, CAFE_TABLE_A.z, 'lobby-a', CAFE_TABLE_A.spin);
     // Spun so its chairs sit east-west (at the first spin a chair interleaved
     // with the west lounge's rug). "kept clear of the west wall's painting"
     // no longer describes this table specifically — the paintings that
@@ -4208,7 +4230,7 @@ export class Hotel implements GameSystem {
     // well north of here in the gap `LOBBY_FOYER_GROWTH` opened, not beside
     // the café — but the same two-metre clearance this spin bought is still
     // worth keeping for whatever else ends up on that wall.
-    this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 'lobby-b', 1.35);
+    this.placeBreakfastTable(shell, LOBBY, CAFE_TABLE_B.x, CAFE_TABLE_B.z, 'lobby-b', CAFE_TABLE_B.spin);
 
     // **Two mirrored seating groups flanking the axis** — the symmetric pair
     // every grand lobby seats its guests in, shifted a stride south of the
