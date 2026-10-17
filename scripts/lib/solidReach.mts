@@ -445,7 +445,11 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         if (top > solidStepCeiling(collision, o.x, o.z, ground)) continue;
         const ix = o.x - o.nx * 0.05;
         const iz = o.z - o.nz * 0.05;
-        // Only if her feet would actually come to rest on THIS top there.
+        // Only if her feet would actually come to rest on THIS top there — on
+        // it, not on ground that happens to stand as high (a wall's uphill end
+        // on a bank: seeds 10, 11 and 15 read the grass beside a wall's end as
+        // the wall's top, past its drawn coping).
+        if (!solid.standsAt(ix, iz)) continue;
         if (Math.abs(standingHeight(sample(ix, iz, ground), collision, ix, iz, ground) - top) > 0.05) continue;
         markReached({ solid, top, how: 'step', at: { x: ix, z: iz, y: top }, from: { x: sx, z: sz, y: ground } });
         changed = true;
