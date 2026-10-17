@@ -41,13 +41,24 @@ const STEP = 2.4;
  * the ground — so its top is `POST_TOP`. One owner for the mesh and the solid.
  */
 const POST_RADIUS = 0.11;
-const POST_LENGTH = 0.95;
-const POST_MIDDLE = 0.48;
+/**
+ * **Taller than she can jump** (the engine rework, 17 Oct 2026). Every solid
+ * now has its real top and a jump lands on whatever it reaches, so a fence is
+ * a guard only by its height: the knee-high fence that stood here (0.95 m
+ * posts, one rail at 0.62 m) was a top she could hop onto and walk along,
+ * straight across the track on a box's end cap. Her jump comes down on
+ * nothing higher than 1.43 m over where she took off (`JUMP_APEX_HEIGHT` and
+ * the clearance grace), so the rail now stands at 1.67 m with its posts over
+ * it, and the old rail at knee height stays as the fence's lower bar.
+ */
+const POST_LENGTH = 1.75;
+const POST_MIDDLE = 0.88;
 const POST_TOP = POST_MIDDLE + POST_LENGTH / 2;
-/** The rail: its centre's height above the ground, and its own depth, so its top is `RAIL_TOP`. */
+/** The rails: the lower bar's centre and the top rail's above the ground, and a rail's own depth, so the top is `RAIL_TOP`. */
 const RAIL_CENTRE = 0.62;
+const TOP_RAIL_CENTRE = 1.62;
 const RAIL_DEPTH = 0.1;
-const RAIL_TOP = RAIL_CENTRE + RAIL_DEPTH / 2;
+const RAIL_TOP = TOP_RAIL_CENTRE + RAIL_DEPTH / 2;
 // Re-exported so existing importers keep one obvious home for it; the value
 // itself lives in the leaf module (see clearance.ts's own note).
 export { STATION_GAP } from './clearance';
@@ -260,10 +271,11 @@ export function buildRailFence(
     z: number;
     y: number;
   }
+  /** A bay's rails: its midpoint, the ground under it (`base`), its bearing and its length — drawn twice, lower bar and top rail. */
   interface Rail {
     x: number;
     z: number;
-    y: number;
+    base: number;
     yaw: number;
     length: number;
   }
@@ -311,7 +323,7 @@ export function buildRailFence(
     rails.push({
       x: (a.x + b.x) / 2,
       z: (a.z + b.z) / 2,
-      y: (a.y + b.y) / 2 + RAIL_CENTRE,
+      base: (a.y + b.y) / 2,
       yaw: Math.atan2(b.x - a.x, b.z - a.z),
       length: Math.hypot(b.x - a.x, b.z - a.z),
     });
@@ -334,7 +346,7 @@ export function buildRailFence(
       rails.push({
         x: (from.x + to.x) / 2,
         z: (from.z + to.z) / 2,
-        y: (from.y + to.y) / 2 + RAIL_CENTRE,
+        base: (from.y + to.y) / 2,
         yaw: Math.atan2(to.x - from.x, to.z - from.z),
         length: Math.hypot(to.x - from.x, to.z - from.z),
       });
@@ -437,7 +449,7 @@ export function buildRailFence(
   const postMaterial = toonMaterial(PALETTE.stonePink);
   const railMaterial = toonMaterial(PALETTE.stonePinkLight);
   const postMesh = new InstancedMesh(new CylinderGeometry(0.09, POST_RADIUS, POST_LENGTH, 6), postMaterial, posts.length);
-  const railMesh = new InstancedMesh(new BoxGeometry(0.09, RAIL_DEPTH, 1), railMaterial, rails.length);
+  const railMesh = new InstancedMesh(new BoxGeometry(0.09, RAIL_DEPTH, 1), railMaterial, rails.length * 2);
   postMesh.castShadow = false;
   railMesh.castShadow = false;
 
@@ -458,11 +470,16 @@ export function buildRailFence(
     // lean at their own feet. Over a fence bay that is a fraction of a degree
     // apart, and it is what keeps the run reading as one fence rather than as
     // posts and rails leaning by different amounts.
-    flat.set(rail.x, rail.y, rail.z);
-    placeOnSphere(flat, rail.yaw, position, rotation);
-    stretch.set(1, 1, rail.length);
-    matrix.compose(position, rotation, stretch);
-    railMesh.setMatrixAt(index, matrix);
+    for (const [slot, centre] of [
+      [0, RAIL_CENTRE],
+      [1, TOP_RAIL_CENTRE],
+    ] as const) {
+      flat.set(rail.x, rail.base + centre, rail.z);
+      placeOnSphere(flat, rail.yaw, position, rotation);
+      stretch.set(1, 1, rail.length);
+      matrix.compose(position, rotation, stretch);
+      railMesh.setMatrixAt(index * 2 + slot, matrix);
+    }
   });
   postMesh.instanceMatrix.needsUpdate = true;
   railMesh.instanceMatrix.needsUpdate = true;
