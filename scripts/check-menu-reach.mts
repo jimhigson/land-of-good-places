@@ -28,6 +28,10 @@
  *    listener that records which pill the click landed on and stops it there,
  *    so nothing actually opens.
  *
+ * And then, the Cute-o-dex opened from it, that **the shut ☰ button is under
+ * the book**, as it always was: the open drawer is lifted over the HUD's bottom
+ * row, and the first try at that lifted the shut button over every panel too.
+ *
  * And so it cannot pass by measuring nothing, the pills every park has —
  * backpack, Next day, help, Cute-o-dex and map — must each be among them.
  * Screenshots of every open drawer go to `CHECK_MENU_REACH_SHOTS`
@@ -147,18 +151,15 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
     // A tap at each pill's centre: which pill did the click land on? Caught on
     // the way down and stopped, so nothing opens and the menu stays open.
     await page.evaluate(() => {
-      const record = window as unknown as { menuReachTapped: string | null };
+      const record = window as unknown as { menuReachTapped: string | null; menuReachCatch: (event: Event) => void };
       record.menuReachTapped = null;
-      window.addEventListener(
-        'click',
-        (event) => {
-          const target = event.target instanceof Element ? event.target.closest('#hud-menu-items > *') : null;
-          record.menuReachTapped = target ? target.className : `outside the menu (${event.target instanceof Element ? event.target.tagName : '?'})`;
-          event.stopPropagation();
-          event.preventDefault();
-        },
-        { capture: true },
-      );
+      record.menuReachCatch = (event: Event): void => {
+        const target = event.target instanceof Element ? event.target.closest('#hud-menu-items > *') : null;
+        record.menuReachTapped = target ? target.className : `outside the menu (${event.target instanceof Element ? event.target.tagName : '?'})`;
+        event.stopPropagation();
+        event.preventDefault();
+      };
+      window.addEventListener('click', record.menuReachCatch, { capture: true });
     });
     const lines: string[] = [];
     for (const item of items) {
@@ -195,6 +196,31 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
         continue;
       }
       lines.push(`${item.name} (y ${item.top.toFixed(0)}–${item.bottom.toFixed(0)})`);
+    }
+    // 4. Shut, the menu is back under the panels it opens. Lifting the open
+    // drawer over the bottom row must not lift the shut button over the
+    // Cute-o-dex: a pill drawn across the book's corner, and pressable through it.
+    await page.evaluate(() => {
+      const record = window as unknown as { menuReachCatch: (event: Event) => void };
+      window.removeEventListener('click', record.menuReachCatch, { capture: true });
+    });
+    const dex = await page.$('#hud-menu-items .pill--dex');
+    if (dex) {
+      if (viewport.touch) await dex.tap();
+      else await dex.click();
+      await page.waitForSelector('.cutodex[data-open="true"]', { timeout: 10_000 });
+      await page.waitForTimeout(400);
+      const underneath = await page.evaluate(() => {
+        const button = document.querySelector('.pill--menu');
+        if (!button) return 'no menu button';
+        const box = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return hit && button.contains(hit) ? 'the menu button is drawn over the open Cute-o-dex' : '';
+      });
+      if (underneath) failures.push(`${viewport.name}: ${underneath}`);
+      lines.push(underneath ? 'shut menu OVER the Cute-o-dex' : 'shut menu under the Cute-o-dex');
+    } else {
+      failures.push(`${viewport.name}: no Cute-o-dex pill to open`);
     }
     if (errors.length > 0) failures.push(`${viewport.name}: the page threw — ${errors.join(' | ')}`);
     notes.push(`${viewport.name}: ${items.length} pills — ${lines.join(', ')}`);

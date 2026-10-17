@@ -414,9 +414,13 @@ body {
 
 .hud-menu {
   position: relative;
-  /* Over the bottom row: the drawer is only open while a child is choosing
-     from it, and on a phone held sideways its second column reaches down
-     beside the hop button and the chips. */
+}
+
+/* Open, over the bottom row: on a phone held sideways the drawer's second
+   column reaches down beside the chips and the hop button. Only while open —
+   shut, the button stays under the panels that open over the park (the
+   Cute-o-dex, the map, the backpack), exactly as before. */
+.hud-menu[data-open='true'] {
   z-index: 2;
 }
 
