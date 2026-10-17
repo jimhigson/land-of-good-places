@@ -15,14 +15,17 @@
  * measured it, because nothing had ever opened the menu on a short screen.
  *
  * So this opens it, in a real Chromium against the served game, at each
- * {@link VIEWPORTS} size, and for every pill the drawer shows asks three things
+ * {@link VIEWPORTS} size — beside the lobby café, stood up from breakfast
+ * (`/hotel-cafe`, then "Leave breakfast"), so the "Have breakfast" chip floats
+ * mid-screen where the second column opens — and for every pill the drawer
+ * shows asks three things
  * (a label — the park's name, the purse — only the first: it is read, not
  * pressed, and lets a tap through to the park):
  *
  * 1. **all of it is on the screen** — its whole box inside the viewport, not a
  *    sliver of it;
- * 2. **nothing covers it** — `elementFromPoint` at its centre is the pill or
- *    something inside it;
+ * 2. **nothing covers it** — `elementFromPoint` at its middle, and a quarter
+ *    in from each corner, is the pill or something inside it;
  * 3. **a tap there reaches it** — a real tap (a touchscreen tap on the phones,
  *    a mouse click on the desktop) at its centre, caught by a capturing
  *    listener that records which pill the click landed on and stops it there,
@@ -39,7 +42,6 @@
  */
 import { mkdirSync } from 'node:fs';
 import { chromium, type Browser } from 'playwright-core';
-import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const BASE = (process.env.CHECK_MENU_REACH_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
@@ -104,8 +106,17 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(String(error)));
-    await page.goto(`${BASE}/spawn?pos=${ENTRANCE_PLAYER_X.toFixed(2)},${ENTRANCE_PLAYER_Z.toFixed(2)}&seed=${SEED}`);
-    await page.waitForSelector('.pill--menu', { state: 'visible', timeout: BOOT_TIMEOUT_MS });
+    // Beside the lobby café, stood up from breakfast: the "Have breakfast"
+    // chip then floats over the chair beside her, in the middle of a phone's
+    // screen, where the drawer's second column opens — a busy HUD, not an
+    // empty one.
+    await page.goto(`${BASE}/hotel-cafe?seed=${SEED}`);
+    const leave = page.locator('.action-chip', { hasText: 'Leave breakfast' }).first();
+    await leave.waitFor({ state: 'visible', timeout: BOOT_TIMEOUT_MS });
+    if (viewport.touch) await leave.tap();
+    else await leave.click();
+    await page.waitForSelector('.pill--menu', { state: 'visible', timeout: 30_000 });
+    await page.locator('.action-chip').first().waitFor({ state: 'visible', timeout: 10_000 });
     await page.waitForSelector('#hud-menu-items .pill--map', { state: 'attached', timeout: BOOT_TIMEOUT_MS });
     await page.waitForSelector('#hud-menu-items .pill--dex', { state: 'attached', timeout: BOOT_TIMEOUT_MS });
 
@@ -127,7 +138,17 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
         })
         .map((element) => {
           const box = element.getBoundingClientRect();
-          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          // Its middle and four points a quarter in from its corners: a chip
+          // across one corner of a pill is a pill a finger can miss.
+          let hit: Element | null = null;
+          for (const [fx, fy] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]] as const) {
+            const at = document.elementFromPoint(box.left + box.width * fx, box.top + box.height * fy);
+            if (!at || !element.contains(at)) {
+              hit = at;
+              break;
+            }
+            hit = at;
+          }
           return {
             name: (element.textContent ?? '').replace(/\s+/g, ' ').trim() || element.getAttribute('aria-label') || '?',
             classes: element.className,
@@ -178,7 +199,7 @@ async function measure(browser: Browser, viewport: Viewport): Promise<void> {
         continue;
       }
       if (!item.hitsItself) {
-        failures.push(`${viewport.name}: ${where} is covered — the middle of it is ${item.hit}`);
+        failures.push(`${viewport.name}: ${where} is covered — part of it is ${item.hit}`);
         lines.push(`${item.name} COVERED`);
         continue;
       }

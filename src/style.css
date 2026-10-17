@@ -416,12 +416,14 @@ body {
   position: relative;
 }
 
-/* Open, over the bottom row: on a phone held sideways the drawer's second
-   column reaches down beside the chips and the hop button. Only while open —
-   shut, the button stays under the panels that open over the park (the
-   Cute-o-dex, the map, the backpack), exactly as before. */
+/* Open, over the rest of the HUD: on a phone held sideways the drawer's
+   second column stands out in the screen, beside the hop button and under
+   the action chips that float over whatever she is next to — the chips sit
+   at 5, so the open drawer is lifted to 6, over them and under every panel.
+   Only while open: shut, the button stays under the panels that open over the
+   park (the Cute-o-dex, the map, the backpack), exactly as before. */
 .hud-menu[data-open='true'] {
-  z-index: 2;
+  z-index: 6;
 }
 
 /* Deliberately taller and roomier than a plain pill: it is now the only thing
