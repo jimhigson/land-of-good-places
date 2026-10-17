@@ -748,6 +748,42 @@ export function libraryArmchairSize(): {
   };
 }
 
+/** One solid part of the armchair, chair-local: its middle, half-extents across (x) and back-to-front (z), and its top. */
+export interface ArmchairPart {
+  readonly centreX: number;
+  readonly centreZ: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  readonly top: number;
+}
+
+/**
+ * **The armchair as the solids she meets** — measured off the kit's own
+ * vertices: the seat cushion to its top, and the frame round it (an arm either
+ * side, the back behind) each to its own. One box over the whole chair at the
+ * seat's height stood her 0.3 m deep in an arm wherever she stood on its edge
+ * (`check:solids`, 17 Oct 2026). The parts tile the chair's plan, so it is the
+ * one solid it was, stepped.
+ */
+export function libraryArmchairParts(): readonly ArmchairPart[] {
+  const plan = kitBounds(['armchair-frame', 'armchair-seat', 'armchair-feet']);
+  const seat = kitBounds(['armchair-seat']);
+  const frameOver = (keep: (x: number, z: number) => boolean): number => kitBounds(['armchair-frame'], (x, _y, z) => keep(x, z)).maxY;
+  const box = (minX: number, maxX: number, minZ: number, maxZ: number, top: number): ArmchairPart => ({
+    centreX: (minX + maxX) / 2,
+    centreZ: (minZ + maxZ) / 2,
+    halfX: (maxX - minX) / 2,
+    halfZ: (maxZ - minZ) / 2,
+    top,
+  });
+  return [
+    box(seat.minX, seat.maxX, seat.minZ, plan.maxZ, seat.maxY),
+    box(plan.minX, seat.minX, seat.minZ, plan.maxZ, frameOver((x, z) => x < seat.minX && z >= seat.minZ)),
+    box(seat.maxX, plan.maxX, seat.minZ, plan.maxZ, frameOver((x, z) => x > seat.maxX && z >= seat.minZ)),
+    box(plan.minX, plan.maxX, plan.minZ, seat.minZ, frameOver((_x, z) => z < seat.minZ)),
+  ];
+}
+
 export interface LampHandle extends AssetHandle {
   /** The middle of the glowing shade, local — where its light's pool is hung. */
   readonly bulb: Vector3;

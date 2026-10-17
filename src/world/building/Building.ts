@@ -3,7 +3,7 @@ import { castleFloorBounds } from './floorBounds';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
-import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_SLAB, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
@@ -1021,6 +1021,7 @@ export class Building implements GameSystem {
     this.parkRoot.add(this.rideMount);
 
     registerFacadeCollision(collision);
+    registerFacadeRoofCollision(collision);
     registerCastleTowerCollision(collision);
 
     const plot = anchorPlots.getGroup('building');
@@ -2750,7 +2751,7 @@ function registerFacadeCollision(collision: CollisionWorld): void {
     const midX = (ax + bx) / 2;
     const midZ = (az + bz) / 2;
     const top = castleTopY(midX, midZ, midX - BUILDING_CENTRE_X, CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT, midZ - BUILDING_CENTRE_Z);
-    collision.kinded('castle curtain wall', () => collision.addWall(ax, az, bx, bz, 0.3, top, false, true));
+    collision.kinded('castle curtain wall', () => collision.addWall(ax, az, bx, bz, FACADE_WALL_COLLIDER_HALF, top, false, true));
   };
   wall(west, north, east, north);
   wall(west, north, west, south);
@@ -2762,6 +2763,52 @@ function registerFacadeCollision(collision: CollisionWorld): void {
   // The back of the lobby.
   const lobbyZ = facadeZ(BUILDING_HALF_Z - 1.8);
   wall(facadeX(ENTRANCE_MIN_X), lobbyZ, facadeX(ENTRANCE_MAX_X), lobbyZ);
+}
+
+/** Half the curtain wall's collider thickness — {@link registerFacadeCollision}'s, which the roof meets. */
+const FACADE_WALL_COLLIDER_HALF = 0.3;
+/** The roof deck's tiles: about this square, so each one's top sits on the deck's leaning plane. */
+const FACADE_ROOF_TILE = 2;
+
+/**
+ * **The roof garden the park sees is a floor.**
+ *
+ * The facade's courtyard is walled in all round to the battlement and roofed
+ * by the roof garden's paving, drawn over the whole inside of the curtain wall
+ * at `CASTLE_WALL_HEIGHT` (`Shell.ts`'s `buildCastleRoofGarden`). Its walls
+ * stood to `Infinity` once, so nothing ever got above them; with real tops
+ * (17 Oct 2026) the jet pack flies over them — 9.4 m against its 12 m — and the
+ * paving had no solid at all: she fell through the deck she could see into a
+ * courtyard walled in on every side, and with the pack off would have stayed
+ * there.
+ *
+ * Tiles about 2 m square over the inside of {@link registerFacadeCollision}'s
+ * walls, flush with their inner faces, each banded from the deck's underside to
+ * its top at the tile's middle in the castle's own leaning frame
+ * (`castleTopY`) — on the same plan as the walls, which is where the courtyard
+ * is sealed. Banded, so no route lattice stamps them: nine metres up,
+ * nobody walks.
+ */
+function registerFacadeRoofCollision(collision: CollisionWorld): void {
+  const innerX = BUILDING_HALF_X - FACADE_WALL_COLLIDER_HALF;
+  const innerZ = BUILDING_HALF_Z - FACADE_WALL_COLLIDER_HALF;
+  const across = Math.max(1, Math.round((2 * innerX) / FACADE_ROOF_TILE));
+  const along = Math.max(1, Math.round((2 * innerZ) / FACADE_ROOF_TILE));
+  const halfX = innerX / across;
+  const halfZ = innerZ / along;
+  collision.kinded('castle roof deck', () => {
+    for (let i = 0; i < across; i += 1) {
+      for (let j = 0; j < along; j += 1) {
+        const localX = -innerX + (2 * i + 1) * halfX;
+        const localZ = -innerZ + (2 * j + 1) * halfZ;
+        const x = facadeX(localX);
+        const z = facadeZ(localZ);
+        const top = castleTopY(x, z, localX, CASTLE_WALL_HEIGHT, localZ);
+        const base = castleTopY(x, z, localX, CASTLE_WALL_HEIGHT - BUILDING_SLAB, localZ);
+        collision.addBox(x, z, halfX, halfZ, 0, 0, top, false, true, base);
+      }
+    }
+  });
 }
 
 /**

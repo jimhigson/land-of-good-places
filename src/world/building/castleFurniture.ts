@@ -929,7 +929,7 @@ export interface HallSolid {
  * blocks, at 1.0 m and above it does not. An `Infinity` top would have been the
  * "every prop is a pillar" bug the hotel already paid for.
  *
- * ## One rectangle per **run**, not per table and not per bench
+ * ## Three strips per **run**, not a solid per table and per bench
  *
  * A run's benches stand 1.85 m either side of its table's axis and reach 0.30 m
  * further out again, and the clear floor between a bench's inner face and the
@@ -940,9 +940,13 @@ export interface HallSolid {
  * a run is a continuous line of furniture whether or not this says so.
  *
  * Registering the run whole rather than piece by piece is therefore both the
- * honest shape *and* the cheap one: five rectangles instead of ninety, no
+ * honest shape *and* the cheap one: a few rectangles instead of ninety, no
  * interior walls buried inside a solid slab for a depenetration to catch on,
- * and no butt-joint between neighbouring tables to fall out of step.
+ * and no butt-joint between neighbouring tables to fall out of step. Since
+ * every top is somewhere she stands (17 Oct 2026) the run is three strips
+ * butted side by side — the tables' to the table top, each bench side's to the
+ * seat — so she stands on what is drawn under her: the same one solid,
+ * stepped.
  *
  * The **dais, throne and armour deliberately get nothing.** The approach
  * between the dais and the first table is {@link FEAST_APPROACH}, 1.5 m, and a
@@ -960,17 +964,22 @@ export function greatHallSolids(deck: number): readonly HallSolid[] {
   const last = centres[centres.length - 1];
   if (first !== undefined && last !== undefined) {
     for (const rowX of feastRowAxes(plan)) {
-      solids.push({
-        x: rowX,
-        z: (first + last) / 2,
-        // Out to the outer face of the outer bench, measured off the asset.
-        halfX: BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH,
-        // The whole run, end to end: the tables butt exactly, so this is their
-        // count times the asset's own half-length. It also covers the benches,
-        // which reach 2.95 m from a table's middle against the table's 3.00.
-        halfZ: (Math.abs(last - first) + TABLE_HALF_LENGTH * 2) / 2,
-        top: CASTLE_TABLE_TOP,
-      });
+      // The whole run, end to end: the tables butt exactly, so this is their
+      // count times the asset's own half-length. It also covers the benches,
+      // which reach 2.95 m from a table's middle against the table's 3.00.
+      const halfZ = (Math.abs(last - first) + TABLE_HALF_LENGTH * 2) / 2;
+      const z = (first + last) / 2;
+      // **Each strip to what is drawn on it** (17 Oct 2026): the table to its
+      // top, and either side of it, out to the outer face of the bench, the
+      // bench to its seat — the 0.45 m slot between them with it, which she is
+      // too wide to stand in. One block to the table's top stood her on air
+      // 0.30 m over every bench. The strips butt, so the run is the one solid
+      // it always was, with no pocket.
+      solids.push({ x: rowX, z, halfX: CASTLE_TABLE_HALF_WIDTH, halfZ, top: CASTLE_TABLE_TOP });
+      const benchHalf = (BENCH_OFFSET + CASTLE_BENCH_HALF_WIDTH - CASTLE_TABLE_HALF_WIDTH) / 2;
+      for (const side of [-1, 1] as const) {
+        solids.push({ x: rowX + side * (CASTLE_TABLE_HALF_WIDTH + benchHalf), z, halfX: benchHalf, halfZ, top: CASTLE_BENCH_SEAT });
+      }
     }
   }
 

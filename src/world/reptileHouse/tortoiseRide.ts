@@ -1,5 +1,5 @@
 import { Box3, CatmullRomCurve3, Group, Vector3 } from 'three';
-import type { CollisionWorld, WallCollider } from '../Collision';
+import { roundTopHalf, type CollisionWorld, type WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
 import type { Player } from '../../entities/Player';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -106,6 +106,8 @@ export class TortoiseRide {
   /** The parked capsule's handle in the collision world, or `null` while it is out walking. */
   private bay: WallCollider | null = null;
   private readonly parkedSolid: ReptileProps['solids'][number];
+  /** The top of her shell, world `y` in the flat hall: the parked solid's top, every time it is added. */
+  private readonly shellTop: number;
 
   constructor(root: Group, props: ReptileProps, collision: CollisionWorld, controls: InteriorControls) {
     this.root = root;
@@ -129,8 +131,10 @@ export class TortoiseRide {
     this.length = this.loop.getLength();
 
     const [front, back] = parkedCapsule();
-    // To the top of her shell — the drawn tortoise, a real height.
-    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, shell.max.y); // flat-ok: the same box the seat above is set from; the hall is flat (floor y 0, off the sphere)
+    // To the top of her shell — the drawn tortoise, a real height — and stood
+    // on only on its dome (`roundTopHalf`), not out over her head and tail.
+    this.shellTop = shell.max.y; // flat-ok: the same box the seat above is set from; the hall is flat (floor y 0, off the sphere)
+    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, this.shellTop, roundTopHalf(TORTOISE_RIDE_PARK_HALF_WIDTH));
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
     this.bay = this.parkedSolid.handle as WallCollider;
     this.park();
@@ -259,12 +263,22 @@ export class TortoiseRide {
     this.along = 0;
     this.park();
     const [front, back] = parkedCapsule();
-    this.bay = this.collision.addWall(
-      REPTILE_HOUSE_ORIGIN_X + front.x,
-      REPTILE_HOUSE_ORIGIN_Z + front.z,
-      REPTILE_HOUSE_ORIGIN_X + back.x,
-      REPTILE_HOUSE_ORIGIN_Z + back.z,
-      TORTOISE_RIDE_PARK_HALF_WIDTH,
+    // Back as she was parked: to the top of her shell, stood on only on its
+    // dome. (Re-added with no top at all, she came back from her first lap
+    // an infinitely tall pillar.)
+    this.bay = this.collision.kinded('the tortoise ride, parked', () =>
+      this.collision.toppedNarrow(roundTopHalf(TORTOISE_RIDE_PARK_HALF_WIDTH), () =>
+        this.collision.addWall(
+          REPTILE_HOUSE_ORIGIN_X + front.x,
+          REPTILE_HOUSE_ORIGIN_Z + front.z,
+          REPTILE_HOUSE_ORIGIN_X + back.x,
+          REPTILE_HOUSE_ORIGIN_Z + back.z,
+          TORTOISE_RIDE_PARK_HALF_WIDTH,
+          this.shellTop,
+          false,
+          true,
+        ),
+      ),
     );
     this.parkedSolid.handle = this.bay;
     const player = this.player;

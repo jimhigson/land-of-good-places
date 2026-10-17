@@ -434,6 +434,8 @@ function snapToWallTop(level: number, topY: number): number {
 
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
+/** How many pieces a parapet segment's solid is cut into, so its top follows the coping's bend. */
+const PARAPET_PIECES = 4;
 
 /**
  * Built on first use, never at module load: `pinkStoneTexture` paints a
@@ -1070,18 +1072,29 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       const humpA = humpAbove(previous.x, previous.z, topA);
       const humpB = humpAbove(point.x, point.z, topB);
       if (Math.max(humpA, humpB) > PARAPET_MIN_HUMP) {
-        walls.push({
-          x1: previous.x,
-          z1: previous.z,
-          x2: point.x,
-          z2: point.z,
-          // The drawn parapet's own top, arc included — not `+ PARAPET_HEIGHT`
-          // recomputed here. A collider that stopped at the un-arced height
-          // would let a child climb the drawn stone and step over it. One at
-          // each end, the solid's top running between them.
-          topHeight: parapetTopFor(topA, previous.x, previous.z),
-          topHeightEnd: parapetTopFor(topB, point.x, point.z),
-        });
+        // The drawn parapet's own top, arc included — not `+ PARAPET_HEIGHT`
+        // recomputed here. A collider that stopped at the un-arced height
+        // would let a child climb the drawn stone and step over it.
+        //
+        // In pieces, each its own top at each end (`TopSlope`): the coping's
+        // line bends along a segment — the arc, the taper on a ramp — and one
+        // straight top from end to end stood 0.25 m under it mid-segment
+        // (one height, the higher end's, stood 0.57 m over it). The pieces lie
+        // end to end on the segment's own line at its own width, so the solid
+        // they make is the segment's, and only its top follows the stone.
+        let pieceX = previous.x;
+        let pieceZ = previous.z;
+        let pieceTop = parapetTopFor(topA, previous.x, previous.z);
+        for (let k = 1; k <= PARAPET_PIECES; k += 1) {
+          const t = k / PARAPET_PIECES;
+          const x = previous.x + (point.x - previous.x) * t;
+          const z = previous.z + (point.z - previous.z) * t;
+          const top = k === PARAPET_PIECES ? parapetTopFor(topB, point.x, point.z) : parapetTopFor(surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t), x, z);
+          walls.push({ x1: pieceX, z1: pieceZ, x2: x, z2: z, topHeight: pieceTop, topHeightEnd: top });
+          pieceX = x;
+          pieceZ = z;
+          pieceTop = top;
+        }
       }
       previous = point;
       previousAlong = clamped;

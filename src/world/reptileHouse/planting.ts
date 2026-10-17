@@ -90,11 +90,14 @@ const FLOOR_ROCKS: readonly (readonly [name: string, x: number, z: number, yaw: 
   // (the solidity review, 2 October 2026).
   ['rp-rock-b', 0.5, 17, 2.1],
 ];
+/** The hop-on log's solid's half-thickness. */
+const FLOOR_LOG_HALF = 0.3;
+
 /**
  * The hop-on log, in the strip between the foyer's sweep and the SE island's
  * kerb. It used to lie along the south wall at z 16.6, which is the Tortoise
  * Ride's parking bay now; a jump from its 0.6 m top cannot reach the bed's
- * 2.4 m collider top beside it.
+ * collider top beside it (`REPTILE_BED_TOP`).
  */
 const FLOOR_LOG: readonly [LocalPoint, LocalPoint] = [
   { x: 7, z: 9.7 },
@@ -334,7 +337,12 @@ export class Planting {
     }
     const [a, b] = FLOOR_LOG;
     this.ctx.root.add(...instancedPlant('rp-log-small', [{ x: (a.x + b.x) / 2, y: 0, z: (a.z + b.z) / 2, yaw: 0, scale: 1 }]));
-    this.ctx.props.wall('the foyer log', a, b, 0.3, reptilePlantTop('rp-log-small'));
+    // Its round ends inside the drawn log's: a capsule run end to end stood
+    // her a radius out past either end, on nothing (`check:solids`).
+    const length = Math.hypot(b.x - a.x, b.z - a.z);
+    const inX = ((b.x - a.x) / length) * FLOOR_LOG_HALF;
+    const inZ = ((b.z - a.z) / length) * FLOOR_LOG_HALF;
+    this.ctx.props.wall('the foyer log', { x: a.x + inX, z: a.z + inZ }, { x: b.x - inX, z: b.z - inZ }, FLOOR_LOG_HALF, reptilePlantTop('rp-log-small'));
   }
 }
 

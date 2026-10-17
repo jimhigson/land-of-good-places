@@ -30,7 +30,7 @@ import {
   createLibrarySecretBookcase,
   createLibrarySideTable,
   createShelfBook,
-  libraryArmchairSize,
+  libraryArmchairParts,
   libraryBookcaseBaked,
   libraryBookcaseSize,
   libraryBookMaterial,
@@ -619,11 +619,12 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       case 'storyChair': {
         const cloth = CHAIR_CLOTH[piece.id] ?? PALETTE.markerPink;
         place(piece, createLibraryArmchair(cloth).root, 0);
-        // The chair is deeper behind its origin than in front of it: its
-        // collider and its seat stand on the drawn footprint's own middle.
-        const chair = libraryArmchairSize();
-        const centre = turned(piece, chair.centreX, chair.centreZ);
-        props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: chair.width / 2, halfDepth: chair.depth / 2 }, chair.seat);
+        // Its seat to the cushion and its arms and back each to its own top,
+        // tiling the chair's drawn plan (`libraryArmchairParts`).
+        for (const part of libraryArmchairParts()) {
+          const centre = turned(piece, part.centreX, part.centreZ);
+          props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: part.halfX, halfDepth: part.halfZ }, part.top);
+        }
         break;
       }
       case 'floorLamp': {
