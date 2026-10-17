@@ -293,11 +293,11 @@ export function buildRailFence(
    * metres above a fence rail, so nothing on it meets one.
    */
   const addFenceWall = (a: Post, b: Post): void => {
-    const midX = (a.x + b.x) / 2;
-    const midZ = (a.z + b.z) / 2;
-    const flatTop = (a.y + b.y) / 2 + RAIL_TOP;
+    // The rail runs from one post's top to the other's, so its solid's top
+    // does too: one end each (`TopSlope`), where the posts' own feet differ.
+    const topAt = (p: Post): number => yAtAltitude(p.x, p.z, p.y + RAIL_TOP - terrainHeight(p.x, p.z));
     collision.kinded('railway fence', () =>
-      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, yAtAltitude(midX, midZ, flatTop - terrainHeight(midX, midZ)), false, true),
+      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, topAt(a), false, true, -Infinity, false, Number.NaN, topAt(b)),
     );
   };
   /** A post at `p`, its own solid: the rail's ends stand on it. */

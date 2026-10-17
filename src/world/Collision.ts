@@ -145,6 +145,37 @@ interface SolidHeights {
    * hoppable, and is `NaN` otherwise (nothing plans a hop over it).
    */
   hopHeight: number;
+  /**
+   * A wall whose top **runs straight from one end's to the other's** — given
+   * when it is registered with a top at each end ({@link CollisionWorld.addWall}'s
+   * `topHeightEnd`) — and absent for a solid with one top everywhere. See
+   * {@link TopSlope}.
+   */
+  topSlope?: TopSlope;
+}
+
+/**
+ * **A top that runs from one end of a wall to the other** — `top1` over
+ * `(x1, z1)`, `top2` over the far end, and a straight line between them along
+ * the wall, each a radius in the park (`radial`) or a world `y` indoors.
+ *
+ * Why a wall needs it: a top held as one number is right at the one point it
+ * was taken and drifts along the wall's length. A garden wall stepping down a
+ * slope, a stair's handrail, a long plinth edge on the sphere — measured on
+ * the library's back edge, 18 m long, a single top sat 0.18 m under the drawn
+ * stone at the wall's ends, which is a body walking into stone it could see.
+ * Two ends, interpolated, are exact at both and a few millimetres out between
+ * them for any wall a few metres long.
+ */
+export interface TopSlope {
+  readonly x1: number;
+  readonly z1: number;
+  readonly dx: number;
+  readonly dz: number;
+  readonly lengthSquared: number;
+  readonly top1: number;
+  readonly top2: number;
+  readonly radial: boolean;
 }
 
 interface CircleCollider extends SolidHeights {
@@ -236,6 +267,13 @@ function yOnRadius(radius: number, x: number, z: number): number {
  */
 export function solidTopAt(solid: Readonly<SolidHeights>, x: number, z: number): number {
   if (!solid.topIsAbsolute) return Number.NaN;
+  const slope = solid.topSlope;
+  if (slope) {
+    let t = slope.lengthSquared < 1e-8 ? 0 : ((x - slope.x1) * slope.dx + (z - slope.z1) * slope.dz) / slope.lengthSquared;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const top = slope.top1 + (slope.top2 - slope.top1) * t;
+    return slope.radial ? yOnRadius(top, x, z) : top;
+  }
   return Number.isNaN(solid.topRadius) ? solid.topHeight : yOnRadius(solid.topRadius, x, z);
 }
 
@@ -1158,15 +1196,37 @@ export class CollisionWorld {
     baseHeight = -Infinity,
     navStamped = false,
     hopHeight = Number.NaN,
+    topHeightEnd = Number.NaN,
   ): WallCollider {
+    // A top at each end (`topHeight` over (x1, z1), `topHeightEnd` over
+    // (x2, z2)) runs straight between them — see {@link TopSlope}. The solid's
+    // one-number `topHeight` is then the middle's, for every reader that asks
+    // a single figure of it.
+    const sloped = topIsAbsolute && Number.isFinite(topHeight) && Number.isFinite(topHeightEnd);
+    const middleTop = sloped ? (topHeight + topHeightEnd) / 2 : topHeight;
     const wall: WallCollider = {
       x1,
       z1,
       x2,
       z2,
       halfThickness,
-      ...this.heights((x1 + x2) / 2, (z1 + z2) / 2, topHeight, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
+      ...this.heights((x1 + x2) / 2, (z1 + z2) / 2, middleTop, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
     };
+    if (sloped) {
+      const r1 = radiusFor(x1, z1, topHeight);
+      const r2 = radiusFor(x2, z2, topHeightEnd);
+      const radial = !Number.isNaN(r1) && !Number.isNaN(r2);
+      wall.topSlope = {
+        x1,
+        z1,
+        dx: x2 - x1,
+        dz: z2 - z1,
+        lengthSquared: (x2 - x1) ** 2 + (z2 - z1) ** 2,
+        top1: radial ? r1 : topHeight,
+        top2: radial ? r2 : topHeightEnd,
+        radial,
+      };
+    }
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
     this.revisionCounter += 1;
