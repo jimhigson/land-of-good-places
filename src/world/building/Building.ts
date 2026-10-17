@@ -33,6 +33,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
+import type { OpenAreaPoint } from '../dismount';
 
 import { BallPit } from './BallPit';
 import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
@@ -55,6 +56,7 @@ import {
   dressDeck,
   PLANTER_RADIUS,
   PLANTER_TOP,
+  keepOutsFor,
   planterRing,
 } from './dressing';
 import { CastleFire } from './castleLighting';
@@ -104,6 +106,7 @@ import {
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
   LIFT_OUT_YAW,
+  LIFT_STAND_X,
   LIFT_WALL_X,
   ROOF_PAVILION_HALF_X,
   ROOF_PAVILION_HALF_Z,
@@ -1657,6 +1660,19 @@ export class Building implements GameSystem {
   }
 
   /**
+   * **A castle floor's open area**, for the put-down rule (`world/dismount.ts`):
+   * where the lift lets her out — the only way between floors — and every disc
+   * of `keepOutsFor`, the single owner of where a child must be able to stand
+   * on that floor. World metres.
+   */
+  openArea(floor: CastleFloor): OpenAreaPoint[] {
+    return [
+      { x: floorX(floor, LIFT_STAND_X), z: floorZ(floor, LIFT_DOOR_Z) },
+      ...keepOutsFor(floor.index).map((disc) => ({ x: floorX(floor, disc.x), z: floorZ(floor, disc.z) })),
+    ];
+  }
+
+  /**
    * **She has been taken somewhere else, behind an iris somebody else is
    * running** — the "Next day" button, from inside the castle. The castle stops
    * being where she is: its interior hidden, `inside` false, exactly as walking
@@ -1753,7 +1769,6 @@ export class Building implements GameSystem {
 
       // The chute is in world coordinates now, so there is nothing to add back.
       this.ginormousSlide.pointAt(0, this.point);
-      player.teleportTo(this.point.x, this.point.y + RIDER_LIFT, this.point.z);
       // **Not for composing her turn** — the ride hands that over whole, as a
       // quaternion (`Player.setRideFrame`), and no euler order touches it. This
       // is for the readers that take `group.rotation.y` as the way she faces
@@ -1763,6 +1778,10 @@ export class Building implements GameSystem {
       // ±90° once she is pitched. Put back in `finishRide`.
       player.group.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
+      // At the top of the chute, **once the ride has her**: a placement onto a
+      // ride is the ride's own pose, never a put-down (`Player.teleportTo`), and
+      // the top of a slide is no floor to be put down on.
+      player.setRidePose(this.point.x, this.point.y + RIDER_LIFT, this.point.z, player.facing);
       // **On her back, feet first** (Jim, 6 August 2026) — the way a child
       // actually goes down a slide, and the way the grown-up in front of her
       // has ridden all along. The ride chooses the posture; `Player` owns what

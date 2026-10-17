@@ -25,8 +25,8 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { hasWalk, type CreatureHandle } from '../../art/style/asset';
-import { PLAYER_PUT_DOWN, type Player, type RideHolder } from '../../entities/Player';
-import { putDownSpot, type RideExit } from '../dismount';
+import type { Player, RideHolder } from '../../entities/Player';
+import type { OpenAreaPoint, RideExit } from '../dismount';
 import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
 import type { LiftPanelSource } from '../building/liftRide';
@@ -598,14 +598,6 @@ const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
 const CHAIR_SEAT_Y = 0.42;
 
 /**
- * How far behind a breakfast chair's centre her stand spot starts, metres: the
- * chair's own 0.3 m footprint plus her 0.62 m radius, and a hand's breadth of
- * air, so the spot is clear of the seat she has just left. Where that spot is
- * not clear, open floor, `Hotel.chairStand` lets the put-down rule move it.
- */
-const CHAIR_STAND_BACK = 0.3 + PLAYER_RADIUS + 0.08;
-
-/**
  * How long after the "Next day" iris reaches its middle she wakes up, seconds:
  * the iris opening on her asleep in bed, then a beat to see her there in the
  * morning before `Hotel.wakeNap` stands her up. A tap or a hop wakes her
@@ -815,16 +807,6 @@ interface Chair {
    * alternative is a second list of chair ids to keep in step with this one.
    */
   taken: boolean;
-  /**
-   * **Where she stands to sit here, and where she is put down when she gets
-   * up** — one spot, for the Sit chip's walk and for "Leave breakfast" alike.
-   * Found once, the first time anything asks ({@link Hotel.chairStand}), by the
-   * put-down rule itself, so it is clear, open floor rather than a formula's
-   * guess. Two answers here were the bug: the chip walked her to a spot behind
-   * the chair (inside the next table, for one café chair), and standing up
-   * ended the ride on the seat.
-   */
-  stand: { readonly x: number; readonly z: number } | null;
 }
 
 interface Bed {
@@ -1681,6 +1663,20 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * **A hotel room's open area**, for the put-down rule (`world/dismount.ts`):
+   * where she lands walking in by its west doorway or lift — the very spot
+   * `stepThroughDoor` and `travelTo` put her, 1.6 m in on the gap's centre line
+   * — and, for the lobby, just inside the front door. World metres.
+   */
+  openArea(room: HotelRoom): OpenAreaPoint[] {
+    const points: OpenAreaPoint[] = [];
+    const west = room.gaps.west;
+    if (west) points.push({ x: room.originX - room.halfX + 1.6, z: room.originZ + (west[0] + west[1]) / 2 });
+    if (room === LOBBY) points.push({ x: LOBBY.originX, z: LOBBY.originZ + LOBBY.halfZ - 2.2 });
+    return points;
+  }
+
+  /**
    * **She has been taken somewhere else, behind an iris somebody else is
    * running.** The hotel stops being where she is — every room hidden, the
    * receptionist's words stopped — as walking out of the front door would leave
@@ -2017,9 +2013,8 @@ export class Hotel implements GameSystem {
         y: 1,
         z: chair.z,
         pickRadius: 1.6,
-        // The chair's one stand spot — see `Chair.stand`.
-        standX: this.chairStand(chair).x,
-        standZ: this.chairStand(chair).z,
+        standX: chair.x - Math.sin(chair.facing) * 0.9,
+        standZ: chair.z - Math.cos(chair.facing) * 0.9,
         standRadius: 2.2,
         // Sitting is a ride as far as the engine cares, and a zone is not
         // selectable while riding unless it says so — the train's own 'Get
@@ -2848,43 +2843,21 @@ export class Hotel implements GameSystem {
   /** A nap is let go by waking up — the same wake a tap or a hop gives. */
   private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap() };
 
-  /**
-   * The one stand spot of one chair — see `Chair.stand`.
-   *
-   * Asked of `world/dismount.ts`'s put-down rule, starting a step behind the
-   * chair (her body clear of its seat, `CHAIR_STAND_BACK`) on the floor: the
-   * rule hands that back unchanged where it is clear, open floor, and moves it
-   * to the nearest spot that is where it is not — the lobby café's middle
-   * chair, whose "behind" is inside the next table. Kept once found: the
-   * furniture does not move.
-   */
-  private chairStand(chair: Chair): { readonly x: number; readonly z: number } {
-    if (!chair.stand) {
-      const spot = putDownSpot(
-        this.collision,
-        (x, z, y) => this.surfaces.sample(x, z, y),
-        {
-          x: chair.x - Math.sin(chair.facing) * CHAIR_STAND_BACK,
-          y: 0,
-          z: chair.z - Math.cos(chair.facing) * CHAIR_STAND_BACK,
-        },
-        PLAYER_PUT_DOWN,
-      );
-      chair.stand = { x: spot.x, z: spot.z };
-    }
-    return chair.stand;
-  }
-
   private standUp(): void {
     const player = this.player;
     if (!player) return;
     const chair = this.chairs.find((seat) => seat.id === this.seatedAt);
     this.seatedAt = null;
-    // **Onto the chair's own stand spot**, never the seat she sat on: the seat
-    // is inside the chair and within her table's reach, and getting up there
-    // is how the lobby café left a child in the strip behind its tables.
-    const stand = chair ? this.chairStand(chair) : player.position;
-    player.endRide({ x: stand.x, y: 0, z: stand.z, facing: chair?.facing ?? player.facing });
+    // Up where she sat, on the floor — and nothing breakfast-specific about
+    // where that leaves her. The seat is inside the chair and within her
+    // table's reach, and on the lobby café's middle and wall-side chairs the
+    // resolver used to escort her out of both into a strip between the tables
+    // and the west wall that no child could walk out of (Jim, 17 Oct 2026).
+    // `endRide`'s put-down rule (`world/dismount.ts`) is what refuses that now,
+    // for every seat in the game: it puts her on the nearest clear floor that
+    // reaches the room.
+    const seat = chair ?? player.position;
+    player.endRide({ x: seat.x, y: 0, z: seat.z, facing: chair?.facing ?? player.facing });
     // Breakfast is over: the bowls and the pet go with it. Hidden rather than
     // disposed — she may sit straight back down, and rebuilding a pet to eat a
     // second bowl of cereal is three models for one child changing her mind.
@@ -6581,7 +6554,6 @@ export class Hotel implements GameSystem {
         room,
         id: `${id}-${index}`,
         taken: false,
-        stand: null,
       });
     });
   }

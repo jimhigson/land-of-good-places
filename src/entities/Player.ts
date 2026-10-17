@@ -31,7 +31,7 @@ import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
 import { NameLabel } from '../ui/NameLabel';
 import { discoverSecret, gameStore, type PlayerState } from '../state';
-import { putDownSpot, type PutDown, type RideExit } from '../world/dismount';
+import { putDownSpot, type OpenAreaPoint, type PutDown, type RideExit } from '../world/dismount';
 import type { WornHat } from './WornHat';
 import type { WornJetpack } from './WornJetpack';
 
@@ -561,11 +561,20 @@ export class Player implements GameSystem {
   /** Who has her while {@link ridingFlag} is up — see {@link RideHolder}. */
   private holder: RideHolder | null = null;
   /**
-   * Where the last {@link endRide} put her, and how far the put-down rule had
-   * to move her from the exit she was given — read by `check:exits`, which
-   * reports every exit the rule had to repair.
+   * Where the last put-down left her — `endRide`, or a `teleportTo` that left
+   * her on her own feet — and how far the rule moved her from the spot asked
+   * for. Read by `check:exits`, which checks every placement went through it.
    */
   lastPutDown: PutDown | null = null;
+  /** How many put-downs she has had — `check:exits` counts them across a placement. */
+  putDowns = 0;
+  /**
+   * The open area of the space at a point — its arrival, its way out, its
+   * designed stand spots — for the put-down rule's flood to reach. `World`
+   * supplies it (`attachPlayer`); without one, only "too big to be a pocket"
+   * makes floor open.
+   */
+  openArea: ((x: number, z: number) => readonly OpenAreaPoint[]) | null = null;
   /** 0..1 of the tree-climb wave. See {@link setClimbWave}. */
   private climbWave = 0;
   /**
@@ -766,6 +775,17 @@ export class Player implements GameSystem {
    * answer.
    */
   teleportTo(x: number, y: number, z: number, facing?: number): void {
+    // **Through the put-down rule whenever it leaves her on her own feet** —
+    // every change of space, deep link, restored save and backstop is one of
+    // these (`world/dismount.ts`). A ride placing her (the keychain rack's
+    // stand, a slide's top) owns her pose and is not a put-down: the rule runs
+    // when that ride gives her back, in `endRide`.
+    if (!this.ridingFlag) {
+      const spot = this.putDown(facing === undefined ? { x, y, z } : { x, y, z, facing });
+      x = spot.x;
+      y = spot.y;
+      z = spot.z;
+    }
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
     // Collapsed onto the destination for exactly the reason `previousPosition`
@@ -1103,10 +1123,10 @@ export class Player implements GameSystem {
    * **Gives the character back, at `exit`.**
    *
    * `exit` is required: a ride cannot hand her back without saying where. And
-   * it is not taken on trust — `world/dismount.ts`'s `putDownSpot`, the one
-   * owner of where a child may be put down, checks it is in bounds, solid
-   * underfoot, clear and open floor, and moves her to the nearest spot that is
-   * when it is not (an exit that passes is used exactly as given). She is put
+   * it is not taken on trust — {@link putDown}, the one put-down
+   * (`world/dismount.ts`), checks it is in bounds, solid underfoot, clear and
+   * connected to the space's open area, and moves her to the nearest spot that
+   * is when it is not (an exit that passes is used exactly as given). She is put
    * there before anything else happens: `previousPosition` collapses onto it,
    * as every teleport's does, so no doorway trigger sweeps the jump.
    *
@@ -1114,8 +1134,7 @@ export class Player implements GameSystem {
    * balls, the tortoise's hop off — and standing still on the floor otherwise.
    */
   endRide(exit: RideExit): void {
-    const spot = putDownSpot(this.collision, (x, z, y) => this.groundAt(x, z, y), exit, PLAYER_PUT_DOWN);
-    this.lastPutDown = spot;
+    const spot = this.putDown(exit);
     this.holder = null;
     this.ridingFlag = false;
     // Stand her back up before handing her over, or she walks away lying down.
@@ -1571,6 +1590,24 @@ export class Player implements GameSystem {
     if (!world) return;
     if (this.hopRings.root.parent !== world) world.add(this.hopRings.root);
     this.hopRings.burst(this.position.x, this.position.y - 0.05, this.position.z, 0.4);
+  }
+
+  /**
+   * **The one put-down** — `world/dismount.ts`'s rule, asked with her own
+   * collision world, her own ground sampler, her own body and the open area of
+   * the space she is going to. `endRide` and `teleportTo` are its only callers.
+   */
+  private putDown(spot: RideExit): PutDown {
+    const result = putDownSpot(
+      this.collision,
+      (x, z, y) => this.groundAt(x, z, y),
+      spot,
+      PLAYER_PUT_DOWN,
+      this.openArea?.(spot.x, spot.z) ?? [],
+    );
+    this.lastPutDown = result;
+    this.putDowns += 1;
+    return result;
   }
 
   private groundAt(x: number, z: number, y: number): number {

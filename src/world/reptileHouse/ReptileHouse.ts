@@ -6,7 +6,8 @@ import type { ShopStand } from '../building/shops/Shops';
 import { SpaceManager } from '../SpaceManager';
 import { bandCrossed, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt } from '../spaces';
+import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt, type SpaceId } from '../spaces';
+import type { OpenAreaPoint } from '../dismount';
 import type { InteractZone } from '../interact';
 import { pressZone } from '../interact';
 import { highlightObject } from '../highlight';
@@ -525,6 +526,18 @@ export class ReptileHouse implements GameSystem {
     const facing = ((at?.facing ?? REPTILE_ARRIVAL_FACING) * Math.PI) / 180;
     player.teleportTo(REPTILE_HOUSE_ORIGIN_X + x, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z + z, facing);
     this.warmExhibitCamera();
+  }
+
+  /**
+   * **The Reptile House's open area**, for the put-down rule
+   * (`world/dismount.ts`): in the hall, where she arrives through the door; on
+   * the forecourt, the doormat. World metres.
+   */
+  openArea(space: SpaceId): OpenAreaPoint[] {
+    if (space === SPACE_REPTILE_HOUSE) {
+      return [{ x: REPTILE_HOUSE_ORIGIN_X + REPTILE_ARRIVAL_X, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_ARRIVAL_Z }];
+    }
+    return [this.doormat];
   }
 
   /**

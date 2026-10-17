@@ -10,7 +10,7 @@ import { LampPosts } from './LampPosts';
 import { TreeLights } from './TreeLights';
 import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
-import { placedEntry } from './parkLayout';
+import { PARK_LAYOUT, placedEntry } from './parkLayout';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
@@ -30,6 +30,18 @@ import { PLAZA } from './paths';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
+import type { OpenAreaPoint } from './dismount';
+import { castleFloorFor } from './building/floors';
+import { roomFor } from './hotel/layout';
+import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
+import {
+  SPACE_GARDEN,
+  SPACE_LIBRARY,
+  SPACE_REPTILE_FORECOURT,
+  SPACE_REPTILE_HOUSE,
+  spaceAt,
+  type SpaceId,
+} from './spaces';
 import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
 // Face painting stall (additive — see FacePaintStall.ts's own file-ownership
@@ -683,6 +695,44 @@ export class World implements GameSystem {
   }
 
   /**
+   * **The open area of whichever space `(x, z)` is in** — the points the
+   * put-down rule's flood may reach (`world/dismount.ts`), each from its own
+   * owner: the park's arrival at the gate and the doormats of the buildings
+   * standing in it; a castle floor's lift and `keepOutsFor`; a hotel room's
+   * entry; the Reptile House's arrival or doormat; the library's
+   * `libraryStandSpots`. Kept per space, once built: none of them moves.
+   */
+  openAreaAt(x: number, z: number): readonly OpenAreaPoint[] {
+    const space = spaceAt(x, z);
+    let points = this.openAreas.get(space);
+    if (!points) {
+      points = this.openAreaOf(space);
+      this.openAreas.set(space, points);
+    }
+    return points;
+  }
+
+  private readonly openAreas = new Map<SpaceId, readonly OpenAreaPoint[]>();
+
+  private openAreaOf(space: SpaceId): readonly OpenAreaPoint[] {
+    if (space === SPACE_GARDEN) {
+      const points: OpenAreaPoint[] = [{ x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z }];
+      for (const id of ['hotel', 'reptileHouse', 'library']) {
+        const plot = PARK_LAYOUT.entries.get(id);
+        if (plot) points.push({ x: plot.entranceX, z: plot.entranceZ });
+      }
+      return points;
+    }
+    const floor = castleFloorFor(space);
+    if (floor) return this.building.openArea(floor);
+    const room = roomFor(space);
+    if (room) return this.hotel.openArea(room);
+    if (space === SPACE_REPTILE_HOUSE || space === SPACE_REPTILE_FORECOURT) return this.reptileHouse.openArea(space);
+    if (space === SPACE_LIBRARY) return this.library.openArea();
+    return [];
+  }
+
+  /**
    * **"Next day"** — the ☰ menu's way out of anywhere: tomorrow morning, waking
    * up in her own bed in her suite. The going there and the waking are the
    * hotel's (`Hotel.wakeTomorrowInSuite`, the one owner); this hands it the two
@@ -749,6 +799,8 @@ export class World implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.labels.add(player.label);
+    // The open area her put-downs must reach — see `openAreaAt`.
+    player.openArea = (x, z) => this.openAreaAt(x, z);
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.reptileHouse.attachPlayer(player);
