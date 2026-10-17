@@ -38,7 +38,8 @@ import {
   WornKeychain,
 } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
-import { NavGrid } from './world/NavGrid';
+import type { NavGrid } from './world/NavGrid';
+import { playerNavGrid } from './world/playerLattice';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
@@ -400,18 +401,9 @@ export class Game {
     // on the P1 where a stuttering frame walked her clean through a wall.
     this.world.collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP);
 
-    this.navGrid = new NavGrid(
-      this.world.collision,
-      PLAYER_RADIUS,
-      JUMP_APEX_HEIGHT,
-      // The declared ways between levels — the lobby's sweeping stair, and
-      // whatever the imperial rebuild declares after it. Read at lattice
-      // build; see NavGrid's header and Decision 11.
-      () => this.world.building.surfaces.connectors,
-      // Every railway bridge's deck and ramps (issue #116, Decision 8) — see
-      // NavGrid's own `bridgeCovers` header.
-      (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
-    );
+    // Her own lattice — the stairs, the bridges, and every solid she can step
+    // up onto — from its one owner, which `check:hotel` builds too.
+    this.navGrid = playerNavGrid(this.world);
 
     // And the same map, handed to the parade — issues #602 and #605, the pets
     // that walked through the bedroom wall to get to bed and warped back

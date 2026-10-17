@@ -2,7 +2,8 @@ import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
-import { stepReferenceFor, withinStep } from './building/stepReach';
+import { stepCeilingAt, stepReferenceFor, withinStep } from './building/stepReach';
+import { standingHeight } from './standing';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
@@ -622,6 +623,8 @@ export class NavGrid {
     bridgeCovers: (x: number, z: number) => boolean = () => false,
     /** See {@link pinnedBoundary}. */
     pinnedBoundary: ParkBoundary | null = null,
+    /** See {@link standsOnSolids}. */
+    standsOnSolids = false,
   ) {
     this.collision = collision;
     this.walkerRadius = walkerRadius;
@@ -629,6 +632,55 @@ export class NavGrid {
     this.connectors = connectors;
     this.bridgeCovers = bridgeCovers;
     this.pinnedBoundary = pinnedBoundary;
+    this.standsOnSolids = standsOnSolids;
+  }
+
+  /**
+   * **Whether the walker this lattice plans for stands on solids** — the
+   * player, whose feet come to rest on a solid's top and who climbs one within
+   * a step exactly as a deck (`world/standing.ts`), against everyone else in
+   * the park, who walks the ground and never climbs.
+   *
+   * True for her own lattice (`Game`'s, which her parade shares): a solid
+   * whose top is within one step of the ground under it is not a wall to her
+   * but somewhere to walk — a bed, a bench, a cushion — so it is not stamped,
+   * and every level is asked of her own rule, the walk sampler's ground or a
+   * solid's top, whichever is higher within a step. A taller solid is stamped
+   * as ever: getting onto a table takes a jump, and the lattice does not plan
+   * jumps.
+   *
+   * False — the default, and so every lattice the crowd, the park generator
+   * and the measures build — keeps the ground-only lattice exactly as it was,
+   * cell for cell, so their routes and the parks they decide are untouched.
+   */
+  private readonly standsOnSolids: boolean;
+
+  /** {@link levelsOf}'s last answer, keyed by the sampler it composed. */
+  private levelsFor: { sample: GroundSampler; levels: GroundSampler } | null = null;
+
+  /**
+   * The sampler this lattice reads its levels from: the caller's own for a
+   * ground walker, and for one who {@link standsOnSolids}, that sampler's ground
+   * or the top of the highest solid within a step — her rule, through its one
+   * owner. Memoised per sampler, so a lattice asked every frame composes once.
+   */
+  private levelsOf(sample: GroundSampler): GroundSampler {
+    if (!this.standsOnSolids) return sample;
+    if (this.levelsFor?.sample === sample) return this.levelsFor.levels;
+    const levels: GroundSampler = (x, z, y) => standingHeight(sample(x, z, y), this.collision, x, z, y);
+    this.levelsFor = { sample, levels };
+    return levels;
+  }
+
+  /**
+   * Is this solid one she walks onto rather than round — its top a height in
+   * the world, no more than a step above the ground under its centre? Only
+   * ever true for a lattice that {@link standsOnSolids}.
+   */
+  private walksOnto(topHeight: number, topIsAbsolute: boolean, x: number, z: number, sample: GroundSampler): boolean {
+    if (!this.standsOnSolids || !topIsAbsolute || !Number.isFinite(topHeight)) return false;
+    const ground = sample(x, z, topHeight);
+    return topHeight <= stepCeilingAt(x, z, ground);
   }
 
   /**
@@ -715,7 +767,7 @@ export class NavGrid {
     // walker standing on that node meets as she steps across to it, which is
     // exactly the sampler's question with the node's height as its reference.
     const nodeY = this.nodeHeight[endNode] ?? startY;
-    this.routeEndY = this.reachedGoal ? sample(goalX, goalZ, nodeY) : nodeY;
+    this.routeEndY = this.reachedGoal ? this.levelsOf(sample)(goalX, goalZ, nodeY) : nodeY;
 
     const pathLength = this.reconstruct(startNode, endNode);
     return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
@@ -783,6 +835,7 @@ export class NavGrid {
   }
 
   private rebuild(boundary: ParkBoundary, sample: GroundSampler): void {
+    const levels = this.levelsOf(sample);
     // Sized and centred on the boundary's own extent rather than on a radius
     // about a centre: the park's edge is neither circular nor, for the castle
     // interior, centred on the origin.
@@ -863,9 +916,10 @@ export class NavGrid {
     // *beneath* the overhang — the lobby's walk-through arch — at every
     // level. See `Collision.ts`'s `baseHeight` header.
     this.collision.forEachCircle(
-      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped) => {
+      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute) => {
         const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        if (this.walksOnto(topHeight, topIsAbsolute, x, z, sample)) return;
         this.stampCircle(
           x,
           z,
@@ -875,9 +929,10 @@ export class NavGrid {
       },
     );
     this.collision.forEachWall(
-      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped) => {
+      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute) => {
         const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        if (this.walksOnto(topHeight, topIsAbsolute, (x1 + x2) / 2, (z1 + z2) / 2, sample)) return;
         this.stampSegment(
           x1,
           z1,
@@ -893,9 +948,10 @@ export class NavGrid {
     // The outline is stamped as the four edges the old `addRectangle` walls
     // were, with the very same arithmetic, so every cell round a box is the
     // cell it always was; the core's own cells are then filled.
-    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped) => {
+    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, centre) => {
       const hoppable = autoHoppable && autoHopClears(topHeight, this.hopApex);
       if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+      if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample)) return;
       const into = hoppable ? this.hopBand : this.blocked;
       for (let i = 0; i < 4; i += 1) {
         const a = corners[i] as readonly [number, number];
@@ -962,7 +1018,7 @@ export class NavGrid {
         if (this.blocked[index] === 1) continue;
         const x = this.originX + cx * CELL;
 
-        let cursor = sample(x, z, TOP_REFERENCE);
+        let cursor = levels(x, z, TOP_REFERENCE);
         if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) {
           this.growNodes(this.nodeHeight.length * 2);
         }
@@ -982,7 +1038,7 @@ export class NavGrid {
           // The reference whose reach stops just under `cursor` — asked of the
           // reach's owner, because that is no longer `cursor - MAX_STEP` once
           // the step is measured along the local up (#643).
-          const next = sample(x, z, stepReferenceFor(x, z, cursor - LEVEL_EPSILON));
+          const next = levels(x, z, stepReferenceFor(x, z, cursor - LEVEL_EPSILON));
           if (next >= cursor - LEVEL_EPSILON) break;
           cursor = next;
           if (!withinStep(x, kept, z, x, next, z, MAX_STEP)) {

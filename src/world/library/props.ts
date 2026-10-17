@@ -1,4 +1,4 @@
-import type { CollisionWorld, WallCollider } from '../Collision';
+import type { BoxCollider, CollisionWorld, WallCollider } from '../Collision';
 import { BUILDING_STEP_UP } from '../../core/constants';
 import { LIBRARY_ARRIVAL, LIBRARY_STAND_KEEP_OUT, libraryStandSpots, type LocalPoint } from './layout';
 
@@ -6,11 +6,13 @@ import { LIBRARY_ARRIVAL, LIBRARY_STAND_KEEP_OUT, libraryStandSpots, type LocalP
  * **Putting a thing in the Library is one call, and that call decides whether
  * a child can walk through it, whether she may stand there, and whether a
  * jump can land on it** — `hotel/place.ts`'s rule, by way of the Reptile
- * House's `props.ts`. Every solid here is discs and capsules, filled, so
- * nothing has an inside to be stuck in. A box — a bookcase, the desk, an
- * armchair — is {@link LibraryProps.box}: one capsule down its length and two
- * thin ones across its ends, so it is solid to within a few centimetres of its
- * drawn corners rather than rounded off a third of a metre short of them.
+ * House's `props.ts`. Every solid here is a disc, a capsule or a box, filled,
+ * so nothing has an inside to be stuck in. A box — a bookcase, the desk, an
+ * armchair — is {@link LibraryProps.box}: one filled box turned with the
+ * model, crisp-cornered on its drawn footprint (`CollisionWorld.addBox`). It
+ * used to be a capsule down its length and two thin ones across its ends, solid
+ * to within a few centimetres of its drawn corners; the corners are solid now,
+ * and so is the top over them.
  *
  * **A solid's top is where a jump lands, and nothing else says so.** There
  * used to be a walkable plate laid on every top a jump could reach, a
@@ -80,11 +82,11 @@ export type PropTop = number | 'wall';
 /** A registered solid, room-local, with the collision world's handle — so a check can remove it and go red. */
 export interface LibrarySolid {
   readonly what: string;
-  readonly shape: 'disc' | 'wall';
+  readonly shape: 'disc' | 'wall' | 'box';
   readonly top: PropTop;
   readonly points: readonly LocalPoint[];
   readonly radius: number;
-  readonly handle: number | WallCollider;
+  readonly handle: number | WallCollider | BoxCollider;
 }
 
 /**
@@ -112,19 +114,19 @@ export interface BoxFootprint {
 }
 
 /**
- * **A box's three colliders**, in the order {@link LibraryProps.box}
- * registers them: the capsule down its length, then the thin capsules across
- * its left and right ends. Handed back so a box that must come and go — the
- * secret shelf's closed and open sets (#719) — can be taken out and put back
- * whole with {@link LibraryProps.detach} and {@link LibraryProps.attach}.
+ * **A box's collider**, as {@link LibraryProps.box} registers it — handed back
+ * so a box that must come and go (the secret shelf's closed and open sets,
+ * #719) can be taken out and put back whole with {@link LibraryProps.detach}
+ * and {@link LibraryProps.attach}.
  */
-export type BoxWalls = readonly [body: WallCollider, leftEnd: WallCollider, rightEnd: WallCollider];
+export type BoxWalls = readonly [body: BoxCollider];
 
 /**
- * The thin capsules across a box's two ends. 0.1, not thinner:
- * `CollisionWorld.maxSafeStep` sub-steps every mover by the thinnest collider
- * in the world, and the park's own thinnest is the entrance's 0.2 m rope
- * posts, so a 0.1 half-thickness costs nothing it does not already pay.
+ * The half-thickness of the room's thinnest walls — the plinth's traced edges
+ * (`shell.ts`). It was the thin capsule across each end of a box, before a box
+ * was one filled solid. 0.1, not thinner: `CollisionWorld.maxSafeStep`
+ * sub-steps every mover by the thinnest collider in the world, and this is
+ * already that thinnest, so it costs nothing it does not already pay.
  */
 export const END_HALF = 0.1;
 
@@ -183,33 +185,42 @@ export class LibraryProps {
   }
 
   /**
-   * **A filled box** — one capsule down its length, inset by its own half-depth
-   * so its round ends land on the drawn ends, and a thin capsule across each
-   * end to square them off. Its top is where a jump onto it lands: the seat
-   * of a chair, the desk's writing surface, the top of a bookcase.
+   * **A filled box**, turned with its model and crisp-cornered on its drawn
+   * footprint — one `CollisionWorld` box (`addBox`), so the face she meets is
+   * the face she sees right into the corners. Its top is where a jump onto it
+   * lands: the seat of a chair, the desk's writing surface, the top of a
+   * bookcase.
    *
-   * Returns the box's three colliders ({@link BoxWalls}), so a box that must
-   * come and go can be {@link detach}ed and {@link attach}ed whole.
+   * Returns the box's collider ({@link BoxWalls}), so a box that must come and
+   * go can be {@link detach}ed and {@link attach}ed whole.
    */
   box(what: string, footprint: BoxFootprint, top: PropTop): BoxWalls {
     const yaw = (footprint.facing * Math.PI) / 180;
-    // The box's length runs across its facing: `(cos, -sin)` is local +X.
-    const ax = Math.cos(yaw);
-    const az = -Math.sin(yaw);
-    const fx = Math.sin(yaw);
-    const fz = Math.cos(yaw);
-    const at = (along: number, out: number): LocalPoint => ({ x: footprint.x + ax * along + fx * out, z: footprint.z + az * along + fz * out });
+    // The box's length runs across its facing: `(cos, -sin)` is local +X, so
+    // the collider's own yaw (local +X onto `(cos θ, sin θ)`) is `-yaw`.
     const { halfLength, halfDepth } = footprint;
-    const spine = Math.max(0, halfLength - halfDepth);
-    const body = this.wall(`${what} (body)`, at(-spine, 0), at(spine, 0), halfDepth, top);
-    const endAt = halfLength - END_HALF;
-    const endAcross = Math.max(0, halfDepth - END_HALF);
-    const end = (side: -1 | 1): WallCollider =>
-      this.wall(`${what} (${side < 0 ? 'left' : 'right'} end)`, at(side * endAt, -endAcross), at(side * endAt, endAcross), END_HALF, top);
-    const leftEnd = end(-1);
-    const rightEnd = end(1);
+    const corners: LocalPoint[] = [];
+    for (const [sx, sz] of [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ] as const) {
+      corners.push({
+        x: footprint.x + Math.cos(yaw) * sx * halfLength + Math.sin(yaw) * sz * halfDepth,
+        z: footprint.z - Math.sin(yaw) * sx * halfLength + Math.cos(yaw) * sz * halfDepth,
+      });
+    }
+    this.checkBoxKeepOuts(what, footprint, top);
+    const worldX = this.originX + footprint.x;
+    const worldZ = this.originZ + footprint.z;
+    const handle =
+      top === 'wall'
+        ? this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0)
+        : this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true);
     if (top !== 'wall') this.standables.push({ what, top, footprint });
-    return [body, leftEnd, rightEnd];
+    this.solids.push({ what, shape: 'box', top, points: corners, radius: 0, handle });
+    return [handle];
   }
 
   /**
@@ -223,8 +234,11 @@ export class LibraryProps {
    * Its top goes with it: a solid's top is only somewhere to land while the
    * solid is there.
    */
-  detach(walls: readonly WallCollider[]): void {
-    for (const wall of walls) this.collision.removeWall(wall);
+  detach(solids: readonly (WallCollider | BoxCollider)[]): void {
+    for (const solid of solids) {
+      if ('halfX' in solid) this.collision.removeBox(solid);
+      else this.collision.removeWall(solid);
+    }
   }
 
   /**
@@ -232,8 +246,11 @@ export class LibraryProps {
    * the same objects, owner tag and all, so a check that names a solid still
    * holds the live collider. Idempotent — one already present is left alone.
    */
-  attach(walls: readonly WallCollider[]): void {
-    for (const wall of walls) this.collision.restoreWall(wall);
+  attach(solids: readonly (WallCollider | BoxCollider)[]): void {
+    for (const solid of solids) {
+      if ('halfX' in solid) this.collision.restoreBox(solid);
+      else this.collision.restoreWall(solid);
+    }
   }
 
   /** Throws with every solid found inside a keep-out — call once, after everything is placed. */
@@ -252,6 +269,24 @@ export class LibraryProps {
    * a deck of that height would be — so only a solid taller than a step can
    * block a spot she must be able to stand on.
    */
+  /** {@link checkKeepOuts} for a turned box: how far each keep-out's centre is outside the drawn box. */
+  private checkBoxKeepOuts(what: string, footprint: BoxFootprint, top: PropTop): void {
+    if (top !== 'wall' && top <= BUILDING_STEP_UP) return;
+    const yaw = (footprint.facing * Math.PI) / 180;
+    for (const keepOut of this.keepOuts) {
+      const dx = keepOut.x - footprint.x;
+      const dz = keepOut.z - footprint.z;
+      const along = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+      const out = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+      const ox = Math.max(Math.abs(along) - footprint.halfLength, 0);
+      const oz = Math.max(Math.abs(out) - footprint.halfDepth, 0);
+      const clearance = Math.hypot(ox, oz) - keepOut.radius;
+      if (clearance < 0) {
+        this.violations.push(`${what} comes ${(-clearance).toFixed(2)} m into ${keepOut.what} at (${keepOut.x}, ${keepOut.z}) r ${keepOut.radius.toFixed(2)}`);
+      }
+    }
+  }
+
   private checkKeepOuts(what: string, points: readonly LocalPoint[], radius: number, top: PropTop): void {
     if (top !== 'wall' && top <= BUILDING_STEP_UP) return;
     for (const keepOut of this.keepOuts) {

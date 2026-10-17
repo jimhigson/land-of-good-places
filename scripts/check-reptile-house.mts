@@ -13,7 +13,7 @@
  * (CLAUDE.md: two agents got clean, decisive, entirely wrong answers from
  * flood fills that were measuring the wrong thing):
  *
- *  1. The fill instrument sees a sealed pocket (a hollow rectangle in a world
+ *  1. The fill instrument sees a sealed pocket (a pen of four walls in a world
  *     of its own) and, in a hall with nothing but its four walls, reaches the
  *     middle of the lagoon.
  *  2. A flood fill at the player's radius from the arrival reaches every
@@ -222,11 +222,20 @@ console.log('CONTROL — the fill instrument:');
   // exists to find.
   const control = new CollisionWorld();
   buildHallShell(new Group(), control, new WalkSurfaces());
-  control.addRectangle(OX, OZ, 3, 3, 0.3);
+  // A pen: four walls round an empty square, the one kind of sealed pocket
+  // there can be now a rectangle is a filled box.
+  for (const [ax, az, bx, bz] of [
+    [-3, -3, 3, -3],
+    [3, -3, 3, 3],
+    [3, 3, -3, 3],
+    [-3, 3, -3, -3],
+  ] as const) {
+    control.addWall(OX + ax, OZ + az, OX + bx, OZ + bz, 0.3);
+  }
   const seen = fill(control, OX + REPTILE_ARRIVAL_X, OZ + REPTILE_ARRIVAL_Z);
   const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
   say(seen.reached.size > 10000, `the fill floods the empty hall: ${seen.reached.size} cells reached`);
-  say(pockets.length > 50 && !reached(seen, OX, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a hollow rectangle are unreachable`);
+  say(pockets.length > 50 && !reached(seen, OX, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a pen of four walls are unreachable`);
   say(!seen.clear.has(key(...cellOf(OX, OZ + 30))), 'nothing off the plate counts as floor');
 
   // And with nothing but the walls, every exhibit's middle is reachable —

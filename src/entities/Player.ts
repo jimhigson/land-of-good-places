@@ -1513,6 +1513,18 @@ export class Player implements GameSystem {
   }
 
   /**
+   * **Where feet come to rest at `(x, z)`, reached from `y`, by her rule** —
+   * the ground there or the top of a solid, whichever is higher within a step
+   * ({@link groundAt}). Public for the one thing that walks where she walks
+   * and must stand where she stood: her parade, which retraces her steps
+   * (`Parade.groundAt`), so a companion following her up onto a bed is on the
+   * bed rather than inside it.
+   */
+  standingAt(x: number, z: number, y: number): number {
+    return this.groundAt(x, z, y);
+  }
+
+  /**
    * Top of the character right now, in metres above the feet, for the name
    * label to clear — bare hair height normally, or the top of whatever hat is
    * worn when that reaches higher. `Math.max` rather than a straight swap

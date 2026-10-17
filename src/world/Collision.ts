@@ -1099,6 +1099,29 @@ export class CollisionWorld {
     return box;
   }
 
+  /**
+   * Takes back a box {@link addBox} or {@link addRectangle} returned — the
+   * same toggle {@link removeWall} is for walls (a library box that must come
+   * and go: the secret shelf's closed and open sets).
+   */
+  removeBox(box: BoxCollider): void {
+    const at = this.boxes.indexOf(box);
+    if (at === -1) return;
+    this.boxes.splice(at, 1);
+    this.revisionCounter += 1;
+  }
+
+  /**
+   * Puts back a box {@link removeBox} took out — **the same object**, for
+   * {@link restoreWall}'s reasons. Idempotent.
+   */
+  restoreBox(box: BoxCollider): void {
+    if (this.boxes.includes(box)) return;
+    this.boxes.push(box);
+    this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, Math.min(box.halfX, box.halfZ) + box.rounding);
+    this.revisionCounter += 1;
+  }
+
   get colliderCount(): number {
     return this.circles.length + this.walls.length + this.boxes.length;
   }
@@ -1129,6 +1152,7 @@ export class CollisionWorld {
       autoHoppable: boolean,
       baseHeight: number,
       navStamped: boolean,
+      topIsAbsolute: boolean,
     ) => void,
   ): void {
     for (const circle of this.circles) {
@@ -1140,6 +1164,7 @@ export class CollisionWorld {
         circle.autoHoppable,
         circle.baseHeight,
         circle.navStamped,
+        circle.topIsAbsolute,
       );
     }
   }
@@ -1155,6 +1180,7 @@ export class CollisionWorld {
       autoHoppable: boolean,
       baseHeight: number,
       navStamped: boolean,
+      topIsAbsolute: boolean,
     ) => void,
   ): void {
     for (const wall of this.walls) {
@@ -1168,6 +1194,7 @@ export class CollisionWorld {
         wall.autoHoppable,
         wall.baseHeight,
         wall.navStamped,
+        wall.topIsAbsolute,
       );
     }
   }
@@ -1191,6 +1218,8 @@ export class CollisionWorld {
       autoHoppable: boolean,
       baseHeight: number,
       navStamped: boolean,
+      topIsAbsolute: boolean,
+      centre: readonly [number, number],
     ) => void,
   ): void {
     for (const box of this.boxes) {
@@ -1205,6 +1234,8 @@ export class CollisionWorld {
         box.autoHoppable,
         box.baseHeight,
         box.navStamped,
+        box.topIsAbsolute,
+        [box.cx, box.cz],
       );
     }
   }
