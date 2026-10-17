@@ -335,7 +335,15 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   // under it and every way off it went untried, so a stool in a cubicle read
   // as a trap.
   const startTop = solids.find((solid) => standsOn(solid, options.start)) ?? null;
-  const first = grid.reachableFrom(options.start.x, options.start.z, options.start.y, sample);
+  // Her lattice's flood from where she starts — **if it is where she starts.**
+  // A start whose own cell the lattice has stamped solid (on a top higher than
+  // a step, or a body's width from a wall) floods from the nearest free cell
+  // instead, which can be on the far side of whatever shuts her in: a pit's
+  // floor read as the walk outside its ring, and the search "left" the pit
+  // before it began (the stranded proof, 17 Oct 2026). A drop's flood is held
+  // to the same test below; the start never was.
+  const flood = grid.reachableFrom(options.start.x, options.start.z, options.start.y, sample);
+  const first = flood && flood(options.start.x, options.start.z, options.start.y) ? flood : null;
   if (!first && !startTop) throw new Error(`solidReach: no lattice under the start (${options.start.x.toFixed(1)}, ${options.start.z.toFixed(1)})`);
   regions.push({ entry: options.start, via: 'the start', has: first ?? (() => false) });
   const groundReached = (x: number, z: number, y: number): boolean => regions.some((region) => region.has(x, z, y));
