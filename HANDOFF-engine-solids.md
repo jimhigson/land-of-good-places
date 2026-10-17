@@ -132,6 +132,24 @@ no-headroom need the census run.
 - SOLIDS_SPACES=park (etc.) runs the census over named spaces (dev switch, notes what it skipped).
 - Jet pack (PARK_FLY_CEILING 12 m) now meets real tops: it can land on fence tops and roofs under
   12 m. The rail centre band (Infinity) and the soft bounds still hold at every height. List for Jim.
+  es-islands.mts: sealed hollows open to the sky = castle courtyard (drawn deck has no solid!),
+  library cella, reptile house, hotel tower (28 m walls: unreachable). TODO lids (banded, no lattice).
+- 123d0092 corridor fill: band 1.3 left a 0.52 m slot before each fence → wedge trap (10 places).
+  Fill runs inset by their half-width from box ends; both lattices hash identical on 16 seeds.
+- Census policy (fc52ff0d): escapes asserted as PLACES (roofs, enclosures, railway corridor/inside
+  fences, off-floor, traps); guards stood on but not passed = stderr note (PERCH_KINDS).
+- 4366838c: reach can start ON a top (cubicle stool false trap); `until` early stop (hotel 4 min→95 s);
+  clause 7 starts pushes where she fits (corridor near the edge at 124°).
+- 8d2e5f26 ENGINE: toppedNarrow(half)/FOOT_HALF_WIDTH 0.1 — a top < 20 cm wide holds nobody
+  (no stand, no step, lattice agrees). Applied: fence rails/posts, booth panels, hotel handrails,
+  reptile stall back panel. Reason: they were launch pads (rails 9 cm, panels 6-18 cm).
+- 888f2a07 reptile: beds 2.4→3.1 (house's walls; beds were walked via stall back panel), nursery
+  glass 2.1 (VISIBLE; log→nursery jump). Chains now end at the pads.
+- Remaining (c): clause 2 drawn-top mismatches (bush/hedge foliage rulings, parapet coping/TopSlope,
+  fountain rim overhang, dodgems barrier/car/tree, ferris deck/rail, water gun rack, wooden/stone
+  walls, mall planters, counters' stock, throne arms, lobby statue hand, library chair), the
+  corridor seam ledge beside bridge decks, stall awning (1), hotel toilet cubicle trap, lids,
+  proofs, chain shard, gate, look, PR.
 - Railway fence raised: posts 0.95 → 1.75 m, a top rail at 1.62 (top 1.67) over the old knee rail.
 - Castle roof: soft edge at the battlement's outer face (+ lift alcove) — `floorBounds.ts`
   `castleFloorBounds` (one owner; NPC journey asks it too). The invisible slide-mouth wall is gone.
