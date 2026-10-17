@@ -12,25 +12,62 @@ marking; guards stop her by real height, never a flag.
 
 ## Local setup that saves hours
 - Baseline worktree (pristine origin/main, detached): `.claude/worktrees/engine-solids-base`.
-- Main's 16 park files (source hash c6596b45…) downloaded from CI run 38828139475,
-  artifact `parks-c6596b45d7f1…`, copied to `/tmp/engine-solids-baseline/parks-main-all/`
-  and into both worktrees' `.parks/`. Without `.parks` for the current source hash a
-  headless park build silently solves (minutes) — see scripts/lib/builtParks.mts.
-- Main's accepted restarts: 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:5 10:9 11:4 12:0 13:6 14:8 15:4.
-- Seed 5 hydrated digest on main: park=2ee2b3fc87c6b269 (`/tmp/engine-solids-baseline/digest-5-main.txt`).
+- Snapshot worktree for long solves (detached at a branch commit, never edited):
+  `.claude/worktrees/engine-solids-snap` — `git -C … checkout --detach <sha>` then run.
+  Never run a 15-min multi-process solve in the live worktree: later processes load edits.
+- Main's 16 park files (source hash c6596b45…) from CI run 38828139475, artifact
+  `parks-c6596b45d7f1…`, in `/tmp/engine-solids-baseline/parks-main-all/`.
+  Build any seed's park from main's decisions on the branch with
+  `LGP_PARK_FILE=/tmp/engine-solids-baseline/parks-main-all/<seed>.json` (4 s, no solve).
+- Main's restarts: 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:5 10:9 11:4 12:0 13:6 14:8 15:4.
+- Baselines in /tmp/engine-solids-baseline/: `digest-main/<seed>.txt` (hydrated digests),
+  `identity-main/<seed>.json` (solved identities, park-identity.mts).
+- `/tmp/es-run-identity.sh <worktree> <outdir>` solves all 16 at main's restarts (3 lanes, ~15 min);
+  then `node scripts/compare-park-identity.mts /tmp/engine-solids-baseline/identity-main <outdir>`.
 
-## Plan / milestones
-- (a) switch-over: CollisionWorld owns solids (footprint, base, real top per point);
-  ground sampling asks it; delete the four hand-kept "absolute top + plate" copies
-  (hotel place.ts, library props.ts, reptileHouse props.ts, Building banquetTables/benchTops);
-  parks identical; precedents behave as before.
-- (b) real heights everywhere + census of newly reachable tops (deep link per kind).
-- (c) guards made tall (visible changes for Jim).
+## The model as built (decisions, with reasons)
+1. **CollisionWorld owns solids.** Circles, capsules (walls) and new filled **boxes**
+   (`addBox`, yaw + rounding). `addRectangle` = one filled box with the old four walls'
+   exact outline (no hollow middle → no trap argument anywhere). `highestTopAt(x,z,ceiling)`
+   = top of the highest solid whose footprint covers the point, within reach (bucketed).
+2. **`world/standing.ts` is the one owner of where her feet rest**: max(walk sampler's ground,
+   highestTopAt within the same step reach). `Player.groundAt`, playerSim, the parade
+   (`Player.standingAt`) and her lattice ask it.
+3. **Step rule (decision):** a grounded player walking INTO a solid whose top is within one
+   step (BUILDING_STEP_UP 0.62, the reach decks/stairs already use) climbs it. Reason: floors are
+   no longer special, so a 0.44 m bench and a 0.44 m deck behave the same; and the beds/cushions
+   that were walk-on plates stay walk-on (precedent preserved) without a floor registry.
+   `walkingOntoStep` looks just past her front edge, so walking PAST a bench she brushes its side.
+   Lateral rule gets a `'stepped'` outcome fed the sampler's own carried reference (consistent by
+   construction). The crowd never climbs (no step ceiling passed) → NPC movement unchanged.
+4. **Who stands on what:** only the player (and her parade) stand on solid tops. NPCs, procgen and
+   every measure's NavGrid use the ground-only `WalkSurfaces.sample` → parks/routes identical.
+   Her lattice (`playerLattice.ts`, `NavGrid(..., standsOnSolids=true)`) skips stamping solids within
+   a step of the ground and reads levels through `standingHeight`.
+5. **Kept separate from solids (ground layer), with reason:** terrain, castle floor plates,
+   ramps/stairs (ArcTread, quarter-riser plates), hotel room floor plates, lobby landing/gallery
+   decks, station platforms, carriage floors (moving), trampoline (moving), bridge humps, library
+   and reptile plinths/steps. They are walked ALONG, their height changes continuously under her
+   or they move; as solids their own slope would be a wall to the lateral rule.
+6. Deleted: hotel place.ts `standable()` + `stand` option; library props plates/OrientedPlate/
+   `soft()`/`stand`; reptile props plates/`stand`; Building `banquetTables`/`benchTops`;
+   castleFurniture `greatHallTableTops`; the suite beds' plates. Beds + cushions are solids.
+7. ParkMap reachability probe stands at the ground's real y (park ground is ~-14 m).
 
-## Findings / decisions (append as they land)
-- (pending)
+## Findings
+- check:hotel probe 31 handed a ROOM-LOCAL sampler to a lattice that asks in world metres
+  (latent check bug); fixed. Lobby ratchet 22 → 0 (sofas are steps now).
+- Thinnest collider is the library plinth's 0.1 m edges → sub-step counts unchanged by boxes.
+- Hydrated digests: all 16 seeds identical to main after the switch-over (commit e95d83a3).
 
 ## Status
-- [ ] (a) switch-over
+- [~] (a) switch-over — engine in, precedent checks green (hotel, library, reptile-house, castle,
+  hall-solid, benches). Running: solved identity of all 16 seeds (snapshot e95d83a3).
+  TODO (a): NPC separation height-aware; check:benches' stale hollow-middle clause; full check
+  chain; test:procgen; build; draft PR; headless-Chrome look.
 - [ ] (b) real heights + census
 - [ ] (c) guards tall
+
+## Notes for the paused Library tracks (-owl, -kids, -den, -books2)
+- `props.ts`: no plates, no `stand`, no `soft()`; `box()` returns `[BoxCollider]` (one filled turned
+  box); `detach/attach` take walls or boxes. Keep-outs ignore solids within a step of the floor.
