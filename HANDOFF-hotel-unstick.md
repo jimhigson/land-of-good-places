@@ -145,13 +145,20 @@ Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue of
 - M9 (bridgeCovers off): exit 1, 2b "moved 25 of 2947". M10 (connectors off): exit 0 — no sampled
   point needs a connector on seed 5 (not traced why); reported as measured.
 
+## Round 4: the final review approved (6241479702); five cheap gaps closed
+- fac07149 Player: wedge rescue backs off (doubling to 8 s) when the rule finds nowhere; escort comment
+  corrected (deep escorts > ~1.5 m outlast 0.5 s and get cut short); `lastWedge` {x,y,z,depth,afterLanding}.
+- c0a9d4c1 check:exits: rule (g) thin box (inner 0.66, walls 0.1, centre +0.2 m); rule (h) back-off (4 tries
+  in 10 s); rescue watch over walk-aways + door walks (2,298): fails on a wedge that took hold > 0.5 s after
+  a landing. Seed 5's one real case (named every run): suite bed-0 walked off west → 0.67 m inside the pet
+  bed by the wall, took hold 0.17 s after landing. Plain "zero" would fail on that real wedge.
+- 91661b65 menu: `[data-menu-open]` on the HUD root hides `.action-chips`; check:menu-reach fails on any
+  chip/pill in the open drawer's area. Red on 18c2ecd1 (menu-red-18c2.log) at 844x390, 667x375, 390x844.
+- Mutations (mutation worktree, env-gated): R2/W5/NO_BACKOFF → /tmp/hotel-unstick/mut4-*.log.
+- Thin-box sweep (scratch thin-box.mts): 0 of 84 left inside here; 29 of 84 under R2.
+
 ## Status
-- [x] all of QA's and the re-review's asks pushed; CI green on c8c059ba (31 jobs); local re-runs on this
-  source's own park: check:hotel OK, check:exits OK.
-- [x] preview passes found two stacking faults of my own, both fixed and checked: the shut ☰ button over
-  the open Cute-o-dex (d3f17f6f) and the "Have breakfast" chip over the open drawer's Map (9d3c96b6);
-  check:menu-reach runs beside the café, hit-tests five points a pill, and opens the dex (red on each
-  old CSS: menu-mut-z.log ×4 sizes, menu-mut-z2.log at 667×375).
-- [x] 9d3c96b's preview loaded at 844×390 + desktop; screens pr721/16–21 on qa-screenshots.
-- [ ] CI green on this head; post the PR body (/tmp/hotel-unstick/pr-body.md) and the answer comment
-  (/tmp/hotel-unstick/answer-3.md); hand back.
+- [x] round 3 approved; round 4 commits pushed (91661b65)
+- [ ] mutation reds (mut4-*.log); seed-5 park for the new source (build-parks-r4.log) → local menu check
+- [ ] CI green on the final head (parks rebuild: Player.ts changed the park source hash); 667x375 preview
+- [ ] PR comment for round 4; hand back
