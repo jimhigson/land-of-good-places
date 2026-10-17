@@ -64,6 +64,7 @@ import {
   REPTILE_LOG_LENGTH,
   REPTILE_NURSERY_KERB_HEIGHT,
   REPTILE_NOODLE_HEAD_Y,
+  REPTILE_NURSERY_GLASS_TOP,
   REPTILE_NURSERY_RAIL_TOP,
   REPTILE_PIER_POST_RADIUS,
   PIER_POSTS,
@@ -986,12 +987,13 @@ export class Exhibits {
     group.add(reptileCaseMesh('rc-nursery-kerb'), reptileCaseMesh('rc-nursery-rail'));
     const glassRadius = REPTILE_NURSERY_GLASS_RADIUS;
     // Inside the rail's posts and ring by a clear margin, so no pane face
-    // lies in a plane with the rail's.
+    // lies in a plane with the rail's. It rises past the rail to the guard's
+    // height (`REPTILE_NURSERY_GLASS_TOP`).
     const glass = new Mesh(
-      new CylinderGeometry(glassRadius - 0.2, glassRadius - 0.2, REPTILE_NURSERY_RAIL_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
+      new CylinderGeometry(glassRadius - 0.2, glassRadius - 0.2, REPTILE_NURSERY_GLASS_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
       GLASS,
     );
-    glass.position.y = (REPTILE_NURSERY_RAIL_TOP + REPTILE_NURSERY_KERB_HEIGHT) / 2;
+    glass.position.y = (REPTILE_NURSERY_GLASS_TOP + REPTILE_NURSERY_KERB_HEIGHT) / 2;
     glass.castShadow = false;
     group.add(glass);
     const bedding = decal(new Mesh(new CylinderGeometry(shape.radius - 0.3, shape.radius - 0.3, 0.12, 32), toonMaterial(ART.hothouseClay)));
@@ -1017,7 +1019,7 @@ export class Exhibits {
       [0.5, 0.07],
       [0.8, 0.09],
     ] as const;
-    this.registerShape(placement.id, shape, REPTILE_NURSERY_RAIL_TOP);
+    this.registerShape(placement.id, shape, REPTILE_NURSERY_GLASS_TOP);
     for (let i = 0; i < 12; i += 1) {
       const [length, radius] = sizes[i % 3]!;
       const angle = (i / 12) * Math.PI * 2 + 0.4;

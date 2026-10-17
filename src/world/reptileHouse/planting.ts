@@ -47,8 +47,8 @@ import { segmentDistance } from './props';
  * stop a radius short of every edge and leave every convex corner open — the
  * solidity review (2 October 2026) walked a body 0.59 m into the NW island
  * and 0.57 m into the SW bed, feet under the soil slab. Every top is
- * `REPTILE_BED_TOP`, above the jump apex, so a bed is a wall to feet on the
- * floor whatever is planted in it. Palm trunks get a disc of their own, the
+ * `REPTILE_BED_TOP`, out of her reach from the floor and from everything she
+ * can stand on, so a bed is a wall whatever is planted in it. Palm trunks get a disc of their own, the
  * hop-on logs and rocks their own wall or disc with a standing plate.
  *
  * **Tall planting keeps the sightlines.** The spec's raked-theatre rule is
