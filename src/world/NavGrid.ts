@@ -948,10 +948,10 @@ export class NavGrid {
     // The outline is stamped as the four edges the old `addRectangle` walls
     // were, with the very same arithmetic, so every cell round a box is the
     // cell it always was; the core's own cells are then filled.
-    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, centre, hopHeight) => {
+    this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, centre, hopHeight, standable) => {
       const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
       if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
-      if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample)) return;
+      if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample, standable)) return;
       const into = hoppable ? this.hopBand : this.blocked;
       for (let i = 0; i < 4; i += 1) {
         const a = corners[i] as readonly [number, number];

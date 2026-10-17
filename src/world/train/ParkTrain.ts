@@ -16,6 +16,7 @@ import { rideFrame } from '../rail/sweptRail';
 import { computeCrossings, type LevelCrossing } from './crossings';
 import { buildRailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
+import { COPING_TOP_INSET } from '../../art/models/bridgeStones';
 import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
 import {
@@ -288,8 +289,12 @@ export class ParkTrain implements GameSystem, TrainService {
       // walker beside the bridge), with an ABSOLUTE top at the local road
       // surface plus the parapet (stops a walker on the hump stepping over
       // the side) — see `bridges.ts`'s `BridgeWall`.
+      // Its top is the coping's face, inset from the wall's sides
+      // (`COPING_TOP_INSET`), from one end's height to the other's.
       collision.kinded('bridge parapet', () =>
-        collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true),
+        collision.toppedNarrow(BRIDGE_WALL_THICKNESS / 2 - COPING_TOP_INSET, () =>
+          collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true, -Infinity, false, Number.NaN, rail.topHeightEnd),
+        ),
       );
     }
 

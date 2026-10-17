@@ -17,7 +17,7 @@ import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/
 import { ANCHORS_BY_ID } from '../../world/anchors';
 import type { AnchorPlots } from '../../world/AnchorPlots';
 import { solidInFrame } from '../../world/terrain';
-import type { CollisionWorld } from '../../world/Collision';
+import { roundTopHalf, type CollisionWorld } from '../../world/Collision';
 import type { FrameContext, GameSystem } from '../../core/types';
 import { createCar } from './car';
 
@@ -65,6 +65,9 @@ const FAKE_TREE_TOP = 3.4 + 0.5 + 1.7 * 0.88;
 const CAR_TUB_TOP = 0.66 + 0.46;
 const CAR_SEAT_TOP = 1.16 + 0.36;
 const CAR_SEAT_Z = -0.6;
+/** How far from the car's middle its tub's top is flat enough to stand on, and the seat back's (0.28 m deep, 0.12 m rounding). */
+const CAR_TUB_TOP_HALF = 0.55;
+const CAR_SEAT_BACK_TOP_HALF = 0.28 / 2 - 0.12;
 /** The light posts round the rink: their height (the flag sits on top) and their foot's radius. */
 const POST_HEIGHT = 3.4;
 const POST_FOOT_RADIUS = 0.14;
@@ -162,8 +165,9 @@ export function buildDodgemsPlot(
     const a = solidInFrame(centreX, centreZ, centreX + x - tx, centreZ + z - tz, deck, barrierTop);
     const b = solidInFrame(centreX, centreZ, centreX + x + tx, centreZ + z + tz, deck, barrierTop);
     const middle = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, deck, barrierTop);
+    // Its top is the rail ring's crown, round and 28 cm across — no ledge.
     collision.kinded('dodgems barrier', () =>
-      collision.addWall(a.x, a.z, b.x, b.z, 0.32, middle.top, false, true),
+      collision.toppedNarrow(roundTopHalf(BARRIER_RAIL_TUBE), () => collision.addWall(a.x, a.z, b.x, b.z, 0.32, middle.top, false, true)),
     );
   }
 
@@ -277,9 +281,12 @@ export function buildDodgemsPlot(
       deck,
       deck + CAR_SEAT_TOP,
     );
+    // Stood on only where drawn: the tub's flat top, its rounded corners and
+    // bumper falling away beyond 0.55 m; the seat back's rounded top is 4 cm
+    // of flat, no ledge at all.
     collision.kinded('dodgems car', () => {
-      collision.addCircle(tub.x, tub.z, 1.1, tub.top, false, true);
-      collision.addCircle(seat.x, seat.z, 0.5, seat.top, false, true);
+      collision.toppedNarrow(CAR_TUB_TOP_HALF, () => collision.addCircle(tub.x, tub.z, 1.1, tub.top, false, true));
+      collision.toppedNarrow(CAR_SEAT_BACK_TOP_HALF, () => collision.addCircle(seat.x, seat.z, 0.5, seat.top, false, true));
     });
   }
 

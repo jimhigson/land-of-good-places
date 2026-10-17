@@ -173,15 +173,30 @@ interface SolidHeights {
  */
 export const FOOT_HALF_WIDTH = 0.1;
 
+/**
+ * **The part of something round in section she could stand on** — a tube, a
+ * torus, a rolled rim: its crown, the middle 60 % of its width, where the
+ * surface is within a fifth of its radius of the crest. A round rail under
+ * a sixth of a metre thick is therefore no ledge at all.
+ */
+export function roundTopHalf(radius: number): number {
+  return radius * 0.6;
+}
+
+/** Wide enough for her feet: `FOOT_HALF_WIDTH` or more, a top computed as exactly that (0.15 − 0.05) included. */
+function wideEnough(half: number): boolean {
+  return half >= FOOT_HALF_WIDTH - 1e-9;
+}
+
 /** Can she stand on `solid`'s top at `distance` from its axis (a wall) or centre (a circle)? */
 function standsWithin(solid: Readonly<SolidHeights>, distance: number): boolean {
   if (Number.isNaN(solid.topHalf)) return true;
-  return solid.topHalf >= FOOT_HALF_WIDTH && distance <= solid.topHalf;
+  return wideEnough(solid.topHalf) && distance <= solid.topHalf + 1e-9;
 }
 
 /** Is any of `solid`'s top wide enough to stand on? */
 function standableTop(solid: Readonly<SolidHeights>): boolean {
-  return Number.isNaN(solid.topHalf) || solid.topHalf >= FOOT_HALF_WIDTH;
+  return Number.isNaN(solid.topHalf) || wideEnough(solid.topHalf);
 }
 
 /**
@@ -861,6 +876,18 @@ export class CollisionWorld {
   }
 
   /**
+   * **Every solid `build` registers is topped with leaves** — a bush, a hedge,
+   * a tree's crown: solid to walk into, jumped over where it is low enough,
+   * never stood on, because leaves are what she brushes through (the planters
+   * ruling, 7 Aug 2026, which `check:solids` holds every landing to). The
+   * census stood her on 247 bushes' crowns, 0.4 m sunk in the drawn leaves,
+   * and dropped her from them into pockets she could not leave.
+   */
+  foliageTopped<T>(build: () => T): T {
+    return this.toppedNarrow(0, build);
+  }
+
+  /**
    * **Files every collider `build` registers as one kind of thing** — "garden
    * wall", "lamp post", "castle bench" — so a measure can say what a solid is
    * when it reports one (`check:solids`' census groups by it). Nests: the
@@ -1019,6 +1046,7 @@ export class CollisionWorld {
     for (const box of bucket.boxes) {
       if (!box.topIsAbsolute) continue;
       if (boxDepth(box, x, z, 0) < 0) continue;
+      if (!standableTop(box)) continue;
       const top = solidTopAt(box, x, z);
       if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
@@ -1529,6 +1557,8 @@ export class CollisionWorld {
       topIsAbsolute: boolean,
       centre: readonly [number, number],
       hopHeight: number,
+      /** Is its top wide enough to stand on ({@link FOOT_HALF_WIDTH})? */
+      standable: boolean,
     ) => void,
   ): void {
     for (const box of this.boxes) {
@@ -1546,6 +1576,7 @@ export class CollisionWorld {
         box.topIsAbsolute,
         [box.cx, box.cz],
         box.hopHeight,
+        standableTop(box),
       );
     }
   }

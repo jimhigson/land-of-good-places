@@ -47,7 +47,7 @@ import { buildHeadlessPark } from './park-harness.mts';
 import { indexDrawnTops } from './lib/drawnTops.mts';
 import { reachWithJumps, joinsMain, runAndJump, type ReachedTop, type Stand } from './lib/solidReach.mts';
 import { SimPlayer } from './playerSim.mts';
-import { CollisionWorld, type SolidView } from '../src/world/Collision.ts';
+import { CollisionWorld, FOOT_HALF_WIDTH, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { PLAYER_LONGEST_STEP, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
@@ -62,7 +62,8 @@ import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/worl
 import { REPTILE_ARRIVAL_X, REPTILE_ARRIVAL_Z, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z } from '../src/world/reptileHouse/layout.ts';
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
-import { terrainHeight } from '../src/world/terrain.ts';
+import { altitudeAt, terrainHeight } from '../src/world/terrain.ts';
+import { carryReference } from '../src/world/building/stepReach.ts';
 
 /**
  * **The red proofs.** Each breaks one thing and must turn its clause red:
@@ -399,11 +400,11 @@ if (SKIP_CENSUS) {
         if (off > FENCE_OFFSET - 0.2) return;
         if (stand.y > terrainHeight(stand.x, stand.z) + 2.5) return; // a bridge deck over it
         if (main(stand.x, stand.z, stand.y)) return; // a level crossing: walked to
-        onRail.push({ stand, how: `${how}, ${off.toFixed(2)} m off the rail's centre, ${(stand.y - terrainHeight(stand.x, stand.z)).toFixed(2)} m up` });
+        onRail.push({ stand, how: `${how}, ${off.toFixed(2)} m off the rail's centre, ${altitudeAt(stand.x, stand.y, stand.z).toFixed(2)} m up` });
       };
       for (const top of result.tops) {
         // The corridor's own top — the seam under a bridge deck — is the railway wherever it stands.
-        if (top.solid.kind === 'railway corridor') onRail.push({ stand: top.at, how: `on the railway's corridor (${top.how}), ${(top.at.y - terrainHeight(top.at.x, top.at.z)).toFixed(2)} m up` });
+        if (top.solid.kind === 'railway corridor') onRail.push({ stand: top.at, how: `on the railway's corridor (${top.how}), ${altitudeAt(top.at.x, top.at.y, top.at.z).toFixed(2)} m up` });
         else consider(top.at, `on a ${top.solid.kind || 'solid'} (${top.how})`);
       }
       for (const region of result.regions.slice(1)) consider(region.entry, `${region.via}`);
@@ -450,12 +451,32 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
    * it. Foliage is soft — leaves are what she brushes through — so a solid
    * under a plant stands to the solid and she stands in the leaves.
    */
+  const drawn = indexDrawnTops(park.scene);
   const SOFT_OVER: Readonly<Record<string, string>> = {
     'roof trough': 'the shrubs in it are foliage (planters ruling, 7 Aug 2026)',
+    'mall planter': 'the shrubs in it are foliage (planters ruling, 7 Aug 2026)',
     'palm at': 'its fronds are foliage',
     "bed '": "a planting bed's plants are foliage",
   };
-  const drawn = indexDrawnTops(park.scene);
+  /**
+   * Her feet: where she stands is a footprint, not a point — her two feet a
+   * stance apart (`Player`'s dust trail puts them 0.14 m either side) and a
+   * foot's width beyond. The drawn top under her is, of the drawn surfaces
+   * within it, the one nearest her feet: an arm of the throne beside the
+   * seat she stands on is not what she stands on.
+   */
+  const FEET = 2 * FOOT_HALF_WIDTH;
+  const underFeet = (x: number, z: number, from: number): { y: number; name: string } | null => {
+    let best: { y: number; name: string } | null = null;
+    for (const [dx, dz] of [[0, 0], [FEET, 0], [-FEET, 0], [0, FEET], [0, -FEET], [FEET * Math.SQRT1_2, FEET * Math.SQRT1_2], [-FEET * Math.SQRT1_2, FEET * Math.SQRT1_2], [FEET * Math.SQRT1_2, -FEET * Math.SQRT1_2], [-FEET * Math.SQRT1_2, -FEET * Math.SQRT1_2]] as const) {
+      const hit = drawn.topAt(x + dx, z + dz, from - 1.2, 2, 1.2 + 0.4);
+      // Carried to her own column at its distance from the planet's centre,
+      // so the comparison below is still in her one column.
+      const y = hit ? carryReference(x + dx, z + dz, hit.y, x, z) : Number.NaN;
+      if (hit && (!best || Math.abs(y - from) < Math.abs(best.y - from))) best = { y, name: hit.name };
+    }
+    return best;
+  };
   const TOLERANCE = 0.15;
   let measured = 0;
   let foliage = 0;
@@ -470,7 +491,7 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
     const at = top.at;
     // The drawn surface under her feet: the highest drawn thing below her
     // head, between a step under her feet and a little over them.
-    const hit = drawn.topAt(at.x, at.z, at.y - 1.2, 2, 1.2 + 0.4);
+    const hit = underFeet(at.x, at.z, at.y);
     if (!hit) {
       nothing += 1;
       off.push({ kind, line: `${kind} in ${space} at (${at.x.toFixed(1)}, ${at.z.toFixed(1)}): she stands at y ${at.y.toFixed(2)} with nothing drawn under her` });

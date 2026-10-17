@@ -24,7 +24,7 @@ import {
 } from '../art/effects/waterSplash';
 import { groundRadiusAt, standOnSphere, terrainHeight, upAt, yAtRadius } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { CollisionWorld } from './Collision';
+import { roundTopHalf, type CollisionWorld } from './Collision';
 import type { Player } from '../entities/Player';
 
 /**
@@ -424,7 +424,9 @@ export class Fountain implements GameSystem {
     // exactly what they were.
     const crestRadius = groundRadiusAt(x, z) + RIM_CREST;
     const RIM_SEGMENTS = 28;
-    collision.kinded('fountain rim', () => {
+    // She stands on the torus's crown, not on the solid's inner edge out over
+    // the water (`roundTopHalf`).
+    collision.kinded('fountain rim', () => collision.toppedNarrow(roundTopHalf(RIM_TUBE), () => {
       for (let i = 0; i < RIM_SEGMENTS; i += 1) {
         const a1 = (i / RIM_SEGMENTS) * Math.PI * 2;
         const a2 = ((i + 1) / RIM_SEGMENTS) * Math.PI * 2;
@@ -446,7 +448,7 @@ export class Fountain implements GameSystem {
           Fountain.RIM_TOP_HEIGHT,
         );
       }
-    });
+    }));
     registerCentrepiece(collision, x, z);
 
     this.group.add(this.splashEffects.root);

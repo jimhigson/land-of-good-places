@@ -471,8 +471,15 @@ export interface BridgeWall {
   readonly z1: number;
   readonly x2: number;
   readonly z2: number;
-  /** Absolute world height of the parapet's top over this segment. */
+  /**
+   * Absolute world height of the parapet's top over `(x1, z1)`, and over
+   * `(x2, z2)`: the drawn top runs from one to the other (`TopSlope`). One
+   * height for the whole 2 m segment was the higher end's, and on a ramp's
+   * taper that stood the solid's top 0.57 m over the coping at the segment's
+   * middle — the census stood her there, on air.
+   */
   readonly topHeight: number;
+  readonly topHeightEnd: number;
 }
 
 export interface Bridge {
@@ -1070,11 +1077,10 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           z2: point.z,
           // The drawn parapet's own top, arc included — not `+ PARAPET_HEIGHT`
           // recomputed here. A collider that stopped at the un-arced height
-          // would let a child climb the drawn stone and step over it.
-          topHeight: Math.max(
-            parapetTopFor(topA, previous.x, previous.z),
-            parapetTopFor(topB, point.x, point.z),
-          ),
+          // would let a child climb the drawn stone and step over it. One at
+          // each end, the solid's top running between them.
+          topHeight: parapetTopFor(topA, previous.x, previous.z),
+          topHeightEnd: parapetTopFor(topB, point.x, point.z),
         });
       }
       previous = point;

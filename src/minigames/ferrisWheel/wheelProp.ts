@@ -20,7 +20,7 @@ import { gameStore } from '../../state';
 import { groundInPlot } from '../../world/AnchorPlots';
 import { solidInFrame } from '../../world/terrain';
 import type { AnchorDefinition } from '../../world/anchors';
-import type { CollisionWorld } from '../../world/Collision';
+import { roundTopHalf, type CollisionWorld } from '../../world/Collision';
 
 /**
  * The Space Ferris Wheel, as it stands in the park.
@@ -420,8 +420,11 @@ export function createFerrisWheelProp(
       const a = solidInFrame(centreX, centreZ, ax, az, deckY, railTop);
       const b = solidInFrame(centreX, centreZ, bx, bz, deckY, railTop);
       const middle = solidInFrame(centreX, centreZ, mx, mz, deckY, railTop);
+      // A round rail 18 cm thick: an edge, not a ledge (`roundTopHalf`).
       collision.kinded('ferris deck rail', () =>
-        collision.addWall(a.x, a.z, b.x, b.z, DECK_RAIL_COLLISION_HALF, middle.top, false, true),
+        collision.toppedNarrow(roundTopHalf(DECK_RAIL_TUBE), () =>
+          collision.addWall(a.x, a.z, b.x, b.z, DECK_RAIL_COLLISION_HALF, middle.top, false, true),
+        ),
       );
     }
   }

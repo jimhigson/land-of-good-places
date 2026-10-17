@@ -2587,13 +2587,15 @@ export function registerPlanterCollision(collision: CollisionWorld, floor: Castl
   // loses its roundel brings its colliders with it and there is nothing here
   // to remember to update.
   for (const planter of planterRing(floor.index)) {
-    collision.addCircle(
-      floorX(floor, planter.x),
-      floorZ(floor, planter.z),
-      PLANTER_RADIUS,
-      BUILDING_BASE_Y + PLANTER_TOP,
-      false,
-      true,
+    collision.kinded('mall planter', () =>
+      collision.addCircle(
+        floorX(floor, planter.x),
+        floorZ(floor, planter.z),
+        PLANTER_RADIUS,
+        BUILDING_BASE_Y + PLANTER_TOP,
+        false,
+        true,
+      ),
     );
   }
 }

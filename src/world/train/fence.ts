@@ -414,15 +414,23 @@ export function buildRailFence(
   // the cap's own (seed 5, the north station). It also holds her centre
   // further than the rail's own width from the fence's line, so the fence's
   // top is not somewhere she can stand.
+  //
+  // **Nobody stands on it** (`toppedNarrow(0)`): its top under a deck is a
+  // seam for the deck's walkers to pass over, never a floor. The deck is the
+  // floor; past the deck's edge, where a run's seam reaches by its margin, the
+  // seam was a ledge in the air over the rails that the census stood her on,
+  // jumping off a bridge's parapet (17 Oct 2026).
   const linkBand = (a: Post, b: Post, half: number): void => {
     const deckY = deckSpanForSegment(a, b, half);
-    collision.kinded('railway corridor', () => {
-      if (deckY === null) {
-        collision.addWall(a.x, a.z, b.x, b.z, half);
-      } else {
-        collision.addWall(a.x, a.z, b.x, b.z, half, deckY - FENCE_SEAM_MARGIN, false, true);
-      }
-    });
+    collision.kinded('railway corridor', () =>
+      collision.toppedNarrow(0, () => {
+        if (deckY === null) {
+          collision.addWall(a.x, a.z, b.x, b.z, half);
+        } else {
+          collision.addWall(a.x, a.z, b.x, b.z, half, deckY - FENCE_SEAM_MARGIN, false, true);
+        }
+      }),
+    );
   };
   const fillHalf = (FENCE_OFFSET - FENCE_HALF_THICKNESS - TRACK_CLEARANCE) / 2;
   const fillSide = (TRACK_CLEARANCE + fillHalf) / FENCE_OFFSET;
