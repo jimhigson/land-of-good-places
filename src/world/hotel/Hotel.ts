@@ -523,7 +523,7 @@ const DISCO_COLOURS: readonly number[] = [
  * ~5 m sideways, unprompted, before anything appeared. Verified
  * geometrically (no browser access) by projecting the desk and receptionist
  * through `IsoCamera` at the player's real teleport-in point
- * (`enterLobby`'s `LOBBY.halfZ - 2.2`): x=4.5 lands the whole desk footprint
+ * (`enterLobby`'s `LOBBY_FRONT_LANDING`): x=4.5 lands the whole desk footprint
  * (NDC x from 0.585 to 0.932) and the receptionist (NDC x=0.906) on-screen
  * — *technically*, per the same QA round that came back with real rendered
  * screenshots and found only ≈2 px of margin at x=4.5 (298→388 of 390 px),
@@ -607,6 +607,21 @@ const CHAIR_SEAT_Y = 0.42;
  * sooner, as it wakes any nap.
  */
 const NEXT_DAY_WAKE_SECONDS = IRIS_OPEN_SECONDS + 1.4;
+
+/**
+ * **Where each of the hotel's doors lands her**, room-local — the one owner of
+ * each, read by the door that puts her there and by {@link Hotel.openArea},
+ * which names them as points of the room's open area (the lift's own is
+ * `HotelLift.landing`):
+ *
+ * - the suite's corridor door, walking in: just inside, facing down the hall;
+ * - the corridor's suite door, walking out of the suite: just outside it;
+ * - the lobby's front door, walking in from the park: just inside, facing the
+ *   statue.
+ */
+const SUITE_DOOR_LANDING = { x: -SUITE.halfX + 1.6, z: 0, facing: Math.PI / 2 } as const;
+const CORRIDOR_SUITE_LANDING = { x: CORRIDOR.halfX - 1.6, z: 0, facing: -Math.PI / 2 } as const;
+const LOBBY_FRONT_LANDING = { x: 0, z: LOBBY.halfZ - 2.2, facing: Math.PI } as const;
 
 /**
  * The chair `/hotel-cafe` sits her at: the lobby café's middle chair, the one
@@ -1678,15 +1693,21 @@ export class Hotel implements GameSystem {
 
   /**
    * **A hotel room's open area**, for the put-down rule (`world/dismount.ts`):
-   * where she lands walking in by its west doorway or lift — the very spot
-   * `stepThroughDoor` and `travelTo` put her, 1.6 m in on the gap's centre line
-   * — and, for the lobby, just inside the front door. World metres.
+   * every place a door or the lift lands her in it — read from the one owner of
+   * each ({@link SUITE_DOOR_LANDING} and its siblings, `HotelLift.landing`),
+   * never typed again here. Doors first: the first point is a room's way out.
+   * World metres.
    */
   openArea(room: HotelRoom): OpenAreaPoint[] {
     const points: OpenAreaPoint[] = [];
-    const west = room.gaps.west;
-    if (west) points.push({ x: room.originX - room.halfX + 1.6, z: room.originZ + (west[0] + west[1]) / 2 });
-    if (room === LOBBY) points.push({ x: LOBBY.originX, z: LOBBY.originZ + LOBBY.halfZ - 2.2 });
+    const landing = (spot: { readonly x: number; readonly z: number }): OpenAreaPoint => ({
+      x: room.originX + spot.x,
+      z: room.originZ + spot.z,
+    });
+    if (room === LOBBY) points.push(landing(LOBBY_FRONT_LANDING));
+    if (room === SUITE) points.push(landing(SUITE_DOOR_LANDING));
+    if (room === CORRIDOR) points.push(landing(CORRIDOR_SUITE_LANDING));
+    if (hotelDoorBands(room).some((band) => band.kind === 'lift')) points.push(this.lift.landing(room));
     return points;
   }
 
@@ -2470,12 +2491,12 @@ export class Hotel implements GameSystem {
         return;
       }
       if (walkedThrough('suite-portal')) {
-        this.spaces.changeTo(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+        this.spaces.changeTo(() => this.stepThroughDoor(SUITE, SUITE_DOOR_LANDING));
       }
       return;
     }
     if (room === SUITE && walkedThrough('corridor-door')) {
-      this.spaces.changeTo(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
+      this.spaces.changeTo(() => this.stepThroughDoor(CORRIDOR, CORRIDOR_SUITE_LANDING));
     }
   }
 
@@ -2486,7 +2507,12 @@ export class Hotel implements GameSystem {
     this.hotelRoot.visible = true;
     this.boundTo(LOBBY);
     // Just inside the front door, facing the statue.
-    player.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2, Math.PI);
+    player.teleportTo(
+      LOBBY.originX + LOBBY_FRONT_LANDING.x,
+      0,
+      LOBBY.originZ + LOBBY_FRONT_LANDING.z,
+      LOBBY_FRONT_LANDING.facing,
+    );
     if (!saveFlags.hasHotelKey()) {
       this.greet();
       // …and the receptionist calls out from the desk a few strides away, so
@@ -2575,7 +2601,7 @@ export class Hotel implements GameSystem {
     if (!player) return;
     this.inside = true;
     this.hotelRoot.visible = true;
-    this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2);
+    this.stepThroughDoor(SUITE, SUITE_DOOR_LANDING);
   }
 
   private leaveToPark(): void {
@@ -2590,11 +2616,14 @@ export class Hotel implements GameSystem {
     player.teleportTo(x, this.surfaces.sample(x, z, 3), z, this.facadeYaw);
   }
 
-  private stepThroughDoor(room: HotelRoom, localX: number, localZ: number, facing: number): void {
+  private stepThroughDoor(
+    room: HotelRoom,
+    landing: { readonly x: number; readonly z: number; readonly facing: number },
+  ): void {
     const player = this.player;
     if (!player) return;
     this.boundTo(room);
-    player.teleportTo(room.originX + localX, 0, room.originZ + localZ, facing);
+    player.teleportTo(room.originX + landing.x, 0, room.originZ + landing.z, landing.facing);
   }
 
   /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
@@ -2852,7 +2881,7 @@ export class Hotel implements GameSystem {
   private enterSuiteThroughDoor(): void {
     const player = this.player;
     if (!player || player.riding || this.spaces.isChanging) return;
-    this.spaces.changeTo(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+    this.spaces.changeTo(() => this.stepThroughDoor(SUITE, SUITE_DOOR_LANDING));
   }
 
   /**

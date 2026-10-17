@@ -398,9 +398,13 @@ const SPACES: SpaceVisit[] = [
     enter: () => {
       releaseEverywhere();
       const door = world.hotel.openArea(room)[0] ?? { x: room.originX, z: room.originZ };
-      // A restored save's way in: the position, then the hotel adopts it.
-      player.teleportTo(door.x, 0, door.z, Math.PI / 2);
+      // A restored save's way in, in `Game`'s own order: `Player` is built
+      // standing there, the hotel adopts her (the room's bounds), and then she
+      // is put down there — under the room's bounds, not the last space's.
+      player.position.set(door.x, 0, door.z);
+      player.previousPosition.copy(player.position);
       world.hotel.adoptRestoredPlayer();
+      player.teleportTo(door.x, 0, door.z, Math.PI / 2);
     },
   })),
   {

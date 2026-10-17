@@ -287,14 +287,19 @@ export class HotelLift implements LiftPanelSource {
     );
   }
 
-  /** The end of the step out of `room`'s alcove — where every ride in this lift gets off. */
+  /**
+   * **Where this lift lets her off in `room`**, world metres: the end of the
+   * step out of its alcove. The one owner — every ride gets off here, and the
+   * hotel names it as a point of the room's open area (`Hotel.openArea`).
+   */
+  landing(room: HotelRoom): { readonly x: number; readonly z: number } {
+    return { x: room.originX + LIFT_CAR_X - room.halfX + 3.4, z: room.originZ + (room.liftZ ?? 0) };
+  }
+
+  /** The step out of `room`'s alcove, as an exit — {@link landing}, facing into the room. */
   private stepOut(room: HotelRoom, y: number): RideExit {
-    return {
-      x: room.originX + LIFT_CAR_X - room.halfX + 3.4,
-      y,
-      z: room.originZ + (room.liftZ ?? 0),
-      facing: Math.PI / 2,
-    };
+    const { x, z } = this.landing(room);
+    return { x, y, z, facing: Math.PI / 2 };
   }
 
   private beginAlight(room: HotelRoom): void {
