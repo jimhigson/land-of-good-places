@@ -383,10 +383,11 @@ function tick(seconds: number, input = still): void {
 /**
  * **When the rule finds nowhere to put her, the wedge rescue waits longer
  * before it asks again** (`Player`'s `WEDGE_RETRY_MAX_SECONDS`). A real
- * `Player` on a world of her own: play bounds 1.2 m across, so no spot within
+ * `Player` on a world of her own: play bounds 1.2 m in radius, so no spot within
  * the rule's reach is open, and a world that reports her 0.2 m inside
  * something solid wherever she stands, so the wedge never lets up. Over 10 s,
- * half-second retries would be 20 full searches and 20 warnings; backing off,
+ * retries every half second would be about 20 full searches and 20 warnings
+ * (18 measured, with the back-off taken out); backing off,
  * doubling each time, it is four (at 0.5, 1.5, 3.5 and 7.5 s).
  */
 {
@@ -413,7 +414,7 @@ function tick(seconds: number, input = still): void {
         'it must back off, doubling its wait after each search that finds nowhere (4 tries, not 20)',
     );
   }
-  notes.push(`rule (h) a wedge with nowhere to go: ${tries} tries in 10 s, ${warned} warnings (half-second retries would be 20)`);
+  notes.push(`rule (h) a wedge with nowhere to go: ${tries} tries in 10 s, ${warned} warnings (retrying every half second would be about 20)`);
 }
 
 // ------------------------------------------------------------------ 2. the instrument
