@@ -147,6 +147,21 @@ export {
 const AUTO_HOP_LOOKAHEAD = 0.5;
 
 /**
+ * **A wedge lets go of her.** How deep inside something solid she may stay,
+ * metres, and for how long, seconds, before she is put down somewhere she
+ * fits — see the wedge section of {@link Player.update}.
+ *
+ * `resolve` ends in exact contact, and an escort out of a deep overlap walks
+ * her out at `Collision.ts`'s `MAX_DEPENETRATION_SPEED` in a handful of frames;
+ * so overlap that is still there, and still this deep, half a second later is
+ * neither of those. It is a wedge: a gap narrower than she is, between things
+ * too tall to step over, that a hop dropped her into — and no walk gets her
+ * out of one.
+ */
+const WEDGE_DEPTH = 0.05;
+const WEDGE_SECONDS = 0.5;
+
+/**
  * ---------------------------------------------------------------------------
  * THE JET PACK
  * ---------------------------------------------------------------------------
@@ -555,6 +570,14 @@ export class Player implements GameSystem {
    * for ordinary contact and banked as speed.
    */
   private escorting = false;
+  /** How long she has been wedged inside something solid, seconds — see {@link WEDGE_SECONDS}. */
+  private wedgedFor = 0;
+  /**
+   * How many times a wedge has let go of her — put her down because she had
+   * been stuck inside something solid too long. Read by `check:hotel`'s probe
+   * 33, which says how many of its walks out of a pocket needed this.
+   */
+  wedgeRescues = 0;
   /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
   private readonly face: FaceLife;
   private ridingFlag = false;
@@ -1455,6 +1478,28 @@ export class Player implements GameSystem {
     // Next frame's sampling reference: the surface she is on, not the damped
     // height she is drawn at. See `groundHeight`.
     this.groundHeight = groundY;
+
+    // --- a wedge lets go of her ---------------------------------------------
+    // Stood inside something solid, frame after frame, is a wedge (see
+    // `WEDGE_SECONDS`). QA on PR #721 hopped her into a pocket behind the
+    // lobby café's tables, and `check:hotel`'s probe 33, written to find every
+    // such place, found wedges in four of the hotel's six rooms: the gap
+    // behind a bathroom's pan and basin, behind a gallery sofa. Walking cannot
+    // get her out of one, and on a phone a hop cannot either — the button has
+    // no direction. So once it has held her for `WEDGE_SECONDS` she is put down
+    // through the one rule (`world/dismount.ts`): the nearest spot her body is
+    // clear and she can walk out of. On her feet only — mid-hop she may pass
+    // through a prop's footprint on her way over it.
+    if (!this.airborne && this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0) > WEDGE_DEPTH) {
+      this.wedgedFor += dt;
+      if (this.wedgedFor >= WEDGE_SECONDS) {
+        this.wedgedFor = 0;
+        this.wedgeRescues += 1;
+        this.teleportTo(this.position.x, groundY, this.position.z);
+      }
+    } else {
+      this.wedgedFor = 0;
+    }
 
     // A little sparkle the moment the jump actually carries her over a wall's
     // footprint, rather than every frame she's above it.
