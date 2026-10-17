@@ -3,7 +3,7 @@ import { lazyArrayView } from '../boot/lazyView';
 import { registerPlanCache } from '../boot/planCaches';
 import { PALETTE } from '../core/palette';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { CollisionWorld, WallCollider } from '../world/Collision';
+import type { BoxCollider, CollisionWorld, WallCollider } from '../world/Collision';
 import { addBoothCollision, MINI_GAME_BOOTH_BOX } from './boothFootprint';
 import { pressZone, type InteractZone } from '../world/interact';
 import { standOnSphere, terrainHeight } from '../world/terrain';
@@ -205,7 +205,7 @@ export class MiniGameStalls implements GameSystem {
 
   private readonly props: StallProp[] = [];
   /** The four wall colliders each booth registered, so exactly those can be taken back if it moves. */
-  private readonly walls = new Map<string, WallCollider[]>();
+  private readonly walls = new Map<string, (WallCollider | BoxCollider)[]>();
   private readonly collision: CollisionWorld;
 
   /**
@@ -281,11 +281,11 @@ export class MiniGameStalls implements GameSystem {
     if (!stall || !prop) return null;
     return {
       withdrawCollision: () => {
-        for (const wall of this.walls.get(id) ?? []) this.collision.removeWall(wall);
+        for (const solid of this.walls.get(id) ?? []) this.collision.removeSolid(solid);
         this.walls.set(id, []);
       },
       placeAt: (x: number, z: number) => {
-        for (const wall of this.walls.get(id) ?? []) this.collision.removeWall(wall);
+        for (const solid of this.walls.get(id) ?? []) this.collision.removeSolid(solid);
         stall.x = x;
         stall.z = z;
         const stand = STALL_STANDS_BY_ID.get(id);
@@ -359,6 +359,6 @@ export class MiniGameStalls implements GameSystem {
  * which is why the corners are rotated by hand there. Collision is
  * height-blind (see `Collision.ts`), which is fine here: one storey.
  */
-function addMiniGameBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): WallCollider[] {
+function addMiniGameBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): (WallCollider | BoxCollider)[] {
   return addBoothCollision(collision, x, z, yaw, MINI_GAME_BOOTH_BOX);
 }

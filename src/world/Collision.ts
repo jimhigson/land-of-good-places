@@ -1285,6 +1285,12 @@ export class CollisionWorld {
     this.revisionCounter += 1;
   }
 
+  /** Takes back a wall or a box — whichever it is. See {@link removeWall}, {@link removeBox}. */
+  removeSolid(solid: WallCollider | BoxCollider): void {
+    if ('halfX' in solid) this.removeBox(solid);
+    else this.removeWall(solid);
+  }
+
   /**
    * Puts back a box {@link removeBox} took out — **the same object**, for
    * {@link restoreWall}'s reasons. Idempotent.

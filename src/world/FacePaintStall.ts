@@ -18,6 +18,11 @@ import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacemen
 import {
   addBoothCollision,
   FACE_PAINT_BOOTH_BOX,
+  FACE_PAINT_AWNING_TILT,
+  FACE_PAINT_AWNING_Y,
+  FACE_PAINT_AWNING_Z,
+  FACE_PAINT_BACK_WALL_HEIGHT,
+  FACE_PAINT_COUNTER_BOARD_Y,
   FACE_PAINT_STALL_DEPTH,
   FACE_PAINT_STALL_WIDTH,
 } from '../minigames/boothFootprint';
@@ -515,8 +520,8 @@ export class FacePaintStall implements GameSystem {
     const boardMaterial = toonMaterial(PALETTE.woodLight);
 
     // --- back wall + counter -------------------------------------------------
-    const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, 1.9, 0.14, 3, 0.06), creamMaterial));
-    back.position.set(0, 0.95, -0.85);
+    const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, FACE_PAINT_BACK_WALL_HEIGHT, 0.14, 3, 0.06), creamMaterial));
+    back.position.set(0, FACE_PAINT_BACK_WALL_HEIGHT / 2, -0.85);
     this.group.add(back);
     addOutline(back, 0.016);
 
@@ -526,7 +531,7 @@ export class FacePaintStall implements GameSystem {
     addOutline(counter, 0.016);
 
     const counterTop = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH - 0.1, 0.1, 0.7, 3, 0.05), boardMaterial));
-    counterTop.position.set(0, 0.86, 0.75);
+    counterTop.position.set(0, FACE_PAINT_COUNTER_BOARD_Y, 0.75);
     this.group.add(counterTop);
 
     // --- corner posts, candy-striped ------------------------------------------
@@ -576,8 +581,8 @@ export class FacePaintStall implements GameSystem {
 
     // --- striped awning --------------------------------------------------------
     const awning = new Group();
-    awning.position.set(0, 2.28, -0.05);
-    awning.rotation.x = -0.2;
+    awning.position.set(0, FACE_PAINT_AWNING_Y, FACE_PAINT_AWNING_Z);
+    awning.rotation.x = -FACE_PAINT_AWNING_TILT;
     this.group.add(awning);
 
     const stripes = 7;

@@ -15,7 +15,7 @@ import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
-import { placeOnSphere, terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight, yAtAltitude } from '../terrain';
 
 /**
  * The exclusion fence — Decision 4 §6, "keeping feet off the track".
@@ -36,6 +36,18 @@ import { placeOnSphere, terrainHeight } from '../terrain';
  */
 
 const STEP = 2.4;
+/**
+ * A fence post: its foot radius, its length, and where its middle stands above
+ * the ground — so its top is `POST_TOP`. One owner for the mesh and the solid.
+ */
+const POST_RADIUS = 0.11;
+const POST_LENGTH = 0.95;
+const POST_MIDDLE = 0.48;
+const POST_TOP = POST_MIDDLE + POST_LENGTH / 2;
+/** The rail: its centre's height above the ground, and its own depth, so its top is `RAIL_TOP`. */
+const RAIL_CENTRE = 0.62;
+const RAIL_DEPTH = 0.1;
+const RAIL_TOP = RAIL_CENTRE + RAIL_DEPTH / 2;
 // Re-exported so existing importers keep one obvious home for it; the value
 // itself lives in the leaf module (see clearance.ts's own note).
 export { STATION_GAP } from './clearance';
@@ -265,23 +277,41 @@ export function buildRailFence(
     const z = point.z - tangent.x * side * FENCE_OFFSET;
     return { x, z, y: terrainHeight(x, z) };
   };
-  /** Every wall segment this file adds goes through here, so a run that
-   * passes under a bridge deck always gets the seam instead of the ordinary
-   * always-solid wall — see `deckSpanAt` above. */
+  /**
+   * Every wall segment this file adds goes through here.
+   *
+   * **Its top is the rail she can see** (the engine rework): a bay of fence is
+   * a solid up to its rail's top, `RAIL_TOP` above the ground at the bay's
+   * middle, along the local up the rail is leant along — not an infinitely
+   * tall rule. A post stands at each end of the bay, taller (`POST_TOP`), and
+   * is its own solid. What keeps a child off the track is how tall that is;
+   * see the census in `check:solids`.
+   *
+   * Under a bridge deck the bay used to need a "seam" — an absolute top just
+   * under the deck, so the deck's walkers were not stopped by a wall meant for
+   * the ground (`deckSpanAt` above). A real top is that already: the deck is
+   * metres above a fence rail, so nothing on it meets one.
+   */
   const addFenceWall = (a: Post, b: Post): void => {
-    const deckY = deckSpanForSegment(a, b, FENCE_HALF_THICKNESS);
-    if (deckY === null) {
-      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS);
-    } else {
-      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, deckY - FENCE_SEAM_MARGIN, false, true);
-    }
+    const midX = (a.x + b.x) / 2;
+    const midZ = (a.z + b.z) / 2;
+    const flatTop = (a.y + b.y) / 2 + RAIL_TOP;
+    collision.kinded('railway fence', () =>
+      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, yAtAltitude(midX, midZ, flatTop - terrainHeight(midX, midZ)), false, true),
+    );
+  };
+  /** A post at `p`, its own solid: the rail's ends stand on it. */
+  const addFencePost = (p: Post): void => {
+    collision.kinded('railway fence post', () =>
+      collision.addCircle(p.x, p.z, POST_RADIUS, yAtAltitude(p.x, p.z, POST_TOP), false, true),
+    );
   };
   const link = (a: Post, b: Post) => {
     addFenceWall(a, b);
     rails.push({
       x: (a.x + b.x) / 2,
       z: (a.z + b.z) / 2,
-      y: (a.y + b.y) / 2 + 0.62,
+      y: (a.y + b.y) / 2 + RAIL_CENTRE,
       yaw: Math.atan2(b.x - a.x, b.z - a.z),
       length: Math.hypot(b.x - a.x, b.z - a.z),
     });
@@ -304,7 +334,7 @@ export function buildRailFence(
       rails.push({
         x: (from.x + to.x) / 2,
         z: (from.z + to.z) / 2,
-        y: (from.y + to.y) / 2 + 0.62,
+        y: (from.y + to.y) / 2 + RAIL_CENTRE,
         yaw: Math.atan2(to.x - from.x, to.z - from.z),
         length: Math.hypot(to.x - from.x, to.z - from.z),
       });
@@ -320,6 +350,8 @@ export function buildRailFence(
       const left = sideAt(distance, 1);
       const right = sideAt(distance, -1);
       posts.push(left, right);
+      addFencePost(left);
+      addFencePost(right);
       if (previousLeft && previousRight) {
         link(previousLeft, left);
         link(previousRight, right);
@@ -395,6 +427,7 @@ export function buildRailFence(
       const z = point.z - tangent.x * farSide * FENCE_OFFSET;
       const post: Post = { x, z, y: terrainHeight(x, z) };
       posts.push(post);
+      addFencePost(post);
       if (previous) link(previous, post);
       previous = post;
     }
@@ -403,8 +436,8 @@ export function buildRailFence(
 
   const postMaterial = toonMaterial(PALETTE.stonePink);
   const railMaterial = toonMaterial(PALETTE.stonePinkLight);
-  const postMesh = new InstancedMesh(new CylinderGeometry(0.09, 0.11, 0.95, 6), postMaterial, posts.length);
-  const railMesh = new InstancedMesh(new BoxGeometry(0.09, 0.1, 1), railMaterial, rails.length);
+  const postMesh = new InstancedMesh(new CylinderGeometry(0.09, POST_RADIUS, POST_LENGTH, 6), postMaterial, posts.length);
+  const railMesh = new InstancedMesh(new BoxGeometry(0.09, RAIL_DEPTH, 1), railMaterial, rails.length);
   postMesh.castShadow = false;
   railMesh.castShadow = false;
 
@@ -414,7 +447,7 @@ export function buildRailFence(
   const position = new Vector3();
   const flat = new Vector3();
   posts.forEach((post, index) => {
-    flat.set(post.x, post.y + 0.48, post.z);
+    flat.set(post.x, post.y + POST_MIDDLE, post.z);
     placeOnSphere(flat, 0, position, rotation);
     matrix.compose(position, rotation, one);
     postMesh.setMatrixAt(index, matrix);
