@@ -1,10 +1,11 @@
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../../world/NavGrid';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../TapNavigator';
-import { PARK_BOUNDARY, circleBoundary, type ParkBoundary } from '../../world/boundary';
-import { INTERIOR_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
+import { PARK_BOUNDARY, type ParkBoundary } from '../../world/boundary';
+import { PLAYER_RADIUS } from '../../core/constants';
 import { JUMP_APEX_HEIGHT } from '../Player';
 import { SPACE_GARDEN, type SpaceId } from '../../world/spaces';
 import { castleFloorFor } from '../../world/building/floors';
+import { castleFloorBounds } from '../../world/building/floorBounds';
 import type { CollisionWorld } from '../../world/Collision';
 import type { GroundSampler } from '../Player';
 import type { LevelConnector } from '../../world/building/surfaces';
@@ -166,13 +167,14 @@ function boundaryFor(space: SpaceId): ParkBoundary | null {
   if (space === SPACE_GARDEN) return PARK_BOUNDARY;
   const floor = castleFloorFor(space);
   if (floor) {
-    // The same circle `Building.boundTo` hands `setPlayBounds`. Taken from the
-    // floor's own origin rather than captured from the collision world, so the
-    // child's lattice covers the floor whether or not the player has ever been
-    // on it — and **per floor** since the split, because the three plates no
-    // longer share a coordinate system and one circle can no longer stand for
-    // all of them.
-    return circleBoundary(INTERIOR_PLAY_RADIUS, floor.originX, floor.originZ);
+    // The same edge `Building.boundTo` hands `setPlayBounds`, asked of its one
+    // owner (`castleFloorBounds`) rather than copied. Taken from the floor's
+    // own origin rather than captured from the collision world, so the child's
+    // lattice covers the floor whether or not the player has ever been on it —
+    // and **per floor** since the split, because the three plates no longer
+    // share a coordinate system and one edge can no longer stand for all of
+    // them.
+    return castleFloorBounds(floor);
   }
   // The hotel's rooms are their own spaces, and their guests are driven by
   // `WaypointDriver` on a pinned circuit rather than by this. Nothing to plan.

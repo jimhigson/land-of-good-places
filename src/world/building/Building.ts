@@ -1,8 +1,9 @@
-import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { castleFloorBounds } from './floorBounds';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
-import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
@@ -1525,9 +1526,7 @@ export class Building implements GameSystem {
 
   /** The soft play boundary, bound to one floor's own plate. */
   private boundTo(floor: CastleFloor): void {
-    this.collision.setPlayBounds(
-      circleBoundary(INTERIOR_PLAY_RADIUS, floor.originX, floor.originZ),
-    );
+    this.collision.setPlayBounds(castleFloorBounds(floor));
   }
 
   /**
@@ -2424,20 +2423,16 @@ export function registerInteriorCollision(collision: CollisionWorld, floor: Cast
     wall(floorX(floor, INTERIOR_DOOR_MAX_X), south, east, south);
   } else if (floor.index === TOP_DECK) {
     // The roof's south battlement stops for the ginormous slide's mouth
-    // (`ROOF_SLIDE_GAPS`, the gaps the drawn parapet steps round). Across the
-    // gap there is nothing drawn and nothing to stand on beyond it, so it keeps
-    // the one invisible solid left in the castle: the slide is boarded from
-    // its pad, never walked into, and this is all that stands between the pad
-    // and the drop. No height would do — it is the ride's own doorway.
+    // (`ROOF_SLIDE_GAPS`, the gaps the drawn parapet steps round), and so does
+    // its solid: across the gap there is nothing drawn to stand to. What holds
+    // her at the mouth is the roof's own edge (`castleFloorBounds`), the soft
+    // edge at the battlement's outer face that holds her everywhere else on
+    // the rampart too — the invisible wall that stood across the gap until 17
+    // Oct 2026 is gone with the reason it was there.
     let from = west;
     for (const [gapMin, gapMax] of ROOF_SLIDE_GAPS) {
-      const gapWest = floorX(floor, gapMin);
-      const gapEast = floorX(floor, gapMax);
-      wall(from, south, gapWest, south);
-      collision.kinded('roof slide mouth (invisible guard)', () =>
-        collision.addWall(gapWest, south, gapEast, south, INTERIOR_WALL_HALF_THICKNESS),
-      );
-      from = gapEast;
+      wall(from, south, floorX(floor, gapMin), south);
+      from = floorX(floor, gapMax);
     }
     wall(from, south, east, south);
   } else {
