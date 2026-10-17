@@ -697,7 +697,13 @@ export function buildBridges(
 
 /** How far a railing post stands over its rail's top — the fence's own margin, so no rail's top lies in a post cap's plane. */
 const RAILING_POST_OVER = 0.085;
-const RAILING_POST_RADIUS = 0.05;
+/**
+ * A railing post's radius — a hexagon, its flat faces at `0.866 ×` this from
+ * its axis. Kept clear of the rail it carries: at 0.05 a flat face stood
+ * 1.7 mm off the rail's side, in its plane wherever the two lined up
+ * (`check:coplanar`, seed 1). At 0.07 the faces stand 1.6 cm off it.
+ */
+const RAILING_POST_RADIUS = 0.07;
 /** How far a railing post's foot is set down into the coping it stands on. */
 const RAILING_POST_SEAT = 0.03;
 /** A railing post at every `RAILING_POST_EVERY`th parapet piece's end — a post every metre and a half or so. */
