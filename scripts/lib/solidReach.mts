@@ -183,6 +183,12 @@ export function runAndJump(
     if (landedAt >= 0 && frame >= landedAt + Math.ceil(0.6 / dt)) break;
   }
   if (!jumped || landedAt < 0 || sim.airborne) return null;
+  // Where she can be, not where a landing wedged her (see `walkOff`).
+  for (let frame = 0; frame < Math.ceil(4 / dt); frame += 1) {
+    if (!sim.airborne && options.collision.deepestSolidOverlap(wedged.set(sim.position.x, sim.position.y, sim.position.z), PLAYER_RADIUS) <= 0.02) break;
+    sim.step(dt, 0, 0, false);
+  }
+  if (sim.airborne || options.collision.deepestSolidOverlap(wedged.set(sim.position.x, sim.position.y, sim.position.z), PLAYER_RADIUS) > 0.02) return null;
   return { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
 }
 
@@ -540,6 +546,27 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
             markReached({ solid, top: landed.y, how: 'jump', at: landed, from });
             changed = true;
             break;
+          }
+        }
+      }
+      // And, asking for a way out (`until`), a hop every way the compass
+      // points from where she landed — the pocket's own exits, whatever they
+      // are, where every stage above asks about one solid at a time.
+      if (options.until) {
+        for (let k = 0; k < 16 && !stopped; k += 1) {
+          const a = (k / 16) * Math.PI * 2;
+          const tx = from.x + Math.cos(a) * 2.5;
+          const tz = from.z + Math.sin(a) * 2.5;
+          if (collision.playBounds.distanceToEdge(tx, tz) < PLAYER_RADIUS) continue;
+          for (const jumpAt of [2.2, 1.0]) {
+            jumps += 1;
+            cost.sims.over += 1;
+            const landed = runAndJump(options, from, tx, tz, jumpAt, fps);
+            if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
+            if (options.until(landed)) {
+              stopped = true;
+              break;
+            }
           }
         }
       }
