@@ -109,8 +109,8 @@ export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 /**
  * **Her body, as the put-down rule measures it** — `world/dismount.ts`'s
  * `putDownSpot`: her radius, and the hop she makes without being asked. One
- * object, so `endRide`, the hotel's chair stand spots and `check:exits` all
- * ask the rule about the same child.
+ * object, so `endRide`, `teleportTo`, `check:exits` and the procgen invariants
+ * all ask the rule about the same child.
  */
 export const PLAYER_PUT_DOWN = { radius: PLAYER_RADIUS, hopApex: JUMP_APEX_HEIGHT } as const;
 

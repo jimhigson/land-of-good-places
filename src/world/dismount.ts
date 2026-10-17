@@ -194,9 +194,10 @@ const SAME_FLOOR = 0.05;
  * ⌈WINDOW_REACH / NAV_CELL⌉ + 3)²`, 1,849 router cells — each one scan of the
  * few colliders near the exit and, if walkable, one sample per floor it is
  * stepped onto from, because every flood the search runs shares the window's
- * cells and the regions already found in it. Measured 17 Oct 2026 at the lobby
- * café: 680–1,020 cells, 3.3–4.5 ms a put-down (`check:exits` prints the cost
- * of every put-down it drives).
+ * cells and the regions already found in it, and a flood stops the moment it
+ * knows its floor is open. Measured by `check:exits` over the 541 put-downs it
+ * drives on seed 5 (17 Oct 2026): 1.8–2.0 ms on average, never more than 360
+ * cells, the slowest under 15 ms — it prints the cost on every run.
  */
 export function putDownSpot(
   collision: CollisionWorld,
