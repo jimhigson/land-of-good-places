@@ -1237,8 +1237,9 @@ function withoutBoxTop(geometry: BoxGeometry): BoxGeometry {
  */
 const COPING_END_OVERHANG = 0.1;
 
-/** Scratch for a garden wall's up at its midpoint. */
+/** Scratch for a garden wall's up at its midpoint, and for a coping's end. */
 const gardenWallUp = new Vector3();
+const copingEnd = new Vector3();
 
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
@@ -1329,9 +1330,28 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     const midGround = terrainHeight(midX, midZ);
     const copingUp = upAt(midX, midGround, midZ, gardenWallUp);
     const copingLift = copingTop - midGround;
+    const shiftX = copingUp.x * copingLift;
+    const shiftZ = copingUp.z * copingLift;
+    // **And its ends where the coping's top is drawn to.** A straight stone
+    // leant at its middle lies on the planet's tangent there, so wherever the
+    // wall runs downhill round the curve its ends come in — 0.13 m each at the
+    // park's edge on a 6 m wall — and a top squared off at the flat ends plus
+    // the overhang stood her past the drawn stone (seed 10, 65 m out). The
+    // coping's own top-end centres, from its own transform, measured along
+    // the wall from its shifted ends.
+    const axisX = (x2 - x1) / length;
+    const axisZ = (z2 - z1) / length;
+    let beyond = Infinity;
+    for (const [sign, ex, ez] of [
+      [1, x2, z2],
+      [-1, x1, z1],
+    ] as const) {
+      const end = copingEnd.set(sign * (length / 2 + COPING_END_OVERHANG), 0.08, 0).applyQuaternion(coping.quaternion).add(coping.position);
+      beyond = Math.min(beyond, sign * ((end.x - (ex + shiftX)) * axisX + (end.z - (ez + shiftZ)) * axisZ));
+    }
     collision.kinded('stone garden wall', () =>
-      collision.toppedShifted(copingUp.x * copingLift, copingUp.z * copingLift, () =>
-        collision.toppedSquare(COPING_END_OVERHANG, () =>
+      collision.toppedShifted(shiftX, shiftZ, () =>
+        collision.toppedSquare(Math.max(0, beyond), () =>
           collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, copingTop), true, true, -Infinity, false, run.height),
         ),
       ),
