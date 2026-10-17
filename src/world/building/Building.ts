@@ -1230,6 +1230,9 @@ export class Building implements GameSystem {
     this.feastDish = dish.root;
   }
 
+  /** Whoever sits at the banquet is held by this, and let go by leaving it. */
+  private readonly feastHolder: RideHolder = { holding: 'a seat at the banquet', letGo: () => this.leaveFeast() };
+
   /**
    * Up from the table: she stands, and the pets come back to the line from
    * wherever they had got to.
@@ -1238,9 +1241,6 @@ export class Building implements GameSystem {
    * there is no list of "which ones did I actually send" to keep in step —
    * the same shape as the hotel's `standPetsDown`.
    */
-  /** Whoever sits at the banquet is held by this, and let go by leaving it. */
-  private readonly feastHolder: RideHolder = { holding: 'a seat at the banquet', letGo: () => this.leaveFeast() };
-
   private leaveFeast(): void {
     const player = this.player;
     const index = this.banquetSeat;
