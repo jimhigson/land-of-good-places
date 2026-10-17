@@ -131,9 +131,20 @@ shard 9, CHECK_MENU_REACH_URL in with-dev-server).
 Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue off, M9) →
 /tmp/hotel-unstick/mut-*.log; red check:exits on 503bd56f → red-exits-full.log.
 
+## Red proofs, round 3 (logs in /tmp/hotel-unstick)
+- menu: red on 503bd56f (menu-red.log: dex y 379–427, Map y 437–484 OFF-SCREEN at 844x390 and 667x375);
+  green here (menu-2.log: second column dex/Map y 90–196). Screens pr721/12–15 on qa-screenshots.
+- check:exits on 503bd56f (red-exits-full.log): rule (g) LEFT INSIDE ×3; 2c 5 exits 0.10–0.28 m.
+- check:hotel on 503bd56f (red-hotel-33.log, copy with 503bd56f's café constants): probe 33 lobby 246
+  ways in, breakfast 10, garden 4, ocean 42; probe 31 22 > 12; probe 32 7 walks off the tables stuck.
+- mutation A, old café + rescue (mut-A.log): probe 33 lobby 123 ways into the strip, overlap 0.000.
+- mutation B, new café, no rescue (mut-B.log): lobby 122 (deck sofas, overlap 0.51), breakfast 10,
+  garden 4, ocean 42. mut-B-sites.log lists every site (pending).
+- M9, M10 (bridgeCovers/connectors off) → mut-M9.log, mut-M10.log (pending).
+
 ## Status
-- [x] re-review items + minors pushed; check:exits OK (exits-16), check:hotel OK (hotel-33d)
-- [ ] menu check green here; red on 503bd56f (red worktree has CI parks 43ad19ac in .parks/)
-- [ ] red proofs: probe 33 on 503bd56f's café (copy check-hotel with local CAFE_TABLE_*), A/B/M9
-- [ ] full `pnpm run check`; CI green on the final head; preview /hotel-cafe at 844x390 + desktop
-- [ ] PR body; one PR comment answering QA + re-review with commits and red proofs
+- [x] re-review items + minors; check:exits OK (exits-16), check:hotel OK (hotel-33d); menu green
+- [ ] CI parks artifact parks-b72244bf… → .parks/, then full `pnpm run check` + `test:procgen` locally
+- [ ] push (local commits after 066a42db: label fix, two check:hotel doc commits, this handoff)
+- [ ] CI green on the final head; preview /hotel-cafe at 844x390 + desktop (browser-preview-3.mjs)
+- [ ] PR body (/tmp/hotel-unstick/pr-body.md, placeholders) + answer comment (/tmp/hotel-unstick/answer-3.md)
