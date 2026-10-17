@@ -110,8 +110,30 @@ putDownSpace (7a948d2e), restore order (1aa734ae), /spawn logs a move (7ffe107e)
 Finding: with 2 pets the suite's bedroom-0 pet bed sits 0.63 m from the painting's stand spot
 (overlap 0.84 m); the rule moves her 1.00 m off it on "See the painting"'s exit.
 
+## Round 3: QA "not approved" (6235898833) + re-review "changes requested" (6236273370)
+Re-review — 2ca1efe6 (dismount: clause 4 starts only from a cell she walks to: nearest standable
+within START_REACH 1.5 m, floor within a step, swept body clear; cost worded "about 6 ms, slowest
+a frame or two"), b2323d20 (check:exits rule (g) sealed boxes 0.66/0.72/0.80; judge walks a real
+Player away 8 ways 2.5 s ≥ 1.5 m; 2c sweep: edge band, stride 3 interiors / 6 park, ~10,600 exits,
+every off-lattice put-down walked ≥ 1.5 m; each visit asserts she is really in that space — a
+walk-away at the slide's mouth once carried her into the park), ef811603 (Hotel.nap one doc).
+Red on 503bd56f (debug copy, sections 1+2c verbatim): rule (g) LEFT INSIDE ×3; 2c 5 exits
+(Reptile House (576.9x,-617.0x) 0.10–0.12 m, park (-12.01,-2.04,28.71) 0.28 m).
+QA — 787b324f (Player: a wedge lets go of her — overlap > 5 cm for 0.5 s → teleportTo, i.e. the
+put-down rule; counter wedgeRescues), 25dfabc6 (café: CAFE_TABLE_A x -9.7 spin 1.35, chairs E/W:
+strip 1.68 m, north channel 1.95 m; a trough was tried first and left wedges + a pocket north of
+the table — abandoned), ecc3c800 (check:hotel probe 33 + probe 32 rework + probe 31 lobby 22→12).
+Probe 33 without the rescue found wedges: bathrooms (breakfast/garden/ocean), gallery sofas on
+the deck (z −24.5), lounge sofa+lamp (±8, 7), chair b-1 corner; with it: 0 traps, all rooms.
+Menu: style.css — drawer max-height = screen − 5.5rem − insets, column-wraps (no scroll: a
+six-year-old sees every pill at once); scripts/check-menu-reach.mts (+ check:served-menu-reach in
+shard 9, CHECK_MENU_REACH_URL in with-dev-server).
+Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue off, M9) →
+/tmp/hotel-unstick/mut-*.log; red check:exits on 503bd56f → red-exits-full.log.
+
 ## Status
-- [x] the three items + minors, pushed; check:exits OK, check:hotel OK (LGP_PARK_FILE=CI's 7b220c83 park)
-- [ ] reds: /tmp/hotel-unstick/red3 (K, P-M3, P-follow, control), red4 (A, B, G) in hotel-unstick-red
-- [ ] local seed-5 park for 43ad19ac (build-parks-7.log), then full `pnpm run check`
-- [ ] CI green on the final head; preview /hotel-cafe loaded; PR body + review answer comment
+- [x] re-review items + minors pushed; check:exits OK (exits-16), check:hotel OK (hotel-33d)
+- [ ] menu check green here; red on 503bd56f (red worktree has CI parks 43ad19ac in .parks/)
+- [ ] red proofs: probe 33 on 503bd56f's café (copy check-hotel with local CAFE_TABLE_*), A/B/M9
+- [ ] full `pnpm run check`; CI green on the final head; preview /hotel-cafe at 844x390 + desktop
+- [ ] PR body; one PR comment answering QA + re-review with commits and red proofs
