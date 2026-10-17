@@ -288,9 +288,8 @@ export class ParkTrain implements GameSystem, TrainService {
       // walker beside the bridge), with an ABSOLUTE top at the local road
       // surface plus the parapet (stops a walker on the hump stepping over
       // the side) — see `bridges.ts`'s `BridgeWall`.
-      collision.addWall(
-        rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2,
-        rail.topHeight, false, true,
+      collision.kinded('bridge parapet', () =>
+        collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true),
       );
     }
 

@@ -369,17 +369,18 @@ if (SKIP_CENSUS) {
     say(climbed.length === 0, `${run.name}: no guard climbed${climbed.length ? ` — ${climbed.length}: ${[...new Set(climbed.map((t) => `${t.solid.kind} (${GUARD_KINDS[t.solid.kind]})`))].join(', ')}, e.g. ${run.link(climbed[0]!.at)}` : ''}`);
     // On the railway: a reached place inside the fences that walking from the start does not reach.
     if (run.name === 'the park') {
-      const onRail: Stand[] = [];
-      const consider = (stand: Stand): void => {
+      const onRail: { stand: Stand; how: string }[] = [];
+      const consider = (stand: Stand, how: string): void => {
         const at = route.pointAt(route.distanceNear(stand.x, stand.z), railScratch);
-        if (Math.hypot(at.x - stand.x, at.z - stand.z) > FENCE_OFFSET - 0.2) return;
+        const off = Math.hypot(at.x - stand.x, at.z - stand.z);
+        if (off > FENCE_OFFSET - 0.2) return;
         if (stand.y > terrainHeight(stand.x, stand.z) + 2.5) return; // a bridge deck over it
         if (main(stand.x, stand.z, stand.y)) return; // a level crossing: walked to
-        onRail.push(stand);
+        onRail.push({ stand, how: `${how}, ${off.toFixed(2)} m off the rail's centre, ${(stand.y - terrainHeight(stand.x, stand.z)).toFixed(2)} m up` });
       };
-      for (const top of result.tops) consider(top.at);
-      for (const region of result.regions.slice(1)) consider(region.entry);
-      say(onRail.length === 0, `the railway is out of reach: ${onRail.length} place(s) inside its fences reached off the walk${onRail.length ? `, e.g. ${run.link(onRail[0]!)}` : ''}`);
+      for (const top of result.tops) consider(top.at, `on a ${top.solid.kind || 'solid'} (${top.how})`);
+      for (const region of result.regions.slice(1)) consider(region.entry, `${region.via}`);
+      say(onRail.length === 0, `the railway is out of reach: ${onRail.length} place(s) inside its fences reached off the walk${onRail.length ? `:\n${onRail.slice(0, 12).map((r) => `      ${run.link(r.stand)} — ${r.how}`).join('\n')}` : ''}`);
     }
     // Off the edge of a space: a drop to well below where she started.
     const below = result.regions.slice(1).filter((region) => region.entry.y < run.start.y - 1.5 && run.name !== 'the park');
