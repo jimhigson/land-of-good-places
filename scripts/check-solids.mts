@@ -383,18 +383,19 @@ if (SKIP_CENSUS) {
     const stuck: string[] = [];
     for (const region of result.regions.slice(1)) {
       let out = false;
+      // Out is anywhere her walking from the start reaches, or any top she
+      // walks off into it; the search stops at the first.
+      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
       try {
-        const local = reachWithJumps({
+        out = reachWithJumps({
           collision,
           sample,
           grid,
           start: region.entry,
           inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - region.entry.x, z - region.entry.z) < 14,
           fps: 60,
-        });
-        out =
-          local.tops.some((top) => main(top.at.x, top.at.z, top.at.y) || joinsMain({ collision, sample }, main, top.at, 60)) ||
-          local.regions.slice(1).some((r) => main(r.entry.x, r.entry.z, r.entry.y) || joinsMain({ collision, sample }, main, r.entry, 60));
+          until: outside,
+        }).stopped;
       } catch {
         out = joinsMain({ collision, sample }, main, region.entry, 60, 14);
       }
@@ -569,17 +570,31 @@ console.log('\n7. THE BOUNDARY AT HEIGHT — the park\'s edge holds her at every
 {
   if (PROVE === 'no-bounds') collision.setPlayBounds(circleBoundary(1e5));
   let pushes = 0;
+  let unplaced = 0;
   const out: string[] = [];
   for (let i = 0; i < 64; i += 1) {
     const a = (i / 64) * Math.PI * 2;
     // March outward from well inside the edge along this bearing until the edge.
     let r = 20;
     while (GARDEN_PLAY_BOUNDARY.distanceToEdge(Math.cos(a) * r, Math.sin(a) * r) > 1.5 && r < 400) r += 0.5;
-    const x = Math.cos(a) * r;
-    const z = Math.sin(a) * r;
     for (const lift of [0, 1.5, 4, 10]) {
+      // From somewhere her body fits: inward from there until nothing holds
+      // it. A start inside a solid is a body the resolver pushes out of it,
+      // wherever that is — the railway's corridor runs within a body of the
+      // edge on some bearings, and a start in it measured the corridor, not
+      // the edge.
+      let from = r;
+      const p = new Vector3();
+      const place = (at: number): void => {
+        p.set(Math.cos(a) * at, terrainHeight(Math.cos(a) * at, Math.sin(a) * at) + lift, Math.sin(a) * at);
+      };
+      place(from);
+      while (collision.deepestSolidOverlap(p, PLAYER_RADIUS, lift, undefined, KID_HEIGHT) > 0 && from > r - 12) place((from -= 0.25));
+      if (collision.deepestSolidOverlap(p, PLAYER_RADIUS, lift, undefined, KID_HEIGHT) > 0) {
+        unplaced += 1;
+        continue;
+      }
       pushes += 1;
-      const p = new Vector3(x, terrainHeight(x, z) + lift, z);
       for (let k = 0; k < 40; k += 1) collision.resolveMovement(p, Math.cos(a) * 0.3, Math.sin(a) * 0.3, PLAYER_RADIUS, lift, MAX_FRAME_DELTA);
       const gap = GARDEN_PLAY_BOUNDARY.distanceToEdge(p.x, p.z);
       if (gap < PLAYER_RADIUS - 0.05) out.push(`${(a * 180 / Math.PI).toFixed(0)}° at ${lift} m up: ${gap.toFixed(2)} m from the edge`);
@@ -587,6 +602,7 @@ console.log('\n7. THE BOUNDARY AT HEIGHT — the park\'s edge holds her at every
   }
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   say(out.length === 0, `${pushes} bodies pushed 12 m outward at 64 bearings, from the grass to 10 m up: ${out.length} got past the edge${out.length ? ` — ${out.slice(0, 6).join('; ')}` : ''}`);
+  if (unplaced) note(`clause 7: ${unplaced} of ${64 * 4} bearing-heights had no room for her within 12 m of the edge and pushed nothing`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');

@@ -42,7 +42,7 @@ export interface ReachedTop {
   readonly solid: SolidView;
   readonly top: number;
   /** `'step'`: walked up onto it. `'jump'`: from the ground beside it. `'chain'`: from another top. `'fall'`: walked off something onto it. */
-  readonly how: 'step' | 'jump' | 'chain';
+  readonly how: 'start' | 'step' | 'jump' | 'chain';
   /** Where she stood on it. */
   readonly at: Stand;
   /** The stand she left to get there. */
@@ -63,6 +63,12 @@ export interface ReachOptions {
   readonly fps?: number;
   /** Progress lines, to stderr. */
   readonly say?: (line: string) => void;
+  /**
+   * Stop as soon as she stands somewhere this says yes to — a top reached or
+   * a place dropped into. For "can she get out of here?", where the first way
+   * out is the whole answer and the rest of the search is wasted.
+   */
+  readonly until?: (stand: Stand) => boolean;
 }
 
 export interface ReachResult {
@@ -74,6 +80,8 @@ export interface ReachResult {
   readonly groundReached: (x: number, z: number, y: number) => boolean;
   /** Simulated jumps attempted, for the coverage line. */
   readonly jumps: number;
+  /** True when `until` said yes and the search stopped there. */
+  readonly stopped: boolean;
 }
 
 /** Points round a solid's outline, each with the outward direction there. */
@@ -266,9 +274,15 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   };
 
   const regions: { entry: Stand; via: string; has: (x: number, z: number, y: number) => boolean }[] = [];
+  // She may start on a solid's top — a place a drop put her can be a stool —
+  // and then that top is her first source: its chains and drops are tried
+  // like any other's. Treated as ground only, a start on a top had no lattice
+  // under it and every way off it went untried, so a stool in a cubicle read
+  // as a trap.
+  const startTop = solids.find((solid) => standsOn(solid, options.start)) ?? null;
   const first = grid.reachableFrom(options.start.x, options.start.z, options.start.y, sample);
-  if (!first) throw new Error(`solidReach: no lattice under the start (${options.start.x.toFixed(1)}, ${options.start.z.toFixed(1)})`);
-  regions.push({ entry: options.start, via: 'the start', has: first });
+  if (!first && !startTop) throw new Error(`solidReach: no lattice under the start (${options.start.x.toFixed(1)}, ${options.start.z.toFixed(1)})`);
+  regions.push({ entry: options.start, via: 'the start', has: first ?? (() => false) });
   const groundReached = (x: number, z: number, y: number): boolean => regions.some((region) => region.has(x, z, y));
 
   const reached = new Map<SolidView, ReachedTop>();
@@ -282,15 +296,18 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   // the ground a new region opened up.
   const triedRunUps = new Set<string>();
 
+  let stopped = false;
   const markReached = (top: ReachedTop): void => {
     if (reached.has(top.solid)) return;
     reached.set(top.solid, top);
     fresh.push(top);
+    if (options.until?.(top.at)) stopped = true;
   };
+  if (startTop) markReached({ solid: startTop, top: options.start.y, how: 'start', at: options.start, from: options.start });
 
   let changed = true;
   let round = 0;
-  while (changed) {
+  while (changed && !stopped) {
     changed = false;
     round += 1;
     // 1. Tops she walks up onto: from reached ground just outside a solid's
@@ -303,6 +320,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
     //    height it is asked at, and so read a station's roof as reached by
     //    whoever walked under it.
     for (const solid of solids) {
+      if (stopped) break;
       if (reached.has(solid)) continue;
       for (const o of outline(solid, 0.6)) {
         const top = solid.topAt(o.x, o.z);
@@ -324,6 +342,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
 
     // 2. Jumps from the ground beside a solid onto it.
     for (const solid of solids) {
+      if (stopped) break;
       if (reached.has(solid)) continue;
       const points = outline(solid, 1.0);
       let done = false;
@@ -358,6 +377,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
     const sources = fresh;
     fresh = [];
     for (const source of sources) {
+      if (stopped) break;
       // 3. Chains: onto any other top within a long jump of it.
       for (const solid of near(source.solid.centreX, source.solid.centreZ, source.solid.reach + 6 + 8)) {
         if (reached.has(solid)) continue;
@@ -417,12 +437,16 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
         regions.push({ entry: landed, via: `a drop off ${source.solid.kind || source.solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
         changed = true;
+        if (options.until?.(landed)) {
+          stopped = true;
+          break;
+        }
       }
     }
     say(`  round ${round}: ${reached.size} tops, ${regions.length} region(s), ${jumps} jumps simulated`);
   }
 
-  return { tops: [...reached.values()], regions, groundReached, jumps };
+  return { tops: [...reached.values()], regions, groundReached, jumps, stopped };
 }
 
 /** Within one step of `fromY` at (x, z) — the reach her walking spends. */
