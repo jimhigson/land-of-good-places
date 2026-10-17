@@ -188,19 +188,25 @@ export function joinsMain(
   fps: number,
   reach = 8,
 ): boolean {
-  const targets: { x: number; z: number }[] = [];
+  // Ground the start reaches, nearest first and spread round her: one target
+  // per 30° sector, the nearest in each, so a bush between her and the
+  // nearest cell does not hide the open ground on her other side.
+  const bySector = new Map<number, { x: number; z: number; r: number }>();
   for (let r = 0.5; r <= reach; r += 0.5) {
     const count = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.75));
     for (let i = 0; i < count; i += 1) {
       const a = (i / count) * Math.PI * 2;
+      const sector = Math.floor((a / (Math.PI * 2)) * 12);
+      if (bySector.has(sector)) continue;
       const x = from.x + Math.cos(a) * r;
       const z = from.z + Math.sin(a) * r;
-      if (main(x, z, options.sample(x, z, from.y + 1))) targets.push({ x, z });
+      if (main(x, z, options.sample(x, z, from.y + 1))) bySector.set(sector, { x, z, r });
     }
-    if (targets.length >= 6) break;
+    if (bySector.size >= 12) break;
   }
+  const targets = [...bySector.values()].sort((a, b) => a.r - b.r);
   const dt = 1 / fps;
-  for (const target of targets.slice(0, 6)) {
+  for (const target of targets) {
     const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: () => false });
     sim.position.set(from.x, from.y, from.z);
     sim.previousPosition.copy(sim.position);
@@ -395,9 +401,19 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         const landed = walkOff(options, source.solid, o, fps);
         if (!landed) continue;
         if (groundReached(landed.x, landed.z, landed.y)) continue;
+        // Her lattice from where she landed: if it walks into ground already
+        // reached, this is the same place by another door, not a new one.
+        const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
+        let joins = false;
+        if (flood && flood.has(landed.x, landed.z, landed.y)) {
+          flood.forEachCell((x, z) => {
+            if (!joins && groundReached(x, z, sample(x, z, landed.y + 1))) joins = true;
+          });
+        }
+        if (joins) continue;
+        // Somewhere her lattice cannot see: ask her own walking.
         if (joinsMain(options, groundReached, landed, fps)) continue;
-        const flood = grid.reachableFrom(landed.x, landed.z, landed.y, sample);
-        const has = flood && flood(landed.x, landed.z, landed.y) ? flood : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
+        const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
         regions.push({ entry: landed, via: `a drop off ${source.solid.kind || source.solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
         changed = true;
       }

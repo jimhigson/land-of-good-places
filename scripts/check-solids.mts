@@ -47,12 +47,13 @@ import { reachWithJumps, joinsMain, runAndJump, type ReachedTop, type Stand } fr
 import { SimPlayer } from './playerSim.mts';
 import { CollisionWorld, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
-import { PLAYER_LONGEST_STEP, PLAYER_RADIUS, MAX_FRAME_DELTA, INTERIOR_PLAY_RADIUS } from '../src/core/constants.ts';
+import { PLAYER_LONGEST_STEP, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_BOUNDARY, circleBoundary, type ParkBoundary } from '../src/world/boundary.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { CASTLE_FLOORS, floorX, floorZ } from '../src/world/building/floors.ts';
+import { castleFloorBounds } from '../src/world/building/floorBounds.ts';
 import { LIFT_DOOR_MAX_Z, LIFT_DOOR_MIN_Z, LIFT_STAND_X } from '../src/world/building/layout.ts';
 import { LOBBY } from '../src/world/hotel/layout.ts';
 import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
@@ -94,8 +95,6 @@ function note(line: string): void {
  * stay out of her reach, which clause 4 measures.
  */
 const INVISIBLE_SOLIDS: Readonly<Record<string, string>> = {
-  'roof slide mouth (invisible guard)':
-    "the ginormous slide's doorway in the roof garden's battlement: the ride is boarded from its pad, and this is all that stands between the pad and the drop",
   '': '',
 };
 /** The railway's centre band carries no kind (it is registered bare in `train/fence.ts`) — found by its own width. */
@@ -276,7 +275,7 @@ const spaceRuns: SpaceRun[] = [
       const z = floorZ(floor, (LIFT_DOOR_MIN_Z + LIFT_DOOR_MAX_Z) / 2);
       return { x, z, y: sample(x, z, 50) };
     })(),
-    bounds: circleBoundary(INTERIOR_PLAY_RADIUS, floor.originX, floor.originZ),
+    bounds: castleFloorBounds(floor),
     link: (s: Stand) => `/castle?deck=${floor.index}&at=${(s.x - floor.originX).toFixed(1)},${(s.z - floor.originZ).toFixed(1)}&seed=${seed}`,
   })),
   {

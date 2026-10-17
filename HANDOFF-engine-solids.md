@@ -111,3 +111,18 @@ pylon/fountain centrepiece/ferris leg/tree 1 each. Regions via drops: bushes (po
 (-83.3, 27.4), ferris deck/rail, pool rim, wooden wall, stall booth (-43.1, -42.9).
 (c) candidates: railway fences + bridge parapets (railway), stall awnings (roofs), castle roof
 battlement (troughs → merlons → void), hotel balustrades (drop to lobby).
+
+## check:solids (scripts/check-solids.mts, commit 18656597) — not yet in the chain
+Clauses: 1 real tops, 2 landings on drawn tops, 3 precedents (+1.0/1.6 m controls), 4 census (park +
+castle floors + hotel lobby + library + reptile hall; guards climbed / railway / off-floor / traps),
+5 marches at new kinds, 6 headroom, 7 boundary at height. Red proofs via SOLIDS_PROVE: infinite,
+too-tall, ghost, no-bounds proved red (fast clauses, SOLIDS_SKIP_CENSUS=1). low-top, low-fence, trap,
+no-headroom need the census run.
+
+## (c) in progress (uncommitted at time of writing — see git status)
+- Railway fence raised: posts 0.95 → 1.75 m, a top rail at 1.62 (top 1.67) over the old knee rail.
+- Castle roof: soft edge at the battlement's outer face (+ lift alcove) — `floorBounds.ts`
+  `castleFloorBounds` (one owner; NPC journey asks it too). The invisible slide-mouth wall is gone.
+- Decisions: interior drops onto the same room's floor (hotel gallery) are physics, not escapes —
+  listed for Jim (raising the balustrade = the hotel's authored rail height, shared with stairs).
+- Open: stall roofs (awning reached via booth walls / bushes), bush launch pads (crowns to 2.1 m).
