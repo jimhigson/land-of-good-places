@@ -177,3 +177,18 @@ no-headroom need the census run.
   Clause 2 park: 241 landings, 0 off.
 - Remaining: proofs (/tmp/es-proofs), gate (check/test:procgen/build + sweep:fountain-hop), seed 9 r0 +
   seed 3 attempts, look, PR head push, CI, preview, PR body, final report.
+
+## (c) state at 52e2d5b2 (22:10, 17 Oct)
+- New clause: every top she reaches she can get down from (hemmedIn tops searched); proof `stranded`.
+- Census fixes found by the proofs: walk-off compares with the top in HER column (radial tops fall away
+  0.2 m/m) — spurious drops gone (regions 71→38); the start region is the lattice flood only if it
+  covers the start, else (ground start in a stamped cell) only if she walks into it, else a 0.5 m disc;
+  stage 2a hops from each region's entry at tops within 2.5 m (bush-pocket false traps).
+- Proofs at 52e2d5b2: all 11 red (exit 1) on their clauses; green controls core+park exit 0
+  (/tmp/es-proofs3). Seed attempts at c296f8b1 (same src): 9 r0 ACCEPTED, 3 r7 ACCEPTED (fresh solves:
+  delete .parks first or the attempt hydrates and stall-accommodate is 'broken').
+- test:procgen 0 (46 files, 2154 tests), build 0, sweep:fountain-hop 16/16 (c296f8b1).
+- check:flat-primitives caught a y difference in the jet pack report → altitudeAt (42dfdb38).
+- Look (c296f8b1, port 5797, killed by PID): stone wall, wooden wall, fountain rim, crate (keys released
+  over it), trough, bench stood on; 1.67 m fence not climbed. /tmp/es-look/shots-c/.
+- PR body draft: /tmp/es-pr-body.md (placeholders __PREVIEW__, __IDENTITY__, __LOCALCHECK__, __CI__...).
