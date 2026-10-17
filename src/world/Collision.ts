@@ -346,6 +346,30 @@ function boxCorners(box: BoxCollider): readonly (readonly [number, number])[] {
 }
 
 /**
+ * A solid as {@link CollisionWorld.forEachSolid} shows it to a measure.
+ * `depthAt` is how far inside the footprint a point is (negative outside),
+ * `reach` the furthest the footprint gets from its centre, `halfWidth` its
+ * thinnest half-width (a capsule's half-thickness, a box's short half).
+ */
+export interface SolidView {
+  readonly shape: 'circle' | 'capsule' | 'box';
+  readonly kind: string;
+  readonly owner: string;
+  readonly centreX: number;
+  readonly centreZ: number;
+  readonly halfWidth: number;
+  readonly reach: number;
+  depthAt(x: number, z: number): number;
+  topAt(x: number, z: number): number;
+  baseAt(x: number, z: number): number;
+  readonly topIsAbsolute: boolean;
+  readonly topHeight: number;
+  readonly hopHeight: number;
+  readonly autoHoppable: boolean;
+  readonly banded: boolean;
+}
+
+/**
  * How far below a collider's top the mover's feet may still be and count as
  * "cleared it". Without this a jump that just grazes the top of a wall would
  * still be caught by the collider, which reads as snagging rather than
@@ -1393,6 +1417,79 @@ export class CollisionWorld {
         [box.cx, box.cz],
         box.hopHeight,
       );
+    }
+  }
+
+  /**
+   * **Every solid, as a read-only view** — what it is, where its footprint is,
+   * and its top and base at any column — for a measure that has to ask about
+   * solids as solids rather than as three collider kinds (`check:solids`, the
+   * census). A view, not the collider: nothing a measure holds can move a tree.
+   */
+  forEachSolid(visit: (solid: SolidView) => void): void {
+    for (const circle of this.circles) {
+      visit({
+        shape: 'circle',
+        kind: circle.kind,
+        owner: circle.owner,
+        centreX: circle.x,
+        centreZ: circle.z,
+        halfWidth: circle.radius,
+        reach: circle.radius,
+        depthAt: (x, z) => circle.radius - Math.hypot(x - circle.x, z - circle.z),
+        topAt: (x, z) => solidTopAt(circle, x, z),
+        baseAt: (x, z) => solidBaseAt(circle, x, z),
+        topIsAbsolute: circle.topIsAbsolute,
+        topHeight: circle.topHeight,
+        hopHeight: circle.hopHeight,
+        autoHoppable: circle.autoHoppable,
+        banded: banded(circle),
+      });
+    }
+    for (const wall of this.walls) {
+      const ax = wall.x2 - wall.x1;
+      const az = wall.z2 - wall.z1;
+      const lengthSquared = ax * ax + az * az;
+      visit({
+        shape: 'capsule',
+        kind: wall.kind,
+        owner: wall.owner,
+        centreX: (wall.x1 + wall.x2) / 2,
+        centreZ: (wall.z1 + wall.z2) / 2,
+        halfWidth: wall.halfThickness,
+        reach: Math.sqrt(lengthSquared) / 2 + wall.halfThickness,
+        depthAt: (x, z) => {
+          let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          return wall.halfThickness - Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
+        },
+        topAt: (x, z) => solidTopAt(wall, x, z),
+        baseAt: (x, z) => solidBaseAt(wall, x, z),
+        topIsAbsolute: wall.topIsAbsolute,
+        topHeight: wall.topHeight,
+        hopHeight: wall.hopHeight,
+        autoHoppable: wall.autoHoppable,
+        banded: banded(wall),
+      });
+    }
+    for (const box of this.boxes) {
+      visit({
+        shape: 'box',
+        kind: box.kind,
+        owner: box.owner,
+        centreX: box.cx,
+        centreZ: box.cz,
+        halfWidth: Math.min(box.halfX, box.halfZ) + box.rounding,
+        reach: Math.hypot(box.halfX, box.halfZ) + box.rounding,
+        depthAt: (x, z) => boxDepth(box, x, z, 0),
+        topAt: (x, z) => solidTopAt(box, x, z),
+        baseAt: (x, z) => solidBaseAt(box, x, z),
+        topIsAbsolute: box.topIsAbsolute,
+        topHeight: box.topHeight,
+        hopHeight: box.hopHeight,
+        autoHoppable: box.autoHoppable,
+        banded: banded(box),
+      });
     }
   }
 

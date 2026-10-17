@@ -226,6 +226,19 @@ export function altitudeAt(x: number, y: number, z: number): number {
 }
 
 /**
+ * **The world `y` in column `(x, z)` of the sphere `radius` from the planet's
+ * centre** — for a height that belongs to something other than the ground under
+ * this column: a rigid thing leaned on the sphere at its own centre (the
+ * fountain's rim, a station's platform) holds one radius across its whole
+ * footprint, whatever the terrain under each part of it does. `-Infinity` past
+ * the horizon, where no column reaches that radius.
+ */
+export function yAtRadius(x: number, z: number, radius: number): number {
+  const above = radius * radius - x * x - z * z;
+  return above > 0 ? Math.sqrt(above) - GROUND_SPHERE_RADIUS : -Infinity;
+}
+
+/**
  * **The world `y` at which a point in this column stands `altitude` metres above
  * the ground** — the inverse of {@link altitudeAt} that keeps `(x, z)` fixed.
  *

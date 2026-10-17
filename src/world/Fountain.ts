@@ -22,7 +22,7 @@ import {
   playPloosh,
   type WaterSplashEffects,
 } from '../art/effects/waterSplash';
-import { standOnSphere, terrainHeight, upAt } from './terrain';
+import { groundRadiusAt, standOnSphere, terrainHeight, upAt, yAtRadius } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 import type { Player } from '../entities/Player';
@@ -94,6 +94,51 @@ const GLOW_DISTANCE = 27;
  * the frame leans. They used to be three separate `0.82`s.
  */
 const WATER_HEIGHT = 0.82;
+
+/** The rim's stone crest: a torus of this tube radius… */
+const RIM_TUBE = 0.22;
+/** …whose centre line stands this high above the fountain's base… */
+const RIM_CREST_CENTRE = 1.05;
+/** …so its top, where a child lands on the rim, is here. One owner for the mesh and the solid. */
+const RIM_CREST = RIM_CREST_CENTRE + RIM_TUBE;
+
+/** The central column's foot, the widest it gets. */
+const COLUMN_FOOT_RADIUS = 0.62;
+/**
+ * The upper bowl: its rim radius, and the heights of its underside and its
+ * top. Exported as the reach of the fountain's solid middle, so a measure of
+ * where a child can wade knows where the water stops being somewhere to stand
+ * (`fountainHop.ts`).
+ */
+export const BOWL_RADIUS = 1.35;
+const BOWL_BOTTOM = 1.74;
+const BOWL_TOP = 2.16;
+
+/**
+ * **The fountain's middle is solid** — the column and the bowl over it, which
+ * a wading child used to walk straight through (no collider at all: the
+ * statue's plinth is out of reach, and "the central column below has never had
+ * one either").
+ *
+ * The column stands on the basin floor (`COLUMN_FOOT_RADIUS`, its top at the
+ * bowl's underside); the bowl is **banded** — it begins `BOWL_BOTTOM` up — and
+ * reaches out to `BOWL_RADIUS`, so a child wading round the column meets the
+ * bowl at her shoulders and is held off it, exactly as she would be by a stone
+ * bowl at head height. It is `navStamped` for the same reason the lobby's
+ * flight flanks are: a body cannot stand under it, so the route lattice must
+ * not offer the water under it as somewhere to walk. Its top is where the
+ * statue stands, out of any jump's reach from the water.
+ *
+ * Both held as radii from the planet's centre through the fountain's own
+ * centre, the rigid lean the whole fountain is drawn with.
+ */
+function registerCentrepiece(collision: CollisionWorld, x: number, z: number): void {
+  const base = groundRadiusAt(x, z);
+  collision.kinded('fountain centrepiece', () => {
+    collision.addCircle(x, z, COLUMN_FOOT_RADIUS, yAtRadius(x, z, base + BOWL_BOTTOM), false, true);
+    collision.addCircle(x, z, BOWL_RADIUS, yAtRadius(x, z, base + BOWL_TOP), false, true, yAtRadius(x, z, base + BOWL_BOTTOM), true);
+  });
+}
 
 /** The basin's rim radius — the ground the fountain claims, plus its rim collider's half. */
 export const FOUNTAIN_RIM_RADIUS = 4.2;
@@ -210,9 +255,9 @@ export class Fountain implements GameSystem {
     basinWall.receiveShadow = true;
     this.group.add(basinWall);
 
-    const rim = new Mesh(new TorusGeometry(this.rimRadius + 0.06, 0.22, 10, 44), trimMaterial);
+    const rim = new Mesh(new TorusGeometry(this.rimRadius + 0.06, RIM_TUBE, 10, 44), trimMaterial);
     rim.rotation.x = Math.PI / 2;
-    rim.position.y = 1.05;
+    rim.position.y = RIM_CREST_CENTRE;
     rim.castShadow = true;
     rim.receiveShadow = true;
     this.group.add(rim);
@@ -249,14 +294,14 @@ export class Fountain implements GameSystem {
     this.group.add(water);
 
     // --- pedestal and upper bowl -----------------------------------------
-    const column = new Mesh(new CylinderGeometry(0.42, 0.62, 1.7, 16), stoneMaterial);
+    const column = new Mesh(new CylinderGeometry(0.42, COLUMN_FOOT_RADIUS, 1.7, 16), stoneMaterial);
     column.position.y = 0.95;
     column.castShadow = true;
     column.receiveShadow = true;
     this.group.add(column);
 
-    const bowl = new Mesh(new CylinderGeometry(1.35, 0.55, 0.42, 24), trimMaterial);
-    bowl.position.y = 1.95;
+    const bowl = new Mesh(new CylinderGeometry(BOWL_RADIUS, 0.55, BOWL_TOP - BOWL_BOTTOM, 24), trimMaterial);
+    bowl.position.y = (BOWL_TOP + BOWL_BOTTOM) / 2;
     bowl.castShadow = true;
     bowl.receiveShadow = true;
     this.group.add(bowl);
@@ -287,9 +332,10 @@ export class Fountain implements GameSystem {
     //  - the bowl water it stands on is a 1.2 m-radius disc, against the
     //    plinth's 0.82 m footing — it sits comfortably inside its own puddle.
     //
-    // No collider. The plinth base is 2.17 m up, well over the 1.4 m jump
-    // ceiling `Player.ts` documents, so a child cannot reach it to be blocked
-    // by it — and the central column below has never had one either.
+    // The statue itself needs no collider: its plinth starts 2.17 m up, on top
+    // of the bowl, and the bowl is solid (below). The column and the bowl were
+    // ghosts until the engine rework — a wading child walked through the stone
+    // — and are solids now: see `registerCentrepiece`.
     this.statue = createRipikaStatue();
     this.statue.root.position.y = 2.17;
     this.group.add(this.statue.root);
@@ -367,20 +413,41 @@ export class Fountain implements GameSystem {
     // that the polygon reads as a circle: at 28 segments the midpoint of an
     // edge sags under the true radius by about 2.5 cm, well inside the walls'
     // own thickness.
+    //
+    // **Its top is the crest she can see**, as a place (the engine rework):
+    // the torus's own top, `RIM_CREST`, held at one radius from the planet's
+    // centre all the way round because the fountain is one rigid thing leaned
+    // at its centre. A jump that clears it can land on it and walk round it;
+    // from the water, 0.57 m below, she steps up onto it. The hop is still
+    // planned on `RIM_TOP_HEIGHT` (`hopHeight`), the height the route lattice
+    // and the lookahead have always asked about, so the fountain's routes are
+    // exactly what they were.
+    const crestRadius = groundRadiusAt(x, z) + RIM_CREST;
     const RIM_SEGMENTS = 28;
-    for (let i = 0; i < RIM_SEGMENTS; i += 1) {
-      const a1 = (i / RIM_SEGMENTS) * Math.PI * 2;
-      const a2 = ((i + 1) / RIM_SEGMENTS) * Math.PI * 2;
-      collision.addWall(
-        x + Math.cos(a1) * this.rimRadius,
-        z + Math.sin(a1) * this.rimRadius,
-        x + Math.cos(a2) * this.rimRadius,
-        z + Math.sin(a2) * this.rimRadius,
-        FOUNTAIN_RIM_COLLIDER_HALF,
-        Fountain.RIM_TOP_HEIGHT,
-        true,
-      );
-    }
+    collision.kinded('fountain rim', () => {
+      for (let i = 0; i < RIM_SEGMENTS; i += 1) {
+        const a1 = (i / RIM_SEGMENTS) * Math.PI * 2;
+        const a2 = ((i + 1) / RIM_SEGMENTS) * Math.PI * 2;
+        const x1 = x + Math.cos(a1) * this.rimRadius;
+        const z1 = z + Math.sin(a1) * this.rimRadius;
+        const x2 = x + Math.cos(a2) * this.rimRadius;
+        const z2 = z + Math.sin(a2) * this.rimRadius;
+        collision.addWall(
+          x1,
+          z1,
+          x2,
+          z2,
+          FOUNTAIN_RIM_COLLIDER_HALF,
+          yAtRadius((x1 + x2) / 2, (z1 + z2) / 2, crestRadius),
+          true,
+          true,
+          -Infinity,
+          false,
+          Fountain.RIM_TOP_HEIGHT,
+        );
+      }
+    });
+    registerCentrepiece(collision, x, z);
 
     this.group.add(this.splashEffects.root);
   }
