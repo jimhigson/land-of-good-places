@@ -89,7 +89,7 @@ import { TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { gameStore } from '../src/state/index.ts';
 import { saveFlags } from '../src/state/flags.ts';
-import type { InteractZone } from '../src/world/interact.ts';
+import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
 
 const problems: string[] = [];
 const notes: string[] = [];
@@ -420,16 +420,29 @@ function codeOf(line: string): string {
   return cut >= 0 ? line.slice(0, cut) : line;
 }
 const sites = new Map<string, Placement>();
+/**
+ * Each site's name in `NOT_DRIVEN` (6): its file and its own code — never its
+ * line number, which moves with every edit above it in a 6,000-line file. A
+ * line that occurs more than once in its file is told apart by its order, `#2`.
+ */
+const siteKeys = new Map<string, string>();
 const writes: string[] = [];
 for (const file of sourceFiles(SRC)) {
   const name = relative(new URL('../', import.meta.url).pathname, file);
   if (name === 'src/entities/Player.ts') continue;
+  const seen = new Map<string, number>();
   readFileSync(file, 'utf8')
     .split('\n')
     .forEach((line, index) => {
       const code = codeOf(line);
       for (const placement of PLACEMENTS) {
-        if (new RegExp(`\\.${placement}\\(`).test(code)) sites.set(`${name}:${index + 1}`, placement);
+        if (!new RegExp(`\\.${placement}\\(`).test(code)) continue;
+        const site = `${name}:${index + 1}`;
+        const text = code.trim();
+        const nth = (seen.get(text) ?? 0) + 1;
+        seen.set(text, nth);
+        sites.set(site, placement);
+        siteKeys.set(site, `${name}: ${text}${nth > 1 ? ` #${nth}` : ''}`);
       }
       // Anything else that writes her position — a receiver named for her.
       if (/\b(?:player|this\.player|napper|walker)\??\.(?:position|previousPosition)\.(?:set|copy|add|sub|setX|setY|setZ|addScaledVector|lerp|applyMatrix4)\(|\b(?:player|this\.player)\??\.position\.[xyz]\s*(?:[-+*/]?=)(?!=)/.test(code)) {
@@ -883,6 +896,31 @@ for (const [label, go] of [
   if (!out.out) fail(`${label}: put her where she cannot walk out — ${out.why}`);
 }
 
+// The /hotel-cafe link: sat at the lobby café's middle chair — the one "Leave
+// breakfast" used to strand her behind — and that chip, from there, gets her out.
+{
+  settle();
+  SPACES[0]!.enter();
+  tick(0.2);
+  const startedAt = player.putDowns;
+  const seatZone = 'hotel-chair-lobby-a-1';
+  if (!world.hotel.requestEnterCafe()) fail('the /hotel-cafe link: refused from the park');
+  else {
+    tick(0.3);
+    const seated = zonesIn('hotel.lobby')
+      .find((zone) => zone.id === seatZone)
+      ?.actions?.()
+      .some((action) => action.label === 'Leave breakfast');
+    if (!player.riding || !seated) {
+      fail(`the /hotel-cafe link: not sat at ${seatZone} (riding=${player.riding}, holder ${player.rideHolder?.holding ?? 'none'})`);
+    } else {
+      const left = leave(seatZone, PRIMARY_ACTION);
+      judge(`the /hotel-cafe link — ${seatZone} "Leave breakfast"`, startedAt, 'a breakfast chair', left, 0);
+      arrivals.push(`the /hotel-cafe link: sat at ${seatZone}, left by ${left}`);
+    }
+  }
+}
+
 for (const visit of SPACES) nextDayFrom(visit.name, () => visit.enter());
 // Mid-ride: at breakfast, up a tree, on the train's platform ride, in the castle lift.
 nextDayFrom('a breakfast chair', () => {
@@ -913,40 +951,48 @@ nextDayFrom('the Rail Race', () => {
 
 // ------------------------------------------------------------------ 6. coverage
 
-/** Call sites (3) this check cannot drive (4/5) — each with the reason, so none passes silently. */
+/**
+ * Call sites (3) this check cannot drive (4/5) — each with the reason, so none
+ * passes silently. Named by file and code (see `siteKeys`), so an edit
+ * elsewhere in the file leaves them standing; a changed line must be named again.
+ */
 const NOT_DRIVEN: Readonly<Record<string, string>> = {
-  'src/world/TreeClimbing.ts:258':
+  'src/world/TreeClimbing.ts: else if (this.player.riding) this.player.endRide(this.startSpot());':
     'the tree holder let go with no tree in hand — defensive: a climb always has its tree; the same endRide as the driven letGo beside it',
-  'src/world/TreeClimbing.ts:304':
+  'src/world/TreeClimbing.ts: if (this.player.riding) this.player.endRide(this.startSpot());':
     'the climb bailing out because its tree vanished mid-climb — defensive, unreachable in a built park; endRide through the rule like every other',
-  'src/world/building/Building.ts:2263':
+  'src/world/building/Building.ts: player.endRide({ #2':
     "the helter-skelter's own landing — no trigger in this build starts a non-giant slide (`startRide` is only called for the ginormous slide)",
-  'src/world/hotel/Hotel.ts:2512':
+  'src/world/hotel/Hotel.ts: player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);':
     '/hotel-breakfast with every Floor 1 chair taken — guests take 3 of its 14 chairs, so the link always seats her (driven via the chairs)',
-  'src/world/hotel/Hotel.ts:6349':
+  'src/world/hotel/Hotel.ts: player.endRide(stood);':
     "a window view let go before its iris reached the middle — headless, the iris's middle runs at once, so the shot is always up by then",
-  'src/world/reptileHouse/ReptileHouse.ts:592':
+  'src/world/reptileHouse/ReptileHouse.ts: player.teleportTo(mat.x, REPTILE_HOUSE_FLOOR_Y, mat.z, facing);':
     "the Reptile House's doormat on its own forecourt — only when the park has no plot for the building; this park has one (the plot's doormat is driven)",
-  'src/Game.ts:291': 'restoring a save into a space: Game is not constructible headless — the same Player.teleportTo, and (4) drives the hotel restore it pairs with',
-  'src/Game.ts:297': 'restoring a save in the park: Game is not constructible headless — the same Player.teleportTo',
-  'src/Game.ts:1517': '/spawn?pos=x,z: Game.enterDebugSpawn — the same Player.teleport',
-  'src/Game.ts:1518': '/spawn?pos=x,y,z: Game.enterDebugSpawn — the same Player.teleportTo',
+  'src/Game.ts: this.player.teleportTo(spawn.x, spawn.y, spawn.z, options.startPlace.facing);':
+    'restoring a save into a space: Game is not constructible headless — the same Player.teleportTo, and (4) drives the hotel restore it pairs with',
+  'src/Game.ts: this.player.teleportTo(spawn.x, this.player.position.y, spawn.z, DEFAULT_SPAWN_FACING);':
+    'restoring a save in the park: Game is not constructible headless — the same Player.teleportTo',
+  'src/Game.ts: if (y === undefined) this.player.teleport(x, z, yaw);': '/spawn?pos=x,z: Game.enterDebugSpawn — the same Player.teleport',
+  'src/Game.ts: else this.player.teleportTo(x, y, z, yaw);': '/spawn?pos=x,y,z: Game.enterDebugSpawn — the same Player.teleportTo',
 };
 const undriven: string[] = [];
 const covered: string[] = [];
 for (const [site, placement] of [...sites].sort()) {
+  const key = siteKeys.get(site)!;
   // Runtime frames carry the line the call starts on, which is the line matched.
   if (driven.has(site)) {
     covered.push(`${site} (${placement}) ×${driven.get(site)}`);
-  } else if (NOT_DRIVEN[site]) {
-    undriven.push(`${site} (${placement}): ${NOT_DRIVEN[site]}`);
+  } else if (NOT_DRIVEN[key]) {
+    undriven.push(`${site} (${placement}): ${NOT_DRIVEN[key]}`);
   } else {
     undriven.push(`${site} (${placement}): NOT DRIVEN and no reason given`);
-    fail(`${site} (${placement}) places her and this check never drove it — drive it in (4)/(5), or name it in NOT_DRIVEN with why`);
+    fail(`${site} (${placement}) places her and this check never drove it — drive it in (4)/(5), or name it in NOT_DRIVEN as '${key}' with why`);
   }
 }
-for (const site of Object.keys(NOT_DRIVEN)) {
-  if (!sites.has(site)) fail(`NOT_DRIVEN names ${site}, which is no longer a placement — remove it (line numbers move)`);
+const keys = new Set(siteKeys.values());
+for (const key of Object.keys(NOT_DRIVEN)) {
+  if (!keys.has(key)) fail(`NOT_DRIVEN names '${key}', which is no longer a placement — remove it, or name the line as it now reads`);
 }
 
 // ------------------------------------------------------------------ report

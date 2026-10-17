@@ -609,6 +609,12 @@ const CHAIR_SEAT_Y = 0.42;
 const NEXT_DAY_WAKE_SECONDS = IRIS_OPEN_SECONDS + 1.4;
 
 /**
+ * The chair `/hotel-cafe` sits her at: the lobby café's middle chair, the one
+ * "Leave breakfast" used to strand her behind (Jim, 17 Oct 2026).
+ */
+const CAFE_LINK_CHAIR = 'lobby-a-1';
+
+/**
  * Honest tops for the scatter dressing, metres above the floor they stand on.
  *
  * Approximate on purpose — a seeded crystal cluster varies a little — but
@@ -1743,6 +1749,20 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * The `/hotel-cafe` deep link: the lobby café, already sat at its middle
+   * chair, `lobby-a-1` — the seat that used to leave her trapped between the
+   * tables and the west wall when she pressed "Leave breakfast" (Jim, 17 Oct
+   * 2026), so the fix is one chip away from the first frame. Same shape as
+   * {@link requestEnterBreakfast}.
+   */
+  requestEnterCafe(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
+    this.spaces.changeTo(() => this.enterCafe());
+    return true;
+  }
+
+  /**
    * The `/hotel-suite` deep link: straight into the guest suite — where
    * #273/#278's doorway-clearance fix (the lounge sofa and TV) and #279's
    * bigger bedrooms and pet beds actually live — from wherever she is.
@@ -2514,6 +2534,24 @@ export class Hotel implements GameSystem {
     } else {
       player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);
     }
+  }
+
+  /**
+   * The other half of {@link requestEnterCafe}: sat at `lobby-a-1`. Should
+   * that chair ever be gone or taken, the link lands where `/hotel` does —
+   * just inside the front door — rather than at some other chair, so it never
+   * quietly shows a seat that is not the one it names.
+   */
+  private enterCafe(): void {
+    const chair = this.chairs.find((seat) => seat.id === CAFE_LINK_CHAIR);
+    if (!chair || chair.taken) {
+      this.enterLobby();
+      return;
+    }
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(LOBBY);
+    this.sitAt(chair);
   }
 
   /**

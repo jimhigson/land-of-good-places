@@ -190,6 +190,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // free chair, so the chip row is on screen the instant the park exists
   // rather than after a walk across the hotel and a tap to sit down.
   '/hotel-breakfast': 'hotelBreakfast',
+  // The lobby café, sat at the chair "Leave breakfast" used to strand her
+  // behind, between the tables and the west wall (Jim, 17 Oct 2026) — the
+  // breakfast room above is a different room, and could never show it.
+  '/hotel-cafe': 'hotelCafe',
   // The guest suite, fifty storeys up (#273/#278's doorway-clearance fix and
   // #279's bigger bedrooms and pet beds) — same problem again, and worse: the
   // normal way in is a walk across the park *and* the lift *and* reception
