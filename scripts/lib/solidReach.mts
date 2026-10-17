@@ -539,6 +539,47 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           }
         }
       }
+      // And over whatever stands within a few metres of her, to the ground
+      // beyond it — stage 2b's question, asked from where she is (seed 2: a
+      // hop from the gap between a pylon and a wall, over the low wall, and
+      // she walks home).
+      for (const solid of overable) {
+        if (stopped) break;
+        if (-solid.depthAt(from.x, from.z) > 2.5) continue;
+        const dx = solid.centreX - from.x;
+        const dz = solid.centreZ - from.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 1e-6) continue;
+        const ux = dx / d;
+        const uz = dz / d;
+        // Along the line through its middle to its far face, and a body beyond.
+        let through = Math.max(0, d - solid.reach);
+        while (through < d + solid.reach && solid.depthAt(from.x + ux * through, from.z + uz * through) < -0.02) through += 0.05;
+        while (through < d + solid.reach + 0.1 && solid.depthAt(from.x + ux * through, from.z + uz * through) >= -0.02) through += 0.05;
+        const lx = from.x + ux * (through + PLAYER_RADIUS + 0.3);
+        const lz = from.z + uz * (through + PLAYER_RADIUS + 0.3);
+        if (collision.playBounds.distanceToEdge(lx, lz) < PLAYER_RADIUS) continue;
+        const top = solid.topAt(solid.centreX, solid.centreZ);
+        if (top - from.y > 1.6) continue;
+        const ly = sample(lx, lz, top + 2);
+        if (!Number.isFinite(ly) || groundReached(lx, lz, ly)) continue;
+        for (const jumpAt of [0.3, 0.8, 1.3]) {
+          jumps += 1;
+          cost.sims.over += 1;
+          const landed = runAndJump(options, from, lx, lz, jumpAt, fps);
+          if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
+          if (options.until?.(landed)) {
+            stopped = true;
+            break;
+          }
+          if (walksBack(landed)) break;
+          const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
+          const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
+          regions.push({ entry: landed, via: `a hop over ${solid.kind || solid.owner || 'a solid'} from (${from.x.toFixed(1)}, ${from.z.toFixed(1)})`, has });
+          changed = true;
+          break;
+        }
+      }
     }
 
     spent('jump');
@@ -589,6 +630,14 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
             if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
             over = true;
             aimedAt(solid, true);
+            // Out, if that is what the caller is asking — before anything
+            // else: a landing she can walk back into the search's start from
+            // is still the way out if it is also outside (a pocket's own
+            // search found the walk, landed on it, and threw it away).
+            if (options.until?.(landed)) {
+              stopped = true;
+              break;
+            }
             // Over, and somewhere new: her walking first, then her lattice, as a drop's.
             if (walksBack(landed)) break;
             const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
@@ -658,6 +707,10 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         if (!landed) continue;
         walkedOffFrom.add(source.solid);
         if (groundReached(landed.x, landed.z, landed.y)) continue;
+        if (options.until?.(landed)) {
+          stopped = true;
+          break;
+        }
         // Her own walking first — cheap, local, and the common answer: she
         // came down beside ground already reached and walks onto it.
         if (walksBack(landed)) continue;
