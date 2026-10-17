@@ -677,8 +677,8 @@ export class NavGrid {
    * the world, no more than a step above the ground under its centre? Only
    * ever true for a lattice that {@link standsOnSolids}.
    */
-  private walksOnto(topHeight: number, topIsAbsolute: boolean, x: number, z: number, sample: GroundSampler): boolean {
-    if (!this.standsOnSolids || !topIsAbsolute || !Number.isFinite(topHeight)) return false;
+  private walksOnto(topHeight: number, topIsAbsolute: boolean, x: number, z: number, sample: GroundSampler, standable = true): boolean {
+    if (!this.standsOnSolids || !standable || !topIsAbsolute || !Number.isFinite(topHeight)) return false;
     const ground = sample(x, z, topHeight);
     return topHeight <= solidStepCeiling(this.collision, x, z, ground);
   }
@@ -916,10 +916,10 @@ export class NavGrid {
     // *beneath* the overhang — the lobby's walk-through arch — at every
     // level. See `Collision.ts`'s `baseHeight` header.
     this.collision.forEachCircle(
-      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight) => {
+      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight, standable) => {
         const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
-        if (this.walksOnto(topHeight, topIsAbsolute, x, z, sample)) return;
+        if (this.walksOnto(topHeight, topIsAbsolute, x, z, sample, standable)) return;
         this.stampCircle(
           x,
           z,
@@ -929,10 +929,10 @@ export class NavGrid {
       },
     );
     this.collision.forEachWall(
-      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight) => {
+      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight, standable) => {
         const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
-        if (this.walksOnto(topHeight, topIsAbsolute, (x1 + x2) / 2, (z1 + z2) / 2, sample)) return;
+        if (this.walksOnto(topHeight, topIsAbsolute, (x1 + x2) / 2, (z1 + z2) / 2, sample, standable)) return;
         this.stampSegment(
           x1,
           z1,

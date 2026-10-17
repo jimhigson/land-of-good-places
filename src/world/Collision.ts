@@ -152,6 +152,36 @@ interface SolidHeights {
    * {@link TopSlope}.
    */
   topSlope?: TopSlope;
+  /**
+   * **How wide the top she can stand on is**, as a half-width from the solid's
+   * axis (a wall) or centre (a circle) — `NaN` when it is the whole footprint.
+   * A rail's or a post's solid is fattened past what is drawn so she bumps it
+   * square, and its drawn top is a few centimetres; given here, she stands
+   * only on what is drawn, and a top narrower than her feet
+   * ({@link FOOT_HALF_WIDTH}) is an edge, not a ledge — jumped over, never
+   * landed on or stepped onto. See {@link CollisionWorld.toppedNarrow}.
+   */
+  topHalf: number;
+}
+
+/**
+ * **A top narrower than this either side of its line holds nobody** — her
+ * feet need 20 cm of it. A fence's rail, a post's cap, a panel's edge: she
+ * can jump over them, not stand on them, which is the difference between a
+ * wall and a ledge (17 Oct 2026: the census stood her on 9 cm rails and 6 cm
+ * panel edges and used them as launch pads onto roofs).
+ */
+export const FOOT_HALF_WIDTH = 0.1;
+
+/** Can she stand on `solid`'s top at `distance` from its axis (a wall) or centre (a circle)? */
+function standsWithin(solid: Readonly<SolidHeights>, distance: number): boolean {
+  if (Number.isNaN(solid.topHalf)) return true;
+  return solid.topHalf >= FOOT_HALF_WIDTH && distance <= solid.topHalf;
+}
+
+/** Is any of `solid`'s top wide enough to stand on? */
+function standableTop(solid: Readonly<SolidHeights>): boolean {
+  return Number.isNaN(solid.topHalf) || solid.topHalf >= FOOT_HALF_WIDTH;
 }
 
 /**
@@ -398,6 +428,8 @@ export interface SolidView {
   readonly halfWidth: number;
   readonly reach: number;
   depthAt(x: number, z: number): number;
+  /** Can she stand on its top at `(x, z)` — inside its footprint, on a top wide enough for her feet ({@link FOOT_HALF_WIDTH})? */
+  standsAt(x: number, z: number): boolean;
   topAt(x: number, z: number): number;
   baseAt(x: number, z: number): number;
   readonly topIsAbsolute: boolean;
@@ -598,7 +630,9 @@ function contactWith(
   if (!collider.topIsAbsolute) return clearsTop(collider.topHeight, clearance) ? 'cleared' : 'solid';
   const top = solidTopAt(collider, position.x, position.z);
   if (feetY + JUMP_CLEARANCE_GRACE >= top) return 'cleared';
-  if (top <= stepCeiling) return 'stepped';
+  // A top too narrow for her feet is never stepped onto: she would pass into
+  // its fattened footprint with nothing to stand on.
+  if (top <= stepCeiling && standableTop(collider)) return 'stepped';
   return 'solid';
 }
 
@@ -806,6 +840,25 @@ export class CollisionWorld {
 
   /** The kind every collider registered now is filed under — see {@link kinded}. */
   private currentKind = '';
+  private currentTopHalf = Number.NaN;
+
+  /**
+   * **Every solid `build` registers has a top `half` either side of its line**
+   * (a wall) or round its centre (a circle) — narrower than its footprint,
+   * which stays what she bumps. For a rail, a post, a panel: drawn a few
+   * centimetres wide and fattened to be met square, and stood on only where
+   * drawn — not at all when under {@link FOOT_HALF_WIDTH}. Nests like
+   * {@link kinded}.
+   */
+  toppedNarrow<T>(half: number, build: () => T): T {
+    const outer = this.currentTopHalf;
+    this.currentTopHalf = half;
+    try {
+      return build();
+    } finally {
+      this.currentTopHalf = outer;
+    }
+  }
 
   /**
    * **Files every collider `build` registers as one kind of thing** — "garden
@@ -851,6 +904,7 @@ export class CollisionWorld {
       // A relative top is its own hop height; an absolute one plans no hop
       // unless it says how tall it stands.
       hopHeight: !topIsAbsolute ? topHeight : hopHeight,
+      topHalf: this.currentTopHalf,
     };
   }
 
@@ -942,6 +996,7 @@ export class CollisionWorld {
       const dx = x - circle.x;
       const dz = z - circle.z;
       if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
+      if (!standsWithin(circle, Math.hypot(dx, dz))) continue;
       const top = solidTopAt(circle, x, z);
       if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
@@ -956,6 +1011,7 @@ export class CollisionWorld {
       const dx = x - (wall.x1 + ax * t);
       const dz = z - (wall.z1 + az * t);
       if (dx * dx + dz * dz > wall.halfThickness * wall.halfThickness) continue;
+      if (!standsWithin(wall, Math.hypot(dx, dz))) continue;
       const top = solidTopAt(wall, x, z);
       if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
@@ -1396,6 +1452,8 @@ export class CollisionWorld {
       navStamped: boolean,
       topIsAbsolute: boolean,
       hopHeight: number,
+      /** Is its top wide enough to stand on ({@link FOOT_HALF_WIDTH})? */
+      standable: boolean,
     ) => void,
   ): void {
     for (const circle of this.circles) {
@@ -1409,6 +1467,7 @@ export class CollisionWorld {
         circle.navStamped,
         circle.topIsAbsolute,
         circle.hopHeight,
+        standableTop(circle),
       );
     }
   }
@@ -1426,6 +1485,8 @@ export class CollisionWorld {
       navStamped: boolean,
       topIsAbsolute: boolean,
       hopHeight: number,
+      /** Is its top wide enough to stand on ({@link FOOT_HALF_WIDTH})? */
+      standable: boolean,
     ) => void,
   ): void {
     for (const wall of this.walls) {
@@ -1441,6 +1502,7 @@ export class CollisionWorld {
         wall.navStamped,
         wall.topIsAbsolute,
         wall.hopHeight,
+        standableTop(wall),
       );
     }
   }
@@ -1505,6 +1567,10 @@ export class CollisionWorld {
         halfWidth: circle.radius,
         reach: circle.radius,
         depthAt: (x, z) => circle.radius - Math.hypot(x - circle.x, z - circle.z),
+        standsAt: (x, z) => {
+          const d = Math.hypot(x - circle.x, z - circle.z);
+          return d <= circle.radius && standsWithin(circle, d);
+        },
         topAt: (x, z) => solidTopAt(circle, x, z),
         baseAt: (x, z) => solidBaseAt(circle, x, z),
         topIsAbsolute: circle.topIsAbsolute,
@@ -1531,6 +1597,12 @@ export class CollisionWorld {
           t = t < 0 ? 0 : t > 1 ? 1 : t;
           return wall.halfThickness - Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
         },
+        standsAt: (x, z) => {
+          let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          const d = Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
+          return d <= wall.halfThickness && standsWithin(wall, d);
+        },
         topAt: (x, z) => solidTopAt(wall, x, z),
         baseAt: (x, z) => solidBaseAt(wall, x, z),
         topIsAbsolute: wall.topIsAbsolute,
@@ -1550,6 +1622,7 @@ export class CollisionWorld {
         halfWidth: Math.min(box.halfX, box.halfZ) + box.rounding,
         reach: Math.hypot(box.halfX, box.halfZ) + box.rounding,
         depthAt: (x, z) => boxDepth(box, x, z, 0),
+        standsAt: (x, z) => boxDepth(box, x, z, 0) >= 0 && standableTop(box),
         topAt: (x, z) => solidTopAt(box, x, z),
         baseAt: (x, z) => solidBaseAt(box, x, z),
         topIsAbsolute: box.topIsAbsolute,

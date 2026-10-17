@@ -234,7 +234,7 @@ export function joinsMain(
 
 /** Does `stand` stand on `solid`'s top? */
 function standsOn(solid: SolidView, stand: Stand): boolean {
-  if (solid.depthAt(stand.x, stand.z) < 0) return false;
+  if (!solid.standsAt(stand.x, stand.z)) return false;
   return Math.abs(stand.y - solid.topAt(stand.x, stand.z)) < 0.05;
 }
 
@@ -247,6 +247,8 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   collision.forEachSolid((solid) => {
     if (!solid.topIsAbsolute || !Number.isFinite(solid.topHeight)) return;
     if (!options.inSpace(solid.centreX, solid.centreZ)) return;
+    // A top too narrow for her feet is never somewhere she lands.
+    if (!solid.standsAt(solid.centreX, solid.centreZ)) return;
     solids.push(solid);
   });
   // Bucketed on an 8 m grid by footprint, for "which solids are near here".
