@@ -85,8 +85,8 @@ import { standingHeight } from '../src/world/standing.ts';
  *   the crate leaves her nowhere to go — clause 4's trap clause.
  * - `ghost` (core): a bench drawn and never registered — clause 5's march
  *   walks into it.
- * - `stranded` (park): a 0.8 m block filling a ring of 2.4 m walls she can
- *   reach off a 1.2 m step — clause 4's every-top-leavable clause.
+ * - `stranded` (park): a 0.8 m block filling a ring of 2.4 m walls she climbs
+ *   to by a staircase of blocks — clause 4's every-top-leavable clause.
  * - `no-headroom` (park): a canopy hung 1 m over a reached top — clause 6.
  * - `no-bounds` (core): the park's leash taken off — clause 7.
  */
@@ -179,14 +179,16 @@ const sample = park.sample;
   };
   if (PROVE === 'stranded') {
     // A pit whose floor is too high to be the ground and too low to jump out
-    // of: a ring of thick 2.4 m walls round a 0.8 m block that fills it, and a
-    // 1.2 m step outside, off which a jump stands her on the ring. From the
-    // ring she jumps down onto the block, and from the block nothing she can
-    // do gets her out — its edges are the walls, and the ring is 1.6 m over it.
+    // of: a ring of thick 2.4 m walls round a 0.8 m block that fills it, and
+    // a staircase up to the ring — a 1.0 m block she jumps onto from the
+    // grass, a 1.9 m one beside it, the ring beside that. From the ring she
+    // jumps down onto the pit's floor, and from the floor nothing she can do
+    // gets her out: its edges are the walls, and the ring is 1.6 m over it.
     const cx = ENTRANCE_PLAYER_X;
     const cz = ENTRANCE_PLAYER_Z - 8;
     const g = sample(cx, cz, 50);
-    collision.kinded('proof: a step up to the ring', () => collision.addCircle(cx + 2.6, cz, 0.6, g + 1.2, false, true));
+    collision.kinded('proof: the first step up', () => collision.addCircle(cx + 5.2, cz, 1.3, g + 1.0, false, true));
+    collision.kinded('proof: the second step up', () => collision.addCircle(cx + 2.9, cz, 1.0, g + 1.9, false, true));
     for (let i = 0; i < 12; i += 1) {
       const a = (i / 12) * Math.PI * 2;
       const b = ((i + 1) / 12) * Math.PI * 2;
