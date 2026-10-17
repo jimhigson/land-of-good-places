@@ -15,7 +15,7 @@ import {
 } from 'three';
 import { TAU } from '../core/mathUtils';
 import type { Frame } from './geo';
-import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
+import { groundRadiusAt, placeOnSphere, standOnSphere, terrainHeight, tiltToSphere, upAt, yAtRadius } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -129,6 +129,60 @@ export function groundInPlot(
   upAt(centreX, centre, centreZ, _plotUp);
   const rise = terrainHeight(centreX + localX, centreZ + localZ) - centre;
   return _plotUp.x * localX + _plotUp.y * rise + _plotUp.z * localZ;
+}
+
+const _plotTilt = /* @__PURE__ */ new Quaternion();
+const _plotPoint = /* @__PURE__ */ new Vector3();
+
+/** Where a solid built into a plot goes in the world — see {@link plotSolid}. */
+export interface PlotSolid {
+  /** The world column its middle is drawn in. */
+  readonly x: number;
+  readonly z: number;
+  /** Its top's world `y` in that column: where she lands on it. */
+  readonly top: number;
+}
+
+/**
+ * **Where a solid standing in a plot really is: the column it is drawn in, and
+ * its real top there.** The one owner of turning a plot's own numbers into a
+ * collider, so a solid in a plot stands where its mesh does.
+ *
+ * A plot's frame is rigid: its origin is the ground at the plot's centre and its
+ * `+Y` the local up there (`AnchorPlots`' constructor, `standOnSphere`). Every
+ * plot here has always registered its colliders at `centre + local`, which is
+ * where the mesh would be if the plot did not lean — and it does, by the
+ * sphere's tilt at the plot's centre. Measured on seed 5: a point 10 m from a
+ * plot's centre is drawn **0.64 m** from `centre + local` at the dodgems,
+ * 0.70 m at the ferris wheel, 0.71 m at the water fight. Once a solid's top is
+ * somewhere she can land, that is the difference between standing on a rail and
+ * standing on the air beside it — so the footprint goes in the column the
+ * solid's middle (half-way up it) is drawn in.
+ *
+ * The top is the drawn top's own radius from the planet's centre,
+ * `hypot(R + top, localX, localZ)` with `R` the centre's ground radius — exact,
+ * because the frame is rigid — read back as a world `y` in that column.
+ *
+ * `x`, `z` are the `centre + local` position every plot already computes;
+ * `base` and `top` are heights in the plot's own frame (`groundInPlot`'s units).
+ */
+export function plotSolid(
+  centreX: number,
+  centreZ: number,
+  x: number,
+  z: number,
+  base: number,
+  top: number,
+): PlotSolid {
+  const ground = terrainHeight(centreX, centreZ);
+  const localX = x - centreX;
+  const localZ = z - centreZ;
+  tiltToSphere(centreX, ground, centreZ, _plotTilt);
+  _plotPoint.set(localX, (base + top) / 2, localZ).applyQuaternion(_plotTilt);
+  const worldX = centreX + _plotPoint.x;
+  const worldZ = centreZ + _plotPoint.z;
+  const radius = Math.hypot(groundRadiusAt(centreX, centreZ) + top, localX, localZ);
+  return { x: worldX, z: worldZ, top: yAtRadius(worldX, worldZ, radius) };
 }
 
 export class AnchorPlots implements GameSystem {
