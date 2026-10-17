@@ -98,7 +98,7 @@ export async function hotelTowerFindings(park: Pick<HeadlessPark, 'world'>): Pro
       0,
       plot.z + Math.cos(bearing) * 16,
     );
-    probe.y = park.sample(probe.x, probe.z, 0);
+    probe.y = park.world.building.surfaces.sample(probe.x, probe.z, 0);
     let closest = Infinity;
     let closestNotByDoor = Infinity;
     let byDoor = false;
@@ -113,7 +113,7 @@ export async function hotelTowerFindings(park: Pick<HeadlessPark, 'world'>): Pro
         0,
         MAX_FRAME_DELTA,
       );
-      probe.y = park.sample(probe.x, probe.z, probe.y);
+      probe.y = park.world.building.surfaces.sample(probe.x, probe.z, probe.y);
       const toAlong = alongOf(probe.x, probe.z);
       const toAcross = acrossOf(probe.x, probe.z);
       if (!byDoor && fromAlong >= facade && toAlong < facade) {
