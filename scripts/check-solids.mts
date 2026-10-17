@@ -79,6 +79,8 @@ import { terrainHeight } from '../src/world/terrain.ts';
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 /** Clause 4 is minutes long; `SOLIDS_SKIP_CENSUS=1` runs the rest alone (never in the chain). */
 const SKIP_CENSUS = process.env['SOLIDS_SKIP_CENSUS'] === '1';
+/** And `SOLIDS_SPACES=park,library` runs the census over the spaces whose names hold one of those words (never in the chain). */
+const ONLY_SPACES = (process.env['SOLIDS_SPACES'] ?? '').split(',').map((word) => word.trim()).filter(Boolean);
 
 let failures = 0;
 function say(ok: boolean, line: string): void {
@@ -332,7 +334,11 @@ if (SKIP_CENSUS) {
   const grid = playerNavGrid(world);
   const route = world.train.route;
   const railScratch = new Vector3();
-  for (const run of spaceRuns) {
+  const runs = ONLY_SPACES.length ? spaceRuns.filter((run) => ONLY_SPACES.some((word) => run.name.includes(word))) : spaceRuns;
+  if (runs.length < spaceRuns.length) {
+    note(`clause 4 ran over ${runs.length} of ${spaceRuns.length} spaces (SOLIDS_SPACES=${ONLY_SPACES.join(',')}) — it says nothing about ${spaceRuns.filter((run) => !runs.includes(run)).map((run) => run.name).join(', ')}`);
+  }
+  for (const run of runs) {
     collision.setPlayBounds(run.bounds);
     const id = spaceAt(run.start.x, run.start.z);
     const t0 = performance.now();
@@ -402,7 +408,7 @@ if (SKIP_CENSUS) {
     say(stuck.length === 0, `${run.name}: every one of ${result.regions.length - 1} region(s) she can drop into, she can get out of again${stuck.length ? ` — trapped: ${stuck.join('; ')}` : ''}`);
   }
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
-  note(`clause 4 simulated her jumps at 60 fps over ${spaceRuns.length} spaces and reached ${allReached.length} tops; a slower frame rate reaches less (fewer, shorter steps up the arc), so 60 is the bound that matters for escapes`);
+  note(`clause 4 simulated her jumps at 60 fps over ${runs.length} spaces and reached ${allReached.length} tops; a slower frame rate reaches less (fewer, shorter steps up the arc), so 60 is the bound that matters for escapes`);
 }
 
 // ---------------------------------------------------------------------------
