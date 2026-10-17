@@ -5196,6 +5196,7 @@ function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: numb
       const at = stack.pop()!;
       patch.push(at);
       for (const next of floor.cellsAround(at.x, at.z)) {
+        // flat-ok: a hotel room is its own flat space off the sphere; two neighbouring cells' floors in it
         if (!member.has(next) || seen.has(next) || Math.abs(next.y - at.y) > rise) continue;
         seen.add(next);
         stack.push(next);
@@ -5402,9 +5403,11 @@ function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: numb
     const PEN_WALL = 0.15;
     const PEN_TOP = 0.5;
     // Open floor for it: a spot whose every cell within 2.5 m walks out, at the way out's own floor.
-    const open = new Set(lobbyFloor.out.filter((cell) => Math.abs(cell.y - lobbyFloor.door.y) < 0.05).map((cell) => `${cell.x.toFixed(2)},${cell.z.toFixed(2)}`));
+    // flat-ok: the lobby is its own flat space off the sphere; a cell's floor against the way out's, in it
+    const atDoorFloor = (cell: FloorCell): boolean => Math.abs(cell.y - lobbyFloor.door.y) < 0.05;
+    const open = new Set(lobbyFloor.out.filter(atDoorFloor).map((cell) => `${cell.x.toFixed(2)},${cell.z.toFixed(2)}`));
     const spot = lobbyFloor.out.find((cell) => {
-      if (Math.abs(cell.y - lobbyFloor.door.y) > 0.05) return false;
+      if (!atDoorFloor(cell)) return false;
       for (let dx = -5; dx <= 5; dx += 1) {
         for (let dz = -5; dz <= 5; dz += 1) {
           if (!open.has(`${(cell.x + dx * NAV_CELL).toFixed(2)},${(cell.z + dz * NAV_CELL).toFixed(2)}`)) return false;
