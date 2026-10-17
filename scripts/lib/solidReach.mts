@@ -26,7 +26,7 @@ import type { NavGrid } from '../../src/world/NavGrid.ts';
 import { PLAYER_RADIUS, BUILDING_STEP_UP } from '../../src/core/constants.ts';
 import { SimPlayer } from '../playerSim.mts';
 import { stepCeilingAt } from '../../src/world/building/stepReach.ts';
-import { standingHeight } from '../../src/world/standing.ts';
+import { solidStepCeiling, standingHeight } from '../../src/world/standing.ts';
 
 export type Sampler = (x: number, z: number, y: number) => number;
 
@@ -105,8 +105,8 @@ function outline(solid: SolidView, spacing: number): { x: number; z: number; nx:
  * when within `jumpAt` of it, keep steering at it until she lands, then let
  * her settle. Returns where she settled (grounded), or null if she never did.
  */
-function runAndJump(
-  options: ReachOptions,
+export function runAndJump(
+  options: Pick<ReachOptions, 'collision' | 'sample'>,
   from: Stand,
   aimX: number,
   aimZ: number,
@@ -147,6 +147,75 @@ function runAndJump(
   }
   if (!jumped || landedAt < 0 || sim.airborne) return null;
   return { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
+}
+
+/**
+ * She walks off a top: from just inside its edge at `o`, along the outward
+ * normal, for a second at a walk — her own movement, so a wall beyond the
+ * edge stops her as it would. Returns where she settled if she left the top
+ * and came to rest on something lower, or null.
+ */
+function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: SolidView, o: { x: number; z: number; nx: number; nz: number }, fps: number): Stand | null {
+  const dt = 1 / fps;
+  const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: () => false });
+  const x = o.x - o.nx * 0.1;
+  const z = o.z - o.nz * 0.1;
+  const top = source.topAt(x, z);
+  sim.position.set(x, top, z);
+  sim.previousPosition.copy(sim.position);
+  sim.groundHeight = top;
+  sim.groundY = top;
+  for (let frame = 0; frame < Math.ceil(1.2 / dt); frame += 1) sim.step(dt, o.nx, o.nz, false);
+  for (let frame = 0; frame < Math.ceil(1 / dt); frame += 1) sim.step(dt, 0, 0, false);
+  if (sim.airborne) return null;
+  if (source.depthAt(sim.position.x, sim.position.z) >= -0.05 && Math.abs(sim.groundHeight - top) < 0.05) return null;
+  if (!(sim.groundHeight < top - 0.05)) return null;
+  return { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
+}
+
+/**
+ * **Does she walk from `from` onto ground the start already reaches?** — her
+ * own movement, steered at the nearest cell of `main` within `reach` metres,
+ * for a few seconds. The lattice cannot be asked this: it answers for a cell
+ * whatever height it is asked at, and a stair it blocks near its flanks is a
+ * stair she walks along. A "region" that this says joins the start is the
+ * lattice's blind spot, not a place she was cut off in.
+ */
+export function joinsMain(
+  options: Pick<ReachOptions, 'collision' | 'sample'>,
+  main: (x: number, z: number, y: number) => boolean,
+  from: Stand,
+  fps: number,
+  reach = 8,
+): boolean {
+  const targets: { x: number; z: number }[] = [];
+  for (let r = 0.5; r <= reach; r += 0.5) {
+    const count = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.75));
+    for (let i = 0; i < count; i += 1) {
+      const a = (i / count) * Math.PI * 2;
+      const x = from.x + Math.cos(a) * r;
+      const z = from.z + Math.sin(a) * r;
+      if (main(x, z, options.sample(x, z, from.y + 1))) targets.push({ x, z });
+    }
+    if (targets.length >= 6) break;
+  }
+  const dt = 1 / fps;
+  for (const target of targets.slice(0, 6)) {
+    const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: () => false });
+    sim.position.set(from.x, from.y, from.z);
+    sim.previousPosition.copy(sim.position);
+    sim.groundHeight = from.y;
+    sim.groundY = from.y;
+    for (let frame = 0; frame < Math.ceil(4 / dt); frame += 1) {
+      const dx = target.x - sim.position.x;
+      const dz = target.z - sim.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.3) break;
+      sim.step(dt, dx / d, dz / d, false);
+    }
+    if (Math.hypot(target.x - sim.position.x, target.z - sim.position.z) < 0.5 && !sim.airborne) return true;
+  }
+  return false;
 }
 
 /** Does `stand` stand on `solid`'s top? */
@@ -218,16 +287,30 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   while (changed) {
     changed = false;
     round += 1;
-    // 1. Tops her lattice already walks onto (within a step), from any region.
+    // 1. Tops she walks up onto: from reached ground just outside a solid's
+    //    edge, its top within the step she can take from there
+    //    (`solidStepCeiling`: one step's reach, with room for her head).
+    //
+    //    Asked from the ground *beside* the solid, at that ground's own
+    //    height — never "is the point over the solid in a reached region",
+    //    because a region's membership test answers for the cell whatever
+    //    height it is asked at, and so read a station's roof as reached by
+    //    whoever walked under it.
     for (const solid of solids) {
       if (reached.has(solid)) continue;
-      for (const p of [{ x: solid.centreX, z: solid.centreZ }, ...outline(solid, 0.6).map((o) => ({ x: o.x - o.nx * 0.05, z: o.z - o.nz * 0.05 }))]) {
-        if (solid.depthAt(p.x, p.z) < 0) continue;
-        const top = solid.topAt(p.x, p.z);
-        if (!groundReached(p.x, p.z, top)) continue;
+      for (const o of outline(solid, 0.6)) {
+        const top = solid.topAt(o.x, o.z);
+        const sx = o.x + o.nx * (PLAYER_RADIUS + 0.1);
+        const sz = o.z + o.nz * (PLAYER_RADIUS + 0.1);
+        const ground = sample(sx, sz, top - BUILDING_STEP_UP);
+        if (!(top > ground + 0.02)) continue;
+        if (!groundReached(sx, sz, ground)) continue;
+        if (top > solidStepCeiling(collision, o.x, o.z, ground)) continue;
+        const ix = o.x - o.nx * 0.05;
+        const iz = o.z - o.nz * 0.05;
         // Only if her feet would actually come to rest on THIS top there.
-        if (Math.abs(standingHeight(sample(p.x, p.z, top), collision, p.x, p.z, top) - top) > 0.05) continue;
-        markReached({ solid, top, how: 'step', at: { x: p.x, z: p.z, y: top }, from: { x: p.x, z: p.z, y: top } });
+        if (Math.abs(standingHeight(sample(ix, iz, ground), collision, ix, iz, ground) - top) > 0.05) continue;
+        markReached({ solid, top, how: 'step', at: { x: ix, z: iz, y: top }, from: { x: sx, z: sz, y: ground } });
         changed = true;
         break;
       }
@@ -304,18 +387,18 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           }
         }
       }
-      // 4. Drops: off every edge onto the ground below — a new region when
-      //    walking from anywhere reached does not get there.
+      // 4. Drops: she walks off every edge of it (her own movement, so a wall
+      //    past the edge stops her) and comes down on whatever is below — a
+      //    new region when walking from anywhere reached does not get there,
+      //    and her own walking cannot rejoin the start from it either.
       for (const o of outline(source.solid, 0.8)) {
-        const px = o.x + o.nx * (PLAYER_RADIUS + 0.35);
-        const pz = o.z + o.nz * (PLAYER_RADIUS + 0.35);
-        const top = source.solid.topAt(o.x, o.z);
-        const ground = standingHeight(sample(px, pz, top), collision, px, pz, top);
-        if (!(ground < top - 0.05)) continue;
-        if (groundReached(px, pz, ground)) continue;
-        const flood = grid.reachableFrom(px, pz, ground, sample);
-        if (!flood || !flood(px, pz, ground)) continue;
-        regions.push({ entry: { x: px, z: pz, y: ground }, via: `a drop off ${source.solid.kind || source.solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has: flood });
+        const landed = walkOff(options, source.solid, o, fps);
+        if (!landed) continue;
+        if (groundReached(landed.x, landed.z, landed.y)) continue;
+        if (joinsMain(options, groundReached, landed, fps)) continue;
+        const flood = grid.reachableFrom(landed.x, landed.z, landed.y, sample);
+        const has = flood && flood(landed.x, landed.z, landed.y) ? flood : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
+        regions.push({ entry: landed, via: `a drop off ${source.solid.kind || source.solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
         changed = true;
       }
     }
