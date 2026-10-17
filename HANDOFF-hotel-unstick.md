@@ -42,6 +42,31 @@ Engineer, Claude Opus 5.5. Worktree `.claude/worktrees/hotel-unstick`, branch
   connectivity).
 - NavGrid lattice build: garden 524 ms, lobby 80 ms; whole flood 35 ms / 3 ms.
 
+## THE MECHANISM — reproduced in headless Chrome on pristine main (control worktree
+`.claude/worktrees/hotel-unstick-main` @58165723, vite dev :5871, /tmp/hotel-unstick/browser-repro2.mjs)
+Real input: keys walk her (router's waypoints) round the south of the café; proximity offers
+lobby-a-1; **E** sits her; a cereal chip; **Leave breakfast** → she stands at local
+(-11.26, 9.74), y 0, riding=false — in the strip. Each arrow held 3 s: 0.35 / 0.87 / 3.53 /
+1.81 m, never out. A tap on open floor (-3, 9): she walks to (-11.64, 10.09), deeper in. A hop
+toward the room (Right+Down+Space): out at (-0.47, 9.75) — fix 2 already holds on main.
+Shots: /tmp/hotel-unstick/shots/main-kbd-*.png.
+Cause: `Hotel.standUp` → `endRide()` at the seat. She is inside the chair and 0.17 m inside her
+table's reach; the resolver escorts her out the nearest face, which for a-1/b-1 is west, into a
+strip sealed by chair a-0 vs the reception partition (1.21 m gap, she is 1.24 m) and by chair b-1
++ table b + the column. Not input held, not the cinematic, not the pet/bowl (visual only),
+not an NPC: keys move her freely after b-0's stand-up (11-17 m), riding=false throughout.
+Taps can never select a-1/b-1 (b-0's 1.6 m pick sphere is nearer the fixed camera on every ray);
+the keyboard's proximity selection can, from south of table b — that is how a child gets there.
+The jump investigator's "14 chair centres walked clear" were Floor 1's breakfast room
+(BREAKFAST, 14 chairs), not the ground floor's lobby café, and "walked clear of the chair" is not
+"reaches the room".
+
+## Brief change 3 (coordinator, relaying Jim): fix 1 is a GENERAL RUNTIME RULE
+"when we choose a point to put the player down, we need to check the reachability of the
+location, not make it breakfast-specific". So: the rule lives inside Player's three placement
+methods (endRide, teleportTo, teleport — the only writers of her position); breakfast's exit is
+the seat itself and the rule moves her. No per-chair stand spot (reverted).
+
 ## Design (decided)
 - `Player.beginRide(holder: RideHolder)` (required): `{ holding: string; letGo(): void }` — so a
   ride cannot take her without saying how to give her back (Next day, and check:exits' lever).
@@ -56,4 +81,8 @@ Engineer, Claude Opus 5.5. Worktree `.claude/worktrees/hotel-unstick`, branch
 ## Status
 - [x] worktree, install, parks, baseline check:hotel (exit 0, 17 s)
 - [x] measurements above (scratch probe-cafe / map-cafe / jump-standup / table-top)
-- [ ] fix 1 code  - [ ] check:exits  - [ ] fix 3  - [ ] fix 2 proof  - [ ] look  - [ ] PR
+- [x] fix 1 code: endRide(exit)/beginRide(holder), putDownSpot (commit e0cd8540)
+- [x] fix 3 code: Next day (commit 62349e2b)
+- [ ] fix 1 refinement: rule inside teleportTo too; open area anchors; revert chair stand spot
+- [ ] checks: putDown unit test (vitest), check:exits (enumeration + Next day), fix-2 jump probe
+- [ ] look in Chrome on the branch  - [ ] PR
