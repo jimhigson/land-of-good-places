@@ -1519,6 +1519,18 @@ export class Game {
     const yaw = facing ?? towardsCentre;
     if (y === undefined) this.player.teleport(x, z, yaw);
     else this.player.teleportTo(x, y, z, yaw);
+    // Through the put-down rule, like every placement (`world/dismount.ts`):
+    // a coordinate inside a prop or a sealed pocket is moved to the nearest
+    // spot she can stand on and walk out of. Said out loud, because the link
+    // promises "that exact spot" and a developer reading off a screenshot
+    // should know when it is not where she landed.
+    const spot = this.player.lastPutDown;
+    if (spot && spot.moved > 0) {
+      console.warn(
+        `/spawn: (${x}, ${z}) is not somewhere she can be put down — the put-down rule moved her ` +
+          `${spot.moved.toFixed(2)} m, to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`,
+      );
+    }
     this.camera.snapTo(this.player.position);
   }
 
