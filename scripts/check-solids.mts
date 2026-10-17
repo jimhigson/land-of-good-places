@@ -530,6 +530,7 @@ if (SKIP_CENSUS) {
   }
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   note(`clause 4 simulated her jumps at 60 fps over ${runs.length} spaces and reached ${allReached.length} tops; a slower frame rate reaches less (fewer, shorter steps up the arc), so 60 is the bound that matters for escapes`);
+  note(`clause 4 censused seed ${PARK_SEED_ASKED}'s park and nothing else: the other shipped parks are not censused by this run (LGP_SEED=<n> asks for another)`);
 }
 
 // ---------------------------------------------------------------------------
