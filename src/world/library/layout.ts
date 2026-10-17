@@ -323,10 +323,14 @@ export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
   { id: 'cushion-4', kind: 'cushion', at: { x: 3, z: -9.5 }, facing: 180 },
   { id: 'cushion-5', kind: 'cushion', at: { x: 5, z: -9.5 }, facing: 180 },
 
-  // The north-west reading nook, by the secret shelf.
+  // The north-west reading nook, by the secret shelf. Its side table stands a
+  // hand's breadth clear of the chair's back corner: with the chair's arms and
+  // wings solid to their own tops (17 Oct 2026) — no longer one block she
+  // walked over at seat height — the slot between them at (-14.4, -10.6) was
+  // a dimple a child fits in and cannot walk out of (`check:library`).
   { id: 'nook-armchair', kind: 'armchair', at: { x: -12.6, z: -9.4 }, facing: 45 },
-  { id: 'nook-table', kind: 'sideTable', at: { x: -14.4, z: -10.6 }, facing: 0 },
-  { id: 'nook-lamp', kind: 'readingLamp', at: { x: -14.4, z: -10.6 }, facing: 0, pool: true },
+  { id: 'nook-table', kind: 'sideTable', at: { x: -14.6, z: -10.8 }, facing: 0 },
+  { id: 'nook-lamp', kind: 'readingLamp', at: { x: -14.6, z: -10.8 }, facing: 0, pool: true },
 
   // The north-east reading nook.
   { id: 'east-armchair', kind: 'armchair', at: { x: 14, z: -9.4 }, facing: 315 },
