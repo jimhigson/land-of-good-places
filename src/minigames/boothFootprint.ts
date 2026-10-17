@@ -317,7 +317,9 @@ export function addBoothCollision(
   const cos = Math.cos(yaw);
   const toWorld = (lx: number, lz: number): [number, number] => [x + lx * cos + lz * sin, z - lx * sin + lz * cos];
   return collision.ownedBy('booth', () =>
-    collision.kinded('stall booth', () => {
+    collision.kinded('stall booth', () => (h.filled ? collision.toppedNarrow(0, build) : build())),
+  );
+  function build(): (WallCollider | BoxCollider)[] {
       // The back wall and the side panels, narrow-topped where they are panels.
       const panel = (a: [number, number], b: [number, number], height: number): WallCollider =>
         h.panelHalf === undefined ? wall(a, b, height) : collision.toppedNarrow(h.panelHalf, () => wall(a, b, height));
@@ -335,10 +337,19 @@ export function addBoothCollision(
           solids.push(wall(front, back, h.front), panel(back, toWorld(side * box.halfWidth, h.sideFront), h.sides));
         }
       }
+      // **A cart's top is its board, not its walls'**: the walls round a
+      // filled cart are what she bumps, a wall's thickness outside the drawn
+      // body, and as tops they stood her a third of a metre out past the
+      // cart's edge, on air (seeds 6 and 12, "0.50 m over the drawn
+      // keychainShop"). So they hold nobody (`toppedNarrow(0)`, round the
+      // whole build) and the filled core — the cart's own outline — is the
+      // top she lands on.
       if (h.filled) {
         const [cx, cz] = toWorld(0, (box.front + box.back) / 2);
         solids.push(
-          collision.addBox(cx, cz, box.halfWidth, (box.front - box.back) / 2, -yaw, 0, yAtRadius(cx, cz, foot + h.front), false, true),
+          collision.toppedNarrow(Number.NaN, () =>
+            collision.addBox(cx, cz, box.halfWidth, (box.front - box.back) / 2, -yaw, 0, yAtRadius(cx, cz, foot + h.front), false, true),
+          ),
         );
       }
       if (h.awning) {
@@ -362,8 +373,7 @@ export function addBoothCollision(
         );
       }
       return solids;
-    }),
-  );
+  }
 }
 
 /**

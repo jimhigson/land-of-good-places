@@ -259,11 +259,13 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
     const b = frame.foot(x2, z2);
     const topA = frame.topY(a.x, a.z, x1, z1, height);
     const topB = frame.topY(b.x, b.z, x2, z2, height);
-    list.push(
-      collision.kinded(height === plan.height ? 'library walls' : 'library plinth edge', () =>
-        collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, -Infinity, false, Number.NaN, topB),
-      ),
-    );
+    // A plinth's edge is what she bumps, not what she stands on: centred on
+    // the drawn edge, half of it stood out over the ground beside the plinth,
+    // and the census stood her there, 0.15 m over the step below (seven seeds).
+    // The plinth's top is its plate (`registerLibrarySteps`), which she walks.
+    const edge = height !== plan.height;
+    const build = (): WallCollider => collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, -Infinity, false, Number.NaN, topB);
+    list.push(collision.kinded(edge ? 'library plinth edge' : 'library walls', () => (edge ? collision.toppedNarrow(0, build) : build())));
   };
   const H = SHELL_HALF;
   const t = EDGE_HALF;

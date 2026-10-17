@@ -358,7 +358,12 @@ export class Station {
       const back = solidInFrame(this.standX, this.standZ, backAt.x, backAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_BACK_Y + BENCH_BACK_HEIGHT / 2);
       collision.kinded('station bench', () => {
         collision.addBox(seat.x, seat.z, BENCH_SEAT_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, seat.top, false, true);
-        collision.addBox(back.x, back.z, BENCH_BACK_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, back.top, false, true);
+        // The backrest is a plank's edge, not a ledge: she bumps it and sits
+        // against it, and never stands on top of it (seed 15's census stood
+        // her there, 0.2 m inside the drawn canopy's frame).
+        collision.toppedNarrow(BENCH_BACK_DEPTH / 2, () =>
+          collision.addBox(back.x, back.z, BENCH_BACK_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, back.top, false, true),
+        );
       });
     }
 
