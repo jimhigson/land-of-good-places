@@ -733,6 +733,20 @@ export class World implements GameSystem {
   }
 
   /**
+   * **Board the world ride a booth sells** — the Rail Race, the Sky Cruiser,
+   * the space ferris wheel. The one owner of which stall is which ride: `Game`
+   * wires the booths' chips (`MiniGameHost.boardRide`) through it, and
+   * `check:exits` boards every one the same way. `null` when the stall is not
+   * a world ride (a curtain game is `MiniGameHost`'s).
+   */
+  boardStallRide(stallId: string): boolean | null {
+    if (stallId === 'railRacer') return this.railRace.requestBoard();
+    if (stallId === 'skyCruiser') return this.coaster.requestBoard();
+    if (stallId === 'spaceFerrisWheel') return this.ferrisWheel.requestBoard();
+    return null;
+  }
+
+  /**
    * **"Next day"** — the ☰ menu's way out of anywhere: tomorrow morning, waking
    * up in her own bed in her suite. The going there and the waking are the
    * hotel's (`Hotel.wakeTomorrowInSuite`, the one owner); this hands it the two

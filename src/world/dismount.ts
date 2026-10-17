@@ -269,10 +269,10 @@ export function putDownSpot(
  *   only when both straight cells beside it are walkable — the router's
  *   no-corner-cutting rule;
  * - a **region** is every node one flood reaches. It is **open** when it holds a
- *   cell beside a point of the space's open area, or touches the window's edge
- *   — it reaches at least {@link OPEN_FLOOR_REACH} beyond any spot the search
- *   tries, and no pocket is that big. Otherwise it is a pocket. A region is
- *   flooded once; every later spot in it is answered from the label.
+ *   cell beside a point of the space's open area, or reaches
+ *   {@link OPEN_FLOOR_REACH} from where the flood began — no pocket is that big.
+ *   Otherwise it is a pocket, flooded whole. Every later spot in a labelled
+ *   region is answered from the label.
  */
 class OpenFloor {
   /** How many cells this window has classified — the cost of one put-down. */
@@ -380,19 +380,41 @@ class OpenFloor {
     return this.regionOpen[node.region] ?? false;
   }
 
-  /** Floods one region from a node and labels every node it reaches. */
+  /**
+   * Floods one region from a node and labels every node it reaches — and stops
+   * the moment the region is known to be open: a cell beside the open area, or
+   * one {@link OPEN_FLOOR_REACH} from where the flood began. A pocket is small,
+   * so it is always flooded whole; open floor is answered in a few hundred
+   * cells. (The rest of an open region stays unlabelled; a later spot there
+   * floods again, and finds the same.)
+   */
   private flood(startCell: number, startLevel: number): void {
     const region = this.regionOpen.length;
     let open = false;
+    const startX = this.cellX(startCell);
+    const startZ = this.cellZ(startCell);
+    const reachSquared = OPEN_FLOOR_REACH * OPEN_FLOOR_REACH;
     const queueCell: number[] = [startCell];
     const queueLevel: number[] = [startLevel];
     this.levels[startCell]![startLevel]!.region = region;
-    for (let head = 0; head < queueCell.length; head += 1) {
+    for (let head = 0; head < queueCell.length && !open; head += 1) {
       const cell = queueCell[head]!;
       const level = queueLevel[head]!;
       const i = cell % this.side;
       const j = (cell - i) / this.side;
-      if (this.anchor[cell] === 1 || i === 0 || j === 0 || i === this.side - 1 || j === this.side - 1) open = true;
+      const dx = this.cellX(cell) - startX;
+      const dz = this.cellZ(cell) - startZ;
+      if (
+        this.anchor[cell] === 1 ||
+        dx * dx + dz * dz >= reachSquared ||
+        i === 0 ||
+        j === 0 ||
+        i === this.side - 1 ||
+        j === this.side - 1
+      ) {
+        open = true;
+        break;
+      }
       const fromX = this.cellX(cell);
       const fromZ = this.cellZ(cell);
       const fromY = this.levels[cell]![level]!.y;

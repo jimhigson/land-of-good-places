@@ -974,9 +974,9 @@ export class Game {
     // Every booth's chip, wired to the framework that runs what is behind it.
     this.world.stalls.onEnter = (stallId) => this.miniGames.enter(stallId);
     this.miniGames.boardRide = (stallId) => {
-      if (stallId === 'railRacer') return this.world.railRace.requestBoard();
-      if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
-      if (stallId === 'spaceFerrisWheel') return this.world.ferrisWheel.requestBoard();
+      // The rides a booth sells — `World.boardStallRide` is the one owner.
+      const ride = this.world.boardStallRide(stallId);
+      if (ride !== null) return ride;
       // The ginormous slide is not a stall — you reach it by climbing the
       // castle — so these two ids exist only for its deep links, which is the
       // difference between QA testing the ride and QA testing the stairs.
