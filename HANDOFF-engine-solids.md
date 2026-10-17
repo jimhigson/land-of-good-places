@@ -192,3 +192,19 @@ no-headroom need the census run.
 - Look (c296f8b1, port 5797, killed by PID): stone wall, wooden wall, fountain rim, crate (keys released
   over it), trough, bench stood on; 1.67 m fence not climbed. /tmp/es-look/shots-c/.
 - PR body draft: /tmp/es-pr-body.md (placeholders __PREVIEW__, __IDENTITY__, __LOCALCHECK__, __CI__...).
+
+## (c) state at 81861e39 (01:30, 18 Oct)
+- ALL-SEED census (was seed 5 only): found the railway reachable on 10/15 other seeds via bridge
+  parapets (drop off the coping onto the track → trapped by the 1.67 m fences). FIX: railing on every
+  parapet at RAILWAY_GUARD_TOP (fence.ts owns it + GUARD_RAIL_WIDTH/DEPTH), parapet solid to the
+  railing, unstandable (7642e0ac; posts r 0.07 for coplanar, baa0ca94; flat-ok 1f0c5562). VISIBLE.
+- Reptile house plinth plate used building-local height as world y → floated 9.65 m up on seed 13
+  (pre-existing on main) → roof escape. FIX 2339e1c3 (radius at the plot).
+- Keychain cart walls hold nobody (filled core is the top); station bench backrest narrow; library
+  plinth edges unstandable; buried wooden posts get no solid; garden walls: toppedShifted (engine:
+  tops where drawn, lean) + stone square top measured from the drawn coping ends.
+- Census fixes: foliage ignored by the drawn-top oracle; step-1 needs standsAt; until asked first
+  at every landing; 2a hops (tops, over-hops, 16-bearing hops when until); wedged landing = none
+  (never settle: it ejects through walls — proof caught it).
+- 16-seed census at e0c63589/d33cb4d2: 14 green, seed 15 station bench 0.20 m (lean, left as gap).
+- Local gate restarted at 81861e39 in snap5 (/tmp/es-gate-d), proofs in /tmp/es-proofs6.
