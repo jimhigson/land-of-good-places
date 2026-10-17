@@ -309,13 +309,14 @@ export function addBoothCollision(
       if (h.sideFront === undefined) {
         solids.push(wall(frontLeft, backLeft, h.sides), wall(frontRight, backRight, h.sides));
       } else {
-        // Each side in two: the drawn panel to its height, and the counter's
-        // end, from the panel's front to the counter's line, to the counter's.
-        for (const side of [-1, 1] as const) {
-          const back = toWorld(side * box.halfWidth, box.back);
-          const split = toWorld(side * box.halfWidth, h.sideFront);
-          const front = toWorld(side * box.halfWidth, box.front);
-          solids.push(wall(back, split, h.sides), wall(split, front, h.front));
+        // Each side's whole length is one solid to the counter's height —
+        // the very wall the booth claims, end for end, which is how
+        // `stallsAreDrawnClaimedAndSolidTogether` finds a booth's collider —
+        // and the drawn panel stands over the back of it to its own height.
+        // Split in two instead, the claim matched no collider and every
+        // restart with a booth in it was rejected.
+        for (const [side, front, back] of [[-1, frontLeft, backLeft], [1, frontRight, backRight]] as const) {
+          solids.push(wall(front, back, h.front), wall(back, toWorld(side * box.halfWidth, h.sideFront), h.sides));
         }
       }
       if (h.filled) {

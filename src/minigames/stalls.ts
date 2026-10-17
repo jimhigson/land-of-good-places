@@ -349,15 +349,14 @@ export class MiniGameStalls implements GameSystem {
 }
 
 /**
- * Four walls around the booth body, rotated with it.
+ * The walls around the booth body, rotated with it, each to its drawn height.
  *
  * The box, the rotation and the registration all live in
  * `boothFootprint.ts` now — one owner, because the same ground is also a
  * **claim** the stalls feature builder commits, and a claim derived
  * separately from the collider is a booth that is in two places at once.
  * `CollisionWorld.addRectangle` is axis-aligned and these booths are not,
- * which is why the corners are rotated by hand there. Collision is
- * height-blind (see `Collision.ts`), which is fine here: one storey.
+ * which is why the corners are rotated by hand there.
  */
 function addMiniGameBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): (WallCollider | BoxCollider)[] {
   return addBoothCollision(collision, x, z, yaw, MINI_GAME_BOOTH_BOX);
