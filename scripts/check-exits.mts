@@ -44,9 +44,12 @@
  *    place her, and can she walk out? The booths' world rides and the cat bus are
  *    boarded the way the game boards them. Every placement the game makes on
  *    the way — a door, a lift, a space's arrival — is asked the same.
- * 5. **"Next day", from everywhere.** From every space, and from mid-ride, the
- *    ☰ menu's "Next day" must end with her awake in her suite, not riding, on
- *    tomorrow morning's clock, able to walk to the suite's door.
+ * 5. **"Next day", from everywhere.** From every space, never checked in,
+ *    mid-ride and mid-flight, the ☰ menu's "Next day" must end with her laid in
+ *    the middle bedroom's bed and then awake in her suite, not riding, not
+ *    flying, key in hand, on tomorrow morning's clock, able to walk to the
+ *    suite's door. The `/hotel-cafe` link is driven too: sat at `lobby-a-1`,
+ *    then left by its own "Leave breakfast".
  * 6. **Coverage.** Every call site found in (3) must have been driven by (4) or
  *    (5), or be named in {@link NOT_DRIVEN} with the reason; one that is neither
  *    fails. Coverage notes go to stderr, so a passing run says what it covered.
@@ -501,6 +504,7 @@ function nextDayFrom(label: string, setUp: () => void): void {
     clauses.push(`the clock reads ${timeOfDay.toFixed(3)}, not the morning (${DAY_START_TIME} plus the seconds since)`);
   }
   if (!laidInBed) clauses.push('she was never lying in the middle bedroom’s bed');
+  if (player.isFlying) clauses.push('still flying');
   if (!saveFlags.hasHotelKey()) clauses.push('no key: the suite would lock her in');
   const out = walksOut();
   if (!out.out) clauses.push(`cannot walk to the suite's door — ${out.why}`);
@@ -941,6 +945,17 @@ nextDayFrom('up a tree', () => {
   tick(0.1);
   tree.actions?.()[0]?.run();
   tick(1);
+});
+// …and in the air under the jet pack — not a ride, so the ☰ menu is up for it.
+nextDayFrom('a jet-pack flight', () => {
+  SPACES[0]!.enter();
+  tick(0.2);
+  // As holding the hop button leaves her: off the ground, the pack holding her.
+  player.position.y += 3;
+  player.launch(0);
+  (player as unknown as { flying: boolean }).flying = true;
+  tick(0.05);
+  if (!player.isFlying) fail('Next day from a jet-pack flight: the set-up never had her flying, so the case asserts nothing');
 });
 nextDayFrom('the Rail Race', () => {
   SPACES[0]!.enter();
