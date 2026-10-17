@@ -244,9 +244,12 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   const { grid, sample, collision } = options;
 
   const solids: SolidView[] = [];
+  // Everything with a top she might clear, stood on or not: what she jumps over.
+  const overable: SolidView[] = [];
   collision.forEachSolid((solid) => {
     if (!solid.topIsAbsolute || !Number.isFinite(solid.topHeight)) return;
     if (!options.inSpace(solid.centreX, solid.centreZ)) return;
+    overable.push(solid);
     // A top too narrow for her feet is never somewhere she lands.
     if (!solid.standsAt(solid.centreX, solid.centreZ)) return;
     solids.push(solid);
@@ -371,6 +374,50 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
             done = true;
             break;
           }
+        }
+      }
+    }
+
+    // 2b. Jumps over a solid, to ground beyond it that nothing has reached
+    //     yet — a bush, a rim, a low wall between her and a pocket. Leaves
+    //     are not a ledge, so no stage above lands her on a bush; this is how
+    //     she clears one. Asked only where the far side is not already
+    //     reached, which is almost nowhere.
+    for (const solid of overable) {
+      if (stopped) break;
+      for (const o of outline(solid, 1.0)) {
+        if (stopped) break;
+        const top = solid.topAt(o.x, o.z);
+        // Through the solid along the inward normal to its far face, and a
+        // body's width beyond it: where she would come down.
+        let through = 0.05;
+        while (through < 2 * solid.reach + 0.1 && solid.depthAt(o.x - o.nx * through, o.z - o.nz * through) >= -0.02) through += 0.05;
+        if (through >= 2 * solid.reach + 0.1) continue;
+        const lx = o.x - o.nx * (through + PLAYER_RADIUS + 0.3);
+        const lz = o.z - o.nz * (through + PLAYER_RADIUS + 0.3);
+        const ly = sample(lx, lz, top + 2);
+        if (!Number.isFinite(ly) || groundReached(lx, lz, ly)) continue;
+        // A run-up on her side, on ground she has reached, within a jump of the top.
+        const sx = o.x + o.nx * (PLAYER_RADIUS + 2.4);
+        const sz = o.z + o.nz * (PLAYER_RADIUS + 2.4);
+        const sy = sample(sx, sz, top + 2);
+        if (top - sy > 1.6) continue;
+        if (!groundReached(sx, sz, sy)) continue;
+        const key = `over ${sx.toFixed(2)},${sz.toFixed(2)},${sy.toFixed(2)}`;
+        if (triedRunUps.has(key)) continue;
+        triedRunUps.add(key);
+        for (const jumpAt of [PLAYER_RADIUS + 0.9, PLAYER_RADIUS + 1.6, PLAYER_RADIUS + 2.3]) {
+          jumps += 1;
+          const landed = runAndJump(options, { x: sx, z: sz, y: sy }, lx, lz, jumpAt, fps);
+          if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
+          // Over, and somewhere new: her walking first, then her lattice, as a drop's.
+          if (joinsMain(options, groundReached, landed, fps)) break;
+          const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
+          const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
+          regions.push({ entry: landed, via: `a jump over ${solid.kind || solid.owner || 'a solid'} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)})`, has });
+          changed = true;
+          if (options.until?.(landed)) stopped = true;
+          break;
         }
       }
     }

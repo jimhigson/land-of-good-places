@@ -460,12 +460,12 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
   };
   /**
    * Her feet: where she stands is a footprint, not a point — her two feet a
-   * stance apart (`Player`'s dust trail puts them 0.14 m either side) and a
-   * foot's width beyond. The drawn top under her is, of the drawn surfaces
+   * stance apart (`Player`'s dust trail puts them 0.14 m either side) and
+   * half a foot beyond that (`FOOT_HALF_WIDTH`). The drawn top under her is, of the drawn surfaces
    * within it, the one nearest her feet: an arm of the throne beside the
    * seat she stands on is not what she stands on.
    */
-  const FEET = 2 * FOOT_HALF_WIDTH;
+  const FEET = 0.14 + FOOT_HALF_WIDTH;
   const underFeet = (x: number, z: number, from: number): { y: number; name: string } | null => {
     let best: { y: number; name: string } | null = null;
     for (const [dx, dz] of [[0, 0], [FEET, 0], [-FEET, 0], [0, FEET], [0, -FEET], [FEET * Math.SQRT1_2, FEET * Math.SQRT1_2], [-FEET * Math.SQRT1_2, FEET * Math.SQRT1_2], [FEET * Math.SQRT1_2, -FEET * Math.SQRT1_2], [-FEET * Math.SQRT1_2, -FEET * Math.SQRT1_2]] as const) {

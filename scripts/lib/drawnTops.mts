@@ -44,7 +44,9 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
     const path: string[] = [];
     for (let at: Object3D | null = mesh; at && path.length < 4; at = at.parent) if (at.name) path.push(at.name);
     const name = path.join('<') || mesh.type;
-    if (DRAWN_IGNORE.test(mesh.name || '') || DRAWN_IGNORE.test(mesh.parent?.name ?? '')) return;
+    // A person anywhere up its parents — a seated hotel guest's hem is under
+    // a 'body' under a 'kid' — is soft, and never anybody's floor.
+    if (DRAWN_IGNORE.test(mesh.name || '') || path.some((name) => DRAWN_IGNORE.test(name))) return;
     const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as (Material & { side: number; transparent?: boolean; opacity?: number })[];
     if (materials.every((m) => m.transparent && (m.opacity ?? 1) < 0.5)) return;
     for (const material of materials) material.side = DoubleSide;
