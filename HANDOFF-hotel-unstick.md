@@ -99,6 +99,9 @@ D (check:hotel probe 32) table without a top → hop ends (-11.42, 0, 10.60), to
 - [x] fix 3 Next day, checked from 12 spaces + 3 mid-ride + keyless
 - [x] /hotel-cafe deep link, driven by check:exits; NOT_DRIVEN keyed by code, not line
 - [x] red proofs A-D
-- [ ] seed-5 park rebuilt for the new hash (background build:parks → /tmp/hotel-unstick/build-parks-2.log)
+- [x] PR #721 opened as a DRAFT (body source /tmp/hotel-unstick/pr-body.md; placeholders PREVIEW_LINE,
+  RED_PROOFS, CHROME_LINE to fill) — mark ready (`gh pr ready 721`) after Chrome + CI
+- [ ] seed-5 park rebuilt for hash d4d55691 (background build:parks → /tmp/hotel-unstick/build-parks-3.log)
+- [ ] red proofs re-run on db54d3fe (/tmp/hotel-unstick/red-proofs2.py → /tmp/hotel-unstick/red2/)
 - [ ] look in Chrome on the branch (/tmp/hotel-unstick/browser-branch.mjs + browser-repro2.mjs)
 - [ ] pnpm run check / test:procgen / build  - [ ] PR, CI, preview link
