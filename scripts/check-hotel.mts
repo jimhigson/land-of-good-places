@@ -5001,9 +5001,10 @@ process.stderr.write(
  *
  * That question is answered by the floor she can walk on, measured — the
  * room's {@link WalkableFloor}: every cell of the router's own lattice the
- * router reaches from the way out, and then every cell a body of her radius
- * walks into from those (a swept circle, every 10 cm, at the higher of the two
- * floors, stepping up no more than {@link WALK_STEP_UP}). The second half is
+ * router reaches from the way out, and then every cell from which a body of
+ * her radius walks into those (a swept circle, every 10 cm, at the higher of
+ * the two floors, stepping up no more than {@link WALK_STEP_UP}, dropping any
+ * height). The second half is
  * what keeps the answer the body's: the router stamps a margin round every
  * solid, so floor a body stands on can be floor the router calls blocked, and
  * the review of 503bd56f found the router's own leniency calling sealed nooks
