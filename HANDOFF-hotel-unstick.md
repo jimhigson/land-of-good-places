@@ -67,22 +67,38 @@ location, not make it breakfast-specific". So: the rule lives inside Player's th
 methods (endRide, teleportTo, teleport — the only writers of her position); breakfast's exit is
 the seat itself and the rule moves her. No per-chair stand spot (reverted).
 
-## Design (decided)
+## Design (as built)
 - `Player.beginRide(holder: RideHolder)` (required): `{ holding: string; letGo(): void }` — so a
   ride cannot take her without saying how to give her back (Next day, and check:exits' lever).
-- `Player.endRide(exit: RideExit)` (required): `{x, y(floor), z, facing?, velocity?}`. Inside,
-  `putDownSpot` (dismount.ts, the one owner) verifies: in bounds, floor within a step of the
-  exit's floor, body clear at that height, and OPEN (local flood on the router's 0.5 m pitch can
-  walk ≥ 5 m away). If not, ring search (0.25 m rings to 4 m) for the nearest that passes.
-  Unchanged spot when the exit already passes (keeps park acceptance stable).
-- Chairs: one stand spot per chair (Sit chip's walk-to AND standUp's exit).
-- `/hotel-cafe` deep link: seated at the lobby café chair that trapped her.
+- `Player.endRide(exit: RideExit)` (required) `{x, y(floor), z, facing?, velocity?}`, and
+  `teleportTo`/`teleport` too: all three run `putDownSpot` (world/dismount.ts, the one owner).
+  It accepts a spot when: inside the play bounds; the floor there is within a step of the exit's
+  floor (a seat is never her floor: SAME_FLOOR 5 cm); the body is clear at that height; and a
+  bounded flood on the router's own lattice (navLattice.ts, 0.5 m cells, routeBlocked =
+  NavGrid's stamp) reaches the space's open area — an anchor from `World.openAreaAt` (arrival,
+  way out, keepOutsFor stand spots), or 6 m from the start, or the window's edge. Else 0.25 m
+  rings out to 4 m for the nearest spot that passes. An exit that passes is left exactly as given.
+  Cost: 43² = 1,849 cells at most; measured 1.8-2.0 ms average, slowest 13.5 ms, over 541.
+- Chairs: no per-chair stand spot (reverted). standUp's exit is the seat; the rule moves her.
+- Next day: Hud pill → Game.nextDay (closes UIs, abandons mini-game, letGo) → World.nextDay →
+  Hotel.wakeTomorrowInSuite (changeTo; behind the iris: clock to DAY_START_TIME + day+1, every
+  building lets her go, key given if none, Yours! star, bound to SUITE, middle bedroom's bed,
+  nap; NEXT_DAY_WAKE_SECONDS later the existing wakeNap stands her up).
+- `/hotel-cafe` deep link: `Hotel.requestEnterCafe` sits her at lobby-a-1 (falls back to the
+  `/hotel` landing if that chair is ever gone or taken, never another chair).
+
+## Red proofs (red worktree `.claude/worktrees/hotel-unstick-red`, /tmp/hotel-unstick/red/*.log)
+A breakfast bypass (seat, airborne, as main) → a-1/b-1/b-0 judged trapped + the position write
+flagged. B rule bypassed → clauses b/c/e + a-1, b-1, garden painting. C1 no clock → 16 ✗.
+C2 corridor → 16 ✗. C3 never wakes → 16 ✗. C4 wrong bed → 16 ✗. C5 no key → keyless ✗.
+D (check:hotel probe 32) table without a top → hop ends (-11.42, 0, 10.60), top y 0.000.
 
 ## Status
-- [x] worktree, install, parks, baseline check:hotel (exit 0, 17 s)
-- [x] measurements above (scratch probe-cafe / map-cafe / jump-standup / table-top)
-- [x] fix 1 code: endRide(exit)/beginRide(holder), putDownSpot (commit e0cd8540)
-- [x] fix 3 code: Next day (commit 62349e2b)
-- [ ] fix 1 refinement: rule inside teleportTo too; open area anchors; revert chair stand spot
-- [ ] checks: putDown unit test (vitest), check:exits (enumeration + Next day), fix-2 jump probe
-- [ ] look in Chrome on the branch  - [ ] PR
+- [x] fix 1 rule + every caller (62 sites, 52 driven, 10 named) — check:exits exit 0 (ad0f4565)
+- [x] fix 2 proven on main (probe 32); no code change but exporting TABLE_TOP
+- [x] fix 3 Next day, checked from 12 spaces + 3 mid-ride + keyless
+- [x] /hotel-cafe deep link, driven by check:exits; NOT_DRIVEN keyed by code, not line
+- [x] red proofs A-D
+- [ ] seed-5 park rebuilt for the new hash (background build:parks → /tmp/hotel-unstick/build-parks-2.log)
+- [ ] look in Chrome on the branch (/tmp/hotel-unstick/browser-branch.mjs + browser-repro2.mjs)
+- [ ] pnpm run check / test:procgen / build  - [ ] PR, CI, preview link
