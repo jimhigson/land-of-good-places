@@ -10,6 +10,7 @@ import { separatedByHeight, type CollisionWorld } from '../../world/Collision';
 import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { terrainHeight } from '../../world/terrain';
 import { faceOnGround } from '../../world/up';
+import { carryReference } from '../../world/building/stepReach';
 import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
@@ -421,6 +422,13 @@ export class NpcCharacter {
   }
 
   /** The height her feet count from when clearing a top — see {@link takeoffY}. */
+  /** Her height and her take-off's, carried from column `(fromX, fromZ)` to where she now is — `carryReference`, the one owner. */
+  private carryFlight(fromX: number, fromZ: number): void {
+    const { x, z } = this.position;
+    this.position.y = carryReference(fromX, fromZ, this.position.y, x, z);
+    this.takeoffY = carryReference(fromX, fromZ, this.takeoffY, x, z);
+  }
+
   private clearsFrom(): number {
     return this.airborne ? Math.min(this.position.y, this.takeoffY) : this.position.y;
   }
@@ -703,8 +711,15 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
+    // A hop keeps its distance from the planet's centre, as hers does
+    // (`Player.update`: a jump is a jump everywhere) — before the resolve, so
+    // the height it clears from is the one in the column it is asked in.
+    if (this.airborne) this.carryFlight(this.previousPosition.x, this.previousPosition.z);
+    const movedX = this.position.x;
+    const movedZ = this.position.z;
     this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
+    if (this.airborne) this.carryFlight(movedX, movedZ);
 
     // Trust the resolved position over the intended one, so walking into a wall
     // kills the momentum instead of grinding against it.
@@ -747,6 +762,9 @@ export class NpcCharacter {
     }
 
     if (this.intent.hop && !this.airborne) {
+      // From the ground, as hers is (`Player.update`): the damped height lags
+      // under it on a climb, and a hop from there landed on its first frame.
+      if (this.position.y < groundY) this.position.y = groundY;
       this.verticalVelocity = NPC_JUMP_SPEED;
       this.airborne = true;
       this.takeoffY = this.position.y;

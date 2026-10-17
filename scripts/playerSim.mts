@@ -248,10 +248,23 @@ export class SimPlayer {
       // The damped control carries its reference too: it models the damp's
       // lag, not a world-y reach, and must not start counting the planet.
       if (!this.airborne) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
+      else {
+        // `Player.update`'s flight, name for name: her own height travels
+        // with her at her distance from the planet's centre.
+        at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
+        reference = at.y;
+      }
       fromX = at.x;
       fromZ = at.z;
       groundY = this.sampleGround(at.x, at.z, reference);
       if (following) reference = groundY;
+    };
+    // The flight's carry is motion, not sampling, so the pre-#358 control
+    // (one ground sample a frame) keeps it too.
+    const carryOnly = (at: Vector3): void => {
+      if (this.airborne) at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
+      fromX = at.x;
+      fromZ = at.z;
     };
 
     // `Player.update`'s step up onto a solid, name for name: only walking
@@ -273,14 +286,18 @@ export class SimPlayer {
         this.radius,
         this.hopClearance,
         dt,
-        this.groundSubstepping ? onStep : undefined,
+        this.groundSubstepping ? onStep : carryOnly,
         stepCeiling,
         KID_HEIGHT,
       );
     } else {
-      this.position.x += deltaX;
-      this.position.z += deltaZ;
+      const movedX = this.position.x + deltaX;
+      const movedZ = this.position.z + deltaZ;
+      if (this.airborne) this.position.y = carryReference(this.position.x, this.position.z, this.position.y, movedX, movedZ);
+      this.position.x = movedX;
+      this.position.z = movedZ;
       result = this.collision.resolve(this.position, this.radius, this.hopClearance, dt, stepCeiling, KID_HEIGHT);
+      if (this.airborne) this.position.y = carryReference(movedX, movedZ, this.position.y, this.position.x, this.position.z);
     }
 
     this.clearedWall = result.clearedWall;
@@ -311,21 +328,29 @@ export class SimPlayer {
         .addScaledVector(this.moveDirection, AUTO_HOP_LOOKAHEAD * inverse);
       autoHopWanted = this.hopProbe(this.probe);
     }
+    let tookOff = false;
     if (autoHopWanted && !this.airborne) {
       this.verticalVelocity = JUMP_SPEED;
       this.airborne = true;
+      tookOff = true;
     }
 
     // The pre-#358 vertical: one sample, at the end of the whole frame's
-    // movement, asked from her damped height. This is the control.
+    // movement, asked from her damped height. This is the control. A frame
+    // that began in the air asks from her own height, carried with her.
     if (!this.groundSubstepping || !this.substepping) {
       const { x, z } = this.position;
       const asked = !this.airborne
         ? carryReference(this.previousPosition.x, this.previousPosition.z, reference, x, z)
-        : reference;
+        : tookOff
+          ? reference
+          : this.position.y;
       groundY = this.sampleGround(x, z, asked);
     }
     this.groundY = groundY;
+    // `Player.update`'s take-off, name for name: she leaves the ground from
+    // the ground, never from the damped height lagging under it on a climb.
+    if (tookOff && this.position.y < groundY) this.position.y = groundY;
 
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
       this.airborne = true;

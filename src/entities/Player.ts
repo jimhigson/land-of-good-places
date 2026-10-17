@@ -1169,8 +1169,8 @@ export class Player implements GameSystem {
     // rejected exactly as before, which is what keeps her from climbing things
     // she should not.
     //
-    // Airborne she is not following any surface, so the reference stays her
-    // own height and the last sub-step's answer is the one used — identical to
+    // Airborne she is not following any surface, so the reference is her own
+    // height and the last sub-step's answer is the one used — identical to
     // the single end-of-frame sample this replaced.
     //
     // **The reference travels with her at her own distance from the planet's
@@ -1179,6 +1179,21 @@ export class Player implements GameSystem {
     // by the sub-step times the sine of the lean, and the step-up reach would
     // spend that on the planet instead of the ramp. `carryReference` is the
     // identity indoors, so the castle and the hotel are untouched.
+    //
+    // **And in the air her own height travels with her the same way — a jump
+    // is a jump everywhere.** Gravity pulls along world `y`, and a flight that
+    // kept its world `y` while she moved in plan rose off a ground falling
+    // away under her by the sine of the lean. Measured with `playerSim.mts` on
+    // the bare planet, a sprint-jump outwards reached 2.37 m over the ground
+    // at 44 m from the middle of the park, 2.84 m at 60 m and 3.1 m beyond
+    // 70 m, against 1.23 m in the middle, and inwards less every metre out.
+    // On screen the rig is turned to the local up (`eyeForFocus`), so that
+    // read as a jump that floats one way and not the other — and no guard can
+    // be taller than she can reach while her reach depends on where she
+    // stands. Carried, a sprint-jump reaches 1.10–1.41 m everywhere, in every
+    // direction; what spread is left is the damped height's lag over the
+    // ground on a run downhill (see the take-off below), inside every guard's
+    // margin.
     const following = !this.airborne;
     let reference = following ? this.groundHeight : this.position.y;
     let groundY = reference;
@@ -1213,6 +1228,12 @@ export class Player implements GameSystem {
       dt,
       (at) => {
         if (following) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
+        else {
+          // In the air her own height travels with her: see "a jump is a
+          // jump everywhere" above.
+          at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
+          reference = at.y;
+        }
         fromX = at.x;
         fromZ = at.z;
         groundY = this.groundAt(at.x, at.z, reference);
@@ -1300,6 +1321,15 @@ export class Player implements GameSystem {
     // has passed decides whether that hop turns into a take-off.
     const canFly = this.canFlyHere;
     if ((input.justPressed('jump') || autoHopWanted) && !this.airborne) {
+      // She leaves the ground from the ground. Her drawn height is damped and
+      // lags *below* the surface on a climb, and a jump started from there was
+      // still under it after its first frame and landed at once: sprinting up
+      // the planet's lean, a jump did nothing anywhere past about 38 m from
+      // the middle of the park (walking, past about 55 m). Running downhill
+      // the lag is *above* the surface, and that is left alone: snapping her
+      // down would dip her at the start of every such jump, for at most
+      // 0.18 m of reach (a sprint at the park's outer edge).
+      if (this.position.y < groundY) this.position.y = groundY;
       this.verticalVelocity = JUMP_SPEED;
       this.airborne = true;
       this.jumpHeldFor = 0;
