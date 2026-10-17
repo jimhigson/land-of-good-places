@@ -6,7 +6,8 @@ import { Plate } from '../hotel/place';
 import { DOOR_HALF, WALL_HALF_DEPTH } from '../hotel/layout';
 import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
-import { solidInFrame } from '../terrain';
+import { groundRadiusAt, solidInFrame, yAtRadius } from '../terrain';
+import { SPACE_GARDEN, spaceAt } from '../spaces';
 import { reptileHouseDrawnTopAt, reptileHouseTopInSector, reptileHouseTopOver } from '../../art/models/reptileHouseAssets';
 import { PALETTE } from '../../core/palette';
 import { solid, decal, softMaterial, toonMaterial } from '../../art/style/materials';
@@ -276,13 +277,34 @@ class FacadePlate implements MovingPlatform {
   private readonly alongFrom: number;
   private readonly alongTo: number;
   private readonly halfAcross: number;
+  /** In a park plot: the plate's height as a radius over the planet's centre, at the frame. Else NaN, and the plate is flat at `surfaceY`. */
+  private readonly radius: number;
 
-  constructor(frame: FacadeFrame, surfaceY: number, alongFrom: number, alongTo: number, halfAcross: number) {
+  /**
+   * `top` is the plate's height in the building's own metres. **In a park plot
+   * the building stands on the sphere**, its origin the ground under it, leant
+   * to the local up (`standInPlot`), so the plate is that far over the ground
+   * there, as a radius — and its world `y` at any column is that radius, the
+   * way `solidInFrame` reads a rigid group's tops.
+   *
+   * It was `top` as a world `y`. Out in the park the ground under a plot is
+   * metres below world 0 — the sphere alone drops 9 m by 64 m out — so the
+   * plinth's walkable step hung in the air over the snake's mouth: 9.65 m up
+   * on seed 13, where a census run stood her on it and jumped her onto the
+   * roof (17 Oct 2026).
+   */
+  constructor(frame: FacadeFrame, top: number, alongFrom: number, alongTo: number, halfAcross: number) {
     this.frame = frame;
-    this.surfaceY = surfaceY;
     this.alongFrom = alongFrom;
     this.alongTo = alongTo;
     this.halfAcross = halfAcross;
+    this.radius = spaceAt(frame.x, frame.z) === SPACE_GARDEN ? groundRadiusAt(frame.x, frame.z) + top : Number.NaN;
+    this.surfaceY = Number.isNaN(this.radius) ? top : yAtRadius(frame.x, frame.z, this.radius);
+  }
+
+  surfaceYAt(x: number, z: number): number {
+    if (Number.isNaN(this.radius)) return this.surfaceY;
+    return yAtRadius(x, z, Math.hypot(this.radius, x - this.frame.x, z - this.frame.z));
   }
 
   covers(x: number, z: number): boolean {
