@@ -55,7 +55,7 @@
 import './headless-canvas.mjs';
 import { BackSide, Box3, Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
+import { NAV_CELL, NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
@@ -123,6 +123,8 @@ import { walkableGroundAt } from '../src/world/building/surfaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { HOTEL_LOBBY_Z, HOTEL_ORIGIN_X } from '../src/core/constants.ts';
 import {
+  CAFE_TABLE_A,
+  CAFE_TABLE_B,
   TABLE_TOP,
   TOWER_DOOR_HALF,
   TOWER_FACADE_ALONG,
@@ -4795,13 +4797,17 @@ if (!lobbyShellForDisco) {
  * room this ticket was not about, and moving lobby or garden furniture is Jim's
  * call and wants its own eyes on it. Measured islands, at the time of writing:
  *
- * - `hotel.lobby` — 2.5 m² at local x -11.75..-10.75, z 9.85..12.35;
- *   1.5 m² at x -10.25..-8.75, z 7.35..7.85; and a symmetric 0.8 m² pair in the
- *   far corners at x ±11.75, z -24.15..-23.15.
+ * - `hotel.lobby` — 1.5 m² at x -10.25..-8.75, z 7.35..7.85; and a symmetric
+ *   0.8 m² pair in the far corners at x ±11.75, z -24.15..-23.15. (A third, the
+ *   2.5 m² café strip at x -11.75..-10.75, z 9.85..12.35, was **fixed** on
+ *   PR #721 — table A stands clear of the wall — taking this from 22 to 12.)
  * - `hotel.garden` — 3.0 m² at local x 9.85..11.35, z -6.75..-5.75.
+ *
+ * None of these is a trap: probe 33 attacks every one of them with a real
+ * child, hopping and walking, and none of them holds her.
  */
 const KNOWN_UNREACHABLE_CELLS: Readonly<Record<string, number>> = {
-  'hotel.lobby': 22,
+  'hotel.lobby': 12,
   'hotel.garden': 12,
 };
 
@@ -4987,119 +4993,480 @@ process.stderr.write(
     reachSummaries.map((line) => `    ${line}\n`).join(''),
 );
 
-// ---------------------------- 32. a hop gets her out of the café strip, and onto a table
+// ------------------------------------------- a body, and "can she walk out from here?"
 /**
- * **The way out over the table** (Jim, 17 October 2026: *"if she could jump on
- * the table it'd be easy to get out anyway"*).
+ * **The two probes below ask a real child, not the router.** A `Player` stepped
+ * by its own `update`, with a real stick and a real jump, and one question of
+ * wherever she ends up: *can she walk to the room's way out from here?*
  *
- * The lobby café's two tables stand close enough to the west wall that the
- * strip between them is a pocket a walking child cannot leave — main's "Leave
- * breakfast" put her in it from the chairs `lobby-a-1` and `lobby-b-1`
- * (measured in Chrome on 58165723: stood up at local (−11.26, 9.74), then four
- * arrow keys held 3 s each and a tap, and she never left). The put-down rule
- * (`world/dismount.ts`) now never puts her there; she can still *get* there,
- * by hopping onto a table and stepping off its far side. So a hop must get her
- * back out, and a table must be somewhere she can stand. This asks both, with
- * a real `Player` stepped by its own `update` and a real stick and jump, on the
- * built lobby:
- *
- * - **(a) the premise**, so this cannot pass vacuously: from the middle of the
- *   strip, walking each of eight ways for 3 s never reaches the room. If the café
- *   is ever re-laid so it does, the probe says so on stderr and asserts nothing;
- * - **(b) a hop toward the room** — the stick held east, jump pressed once —
- *   lands her east of the tables, out in the foyer;
- * - **(c) the table is standable**: stood on its top she stays at
- *   `TABLE_TOP`, and walking on east she steps off into the open.
- *
- * The tables are found in the built hotel — the lobby's two 0.6 m props west of
- * x −9.5 in the foyer (`propKeepOuts`, the list the guests walk round) — never
- * typed here.
+ * That question is answered by the floor she can walk on, measured — the
+ * room's {@link WalkableFloor}: every cell of the router's own lattice the
+ * router reaches from the way out, and then every cell a body of her radius
+ * walks into from those (a swept circle, every 10 cm, at the higher of the two
+ * floors, stepping up no more than {@link WALK_STEP_UP}). The second half is
+ * what keeps the answer the body's: the router stamps a margin round every
+ * solid, so floor a body stands on can be floor the router calls blocked, and
+ * the review of 503bd56f found the router's own leniency calling sealed nooks
+ * open. Here a spot counts only when her own body gets from it to that floor.
  */
-{
-  const tables = hotel.propKeepOuts
-    .filter((disc) => disc.room === LOBBY && disc.radius === 0.6 && disc.x < -9.5 && disc.z > 5 && disc.z < 14)
-    .sort((a, b) => b.z - a.z);
-  const tableA = tables[0];
-  if (tables.length !== 2 || !tableA) {
-    problems.push(`probe 32: expected the lobby café's two tables, found ${tables.length} — the probe cannot find what it measures`);
-  } else {
-    const hopCamera = new IsoCamera();
-    const hopper = quietly(() => new Player(collision, hopCamera, new Vector3(LOBBY.originX, 0, LOBBY.originZ)));
-    world.building.attachPlayer(hopper);
-    hotel.attachPlayer(hopper as never);
-    hopper.teleportTo(LOBBY.originX - 6, 0, LOBBY.originZ + tableA.z, 0);
-    hotel.adoptRestoredPlayer();
-    let hopElapsed = 5000;
-    const drive = (seconds: number, dx: number, dz: number, jumpAt = -1): void => {
-      const len = Math.hypot(dx, dz) || 1;
-      const moveX = dx || dz ? (dx / len) * hopCamera.right.x + (dz / len) * hopCamera.right.z : 0;
-      const moveY = dx || dz ? (dx / len) * hopCamera.forward.x + (dz / len) * hopCamera.forward.z : 0;
-      let wasDown = false;
-      for (let t = 0; t < seconds; t += 1 / 60) {
-        const down = jumpAt >= 0 && t >= jumpAt && t < jumpAt + 0.1;
-        const pressed = down && !wasDown;
-        wasDown = down;
-        const input = { moveX, moveY, isDown: (key: string) => key === 'jump' && down, justPressed: (key: string) => key === 'jump' && pressed };
-        hopElapsed += 1 / 60;
-        hopper.update({ dt: 1 / 60, elapsed: hopElapsed, input } as never);
-      }
-    };
-    // Raw placement on purpose: the put-down rule would (rightly) refuse the strip.
-    const place = (localX: number, y: number, localZ: number): void => {
-      hopper.position.set(LOBBY.originX + localX, y, LOBBY.originZ + localZ);
-      hopper.previousPosition.copy(hopper.position);
-      hopper.launch(0);
-      drive(0.3, 0, 0);
-    };
-    // East of the tables, out in the foyer: past table A's east edge by her width.
-    const outX = tableA.x + tableA.radius + PLAYER_RADIUS;
-    const stripX = tableA.x - 1.6;
-    const local = (): string =>
-      `(${(hopper.position.x - LOBBY.originX).toFixed(2)}, ${hopper.position.y.toFixed(2)}, ${(hopper.position.z - LOBBY.originZ).toFixed(2)})`;
+const WALK_STEP_UP = 0.3;
+const SWEEP = 0.1;
+const trapCamera = new IsoCamera();
+const trapBody = quietly(() => new Player(collision, trapCamera, new Vector3(LOBBY.originX, 0, LOBBY.originZ)));
+world.building.attachPlayer(trapBody);
+hotel.attachPlayer(trapBody as never);
+let trapClock = 7000;
+/**
+ * Holds the stick along `(dx, dz)` for `seconds`; with `hop`, jump is pressed
+ * once at 0.05 s. `stopWhen`, asked every `every` frames, ends it early.
+ */
+function driveBody(seconds: number, dx: number, dz: number, hop = false, stopWhen?: () => boolean, every = 15): void {
+  const len = Math.hypot(dx, dz) || 1;
+  const moveX = dx || dz ? (dx / len) * trapCamera.right.x + (dz / len) * trapCamera.right.z : 0;
+  const moveY = dx || dz ? (dx / len) * trapCamera.forward.x + (dz / len) * trapCamera.forward.z : 0;
+  let wasDown = false;
+  let frame = 0;
+  for (let t = 0; t < seconds; t += 1 / 60) {
+    const down = hop && t >= 0.05 && t < 0.15;
+    const pressed = down && !wasDown;
+    wasDown = down;
+    const input = { moveX, moveY, isDown: (key: string) => key === 'jump' && down, justPressed: (key: string) => key === 'jump' && pressed };
+    trapClock += 1 / 60;
+    trapBody.update({ dt: 1 / 60, elapsed: trapClock, input } as never);
+    frame += 1;
+    if (stopWhen && frame % every === 0 && stopWhen()) return;
+  }
+}
+/** Stands her on a spot by hand — raw, on purpose: the put-down rule would rightly refuse a pocket. */
+function standBody(x: number, y: number, z: number): void {
+  trapBody.position.set(x, y, z);
+  trapBody.previousPosition.copy(trapBody.position);
+  trapBody.launch(0);
+  driveBody(0.2, 0, 0);
+}
+const bodyProbe = new Vector3();
+function bodyClear(x: number, y: number, z: number): boolean {
+  bodyProbe.set(x, y, z);
+  return collision.deepestSolidOverlap(bodyProbe, PLAYER_RADIUS, 0) <= 1e-3;
+}
+/** A body of her radius gets from `(ax, az)` to `(bx, bz)` at height `y` touching nothing solid. */
+function sweepClear(ax: number, az: number, bx: number, bz: number, y: number): boolean {
+  const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / SWEEP));
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    if (!bodyClear(ax + (bx - ax) * t, y, az + (bz - az) * t)) return false;
+  }
+  return true;
+}
+const surfaceAt = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
 
-    // (a) The premise.
-    let walkedOut = 0;
-    for (let k = 0; k < 8; k += 1) {
-      place(stripX, 0, tableA.z);
-      const a = (k / 8) * Math.PI * 2;
-      drive(3, Math.sin(a), Math.cos(a));
-      if (hopper.position.x - LOBBY.originX > outX) walkedOut += 1;
+/** One floor of one lattice cell: its centre, and the height she stands at there. */
+interface FloorCell {
+  readonly x: number;
+  readonly z: number;
+  readonly y: number;
+}
+/**
+ * **The floor of a hotel room a child can walk out from**, and the floor she
+ * cannot — see the section header. Built per room, on the room's own bounds.
+ */
+interface WalkableFloor {
+  readonly room: HotelRoom;
+  /** Cells she can walk to the way out from. */
+  readonly out: FloorCell[];
+  /** Cells a body stands on that she cannot walk to the way out from. */
+  readonly cut: FloorCell[];
+  /** Can she walk to the way out from `(x, y, z)`? */
+  readonly walksOut: (x: number, y: number, z: number) => boolean;
+  /** Every floor of the nine lattice cells round `(x, z)`, her own included. */
+  readonly cellsAround: (x: number, z: number) => FloorCell[];
+  /** The way out the floor was measured from. */
+  readonly door: { readonly x: number; readonly y: number; readonly z: number };
+}
+function walkableFloor(room: HotelRoom): WalkableFloor | string {
+  collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, room.originX, room.originZ));
+  const grid = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers);
+  const way = hotel.openArea(room)[0];
+  if (!way) return `${room.space} publishes no way out to measure from`;
+  const door = { x: way.x, y: surfaceAt(way.x, way.z, 3), z: way.z };
+  const reach = grid.floodFrom(door.x, door.z, door.y, surfaceAt);
+  if (!reach || !reach.has(door.x, door.z, door.y)) {
+    return `the router reaches nothing from ${room.space}'s way out at (${door.x.toFixed(2)}, ${door.z.toFixed(2)}) — the probe cannot measure that room`;
+  }
+  // The lattice's own cells, keyed by where they sit (the one owner of where a
+  // cell is, `forEachCellCentre`), with every floor a body could stand on there:
+  // the room's floor or a furniture top under 3 m, and a deck over it.
+  let offsetX = NaN;
+  let offsetZ = NaN;
+  const keyOf = (x: number, z: number): string =>
+    `${Math.round((x - offsetX) / NAV_CELL)},${Math.round((z - offsetZ) / NAV_CELL)}`;
+  const floors = new Map<string, FloorCell[]>();
+  const inRoom = (x: number, z: number): boolean =>
+    Math.abs(x - room.originX) < room.halfX && Math.abs(z - room.originZ) < room.halfZ;
+  grid.forEachCellCentre(surfaceAt, (x, z) => {
+    if (Number.isNaN(offsetX)) {
+      offsetX = ((x % NAV_CELL) + NAV_CELL) % NAV_CELL;
+      offsetZ = ((z % NAV_CELL) + NAV_CELL) % NAV_CELL;
     }
-    if (walkedOut > 0) {
-      process.stderr.write(
-        `probe 32 ASSERTS NOTHING: from the café strip at local (${stripX.toFixed(2)}, ${tableA.z.toFixed(2)}) ` +
-          `${walkedOut} of 8 walks reach the room, so it is no longer the pocket this probe was written for\n`,
-      );
-    } else {
-      // (b) The hop: stick toward the room, jump pressed once.
-      place(stripX, 0, tableA.z);
-      drive(3, 1, 0, 0.05);
-      const hopEnd = local();
-      if (!(hopper.position.x - LOBBY.originX > outX)) {
-        problems.push(
-          `probe 32: a hop toward the room from the café strip at local (${stripX.toFixed(2)}, ${tableA.z.toFixed(2)}) ` +
-            `ended at ${hopEnd} — still behind the tables (the room starts at x ${outX.toFixed(2)})`,
-        );
+    if (!inRoom(x, z)) return;
+    const low = surfaceAt(x, z, 3);
+    const high = surfaceAt(x, z, room.wallHeight + 1);
+    const levels = high > 3 && high - low > 2 ? [low, high] : [low];
+    const cells = levels.filter((y) => Number.isFinite(y) && bodyClear(x, y, z)).map((y) => ({ x, z, y }));
+    if (cells.length > 0) floors.set(keyOf(x, z), cells);
+  });
+  const floorKey = (cell: FloorCell): string => `${keyOf(cell.x, cell.z)}@${cell.y.toFixed(2)}`;
+  const outKeys = new Set<string>();
+  const queue: FloorCell[] = [];
+  for (const cells of floors.values()) {
+    for (const cell of cells) {
+      if (grid.canStandAt(cell.x, cell.z, cell.y, surfaceAt) && reach.has(cell.x, cell.z, cell.y)) {
+        outKeys.add(floorKey(cell));
+        queue.push(cell);
       }
-      // (c) The table is somewhere to stand, and to step off.
-      place(tableA.x, TABLE_TOP, tableA.z);
-      drive(1, 0, 0);
-      const onTop = hopper.position.y;
-      if (Math.abs(onTop - TABLE_TOP) > 0.02) {
-        problems.push(`probe 32: stood on a café table's top she is at y ${onTop.toFixed(3)}, not its ${TABLE_TOP} m top`);
-      }
-      drive(2, 1, 0);
-      const offEnd = local();
-      // flat-ok: the hotel lobby is its own flat space at (-600, 613), floor y 0, off the sphere; her height above its one floor
-      if (!(hopper.position.x - LOBBY.originX > outX) || hopper.position.y > 0.05) {
-        problems.push(`probe 32: walking east off a café table's top ended at ${offEnd}, not on the foyer floor`);
-      }
-      process.stderr.write(
-        `probe 32: the café strip at local (${stripX.toFixed(2)}, ${tableA.z.toFixed(2)}) is a walking pocket (0 of 8 walks out); ` +
-          `one hop toward the room ends at ${hopEnd}; on table A's top she stands at y ${onTop.toFixed(3)} and walks off to ${offEnd}\n`,
-      );
     }
   }
+  // Every cell her body walks from into that floor joins it.
+  while (queue.length > 0) {
+    const at = queue.pop()!;
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        if (dx === 0 && dz === 0) continue;
+        for (const next of floors.get(keyOf(at.x + dx * NAV_CELL, at.z + dz * NAV_CELL)) ?? []) {
+          if (outKeys.has(floorKey(next))) continue;
+          if (at.y > next.y + WALK_STEP_UP) continue;
+          if (!sweepClear(next.x, next.z, at.x, at.z, Math.max(at.y, next.y))) continue;
+          outKeys.add(floorKey(next));
+          queue.push(next);
+        }
+      }
+    }
+  }
+  const out: FloorCell[] = [];
+  const cut: FloorCell[] = [];
+  for (const cells of floors.values()) for (const cell of cells) (outKeys.has(floorKey(cell)) ? out : cut).push(cell);
+  const cellsAround = (x: number, z: number): FloorCell[] => {
+    const around: FloorCell[] = [];
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) around.push(...(floors.get(keyOf(x + dx * NAV_CELL, z + dz * NAV_CELL)) ?? []));
+    }
+    return around;
+  };
+  // Through a doorway, or off the edge of the room's floor, is out of this
+  // room: the game's own doorway band takes her on from there, and none of it
+  // runs here, where only her body is stepped.
+  const walksOut = (x: number, y: number, z: number): boolean =>
+    !inRoom(x, z) ||
+    y < door.y - 1 ||
+    cellsAround(x, z).some(
+      (cell) => Math.abs(cell.y - y) <= WALK_STEP_UP && outKeys.has(floorKey(cell)) && sweepClear(x, z, cell.x, cell.z, Math.max(y, cell.y)),
+    );
+  return { room, out, cut, walksOut, cellsAround, door };
+}
+/** How long she tries to walk out of a spot, each of {@link WALK_OUT_WAYS} ways. */
+const WALK_OUT_SECONDS = 3;
+const WALK_OUT_WAYS = 16;
+/** Can she walk out of `(x, y, z)` — sixteen ways, 3 s each, out as soon as she is on floor that walks out? */
+function walkOutOf(floor: WalkableFloor, x: number, y: number, z: number): number {
+  for (let w = 0; w < WALK_OUT_WAYS; w += 1) {
+    standBody(x, y, z);
+    const heading = (w / WALK_OUT_WAYS) * Math.PI * 2;
+    let out = false;
+    driveBody(WALK_OUT_SECONDS, Math.sin(heading), Math.cos(heading), false, () => {
+      out = floor.walksOut(trapBody.position.x, trapBody.position.y, trapBody.position.z);
+      return out;
+    });
+    if (out || floor.walksOut(trapBody.position.x, trapBody.position.y, trapBody.position.z)) return w;
+  }
+  return -1;
+}
+
+/** `cells` grouped into connected patches: lattice neighbours whose floors are within `rise` of each other. */
+function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: number): FloorCell[][] {
+  const member = new Set(cells);
+  const seen = new Set<FloorCell>();
+  const patches: FloorCell[][] = [];
+  for (const cell of cells) {
+    if (seen.has(cell)) continue;
+    const patch: FloorCell[] = [];
+    const stack = [cell];
+    seen.add(cell);
+    while (stack.length > 0) {
+      const at = stack.pop()!;
+      patch.push(at);
+      for (const next of floor.cellsAround(at.x, at.z)) {
+        if (!member.has(next) || seen.has(next) || Math.abs(next.y - at.y) > rise) continue;
+        seen.add(next);
+        stack.push(next);
+      }
+    }
+    patches.push(patch);
+  }
+  return patches;
+}
+
+// ---------------------------- 32. a hop gets her onto a café table, and every way off it is a way out
+/**
+ * **The way out over the table** (Jim, 17 October 2026: *"if she could jump on
+ * the table it'd be easy to get out anyway"*), and the way off it.
+ *
+ * The lobby café's table A stood close enough to the west wall that the strip
+ * behind it was a pocket a walking child could not leave — main's "Leave
+ * breakfast" put her in it from `lobby-a-1` and `lobby-b-1`. The put-down rule
+ * (`world/dismount.ts`) never puts her there now, and since QA on PR #721 found
+ * she still got in by hopping — 3 of 7 hops at table A from the room, and
+ * walking off the table's north end — the table stands clear of the wall
+ * (`Hotel.ts`'s `CAFE_TABLE_A`), so the strip is floor she walks out of. A hop
+ * still has to get her *onto* a table, and every way *off* one has to leave
+ * her somewhere she can walk out of. With a real `Player` on the built lobby:
+ *
+ * - **(a)** from the floor beside table A, the stick toward its middle and
+ *   jump pressed once, she lands on its top, at `TABLE_TOP`;
+ * - **(b)** stood on each table's top, walking off it each of eight ways for
+ *   2 s ends where she can walk to the lobby's way out (probe 33's
+ *   {@link WalkableFloor}, the body's answer).
+ *
+ * The tables are the ones `Hotel.ts` stands (`CAFE_TABLE_A`, `CAFE_TABLE_B`),
+ * never typed here.
+ */
+{
+  const tables = [CAFE_TABLE_A, CAFE_TABLE_B].map((table) => ({ x: table.x, z: table.z, radius: 0.6 }));
+  const tableA = tables[0]!;
+  const lobbyFloor = walkableFloor(LOBBY);
+  if (!hotel.propKeepOuts.some((disc) => disc.room === LOBBY && Math.hypot(disc.x - tableA.x, disc.z - tableA.z) < 1e-6 && disc.radius === tableA.radius)) {
+    problems.push(`probe 32: no 0.6 m prop stands at CAFE_TABLE_A, local (${tableA.x}, ${tableA.z.toFixed(2)}) — the probe cannot find what it measures`);
+  } else if (typeof lobbyFloor === 'string') {
+    problems.push(`probe 32: ${lobbyFloor}`);
+  } else {
+    const local = (): string =>
+      `(${(trapBody.position.x - LOBBY.originX).toFixed(2)}, ${trapBody.position.y.toFixed(2)}, ${(trapBody.position.z - LOBBY.originZ).toFixed(2)})`;
+    // (a) The hop: from the floor beside table A's north edge, where no chair
+    // stands, the stick toward its middle, jump pressed once, the stick let go
+    // after a moment — a child aiming at the table, not running past it. Held
+    // on, a hop carries her clean over a 1.2 m table, so a few holds are tried
+    // and one has to land her on the top.
+    const fromZ = LOBBY.originZ + tableA.z + tableA.radius + PLAYER_RADIUS + 0.05;
+    let landed = '';
+    let onTop = false;
+    const holds = [0.1, 0.2, 0.3, 0.4];
+    for (const hold of holds) {
+      standBody(LOBBY.originX + tableA.x, 0, fromZ);
+      driveBody(hold, 0, -1, true);
+      driveBody(1.5, 0, 0);
+      landed = local();
+      const onTable =
+        Math.hypot(trapBody.position.x - LOBBY.originX - tableA.x, trapBody.position.z - LOBBY.originZ - tableA.z) < tableA.radius;
+      if (onTable && Math.abs(trapBody.position.y - TABLE_TOP) <= 0.02) {
+        onTop = true;
+        landed = `${landed} (the stick held ${hold} s)`;
+        break;
+      }
+    }
+    if (!onTop) {
+      problems.push(
+        `probe 32: no hop at café table A from beside it, local (${tableA.x.toFixed(2)}, ${(fromZ - LOBBY.originZ).toFixed(2)}), ` +
+          `with the stick held ${holds.join(', ')} s, lands her on its ${TABLE_TOP} m top — the last ended at ${landed}`,
+      );
+    }
+    // (b) Every way off each table's top.
+    const stuck: string[] = [];
+    let walksOff = 0;
+    for (const table of tables) {
+      for (let k = 0; k < 8; k += 1) {
+        const heading = (k / 8) * Math.PI * 2;
+        standBody(LOBBY.originX + table.x, TABLE_TOP, LOBBY.originZ + table.z);
+        driveBody(2, Math.sin(heading), Math.cos(heading));
+        walksOff += 1;
+        const end = trapBody.position.clone();
+        if (lobbyFloor.walksOut(end.x, end.y, end.z)) continue;
+        if (walkOutOf(lobbyFloor, end.x, end.y, end.z) >= 0) continue;
+        stuck.push(`off the table at local (${table.x.toFixed(2)}, ${table.z.toFixed(2)}) heading ${(heading * 180 / Math.PI).toFixed(0)}°, she ends at ${local()} and cannot walk out`);
+      }
+    }
+    if (stuck.length > 0) problems.push(`probe 32: ${stuck.length} of ${walksOff} walks off a café table leave her stuck:\n      ${stuck.join('\n      ')}`);
+    process.stderr.write(
+      `probe 32: a hop at café table A from beside it lands at ${landed}; ${walksOff} walks off the two tables' tops, ${stuck.length} stuck\n`,
+    );
+  }
+}
+
+// ------------------------------- 33. no pocket she can get into and cannot walk out of
+/**
+ * **Wherever she can get to in a hotel room, she can walk back out of.** QA on
+ * PR #721, 17 October 2026: hopping from the room landed her behind the café's
+ * tables, walking off a table's north end dropped her there too, and once in,
+ * walking eight ways never got her out — and on a phone, where the hop button
+ * has no direction, Next day was the only way out. Jim, the day it was filed:
+ * *"We need it to not do this in specifics, but also in general."*
+ *
+ * So, in every hotel room: every **pocket** — floor a body stands on that she
+ * cannot walk to the way out from ({@link WalkableFloor}'s `cut`, grouped into
+ * connected patches) — is attacked by a real child: from the floor round it
+ * (up to {@link ENTRY_STARTS} spots within {@link ENTRY_REACH} m, spread round
+ * it), the stick held toward it seven ways, walking and with one hop, 2 s
+ * each. Every furniture top she can stand on is walked off eight ways too —
+ * that is how the café strip was entered. Wherever any of that leaves her on
+ * floor that does not walk out, she then tries to walk out, sixteen ways, 3 s
+ * each. **A pocket she gets into and cannot walk out of fails.**
+ *
+ * The control runs first, on the built lobby: a pen of four knee-high walls
+ * (0.5 m, under her hop) on open floor must come back as a pocket she hops
+ * into and cannot walk out of. If it does not, the instrument is measuring
+ * something else, and the probe says so rather than reporting clean.
+ */
+{
+  const ENTRY_REACH = 3;
+  const ENTRY_STARTS = 12;
+  const ENTRY_SECONDS = 2;
+  interface Attack {
+    readonly pockets: number;
+    readonly cells: number;
+    readonly tops: number;
+    readonly tries: number;
+    readonly endedCut: number;
+    /** How many times, in all of it, a wedge let go of her (`Player`'s `WEDGE_SECONDS`). */
+    readonly rescued: number;
+    readonly traps: string[];
+  }
+  const localOf = (room: HotelRoom, x: number, y: number, z: number): string =>
+    `(${(x - room.originX).toFixed(2)}, ${y.toFixed(2)}, ${(z - room.originZ).toFixed(2)})`;
+  /** Every way into `floor`'s pockets and off its tops; `near` keeps only the pockets within 3 m of a point. */
+  const attack = (floor: WalkableFloor, near: { x: number; z: number } | null): Attack => {
+    const { room } = floor;
+    const cut = floor.cut.filter((cell) => !near || Math.hypot(cell.x - near.x, cell.z - near.z) < 3);
+    // The pockets: connected patches of cut floor, one level each.
+    const pockets = patchesOf(floor, cut, WALK_STEP_UP);
+    let tries = 0;
+    let endedCut = 0;
+    const rescuesAtStart = trapBody.wedgeRescues;
+    const traps: string[] = [];
+    const judge = (what: string): void => {
+      tries += 1;
+      const end = trapBody.position.clone();
+      if (floor.walksOut(end.x, end.y, end.z)) return;
+      endedCut += 1;
+      if (walkOutOf(floor, end.x, end.y, end.z) >= 0) return;
+      bodyProbe.set(end.x, end.y, end.z);
+      const wedged = collision.deepestSolidOverlap(bodyProbe, PLAYER_RADIUS, 0);
+      traps.push(`${what} ends at local ${localOf(room, end.x, end.y, end.z)} (overlapping a solid by ${wedged.toFixed(3)} m), and no walk of ${WALK_OUT_WAYS} ways gets her out`);
+    };
+    for (const pocket of pockets) {
+      const cx = pocket.reduce((sum, cell) => sum + cell.x, 0) / pocket.length;
+      const cz = pocket.reduce((sum, cell) => sum + cell.z, 0) / pocket.length;
+      // Starts: floor that walks out, within reach of the pocket, spread round it by bearing.
+      const candidates = floor.out
+        .filter((cell) => pocket.some((p) => Math.hypot(p.x - cell.x, p.z - cell.z) <= ENTRY_REACH))
+        .map((cell) => ({ cell, bearing: Math.atan2(cell.x - cx, cell.z - cz), distance: Math.hypot(cell.x - cx, cell.z - cz) }))
+        .sort((a, b) => a.bearing - b.bearing || a.distance - b.distance);
+      const step = Math.max(1, candidates.length / ENTRY_STARTS);
+      const starts: FloorCell[] = [];
+      for (let i = 0; i < candidates.length && starts.length < ENTRY_STARTS; i += step) starts.push(candidates[Math.floor(i)]!.cell);
+      for (const start of starts) {
+        const toward = Math.atan2(cx - start.x, cz - start.z);
+        for (let k = -3; k <= 3; k += 1) {
+          const heading = toward + (k * Math.PI) / 8;
+          for (const hop of [false, true]) {
+            standBody(start.x, start.y, start.z);
+            driveBody(ENTRY_SECONDS, Math.sin(heading), Math.cos(heading), hop);
+            judge(`${hop ? 'a hop' : 'a walk'} from local ${localOf(room, start.x, start.y, start.z)} heading ${(heading * 180 / Math.PI).toFixed(0)}°`);
+          }
+        }
+      }
+    }
+    // Every furniture top she stands on, walked off eight ways: one cell of each
+    // patch of floor raised above the way out's own, and under her hop.
+    const raised = floor.out.filter(
+      (cell) => cell.y > floor.door.y + 0.2 && cell.y < floor.door.y + JUMP_APEX_HEIGHT && (!near || Math.hypot(cell.x - near.x, cell.z - near.z) < 3),
+    );
+    const tops = patchesOf(floor, raised, 0.05);
+    for (const top of tops) {
+      const cell = top[0]!;
+      for (let k = 0; k < 8; k += 1) {
+        const heading = (k / 8) * Math.PI * 2;
+        standBody(cell.x, cell.y, cell.z);
+        driveBody(ENTRY_SECONDS, Math.sin(heading), Math.cos(heading));
+        judge(`walking off the top at local ${localOf(room, cell.x, cell.y, cell.z)} heading ${(heading * 180 / Math.PI).toFixed(0)}°`);
+      }
+    }
+    return { pockets: pockets.length, cells: cut.length, tops: tops.length, tries, endedCut, rescued: trapBody.wedgeRescues - rescuesAtStart, traps };
+  };
+
+  // CONTROL, before any room is read: a pen she hops into and cannot walk out of.
+  let controlled = false;
+  const lobbyFloor = walkableFloor(LOBBY);
+  if (typeof lobbyFloor === 'string') {
+    problems.push(`probe 33 CONTROL could not run: ${lobbyFloor}`);
+  } else {
+    const PEN_HALF = 1.2;
+    const PEN_WALL = 0.15;
+    const PEN_TOP = 0.5;
+    // Open floor for it: a spot whose every cell within 2.5 m walks out, at the way out's own floor.
+    const open = new Set(lobbyFloor.out.filter((cell) => Math.abs(cell.y - lobbyFloor.door.y) < 0.05).map((cell) => `${cell.x.toFixed(2)},${cell.z.toFixed(2)}`));
+    const spot = lobbyFloor.out.find((cell) => {
+      if (Math.abs(cell.y - lobbyFloor.door.y) > 0.05) return false;
+      for (let dx = -5; dx <= 5; dx += 1) {
+        for (let dz = -5; dz <= 5; dz += 1) {
+          if (!open.has(`${(cell.x + dx * NAV_CELL).toFixed(2)},${(cell.z + dz * NAV_CELL).toFixed(2)}`)) return false;
+        }
+      }
+      return true;
+    });
+    if (!spot) {
+      problems.push('probe 33 CONTROL could not run: no 5 m square of open floor in the lobby to stand the pen on');
+    } else {
+      const c = PEN_HALF + PEN_WALL;
+      const pen = [
+        collision.addWall(spot.x - c, spot.z - c, spot.x + c, spot.z - c, PEN_WALL, PEN_TOP, false, true),
+        collision.addWall(spot.x + c, spot.z - c, spot.x + c, spot.z + c, PEN_WALL, PEN_TOP, false, true),
+        collision.addWall(spot.x + c, spot.z + c, spot.x - c, spot.z + c, PEN_WALL, PEN_TOP, false, true),
+        collision.addWall(spot.x - c, spot.z + c, spot.x - c, spot.z - c, PEN_WALL, PEN_TOP, false, true),
+      ];
+      const penned = walkableFloor(LOBBY);
+      const found = typeof penned === 'string' ? null : attack(penned, spot);
+      for (const wall of pen) collision.removeWall(wall);
+      if (!found || found.traps.length === 0) {
+        problems.push(
+          `probe 33 CONTROL FAILED: a pen of 0.5 m walls round local ${localOf(LOBBY, spot.x, spot.y, spot.z)} ` +
+            `came back with ${found ? `${found.pockets} pocket(s), ${found.tries} tries, ${found.endedCut} ending in it, no trap` : 'no floor measured'} — ` +
+            'the instrument cannot see a trap it was handed, so nothing it says about the rooms means anything',
+        );
+      } else {
+        controlled = true;
+        process.stderr.write(
+          `probe 33 control: a pen of 0.5 m walls round local ${localOf(LOBBY, spot.x, spot.y, spot.z)} — ` +
+            `${found.pockets} pocket, ${found.tries} tries, ${found.traps.length} trapped her (e.g. ${found.traps[0]})\n`,
+        );
+      }
+    }
+  }
+
+  const trapSummaries: string[] = [];
+  if (controlled) {
+    for (const room of ROOMS) {
+      const floor = walkableFloor(room);
+      if (typeof floor === 'string') {
+        problems.push(`probe 33: ${floor}`);
+        continue;
+      }
+      const found = attack(floor, null);
+      trapSummaries.push(
+        `${room.space}: ${found.pockets} pocket(s) of floor she cannot walk out of (${(found.cells * NAV_CELL * NAV_CELL).toFixed(2)} m²), ` +
+          `${found.tops} top(s) to walk off; ${found.tries} tries, ${found.endedCut} ended off the floor that walks out, ` +
+          `a wedge let go of her ${found.rescued} time(s), ${found.traps.length} trapped her`,
+      );
+      if (found.traps.length > 0) {
+        problems.push(
+          `probe 33: ${room.space} has a pocket she gets into and cannot walk out of — ${found.traps.length} way(s) in, e.g.\n      ` +
+            found.traps.slice(0, 6).join('\n      '),
+        );
+      }
+    }
+  }
+  collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, LOBBY.originX, LOBBY.originZ));
+  process.stderr.write(
+    `probe 33 pockets — ${controlled ? `${trapSummaries.length} room(s) attacked` : 'ASSERTS NOTHING: the control failed'}:\n` +
+      trapSummaries.map((line) => `    ${line}\n`).join(''),
+  );
 }
 
 // ----------------------------------------------------------------- report
