@@ -94,14 +94,18 @@ C2 corridor → 16 ✗. C3 never wakes → 16 ✗. C4 wrong bed → 16 ✗. C5 n
 D (check:hotel probe 32) table without a top → hop ends (-11.42, 0, 10.60), top y 0.000.
 
 ## Status
-- [x] fix 1 rule + every caller (62 sites, 52 driven, 10 named) — check:exits exit 0 (ad0f4565)
+- [x] fix 1 rule + every caller (62 sites, 52 driven, 10 named); check:exits OK
 - [x] fix 2 proven on main (probe 32); no code change but exporting TABLE_TOP
-- [x] fix 3 Next day, checked from 12 spaces + 3 mid-ride + keyless
+- [x] fix 3 Next day, checked from 12 spaces + keyless + 3 mid-ride + mid-flight
 - [x] /hotel-cafe deep link, driven by check:exits; NOT_DRIVEN keyed by code, not line
-- [x] red proofs A-D
-- [x] PR #721 opened as a DRAFT (body source /tmp/hotel-unstick/pr-body.md; placeholders PREVIEW_LINE,
-  RED_PROOFS, CHROME_LINE to fill) — mark ready (`gh pr ready 721`) after Chrome + CI
-- [ ] seed-5 park rebuilt for hash d4d55691 (background build:parks → /tmp/hotel-unstick/build-parks-3.log)
-- [ ] red proofs re-run on db54d3fe (/tmp/hotel-unstick/red-proofs2.py → /tmp/hotel-unstick/red2/)
-- [ ] look in Chrome on the branch (/tmp/hotel-unstick/browser-branch.mjs + browser-repro2.mjs)
-- [ ] pnpm run check / test:procgen / build  - [ ] PR, CI, preview link
+- [x] red proofs A-D + two controls re-run on db54d3fe → /tmp/hotel-unstick/red2/, pasted in the PR
+- [x] seed-5 park built for the final hash 2f37b38c (restart 1, digest 2ee2b3fc87c6b269)
+- [x] Chrome look on the branch (dev :5894, killed): /hotel-cafe, Jim's key route, Next day — frames on
+  qa-screenshots/pr721/ (raw.githubusercontent.com/jimhigson/land-of-good-places/qa-screenshots/pr721/…)
+- [x] pnpm run build exit 0
+- [ ] pnpm run check (first run: check:flat-primitives flagged probe 32's y threshold → flat-ok, 1ae0c00e;
+  re-running → /tmp/hotel-unstick/check-full-2.log)
+- [ ] test:procgen — CI is the gate (other seeds' parks are not built locally)
+- [ ] PR #721 is a DRAFT: body source /tmp/hotel-unstick/pr-body.md (PREVIEW_LINE left to fill from the
+  newest "Deploy PR preview" comment + /hotel-cafe); then `gh pr edit 721 --body-file`, `gh pr ready 721`
+- [ ] CI green on the final head; remove worktrees hotel-unstick-red and (at the very end) hotel-unstick
