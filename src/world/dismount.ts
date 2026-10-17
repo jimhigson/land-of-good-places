@@ -61,12 +61,17 @@ import { withinStep } from './building/stepReach';
  * small window of the space round the exit: the very cells `Game`'s router lays
  * over it, stamped, banded, bridge-exempted, levelled and joined by stairs by
  * the same code from the same inputs ({@link PutDownSpace}), and `floodFrom`
- * floods it by the router's own start rule, steps, hops and corners. So a spot
- * the router walks her out of is a spot this leaves exactly where it is — which
- * `check:exits` holds it to across every bridge, stair, deck and room of the
- * park — and the window is what keeps it to a frame or two: the whole park's
- * lattice costs 524 ms to build (measured 17 Oct 2026), and one put-down builds
- * at most {@link PUT_DOWN_WINDOW_CELLS} cells.
+ * floods it by the router's own steps, hops and corners — from a cell she can
+ * actually get to, never the router's own start rule (see {@link OpenFloor}).
+ * So a spot the router walks her out of is a spot this leaves exactly where it
+ * is, which `check:exits` holds it to across every bridge, stair, deck and room
+ * of the park.
+ *
+ * **What it costs.** A put-down averages about 6 ms, and the slowest take a
+ * frame or two: `check:exits` measured 6.6 ms on average and 47 ms at the
+ * slowest over the 571 put-downs it drives (17 Oct 2026, a loaded laptop). The
+ * window is what keeps it there — the whole park's lattice costs 524 ms to
+ * build, and one put-down builds at most {@link PUT_DOWN_WINDOW_CELLS} cells.
  */
 
 /**
@@ -241,10 +246,11 @@ export function putDownSpot(
   space: PutDownSpace = BARE_SPACE,
 ): PutDown {
   const { floor: exitFloor, lift } = floorOf(sample, exit);
-  // Clause 3 is asked of every spot the search tries; the solids it could
-  // touch are the ones within her reach of the farthest of them.
-  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + mover.radius + NAV_CELL);
-  const floor = new OpenFloor(collision, sample, exit, mover, space);
+  // Clauses 3 and 4 ask about solids round every spot the search tries, and
+  // along the walk from each to where the router would start her: the ones
+  // within her reach of the farthest of those.
+  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + START_REACH + mover.radius + NAV_CELL);
+  const floor = new OpenFloor(collision, solids, sample, exit, mover, space);
   const probe = new Vector3();
 
   const accept = (x: number, z: number): PutDown | null => {
@@ -282,15 +288,36 @@ export function putDownSpot(
 }
 
 /**
+ * **How far from a spot the cell the flood starts in may be**, metres: three
+ * of the router's cells. The router itself, planning a tap, starts from the
+ * first free cell within four metres of a walker squeezed against something —
+ * right for a tap, where the resolver pushes her out of whatever she is
+ * squeezed against, and wrong for "can she walk out of here?": a sealed nook
+ * with no free cell inside it would be flooded from outside it and called
+ * open. So clause 4 starts only from a cell she can actually get to (see
+ * {@link OpenFloor}), and only this near.
+ */
+const START_REACH = 3 * NAV_CELL;
+
+/** How finely the walk from a spot to its start cell is swept for solids, metres. */
+const SWEEP_STEP = 0.1;
+
+/**
  * **Clause 4: can she walk out of here?** — asked of the router itself.
  *
  * A window of `NavGrid`'s own lattice round the exit ({@link NavGrid.around}),
  * built from the same inputs `Game`'s router is ({@link PutDownSpace}), and
- * flooded by the router's own `floodFrom` — its start rule (from the nearest
- * free cell when hers is stamped, as `findRoute` starts), its steps, hops,
- * corners and stairs. A spot is open when that flood reaches a cell beside a
- * point of the space's open area, or one {@link OPEN_FLOOR_REACH} from the
- * spot: no pocket is that big.
+ * flooded by the router's own `floodFrom` — its steps, hops, corners and
+ * stairs. A spot is open when that flood reaches a cell beside a point of the
+ * space's open area, or one {@link OPEN_FLOOR_REACH} from the spot: no pocket
+ * is that big.
+ *
+ * **The flood starts only where she can get to**: the nearest cell of the
+ * router's lattice within {@link START_REACH} that it could stand her in
+ * (`NavGrid.nearestStandable`), whose floor is within a step of hers, and to
+ * whose centre a body of her radius walks from the spot touching nothing
+ * solid. Her own cell, when it is free, is that cell. A spot with no such cell
+ * — inside four walls with no free cell between them, say — is not open.
  *
  * Two windows, each built lazily, at most once per put-down: the exit is asked
  * in one just big enough to answer it ({@link EXIT_WINDOW_HALF}), and only when
@@ -305,15 +332,25 @@ class OpenFloor {
   cells = 0;
 
   private readonly collision: CollisionWorld;
+  private readonly solids: CollisionWorld;
   private readonly sample: GroundSampler;
   private readonly exit: RideExit;
   private readonly mover: PutDownMover;
   private readonly space: PutDownSpace;
   private readonly windows = new Map<number, { readonly router: NavGrid; readonly regions: Region[] }>();
   private anchors: readonly OpenAreaPoint[] | null = null;
+  private readonly probe = new Vector3();
 
-  constructor(collision: CollisionWorld, sample: GroundSampler, exit: RideExit, mover: PutDownMover, space: PutDownSpace) {
+  constructor(
+    collision: CollisionWorld,
+    solids: CollisionWorld,
+    sample: GroundSampler,
+    exit: RideExit,
+    mover: PutDownMover,
+    space: PutDownSpace,
+  ) {
     this.collision = collision;
+    this.solids = solids;
     this.sample = sample;
     this.exit = exit;
     this.mover = mover;
@@ -327,15 +364,36 @@ class OpenFloor {
     if (this.collision.inAnotherSpace(x, z)) return true;
     const atExit = x === this.exit.x && z === this.exit.z;
     const window = this.window(atExit ? EXIT_WINDOW_HALF : SEARCH_WINDOW_HALF);
+    const reachable = (cx: number, cz: number, cy: number): boolean => this.walksTo(x, floor, z, cx, cy, cz);
+    const start = window.router.nearestStandable(x, z, floor, this.sample, START_REACH, reachable);
+    // No cell she can get to: shut in, however open the floor beyond the walls.
+    if (!start || !reachable(start.x, start.z, start.y)) return false;
     for (const region of window.regions) {
-      if (region.reach.has(x, z, floor)) return region.openFrom(x, z);
+      if (region.reach.has(start.x, start.z, start.y)) return region.openFrom(x, z);
     }
-    const reach = window.router.floodFrom(x, z, floor, this.sample);
-    // Nowhere the router could start her within its own reach: shut in.
+    const reach = window.router.floodFrom(start.x, start.z, start.y, this.sample);
     if (!reach) return false;
     const region = new Region(reach, this.openArea());
     window.regions.push(region);
     return region.openFrom(x, z);
+  }
+
+  /**
+   * Can she get from `(x, floor, z)` to the cell centre `(cx, cy, cz)` on her
+   * own feet? Its floor within a step of hers, either way, and a body of her
+   * radius swept along the straight line between them, at her own floor's
+   * height, overlapping nothing solid by the resolver's own rule.
+   */
+  private walksTo(x: number, floor: number, z: number, cx: number, cy: number, cz: number): boolean {
+    if (!withinStep(x, floor, z, cx, cy, cz)) return false;
+    const length = Math.hypot(cx - x, cz - z);
+    const steps = Math.max(1, Math.ceil(length / SWEEP_STEP));
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      this.probe.set(x + (cx - x) * t, floor, z + (cz - z) * t);
+      if (this.solids.deepestSolidOverlap(this.probe, this.mover.radius, 0) > CLEAR_TOLERANCE) return false;
+    }
+    return true;
   }
 
   /** The window of `half` cells round the exit, built on first asking. */
