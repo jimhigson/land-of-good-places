@@ -22,12 +22,12 @@ import { toonMaterial } from '../art/style/materials';
 import { SKULL_RADIUS } from '../art/models/kid';
 import { TRAIN_PLAN } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
-import { placeOnSphere, standOnSphere, terrainHeight, yAtAltitude } from './terrain';
+import { groundRadiusAt, placeOnSphere, standOnSphere, terrainHeight, yAtAltitude, yAtRadius } from './terrain';
 import { COASTER_PLANS } from './coaster/plan';
 import { hidesTheArrivingBus } from './entrance/arrivalSightline';
 import { distanceToEntranceCorridor } from './entrance/roadRoute';
 import { CART_ENVELOPE } from './coaster/cart';
-import type { CollisionWorld } from './Collision';
+import { roundTopHalf, type CollisionWorld } from './Collision';
 // **The trees are not this file's to define.** See `world/treeModel.ts`: the
 // lane the cat bus drives up plants the same trees from the same rolls, so
 // they live in a module neither scene owns and both ask.
@@ -1017,6 +1017,15 @@ export function clearOfCruiser(x: number, z: number, reach: number, topY: number
  * around and hide behind", so these are laid out as a loose, open maze rather
  * than a fence line.
  */
+/**
+ * A wooden wall's corner post at its foot, and its ball cap — its radius, and
+ * how squashed it is drawn. The post's solid stands on the foot's radius,
+ * which is inside the run's own capsule end ({@link WOOD_WALL_COLLIDER_HALF}).
+ */
+const POST_FOOT_RADIUS = 0.21;
+const CAP_RADIUS = 0.24;
+const CAP_SQUASH = 0.8;
+
 function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], runs: readonly WallRun[]): Group {
   const group = new Group();
   group.name = 'wooden-walls';
@@ -1031,8 +1040,8 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
   const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
   const postMaterial = toonMaterial(PALETTE.woodDark);
   const capMaterial = toonMaterial(PALETTE.woodLight);
-  const postGeometry = new CylinderGeometry(0.19, 0.21, 1, 8);
-  const capGeometry = new SphereGeometry(0.24, 10, 8);
+  const postGeometry = new CylinderGeometry(0.19, POST_FOOT_RADIUS, 1, 8);
+  const capGeometry = new SphereGeometry(CAP_RADIUS, 10, 8);
 
   /**
    * **One post per corner, however many runs end there.**
@@ -1056,6 +1065,8 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     z: number;
     base: number;
     top: number;
+    /** The lowest boards' top meeting here, as a radius from the planet's centre — where the post's own solid begins. */
+    boards: number;
   }
   const corners: Corner[] = [];
   /** Same corner, allowing for the endpoints being written twice over. */
@@ -1086,14 +1097,18 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     boards.receiveShadow = true;
     group.add(boards);
 
+    // The boards' top as the run's solid holds it: a radius, measured up from
+    // the midpoint the boards are leant at (`gardenWallTop`).
+    const boardsTop = groundRadiusAt(midX, midZ) + base + run.height - terrainHeight(midX, midZ);
     for (const [px, pz] of [run.from, run.to]) {
       const top = base + run.height + 0.32;
       const existing = cornerAt(px, pz);
       if (existing) {
         existing.base = Math.min(existing.base, base);
         existing.top = Math.max(existing.top, top);
+        existing.boards = Math.min(existing.boards, boardsTop);
       } else {
-        corners.push({ x: px, z: pz, base, top });
+        corners.push({ x: px, z: pz, base, top, boards: boardsTop });
       }
     }
 
@@ -1124,9 +1139,36 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     const cap = new Mesh(capGeometry, capMaterial);
     cap.position.set(corner.x, corner.top, corner.z);
     standOnSphere(cap);
-    cap.scale.set(1, 0.8, 1);
+    cap.scale.set(1, CAP_SQUASH, 1);
     cap.castShadow = true;
     group.add(cap);
+
+    // **The post is a solid of its own, to its cap's crown** — taller than the
+    // boards either side by a third of a metre and a cap, so a child walking
+    // along a wall's top meets the post (or steps up onto its cap) rather
+    // than standing inside it at the boards' height, which is where the run's
+    // own capsule end put her. The cap is a ball: she stands on its crown
+    // (`roundTopHalf`).
+    //
+    // **Banded, from the boards' top up** (a finite `baseHeight`). Below the
+    // boards the run's own capsule end is what anyone meets — the footprint is
+    // inside it — and a banded solid is one the planner, the route lattice and
+    // the crowd's hop band never read, so the park and its routes are the ones
+    // they were; only what stands over the boards is new.
+    const crown = corner.top + CAP_RADIUS * CAP_SQUASH;
+    collision.kinded('wooden wall post', () =>
+      collision.toppedNarrow(roundTopHalf(CAP_RADIUS), () =>
+        collision.addCircle(
+          corner.x,
+          corner.z,
+          POST_FOOT_RADIUS,
+          yAtAltitude(corner.x, corner.z, crown - terrainHeight(corner.x, corner.z)),
+          false,
+          true,
+          yAtRadius(corner.x, corner.z, corner.boards),
+        ),
+      ),
+    );
   }
 
   return group;
@@ -1174,6 +1216,16 @@ function withoutBoxTop(geometry: BoxGeometry): BoxGeometry {
   geometry.clearGroups();
   return geometry;
 }
+
+/**
+ * **How far a stone wall's coping runs past each end of the wall** — and so
+ * how far past each end its top is somewhere to stand
+ * (`CollisionWorld.toppedSquare`). The wall's solid is a capsule, round-ended
+ * so she slides round an end; its round end runs 0.34 m past the wall, and as
+ * a top it was a ledge over nothing drawn: the census stood her 0.3 m past a
+ * coping's end, 0.24 m over the flank of its finial (seed 5, 17 Oct 2026).
+ */
+const COPING_END_OVERHANG = 0.1;
 
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
@@ -1225,7 +1277,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     group.add(wall);
 
     // A rounded coping stone along the top — reads as "sit on me".
-    const coping = new Mesh(new BoxGeometry(length + 0.2, 0.16, 0.72), copingMaterial);
+    const coping = new Mesh(new BoxGeometry(length + 2 * COPING_END_OVERHANG, 0.16, 0.72), copingMaterial);
     placeOnSphere(new Vector3(midX, base + run.height + 0.08, midZ), -angle, coping.position, coping.quaternion);
     coping.castShadow = true;
     coping.receiveShadow = true;
@@ -1255,7 +1307,9 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     // land on and walk along — see the wooden walls above, including why the
     // hop is still planned on the run's own height.
     collision.kinded('stone garden wall', () =>
-      collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, copingTop), true, true, -Infinity, false, run.height),
+      collision.toppedSquare(COPING_END_OVERHANG, () =>
+        collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, copingTop), true, true, -Infinity, false, run.height),
+      ),
     );
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }

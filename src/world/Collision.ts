@@ -255,6 +255,30 @@ export interface WallCollider extends SolidHeights {
   x2: number;
   z2: number;
   halfThickness: number;
+  /**
+   * **How far past each end its top runs, square** — `NaN` when the top is
+   * the whole capsule, round ends and all. A capsule is round-ended so she
+   * slides round its end rather than snagging on a corner; a garden wall is
+   * drawn square-ended, and the round end's top past the drawn coping was
+   * somewhere she could stand on air. See {@link CollisionWorld.toppedSquare}.
+   */
+  topEnds: number;
+}
+
+/**
+ * **Does a wall's top reach over `(x, z)` along its length?** — always, for a
+ * round-ended top; for a square one ({@link WallCollider.topEnds}), only up to
+ * `topEnds` past either end. The across-the-wall reach is the footprint's and
+ * {@link standsWithin}'s question.
+ */
+function wallTopReaches(wall: Readonly<WallCollider>, x: number, z: number): boolean {
+  if (Number.isNaN(wall.topEnds)) return true;
+  const ax = wall.x2 - wall.x1;
+  const az = wall.z2 - wall.z1;
+  const length = Math.hypot(ax, az);
+  if (length < 1e-6) return Math.hypot(x - wall.x1, z - wall.z1) <= wall.topEnds + 1e-9;
+  const along = ((x - wall.x1) * ax + (z - wall.z1) * az) / length;
+  return along >= -wall.topEnds - 1e-9 && along <= length + wall.topEnds + 1e-9;
 }
 
 /**
@@ -856,6 +880,7 @@ export class CollisionWorld {
   /** The kind every collider registered now is filed under — see {@link kinded}. */
   private currentKind = '';
   private currentTopHalf = Number.NaN;
+  private currentTopEnds = Number.NaN;
 
   /**
    * **Every solid `build` registers has a top `half` either side of its line**
@@ -872,6 +897,23 @@ export class CollisionWorld {
       return build();
     } finally {
       this.currentTopHalf = outer;
+    }
+  }
+
+  /**
+   * **Every wall `build` registers has a square-ended top, running `beyond`
+   * metres past each end** — what a square-ended thing is drawn with, where
+   * the capsule's round ends, kept for her to bump and slide round, would be a
+   * top over nothing drawn. Changes nothing she bumps, nothing a planner or a
+   * lattice reads: only where she can stand. Nests like {@link kinded}.
+   */
+  toppedSquare<T>(beyond: number, build: () => T): T {
+    const outer = this.currentTopEnds;
+    this.currentTopEnds = beyond;
+    try {
+      return build();
+    } finally {
+      this.currentTopEnds = outer;
     }
   }
 
@@ -1028,6 +1070,7 @@ export class CollisionWorld {
       const dz = z - (wall.z1 + az * t);
       if (dx * dx + dz * dz > wall.halfThickness * wall.halfThickness) continue;
       if (!standsWithin(wall, Math.hypot(dx, dz))) continue;
+      if (!wallTopReaches(wall, x, z)) continue;
       const top = solidTopAt(wall, x, z);
       if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
       best = top;
@@ -1284,6 +1327,7 @@ export class CollisionWorld {
       z2,
       halfThickness,
       ...this.heights((x1 + x2) / 2, (z1 + z2) / 2, middleTop, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
+      topEnds: this.currentTopEnds,
     };
     if (sloped) {
       const r1 = radiusFor(x1, z1, topHeight);
@@ -1621,7 +1665,7 @@ export class CollisionWorld {
           let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
           t = t < 0 ? 0 : t > 1 ? 1 : t;
           const d = Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
-          return d <= wall.halfThickness && standsWithin(wall, d);
+          return d <= wall.halfThickness && standsWithin(wall, d) && wallTopReaches(wall, x, z);
         },
         topAt: (x, z) => solidTopAt(wall, x, z),
         baseAt: (x, z) => solidBaseAt(wall, x, z),
