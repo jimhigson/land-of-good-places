@@ -21,7 +21,7 @@
  * and climbs included.
  */
 import { Vector3 } from 'three';
-import type { CollisionWorld, SolidView } from '../../src/world/Collision.ts';
+import { JUMP_CLEARANCE_GRACE, type CollisionWorld, type SolidView } from '../../src/world/Collision.ts';
 import type { NavGrid } from '../../src/world/NavGrid.ts';
 import { PLAYER_RADIUS, BUILDING_STEP_UP } from '../../src/core/constants.ts';
 import { SimPlayer } from '../playerSim.mts';
@@ -124,6 +124,12 @@ function outline(solid: SolidView, spacing: number): { x: number; z: number; nx:
  * One run-and-jump at a solid, simulated: from `from`, sprint at `aim`, hop
  * when within `jumpAt` of it, keep steering at it until she lands, then let
  * her settle. Returns where she settled (grounded), or null if she never did.
+ *
+ * With `onto`, the jump is for that solid's top alone, and it is given up as
+ * soon as it has missed: once she is coming down with her feet past its top
+ * (and the clearance grace), nothing she can do lands her on it — the contact
+ * rule now meets it side-on. The rest of the fall and the settle are spent on
+ * nothing; on the park they were most of what the census cost.
  */
 export function runAndJump(
   options: Pick<ReachOptions, 'collision' | 'sample'>,
@@ -132,6 +138,7 @@ export function runAndJump(
   aimZ: number,
   jumpAt: number,
   fps: number,
+  onto: SolidView | null = null,
 ): Stand | null {
   const dt = 1 / fps;
   let fire = false;
@@ -158,6 +165,9 @@ export function runAndJump(
       fire = true;
       jumped = true;
     }
+    // Falling (her own vertical speed, which the flight carry keeps as height
+    // over the ground rather than world y), and below its top in her column.
+    if (onto && jumped && sim.airborne && sim.verticalVelocity < 0 && sim.position.y + JUMP_CLEARANCE_GRACE < onto.topAt(sim.position.x, sim.position.z) - 0.02) return null;
     const wasAirborne = sim.airborne;
     // Steer at the aim until she has landed after the jump, then stand still.
     const steer = landedAt < 0 && d > 0.15;
@@ -307,6 +317,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
 
   const reached = new Map<SolidView, ReachedTop>();
   let jumps = 0;
+  const beyond = new Vector3();
   const byKind = new Map<string, { sims: number; won: number }>();
   const cost = {
     ms: { step: 0, jump: 0, over: 0, chain: 0, drop: 0 },
@@ -411,7 +422,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
             jumps += 1;
             cost.sims.jump += 1;
             aimedAt(solid, false);
-            const landed = runAndJump(options, { x: sx, z: sz, y: sy }, aimX, aimZ, jumpAt, fps);
+            const landed = runAndJump(options, { x: sx, z: sz, y: sy }, aimX, aimZ, jumpAt, fps, solid);
             if (landed && standsOn(solid, landed)) {
               aimedAt(solid, true);
               markReached({ solid, top: landed.y, how: 'jump', at: landed, from: { x: sx, z: sz, y: sy } });
@@ -442,8 +453,16 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         if (through >= 2 * solid.reach + 0.1) continue;
         const lx = o.x - o.nx * (through + PLAYER_RADIUS + 0.3);
         const lz = o.z - o.nz * (through + PLAYER_RADIUS + 0.3);
+        // Nowhere to come down past the space's own edge — the leash holds
+        // her inside it at every height, which is clause 7's to prove, and
+        // every outline point of the park's boundary wall was otherwise nine
+        // jumps at the void (15078 of the park's 39003, seed 5).
+        if (collision.playBounds.distanceToEdge(lx, lz) < PLAYER_RADIUS) continue;
         const ly = sample(lx, lz, top + 2);
         if (!Number.isFinite(ly) || groundReached(lx, lz, ly)) continue;
+        // Nor inside another solid: what is beyond is that solid's side, and
+        // its top is stage 2's and 3's.
+        if (collision.deepestSolidOverlap(beyond.set(lx, ly, lz), PLAYER_RADIUS) > 0.02) continue;
         // A run-up on her side, on ground she has reached, within a jump of the top.
         let over = false;
         for (const runUp of RUN_UPS) {
@@ -512,7 +531,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
           jumps += 1;
           cost.sims.chain += 1;
           aimedAt(solid, false);
-          const landed = runAndJump(options, start, solid.centreX, solid.centreZ, jumpAt, fps);
+          const landed = runAndJump(options, start, solid.centreX, solid.centreZ, jumpAt, fps, solid);
           if (landed && standsOn(solid, landed)) {
             aimedAt(solid, true);
             markReached({ solid, top: landed.y, how: 'chain', at: landed, from: start });
