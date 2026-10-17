@@ -274,11 +274,17 @@ export function buildRailFence(
     z: number;
     y: number;
   }
-  /** A bay's rails: its midpoint, the ground under it (`base`), its bearing and its length — drawn twice, lower bar and top rail. */
+  /**
+   * A bay's rails: its midpoint, the ground under it (`base`, the mean of its
+   * two posts' feet), how far the far post's foot rises over the near one's
+   * (`rise`), its bearing and its plan length — drawn twice, lower bar and top
+   * rail.
+   */
   interface Rail {
     x: number;
     z: number;
     base: number;
+    rise: number;
     yaw: number;
     length: number;
   }
@@ -331,6 +337,7 @@ export function buildRailFence(
       x: (a.x + b.x) / 2,
       z: (a.z + b.z) / 2,
       base: (a.y + b.y) / 2,
+      rise: b.y - a.y,
       yaw: Math.atan2(b.x - a.x, b.z - a.z),
       length: Math.hypot(b.x - a.x, b.z - a.z),
     });
@@ -354,6 +361,7 @@ export function buildRailFence(
         x: (from.x + to.x) / 2,
         z: (from.z + to.z) / 2,
         base: (from.y + to.y) / 2,
+        rise: to.y - from.y,
         yaw: Math.atan2(to.x - from.x, to.z - from.z),
         length: Math.hypot(to.x - from.x, to.z - from.z),
       });
@@ -504,18 +512,31 @@ export function buildRailFence(
     postMesh.setMatrixAt(index, matrix);
   });
   const stretch = new Vector3();
+  const pitch = new Quaternion();
+  const across = new Vector3(1, 0, 0);
   rails.forEach((rail, index) => {
     // A rail is placed from its own midpoint while the two posts carrying it
     // lean at their own feet. Over a fence bay that is a fraction of a degree
     // apart, and it is what keeps the run reading as one fence rather than as
     // posts and rails leaning by different amounts.
+    //
+    // **And it runs from post to post**, pitched up the rise between their
+    // feet, so at each post it stands its own height over that post's ground
+    // — the line its solid's top runs along (`addFenceWall`'s `TopSlope`).
+    // Drawn level at the bay's mean, a rail's end stood half the rise off its
+    // height at each post: harmless while one rail ran 0.29 m under the posts'
+    // tops, but the top rail runs 8.5 cm under them, and a bay rising 17 cm put
+    // its top in the plane of the lower post's cap (`check:coplanar`, seed 9,
+    // 17 Oct 2026). Pitched, the gap at every post is the gap as authored.
+    pitch.setFromAxisAngle(across, -Math.atan2(rail.rise, rail.length));
     for (const [slot, centre] of [
       [0, RAIL_CENTRE],
       [1, TOP_RAIL_CENTRE],
     ] as const) {
       flat.set(rail.x, rail.base + centre, rail.z);
       placeOnSphere(flat, rail.yaw, position, rotation);
-      stretch.set(1, 1, rail.length);
+      rotation.multiply(pitch);
+      stretch.set(1, 1, Math.hypot(rail.length, rail.rise));
       matrix.compose(position, rotation, stretch);
       railMesh.setMatrixAt(index * 2 + slot, matrix);
     }

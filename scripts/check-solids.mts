@@ -73,7 +73,8 @@ import { standingHeight } from '../src/world/standing.ts';
  * **The red proofs.** Each breaks one thing and must turn its clause red:
  *
  * - `infinite`: registers an invisible pillar with no top — clause 1.
- * - `low-top`: a solid sunk 0.4 m under a station bench's seat — clause 2.
+ * - `tall-top`: a prop made too tall — a solid round a station bench half a
+ *   metre over its drawn seat — clause 2 finds her standing on air.
  * - `too-tall`: the precedent bench made 1 m taller — clause 3 cannot land.
  * - `rail-step`, `low-roof`, `low-exhibit`: a step by the gate carrying the
  *   kind of the railway's corridor, a stall's roof, an exhibit — each of
@@ -121,12 +122,12 @@ const sample = park.sample;
 {
   const before: SolidView[] = [];
   collision.forEachSolid((solid) => before.push(solid));
-  const groundAt = (s: SolidView): number => sample(s.centreX + s.reach + 1, s.centreZ, s.topAt(s.centreX, s.centreZ));
   if (PROVE === 'infinite') collision.kinded('proof: a pillar with no top', () => collision.addCircle(ENTRANCE_PLAYER_X + 4, ENTRANCE_PLAYER_Z, 0.4));
-  if (PROVE === 'low-top') {
-    // A solid sunk 0.4 m under the station bench it stands in.
+  if (PROVE === 'tall-top') {
+    // A prop made too tall: a solid round a station bench, half a metre over
+    // its drawn seat — she stands on air over the bench.
     const bench = before.find((s) => s.kind === 'station bench');
-    if (bench) collision.kinded('proof: a bench solid sunk under its seat', () => collision.addCircle(bench.centreX, bench.centreZ, 0.2, bench.topAt(bench.centreX, bench.centreZ) - 0.4, false, true));
+    if (bench) collision.kinded('station bench', () => collision.addCircle(bench.centreX, bench.centreZ, 1.2, bench.topAt(bench.centreX, bench.centreZ) + 0.5, false, true));
   }
   if (PROVE === 'too-tall') {
     const bench = before.find((s) => s.owner === 'castle' && s.shape === 'box' && Math.abs(s.halfWidth - 0.36) < 0.02);
@@ -717,7 +718,7 @@ if (SKIP_CENSUS || (ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the park'
   let clusters = 0;
   let dropOff = 0;
   let searched = 0;
-  for (const [key, first] of cells) {
+  for (const key of cells.keys()) {
     if (seen.has(key)) continue;
     clusters += 1;
     const members: Stand[] = [];
