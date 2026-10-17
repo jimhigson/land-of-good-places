@@ -6,7 +6,7 @@ import {
   PLAYER_TURN_SPEED,
 } from '../../core/constants';
 import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
-import type { CollisionWorld } from '../../world/Collision';
+import { separatedByHeight, type CollisionWorld } from '../../world/Collision';
 import { terrainHeight } from '../../world/terrain';
 import { faceOnGround } from '../../world/up';
 import type { GroundSampler } from '../Player';
@@ -521,6 +521,9 @@ export class NpcCharacter {
     // standing — shoving it "apart" from a passer-by at ground level would
     // knock it out of setClimbPose's next call for nothing visible in return.
     if (this.climbingFlag || other.climbingFlag) return;
+    // One above the other — a guest on the hotel landing and one walking
+    // under it — are not in each other's way. See `separatedByHeight`.
+    if (separatedByHeight(this.position.x, this.position.y, this.position.z, other.position.x, other.position.y, other.position.z)) return;
 
     // **A scripted child cannot be pushed, but must still push.**
     //

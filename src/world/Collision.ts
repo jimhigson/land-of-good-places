@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
+import { riseBetween } from './building/stepReach';
 
 /**
  * Deliberately simple solid-object handling.
@@ -1893,6 +1894,37 @@ export class CollisionWorld {
  * as a second line of defence should two characters ever end up teleported
  * on top of each other.
  */
+/**
+ * **How far apart in height two bodies can stand and still be pushed apart**,
+ * metres along the local up — about half a metre.
+ *
+ * The push-apart is two circles in plan, so before solids had tops to stand on
+ * a child walking past a bench shoved the girl standing on it, and a guest on
+ * the hotel landing shoved one walking under it, through the floor between
+ * them. Within this gap they are close enough in height to bump (she is up a
+ * kerb, or on a low bench beside you); past it one is above the other, and
+ * nothing is pushed.
+ */
+export const SEPARATION_HEIGHT_GAP = 0.5;
+
+/**
+ * Are two bodies, feet at `a` and `b`, too far apart in height to push each
+ * other — one above the other rather than side by side? Measured along the
+ * local up (`riseBetween`: radial out in the park, plain `y` indoors), so two
+ * children on the same hillside 1.3 m apart are side by side however the
+ * planet leans under them.
+ */
+export function separatedByHeight(
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+): boolean {
+  return Math.abs(riseBetween(ax, ay, az, bx, by, bz)) > SEPARATION_HEIGHT_GAP;
+}
+
 export function circleSeparation(
   ax: number,
   az: number,

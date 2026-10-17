@@ -15,7 +15,7 @@ import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
-import { circleSeparation, MAX_DEPENETRATION_SPEED, type CollisionWorld } from '../../world/Collision';
+import { circleSeparation, MAX_DEPENETRATION_SPEED, separatedByHeight, type CollisionWorld } from '../../world/Collision';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { GroundSampler, Player } from '../Player';
 import { CharacterModel } from '../CharacterModel';
@@ -1097,6 +1097,10 @@ export class NpcSystem implements GameSystem {
       // Two pieces of furniture: nobody can step aside, so nobody is moved.
       const childSeated = character.seated;
       if (childSeated && playerRiding) continue;
+      // One above the other — she is stood on a wall or a table — and so not
+      // in each other's way at all. See `separatedByHeight`.
+      const at = player.position;
+      if (separatedByHeight(character.position.x, character.position.y, character.position.z, at.x, at.y, at.z)) continue;
 
       const push = circleSeparation(
         character.position.x,

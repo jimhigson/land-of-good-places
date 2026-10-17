@@ -312,13 +312,12 @@ for (const floor of CASTLE_FLOORS) {
 // ---------------------------------------------------------------------------
 
 /**
- * **`addRectangle` is four walls round a hollow middle, and a mover inside one
- * is never pushed out** — the soft-lock #453 nearly shipped on the banquet
- * tables. A bench is small enough that the four walls' stadiums overlap
- * through the centre and there is no interior at all, which is arithmetic
- * (`BENCH_DEPTH` under four half-thicknesses) rather than luck — so this
- * clause is what turns the arithmetic into something that fails out loud the
- * day somebody widens a bench.
+ * **A mover inside a solid must be pushed out** — the soft-lock #453 nearly
+ * shipped on the banquet tables, when `addRectangle` was four walls round a
+ * hollow middle that cancelled each other's pushes. It is one filled box now
+ * (`Collision.ts`'s `BoxCollider`), pushed out through the nearest face from
+ * anywhere inside, and this clause is what proves that rather than trusting
+ * it, whatever size a bench grows to.
  *
  * She gets there by jumping onto the bench and stepping off inside it, which
  * is exactly what a six-year-old does with a thing she has just discovered she
@@ -408,16 +407,12 @@ for (const floor of CASTLE_FLOORS) {
   }
 }
 
-// A bench cannot be so deep that `addRectangle`'s hollow middle reappears.
-// Clause 2 is the measurement; this is the reason, stated where a widening
-// edit will read it.
-if (BENCH_DEPTH >= 4 * 0.2) {
-  fail(
-    `a bench is ${BENCH_DEPTH} m deep, which is no less than four collision-wall ` +
-      `half-thicknesses — its four walls no longer overlap through the middle, so it has an ` +
-      `interior to get stuck in. See Building.ts's registerBenchCollision.`,
-  );
-}
+// (A clause stood here holding a bench under 0.8 m deep, because four walls
+// round a hollow middle only overlapped through it while the bench was that
+// narrow. A rectangle is one filled box now — `Collision.ts`'s `BoxCollider` —
+// so there is no interior to reappear, whatever the depth. Clause 2, which
+// drops a body in every bench's middle and watches it leave, is the
+// measurement either way.)
 
 // ---------------------------------------------------------------------------
 // 3b. The planters: the pot stops her, the bush does not
