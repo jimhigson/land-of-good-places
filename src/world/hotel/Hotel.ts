@@ -3146,6 +3146,10 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * **Lies her down in `bed`, and sends every pet she has to its own bed** —
+   * walking there and climbing in, or with `petsAsleep` already lying in it
+   * (the "Next day" morning, {@link wakeTomorrowInSuite}).
+   *
    * Sleep — visibly, in the bed (Jim, 8 August 2026: *"they should lie in a
    * bed visibly with a blanket on them"*).
    *
@@ -3179,7 +3183,8 @@ export class Hotel implements GameSystem {
    * #275, Jim's direct ask: *"when the player sleeps, all pets should also
    * go to sleep."* They are not *already* in those beds, and that is bug 1 of
    * the same 21 Aug report: a bed stands empty until this moment, and its pet
-   * trots into it now, in step with her — see {@link sendPetsToBed}. It does
+   * trots into it now, in step with her — see {@link sendPetsToBed} — unless
+   * `petsAsleep` opens the morning with every pet already asleep in it. It does
    * not matter which of the three bedrooms she napped
    * in; {@link napping} is one room-wide flag already (it is what disables
    * every other bed's own "Have a sleep" chip while it runs), so every pet
@@ -3197,11 +3202,6 @@ export class Hotel implements GameSystem {
    *
    * **Runs until {@link wakeNap} ends it — no timer.** Jim, 24 Aug 2026:
    * *"make them stay in the bed until the player gets them out."*
-   */
-  /**
-   * Lies her down in `bed`, and sends every pet she has to its own bed —
-   * walking there and climbing in, or with `petsAsleep` already lying in it
-   * (the "Next day" morning, {@link wakeTomorrowInSuite}).
    */
   private nap(bed: Bed, petsAsleep = false): void {
     const player = this.player;
