@@ -146,11 +146,12 @@ Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue of
   point needs a connector on seed 5 (not traced why); reported as measured.
 
 ## Status
-- [x] all of QA's and the re-review's asks pushed; CI green on c8c059ba (31 jobs: 25 success, 6 skipped
-  park builds reused); local re-runs on this source's own park: check:hotel OK, check:exits OK.
-- [x] c8c059b's preview loaded at 844x390 + desktop: two-column menu, dex opens — but the shut ☰ button
-  sat over the open Cute-o-dex (z-index on .hud-menu always) → d3f17f6f lifts it only while open;
-  check:menu-reach clause 4 red on the always-lifted CSS ×4, green here.
-- [ ] CI on the final head; its preview at 844x390 + desktop (browser-preview-3.mjs); full local check log
-  /tmp/hotel-unstick/check-full.log
-- [ ] PR body (/tmp/hotel-unstick/pr-body.md) + answer comment (/tmp/hotel-unstick/answer-3.md), then hand back
+- [x] all of QA's and the re-review's asks pushed; CI green on c8c059ba (31 jobs); local re-runs on this
+  source's own park: check:hotel OK, check:exits OK.
+- [x] preview passes found two stacking faults of my own, both fixed and checked: the shut ☰ button over
+  the open Cute-o-dex (d3f17f6f) and the "Have breakfast" chip over the open drawer's Map (9d3c96b6);
+  check:menu-reach runs beside the café, hit-tests five points a pill, and opens the dex (red on each
+  old CSS: menu-mut-z.log ×4 sizes, menu-mut-z2.log at 667×375).
+- [x] 9d3c96b's preview loaded at 844×390 + desktop; screens pr721/16–21 on qa-screenshots.
+- [ ] CI green on this head; post the PR body (/tmp/hotel-unstick/pr-body.md) and the answer comment
+  (/tmp/hotel-unstick/answer-3.md); hand back.
