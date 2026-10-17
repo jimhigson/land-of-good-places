@@ -85,6 +85,8 @@ import { standingHeight } from '../src/world/standing.ts';
  *   the crate leaves her nowhere to go — clause 4's trap clause.
  * - `ghost` (core): a bench drawn and never registered — clause 5's march
  *   walks into it.
+ * - `stranded` (park): a 0.8 m block filling a ring of 2.4 m walls she can
+ *   reach off a 1.2 m step — clause 4's every-top-leavable clause.
  * - `no-headroom` (park): a canopy hung 1 m over a reached top — clause 6.
  * - `no-bounds` (core): the park's leash taken off — clause 7.
  */
@@ -175,6 +177,25 @@ const sample = park.sample;
     const z = ENTRANCE_PLAYER_Z;
     collision.kinded(kind, () => collision.addCircle(x, z, 0.7, sample(x, z, 50) + 0.4, false, true));
   };
+  if (PROVE === 'stranded') {
+    // A pit whose floor is too high to be the ground and too low to jump out
+    // of: a ring of thick 2.4 m walls round a 0.8 m block that fills it, and a
+    // 1.2 m step outside, off which a jump stands her on the ring. From the
+    // ring she jumps down onto the block, and from the block nothing she can
+    // do gets her out — its edges are the walls, and the ring is 1.6 m over it.
+    const cx = ENTRANCE_PLAYER_X;
+    const cz = ENTRANCE_PLAYER_Z - 8;
+    const g = sample(cx, cz, 50);
+    collision.kinded('proof: a step up to the ring', () => collision.addCircle(cx + 2.6, cz, 0.6, g + 1.2, false, true));
+    for (let i = 0; i < 12; i += 1) {
+      const a = (i / 12) * Math.PI * 2;
+      const b = ((i + 1) / 12) * Math.PI * 2;
+      collision.kinded('proof: the ring round the pit', () =>
+        collision.addWall(cx + Math.cos(a) * 1.6, cz + Math.sin(a) * 1.6, cx + Math.cos(b) * 1.6, cz + Math.sin(b) * 1.6, 0.35, g + 2.4, false, true),
+      );
+    }
+    collision.kinded("proof: the pit's floor", () => collision.addCircle(cx, cz, 1.3, g + 0.8, false, true));
+  }
   if (PROVE === 'rail-step') stepNearGate('railway corridor');
   if (PROVE === 'low-roof') stepNearGate('stall awning');
   if (PROVE === 'low-exhibit') stepNearGate("proof's enclosure");
@@ -482,6 +503,30 @@ if (SKIP_CENSUS) {
       if (!out) stuck.push(`${region.via} → ${run.link(region.entry)}`);
     }
     say(stuck.length === 0, `${run.name}: every one of ${result.regions.length - 1} region(s) she can drop into, she can get out of again${stuck.length ? ` — trapped: ${stuck.join('; ')}` : ''}`);
+    // Every top leavable: a top she walked off an edge of, she has left; one
+    // she could not — hemmed in, or level with the next top along — is asked
+    // the region's question: from where she stood on it, do her own walking
+    // and jumping get her back to the walk?
+    const strandedOn: string[] = [];
+    for (const top of result.hemmedIn) {
+      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+      let out = false;
+      try {
+        out = reachWithJumps({
+          collision,
+          sample,
+          grid,
+          start: top.at,
+          inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - top.at.x, z - top.at.z) < 14,
+          fps: 60,
+          until: outside,
+        }).stopped;
+      } catch {
+        out = joinsMain({ collision, sample }, main, top.at, 60, 14);
+      }
+      if (!out) strandedOn.push(`${top.solid.kind || top.solid.owner || 'a solid'} → ${run.link(top.at)}`);
+    }
+    say(strandedOn.length === 0, `${run.name}: every one of ${result.tops.length} top(s) she reaches, she can get down from again (${result.hemmedIn.length} with no edge to walk off, each searched)${strandedOn.length ? ` — stranded on: ${strandedOn.join('; ')}` : ''}`);
   }
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   note(`clause 4 simulated her jumps at 60 fps over ${runs.length} spaces and reached ${allReached.length} tops; a slower frame rate reaches less (fewer, shorter steps up the arc), so 60 is the bound that matters for escapes`);

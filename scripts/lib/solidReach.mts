@@ -82,6 +82,13 @@ export interface ReachResult {
   readonly jumps: number;
   /** True when `until` said yes and the search stopped there. */
   readonly stopped: boolean;
+  /**
+   * Tops she reached and never came down from by walking off an edge — every
+   * walk-off stopped at a wall or kept her at the same height. Not stuck by
+   * that alone (a jump may take her off, or the next top along), so the
+   * caller asks each one whether she can get back.
+   */
+  readonly hemmedIn: readonly ReachedTop[];
   /** What the search spent, by stage: wall-clock milliseconds and simulations run — for the coverage line, and for whoever has to make it faster. */
   readonly cost: ReachCost;
 }
@@ -331,6 +338,8 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   const reached = new Map<SolidView, ReachedTop>();
   let jumps = 0;
   const beyond = new Vector3();
+  /** Tops a walk-off brought her down from. */
+  const walkedOffFrom = new Set<SolidView>();
   const byKind = new Map<string, { sims: number; won: number }>();
   const cost = {
     ms: { step: 0, jump: 0, over: 0, chain: 0, drop: 0 },
@@ -567,6 +576,7 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         cost.sims.walkOff += 1;
         const landed = walkOff(options, source.solid, o, fps);
         if (!landed) continue;
+        walkedOffFrom.add(source.solid);
         if (groundReached(landed.x, landed.z, landed.y)) continue;
         // Her own walking first — cheap, local, and the common answer: she
         // came down beside ground already reached and walks onto it.
@@ -594,7 +604,8 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
     say(`  round ${round}: ${reached.size} tops, ${regions.length} region(s), ${jumps} jumps simulated`);
   }
 
-  return { tops: [...reached.values()], regions, groundReached, jumps, stopped, cost };
+  const tops = [...reached.values()];
+  return { tops, regions, groundReached, jumps, stopped, cost, hemmedIn: stopped ? [] : tops.filter((top) => !walkedOffFrom.has(top.solid)) };
 }
 
 /** Within one step of `fromY` at (x, z) — the reach her walking spends. */
