@@ -275,18 +275,13 @@ export function buildRailFence(
     y: number;
   }
   /**
-   * A bay's rails: its midpoint, the ground under it (`base`, the mean of its
-   * two posts' feet), how far the far post's foot rises over the near one's
-   * (`rise`), its bearing and its plan length — drawn twice, lower bar and top
-   * rail.
+   * A bay's rails, from the foot they start over to the one they end over —
+   * a post's, or a stub's end, which keeps its post's foot height — drawn
+   * twice, lower bar and top rail.
    */
   interface Rail {
-    x: number;
-    z: number;
-    base: number;
-    rise: number;
-    yaw: number;
-    length: number;
+    from: Post;
+    to: Post;
   }
   const posts: Post[] = [];
   const rails: Rail[] = [];
@@ -333,14 +328,7 @@ export function buildRailFence(
   };
   const link = (a: Post, b: Post) => {
     addFenceWall(a, b);
-    rails.push({
-      x: (a.x + b.x) / 2,
-      z: (a.z + b.z) / 2,
-      base: (a.y + b.y) / 2,
-      rise: b.y - a.y,
-      yaw: Math.atan2(b.x - a.x, b.z - a.z),
-      length: Math.hypot(b.x - a.x, b.z - a.z),
-    });
+    rails.push({ from: a, to: b });
   };
   /**
    * A box end cap crosses the track, and the train drives through it four
@@ -357,14 +345,7 @@ export function buildRailFence(
       [a, { x: a.x + (b.x - a.x) * stub, z: a.z + (b.z - a.z) * stub, y: a.y }],
       [b, { x: b.x + (a.x - b.x) * stub, z: b.z + (a.z - b.z) * stub, y: b.y }],
     ] as const) {
-      rails.push({
-        x: (from.x + to.x) / 2,
-        z: (from.z + to.z) / 2,
-        base: (from.y + to.y) / 2,
-        rise: to.y - from.y,
-        yaw: Math.atan2(to.x - from.x, to.z - from.z),
-        length: Math.hypot(to.x - from.x, to.z - from.z),
-      });
+      rails.push({ from, to });
     }
   };
 
@@ -512,31 +493,46 @@ export function buildRailFence(
     postMesh.setMatrixAt(index, matrix);
   });
   const stretch = new Vector3();
-  const pitch = new Quaternion();
-  const across = new Vector3(1, 0, 0);
+  const endFrom = new Vector3();
+  const endTo = new Vector3();
+  const along = new Vector3();
+  const drawnAlong = new Vector3();
+  const turn = new Quaternion();
+  const unused = new Quaternion();
+  const atMiddle = new Vector3();
   rails.forEach((rail, index) => {
-    // A rail is placed from its own midpoint while the two posts carrying it
-    // lean at their own feet. Over a fence bay that is a fraction of a degree
-    // apart, and it is what keeps the run reading as one fence rather than as
-    // posts and rails leaning by different amounts.
+    const { from, to } = rail;
+    // **A rail runs from post to post: each end is where its post puts that
+    // height** — leant at the post's own foot, exactly as the post is
+    // (`placeOnSphere`), so at every post the top rail's top is the 8.5 cm
+    // under the cap it was authored at, and the drawn rail lies along the
+    // line its solid's top runs (`addFenceWall`'s `TopSlope`).
     //
-    // **And it runs from post to post**, pitched up the rise between their
-    // feet, so at each post it stands its own height over that post's ground
-    // — the line its solid's top runs along (`addFenceWall`'s `TopSlope`).
-    // Drawn level at the bay's mean, a rail's end stood half the rise off its
-    // height at each post: harmless while one rail ran 0.29 m under the posts'
-    // tops, but the top rail runs 8.5 cm under them, and a bay rising 17 cm put
-    // its top in the plane of the lower post's cap (`check:coplanar`, seed 9,
-    // 17 Oct 2026). Pitched, the gap at every post is the gap as authored.
-    pitch.setFromAxisAngle(across, -Math.atan2(rail.rise, rail.length));
+    // It used to be placed from its own midpoint, level and leant as one
+    // piece. On the sphere that is a straight line tangent at the middle of
+    // the bay, and wherever a bay runs across the slope of the planet its ends
+    // came out up to a quarter of a metre off their posts' heights — one end
+    // through the top of its post, and somewhere in every park a top rail's
+    // top in a cap's plane (`check:coplanar`, seeds 3 and 9, 17 Oct 2026).
     for (const [slot, centre] of [
       [0, RAIL_CENTRE],
       [1, TOP_RAIL_CENTRE],
     ] as const) {
-      flat.set(rail.x, rail.base + centre, rail.z);
-      placeOnSphere(flat, rail.yaw, position, rotation);
-      rotation.multiply(pitch);
-      stretch.set(1, 1, Math.hypot(rail.length, rail.rise));
+      flat.set(from.x, from.y + centre, from.z);
+      placeOnSphere(flat, 0, endFrom, unused);
+      flat.set(to.x, to.y + centre, to.z);
+      placeOnSphere(flat, 0, endTo, unused);
+      position.addVectors(endFrom, endTo).multiplyScalar(0.5);
+      along.subVectors(endTo, endFrom);
+      const length = along.length();
+      along.divideScalar(length);
+      // Turned as its middle leans it — its width level across the bay — and
+      // then swung, the least way, to lie along the line between its ends.
+      flat.set((from.x + to.x) / 2, (from.y + to.y) / 2 + centre, (from.z + to.z) / 2);
+      placeOnSphere(flat, Math.atan2(to.x - from.x, to.z - from.z), atMiddle, rotation);
+      drawnAlong.set(0, 0, 1).applyQuaternion(rotation);
+      rotation.premultiply(turn.setFromUnitVectors(drawnAlong, along));
+      stretch.set(1, 1, length);
       matrix.compose(position, rotation, stretch);
       railMesh.setMatrixAt(index * 2 + slot, matrix);
     }
