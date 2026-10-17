@@ -826,7 +826,9 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nk = keyOf(i + di, j + dj);
         const next = cells.get(nk);
-        if (next && Math.abs(next.y - cell.y) <= 0.62) {
+        // Within a step of each other as heights over the ground, which is
+        // what she climbs — not as world y, which the planet bends.
+        if (next && Math.abs(altitudeAt(next.x, next.y, next.z) - altitudeAt(cell.x, cell.y, cell.z)) <= 0.62) {
           if (!seen.has(nk)) {
             seen.add(nk);
             stack.push(nk);
