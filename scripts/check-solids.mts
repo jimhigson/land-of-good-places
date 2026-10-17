@@ -443,7 +443,7 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
       continue;
     }
     measured += 1;
-    const delta = at.y - hit.y;
+    const delta = at.y - hit.y; // flat-ok: both in her one column, her feet and the drawn top under them
     if (Math.abs(delta) > TOLERANCE) {
       off.push({ kind, line: `${kind} in ${space} at (${at.x.toFixed(1)}, ${at.z.toFixed(1)}): she stands ${delta > 0 ? `${delta.toFixed(2)} m over` : `${(-delta).toFixed(2)} m sunk into`} the drawn ${hit.name.split('<')[0]}` });
     }
