@@ -157,8 +157,13 @@ Mutation runner /tmp/hotel-unstick/run-mutations.sh (A café revert, B rescue of
 - Mutations (mutation worktree, env-gated): R2/W5/NO_BACKOFF → /tmp/hotel-unstick/mut4-*.log.
 - Thin-box sweep (scratch thin-box.mts): 0 of 84 left inside here; 29 of 84 under R2.
 
+- df2e91e2 check:update-adoption: waits for the gate (built with the touch watch) before pressing Shift;
+  the race went red on 1648d36a's CI. Proved: setupUpdateGate delayed 1.5 s → old check red, new green.
+- Mutations all red as expected: R2 (thin box LEFT INSIDE), W5 (5,653 misfires + 4 doors), NO_BACKOFF
+  (18 tries); menu on 18c2ecd1: "Have breakfast … shows in the open menu" ×3 sizes. Green here: exits,
+  hotel, menu-reach (local, park for source 75086da8 built with build:parks LGP_SEEDS=5).
+
 ## Status
-- [x] round 3 approved; round 4 commits pushed (91661b65)
-- [ ] mutation reds (mut4-*.log); seed-5 park for the new source (build-parks-r4.log) → local menu check
-- [ ] CI green on the final head (parks rebuild: Player.ts changed the park source hash); 667x375 preview
-- [ ] PR comment for round 4; hand back
+- [x] round 4 commits pushed; CI parks for source 75086da8 cached (parks-75086da8… artifact)
+- [ ] CI green on the final head; 667x375 preview of /hotel-cafe; PR body + round-4 comment
+  (/tmp/hotel-unstick/pr-body.md, /tmp/hotel-unstick/answer-4.md); hand back
