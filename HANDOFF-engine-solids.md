@@ -61,12 +61,32 @@ marking; guards stop her by real height, never a flag.
 - Hydrated digests: all 16 seeds identical to main after the switch-over (commit e95d83a3).
 
 ## Status
-- [~] (a) switch-over — engine in, precedent checks green (hotel, library, reptile-house, castle,
-  hall-solid, benches). Running: solved identity of all 16 seeds (snapshot e95d83a3).
-  TODO (a): NPC separation height-aware; check:benches' stale hollow-middle clause; full check
-  chain; test:procgen; build; draft PR; headless-Chrome look.
-- [ ] (b) real heights + census
+- [x] (a) switch-over — DRAFT PR #722, head `feat/engine-solids-pr` = 7defc913. Local gate on the
+  snapshot: check 0, test:procgen 0 (46 files, 2154 tests), build 0. Looks: /tmp/es-look/shots-a/.
+  TODO: read CI's 16 parks against main's (restarts + digests) when the PR's Parks job finishes.
+- [~] (b) real heights + census. Done (each family named + kinded, meshes byte-identical, digests 16/16):
+  garden walls, fountain, railway fence, stall booths, dodgems (+posts), ferris (legs, step-up deck,
+  railings where drawn), water fight (pool rims, hedges, sprinkler, rack), lamps, fairy poles, trees,
+  bushes, cruiser pylons, rail race trestles, slide legs, gate piers, welcome sign posts, bus shelter
+  (posts, NEW bench + canopy), stations (posts, NEW bench + awning).
+  TODO: boundary wall, castle (exterior + interior), hotel, library, reptile house, ShopUnits,
+  train centre band (c), check:solids, census, hop re-measure.
 - [ ] (c) guards tall
+
+## Decisions made in (b) (with reasons)
+- **solidInFrame** (terrain.ts): a rigid group stood on the sphere (plots, shelter, station) puts a
+  solid at the column its middle is drawn in, top = hypot(R+top, lx, lz). Plots used centre+local,
+  0.64 m off at the dodgems' barrier on seed 5 — standing on air beside the rail once tops are real.
+- **The crowd clears tops from its takeoff** (`resolve(..., feetY)`): NPCs never stand on tops, so a
+  hop must never carry one over a footprint. Keeps NPC walking what it was.
+- **Headroom** (`solidStepCeiling`): a top she can't fit on (head into the solid above) is a side,
+  not a step. One owner for lateral rule, feet, playerSim and her lattice.
+- Ghosts given solids (new footprints, so NavGrid/crowd may differ — CI re-solves): dodgem light
+  posts, ferris railings (old walls stood across the open ends), pool rims (old: invisible post in
+  the water), sprinkler, bus shelter bench + canopy, station benches + awnings.
+- Left as found, listed for the census: the welcome sign's board (1.65 m underside over the path she
+  walks — a solid would block the path; raising it is a (c) visible change); tall leaning props keep
+  colliders at their feet (lean offset is pre-existing, orthogonal).
 
 ## Notes for the paused Library tracks (-owl, -kids, -den, -books2)
 - `props.ts`: no plates, no `stand`, no `soft()`; `box()` returns `[BoxCollider]` (one filled turned
