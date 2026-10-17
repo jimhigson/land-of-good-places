@@ -5466,7 +5466,9 @@ function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: numb
   collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, LOBBY.originX, LOBBY.originZ));
   process.stderr.write(
     `probe 33 pockets — ${controlled ? `${trapSummaries.length} room(s) attacked` : 'ASSERTS NOTHING: the control failed'}:\n` +
-      trapSummaries.map((line) => `    ${line}\n`).join(''),
+      trapSummaries.map((line) => `    ${line}\n`).join('') +
+      '    (a pocket is aimed at only where a body fits at a lattice cell\'s centre; a nook narrower than that is reached ' +
+      'only by the walks aimed at its neighbours, and a wedge there lets go of her — `Player`\'s WEDGE_SECONDS)\n',
   );
 }
 
