@@ -1,7 +1,7 @@
 import type { Vector3 } from 'three';
 import type { CollisionWorld } from './Collision';
 import type { GroundSampler } from '../entities/Player';
-import { carryReference, stepCeilingAt } from './building/stepReach';
+import { carryFrom, stepCeilingAt } from './building/stepReach';
 import { PLAYER_RADIUS } from '../core/constants';
 import { KID_HEIGHT } from '../art/models/kidHeight';
 
@@ -36,7 +36,14 @@ import { KID_HEIGHT } from '../art/models/kidHeight';
  * HANDOFF-engine-solids.md, "who stands on what".
  */
 export function standingHeight(ground: number, collision: CollisionWorld, x: number, z: number, y: number): number {
-  const top = collision.highestTopAt(x, z, solidStepCeiling(collision, x, z, y));
+  if (!collision.anyTopToStandOn()) return ground;
+  // The step's own reach first: headroom only ever lowers it, so where no top
+  // stands over the ground within a step, none does within less, and the
+  // underside over her (`ceilingAt`) need not be asked — most of the park,
+  // most of the time.
+  const step = stepCeilingAt(x, z, y);
+  if (collision.highestTopAt(x, z, step) <= ground) return ground;
+  const top = collision.highestTopAt(x, z, solidStepCeiling(collision, x, z, y, step));
   return top > ground ? top : ground;
 }
 
@@ -67,8 +74,8 @@ export function feetSampler(ground: GroundSampler, collision: CollisionWorld): G
  * thing over it. The one owner of the rule for everything that stands on
  * solids.
  */
-export function solidStepCeiling(collision: CollisionWorld, x: number, z: number, reference: number): number {
-  return Math.min(stepCeilingAt(x, z, reference), collision.ceilingAt(x, z, reference) - KID_HEIGHT);
+export function solidStepCeiling(collision: CollisionWorld, x: number, z: number, reference: number, step = stepCeilingAt(x, z, reference)): number {
+  return Math.min(step, collision.ceilingAt(x, z, reference) - KID_HEIGHT);
 }
 
 /**
@@ -114,16 +121,22 @@ export function walkingOntoStep(
   reference: number,
   samples = STEP_SAMPLES,
 ): boolean {
+  if (!collision.anyTopToStandOn()) return false;
+  const carry = carryFrom(x, z, reference);
   for (let i = 1; i <= samples; i += 1) {
     const along = (STEP_LOOKAHEAD * i) / samples;
     const aheadX = x + dirX * along;
     const aheadZ = z + dirZ * along;
-    const from = carryReference(x, z, reference, aheadX, aheadZ);
-    const ceiling = solidStepCeiling(collision, aheadX, aheadZ, from);
+    const from = carry(aheadX, aheadZ);
     // A top over the surface she stands on: a step *up*. The top she is
     // already on — her own wall's, met by the near half of the stretch — is
     // not one, or walking along a wall she would sink into a bench beside it.
-    if (collision.highestTopAt(aheadX, aheadZ, ceiling) > from + STEP_ABOVE) return true;
+    // Asked within the step's reach first, as `standingHeight` does: headroom
+    // only lowers it, so where nothing stands over her floor within a step the
+    // underside over the point need not be asked.
+    const step = stepCeilingAt(aheadX, aheadZ, from);
+    if (collision.highestTopAt(aheadX, aheadZ, step) <= from + STEP_ABOVE) continue;
+    if (collision.highestTopAt(aheadX, aheadZ, solidStepCeiling(collision, aheadX, aheadZ, from, step)) > from + STEP_ABOVE) return true;
   }
   return false;
 }

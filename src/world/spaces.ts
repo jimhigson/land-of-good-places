@@ -46,7 +46,7 @@ import {
   HOTEL_ORIGIN_X,
   HOTEL_SUITE_Z,
 } from '../core/constants';
-import { castleFloorAt } from './building/floors';
+import { CASTLE_FLOORS, CASTLE_FLOOR_RADIUS, castleFloorAt } from './building/floors';
 import {
   REPTILE_FORECOURT_ORIGIN_X,
   REPTILE_FORECOURT_ORIGIN_Z,
@@ -161,6 +161,24 @@ export const HOTEL_ROOM_Z: readonly (readonly [SpaceId, number])[] = [
 const HOTEL_ROOM_RADIUS = 70;
 
 /**
+ * **Within this of the planet's middle, every point is the garden** (squared):
+ * the nearest any other space comes — each castle floor, hotel room, the
+ * reptile house's two spaces and the library's, its origin's distance less
+ * its radius — less a metre. `spaceAt` is asked several times for every step
+ * she takes, and out in the park, where she almost always is, this answers it
+ * with one comparison instead of every space's in turn (PR #722's review: a
+ * third of `check:wall-tunnelling`'s time was spent here).
+ */
+const GARDEN_CERTAIN_SQ = (() => {
+  let nearest = Math.hypot(LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z) - LIBRARY_SPACE_RADIUS;
+  for (const floor of CASTLE_FLOORS) nearest = Math.min(nearest, Math.hypot(floor.originX, floor.originZ) - CASTLE_FLOOR_RADIUS);
+  for (const [, roomZ] of HOTEL_ROOM_Z) nearest = Math.min(nearest, Math.hypot(HOTEL_ORIGIN_X, roomZ) - HOTEL_ROOM_RADIUS);
+  for (const [, originX, originZ] of REPTILE_SPACE_ORIGINS) nearest = Math.min(nearest, Math.hypot(originX, originZ) - REPTILE_HOUSE_SPACE_RADIUS);
+  const radius = Math.max(0, nearest - 1);
+  return radius * radius;
+})();
+
+/**
  * Which space a world position is in — **purely positional**, exactly as
  * Decision 3 requires of `spaceAt(x, z)`.
  *
@@ -170,6 +188,7 @@ const HOTEL_ROOM_RADIUS = 70;
  * player changes rooms.
  */
 export function spaceAt(x: number, z: number): SpaceId {
+  if (x * x + z * z < GARDEN_CERTAIN_SQ) return SPACE_GARDEN;
   // `castleFloorAt` owns the castle's own radius test, so "which floor am I
   // on?" is asked in exactly one place — `Building` asks it directly all the
   // time, and a second copy of the arithmetic here is how the floor pill and

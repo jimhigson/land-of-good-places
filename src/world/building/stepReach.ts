@@ -124,12 +124,25 @@ export function carryReference(
   toX: number,
   toZ: number,
 ): number {
+  return carryFrom(fromX, fromZ, y)(toX, toZ);
+}
+
+/**
+ * **{@link carryReference} from one column to many** — the reference's own
+ * radius asked once, then carried to each column asked of it, bit for bit
+ * what `carryReference` gives. For a caller asking a whole stretch at once
+ * (`walkingOntoStep`'s points along her front half, every frame she walks).
+ */
+export function carryFrom(fromX: number, fromZ: number, y: number): (toX: number, toZ: number) => number {
   const cy = y + GROUND_SPHERE_RADIUS;
-  if (!Number.isFinite(y) || cy <= 0) return y;
-  if (spaceAt(fromX, fromZ) !== SPACE_GARDEN || spaceAt(toX, toZ) !== SPACE_GARDEN) return y;
+  if (!Number.isFinite(y) || cy <= 0 || spaceAt(fromX, fromZ) !== SPACE_GARDEN) return () => y;
   const radius = Math.hypot(fromX, cy, fromZ);
-  const above = radius * radius - toX * toX - toZ * toZ;
-  if (above <= 0) return y;
-  return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
+  const radiusSquared = radius * radius;
+  return (toX, toZ) => {
+    if (spaceAt(toX, toZ) !== SPACE_GARDEN) return y;
+    const above = radiusSquared - toX * toX - toZ * toZ;
+    if (above <= 0) return y;
+    return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
+  };
 }
 
