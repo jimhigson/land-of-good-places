@@ -2,7 +2,7 @@ import { Group, type Object3D, PointLight, Vector3 } from 'three';
 import { clamp01 } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import type { CollisionWorld } from '../Collision';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
@@ -32,8 +32,6 @@ import {
 } from './trainModel';
 import { playChuff, playStationBell, playTrainWhistle, setTrainAudioCarry } from './trainSounds';
 import { setTrainService, type TrainPassenger, type TrainService, type TrainStop } from './service';
-import { resolveDismount } from '../dismount';
-import { PLAYER_RADIUS } from '../../core/constants';
 
 /**
  * The park train.
@@ -202,8 +200,6 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly carOffsets: number[] = [];
 
   private readonly stopOffset: number;
-  /** Kept for {@link alight}'s dismount safety net — see `world/dismount.ts`. */
-  private readonly collision: CollisionWorld;
   private player: Player | null = null;
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
@@ -215,7 +211,6 @@ export class ParkTrain implements GameSystem, TrainService {
     hasFellableTreeNear?: (x: number, z: number, radius: number) => boolean,
   ) {
     this.group.name = 'park-train';
-    this.collision = collision;
 
     this.route = TRAIN_PLAN.route;
     this.track = buildTrack(this.route);
@@ -451,7 +446,7 @@ export class ParkTrain implements GameSystem, TrainService {
     seat.taken = 'player';
     this.playerRiding = true;
     this.playerBoardedAt = this.boardedAtElapsed;
-    player.beginRide();
+    player.beginRide(this.holder);
     playStationBell();
     // Still inside the "Get on" press, which is the point: this is where the
     // phone-tilt look takes "straight ahead" from where she is actually facing,
@@ -460,6 +455,19 @@ export class ParkTrain implements GameSystem, TrainService {
     this.rideView?.board();
     this.onRideChange?.(true);
   }
+
+  /**
+   * Whoever rides the train is held by this — and let go by getting off: at the
+   * platform it is standing at, or, mid-journey, at the next one's stand, the
+   * platform she was about to arrive at. Never in the middle of the track.
+   */
+  private readonly holder: RideHolder = {
+    holding: 'the train',
+    letGo: () => {
+      const player = this.player;
+      if (player && this.playerRiding) this.alight(player);
+    },
+  };
 
   /** "Get off, please." Ignored while the train is moving — there is nowhere to step. */
   requestAlight(): void {
@@ -754,17 +762,24 @@ export class ParkTrain implements GameSystem, TrainService {
     // not put you straight back on.
     this.boardingLocked = true;
 
-    const station = this.stoppedStop === null ? null : this.stations[this.stoppedStop];
-    if (station) {
-      // The platform stand is already a genuine exit — `train/plan.ts` solves
-      // it clear of every plot before the platform is ever built. The
-      // dismount safety net (`world/dismount.ts`) still runs on top of it:
-      // the universal rule is "every dismount goes through here", not
-      // "every dismount that is currently known to need it".
-      const { x, z } = resolveDismount(this.collision, station.standX, station.standZ, PLAYER_RADIUS);
-      player.setRidePose(x, station.surfaceY, z, Math.atan2(-station.standX, -station.standZ));
-    }
-    player.endRide();
+    // At the platform it is standing at — or, let go mid-journey (see
+    // `holder`), the next one along.
+    const station = this.stations[this.stoppedStop ?? this.nextStop] ?? null;
+    // The platform stand is already a genuine exit — `train/plan.ts` solves it
+    // clear of every plot before the platform is ever built — and `endRide`'s
+    // put-down rule (`world/dismount.ts`) still checks it: the universal rule
+    // is "every dismount goes through here", not "every dismount that is
+    // currently known to need it".
+    player.endRide(
+      station
+        ? {
+            x: station.standX,
+            y: station.surfaceY,
+            z: station.standZ,
+            facing: Math.atan2(-station.standX, -station.standZ),
+          }
+        : { x: player.position.x, y: player.position.y, z: player.position.z },
+    );
     this.onRideChange?.(false);
   }
 

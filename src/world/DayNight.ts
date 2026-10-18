@@ -9,6 +9,7 @@ import {
 } from 'three';
 import {
   DAY_LENGTH_SECONDS,
+  DAY_START_TIME,
   FAIRY_LIGHT_OFF,
   FAIRY_LIGHT_ON,
   FILL_LIGHT_RATIO,
@@ -482,6 +483,27 @@ export class DayNight implements GameSystem {
   /** Jump the clock, e.g. from a debug key or a cutscene. */
   setTimeOfDay(time: number): void {
     this.time = ((time % 1) + 1) % 1;
+  }
+
+  /**
+   * **Tomorrow morning** — the "Next day" button's clock, and the one owner of
+   * what that means: the day count goes up by one, and the time is
+   * `DAY_START_TIME`, the morning a brand-new game begins on. Always the *next*
+   * day, whatever the hour now: a child who presses "Next day" at breakfast
+   * time wakes up on tomorrow's, not on today's again.
+   *
+   * Written straight into the store as well as here, so a save taken on the
+   * very next frame already has the new day in it.
+   */
+  advanceToNextMorning(): void {
+    this.days += 1;
+    this.time = DAY_START_TIME;
+    gameStore.setTimeOfDay(this.time, this.days, this.lightsOnValue);
+  }
+
+  /** How many days have passed since the game began — the store's `dayCount`. */
+  get dayCount(): number {
+    return this.days;
   }
 
   setPaused(paused: boolean): void {

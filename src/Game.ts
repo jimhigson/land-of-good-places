@@ -402,7 +402,8 @@ export class Game {
     this.world.collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP);
 
     // Her own lattice — the stairs, the bridges, and every solid she can step
-    // up onto — from its one owner, which `check:hotel` builds too.
+    // up onto — from its one owner, which `check:hotel` builds too, and whose
+    // windows the put-down rule floods (`world/dismount.ts`).
     this.navGrid = playerNavGrid(this.world);
 
     // And the same map, handed to the parade — issues #602 and #605, the pets
@@ -550,6 +551,7 @@ export class Game {
     // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
     this.hud.setLookHandler(() => this.reopenCharacterCreator());
+    this.hud.setNextDayHandler(() => this.nextDay());
     // The HIGHLIGHT RULE's activation flash, for the interface: press any
     // button anywhere and the same rainbow radiates off it. One delegated
     // listener and a pool of four overlays — see `ui/TapBurst.ts`; no panel
@@ -965,9 +967,9 @@ export class Game {
     // Every booth's chip, wired to the framework that runs what is behind it.
     this.world.stalls.onEnter = (stallId) => this.miniGames.enter(stallId);
     this.miniGames.boardRide = (stallId) => {
-      if (stallId === 'railRacer') return this.world.railRace.requestBoard();
-      if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
-      if (stallId === 'spaceFerrisWheel') return this.world.ferrisWheel.requestBoard();
+      // The rides a booth sells — `World.boardStallRide` is the one owner.
+      const ride = this.world.boardStallRide(stallId);
+      if (ride !== null) return ride;
       // The ginormous slide is not a stall — you reach it by climbing the
       // castle — so these two ids exist only for its deep links, which is the
       // difference between QA testing the ride and QA testing the stairs.
@@ -1018,6 +1020,8 @@ export class Game {
       // Not a ride either: the hotel's breakfast room, seated, for #276's
       // clipped action-chip-row deep link.
       if (stallId === 'hotelBreakfast') return this.world.hotel.requestEnterBreakfast();
+      // …and the lobby café's, sat at the chair that used to trap her.
+      if (stallId === 'hotelCafe') return this.world.hotel.requestEnterCafe();
       // Not a ride either: the guest suite, for its own deep link — see
       // `Hotel.requestEnterSuite`.
       if (stallId === 'hotelSuite') return this.world.hotel.requestEnterSuite();
@@ -1299,6 +1303,38 @@ export class Game {
   // GAME_DESIGN.md's "Riding the lift".
 
   /**
+   * **"Next day"** — the ☰ menu's way out of anywhere (Jim, 17 Oct 2026: *"a
+   * 'manual rescue' feature like in the menu an option that says 'next day' and
+   * then you wake up in the hotel bed"*).
+   *
+   * First, whatever she is doing ends, so that nothing is left holding her: the
+   * shop panels, the backpack, the face paint, the Cute-o-dex, the map and an
+   * open book put away; a curtain game abandoned; a tap walk cancelled; and
+   * whatever ride, seat, nap or cinematic has her let go, through its own way
+   * off (`Player.letGo`). A jet-pack flight ends on the teleport by itself.
+   * Then `World.nextDay` — the iris, tomorrow morning, and waking up in her own
+   * bed in her suite, which the hotel owns.
+   *
+   * The ☰ button is hidden while an attraction has her (#404), so in play this
+   * is pressed on her own two feet; every one of those endings is still done
+   * here rather than assumed, so that "Next day" means the same from anywhere.
+   */
+  private nextDay(): void {
+    this.shopping.closeAll();
+    this.world.facePaintStall.closeUi();
+    if (this.cuteODex.isOpen) this.cuteODex.close();
+    if (this.parkMap.isOpen) this.parkMap.close();
+    if (this.bookReader.isOpen) this.bookReader.close();
+    if (this.world.keychainShop.viewOpen) this.world.keychainShop.closeView();
+    this.miniGames.abandon();
+    this.tapNavigator.cancel();
+    this.player.letGo();
+    if (!this.world.nextDay()) {
+      console.warn('Next day: not now — a change of space is already running, or something still has her');
+    }
+  }
+
+  /**
    * "Look" pill in the HUD menu (`Hud.ts`). Mounts `CharacterCreation`
    * straight over this running `Game` — the park, the save, the session all
    * stay exactly as they are; only `onComplete` (below, {@link
@@ -1475,6 +1511,18 @@ export class Game {
     const yaw = facing ?? towardsCentre;
     if (y === undefined) this.player.teleport(x, z, yaw);
     else this.player.teleportTo(x, y, z, yaw);
+    // Through the put-down rule, like every placement (`world/dismount.ts`):
+    // a coordinate inside a prop or a sealed pocket is moved to the nearest
+    // spot she can stand on and walk out of. Said out loud, because the link
+    // promises "that exact spot" and a developer reading off a screenshot
+    // should know when it is not where she landed.
+    const spot = this.player.lastPutDown;
+    if (spot && spot.moved > 0) {
+      console.warn(
+        `/spawn: (${x}, ${z}) is not somewhere she can be put down — the put-down rule moved her ` +
+          `${spot.moved.toFixed(2)} m, to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`,
+      );
+    }
     this.camera.snapTo(this.player.position);
   }
 

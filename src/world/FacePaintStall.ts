@@ -360,6 +360,11 @@ export class FacePaintStall implements GameSystem {
     this.panel?.close();
   }
 
+  /** The face-paint panel put away — the "Next day" button's tidy-up. */
+  closeUi(): void {
+    this.closePanel();
+  }
+
   private pickDesign(design: FacePaintDesign): void {
     const panel = this.panel;
     if (!panel) return;

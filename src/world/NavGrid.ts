@@ -601,6 +601,41 @@ export class NavGrid {
    * the only way that stays true as the pathfinder changes.
    */
   private readonly pinnedBoundary: ParkBoundary | null;
+  /**
+   * The square of the space's lattice this grid is built over, or `null` for
+   * the whole of it — see {@link NavGrid.around}.
+   */
+  private windowAround: { readonly x: number; readonly z: number; readonly half: number } | null = null;
+
+  /**
+   * **This lattice, over a small square of its space** — for the put-down rule
+   * (`world/dismount.ts`), which asks "can she walk out of here?" every time
+   * the game puts her down, and must ask it of exactly the cells a tap is
+   * routed over: the whole space's lattice is 524 ms to build for the park
+   * (measured 17 Oct 2026), and a ride's end cannot wait for that.
+   *
+   * Not a second lattice. It is this class, built by `rebuild` as ever: every
+   * cell in it is the cell the space's own lattice has — the same centre, in the
+   * same frame — classified by the same stamps, boundary band and bridge
+   * exemption, given the same levels, and joined by the same steps and
+   * connector edges. There are only fewer of them: the `(2·half + 1)²` round the
+   * cell holding `(x, z)`. Cells the space's lattice would not reach are outside
+   * its boundary, so its band blocks them here as it would there.
+   */
+  static around(
+    collision: CollisionWorld,
+    walkerRadius: number,
+    hopApex: number,
+    connectors: () => readonly LevelConnector[],
+    bridgeCovers: (x: number, z: number) => boolean,
+    x: number,
+    z: number,
+    half: number,
+  ): NavGrid {
+    const grid = new NavGrid(collision, walkerRadius, hopApex, connectors, bridgeCovers);
+    grid.windowAround = { x, z, half };
+    return grid;
+  }
 
   constructor(
     collision: CollisionWorld,
@@ -843,16 +878,25 @@ export class NavGrid {
     const centreX = (minX + maxX) / 2;
     const centreZ = (minZ + maxZ) / 2;
     const reach = Math.max(maxX - minX, maxZ - minZ) / 2;
-    const side = Math.ceil(((reach + MARGIN) * 2) / CELL);
+    let side = Math.ceil(((reach + MARGIN) * 2) / CELL);
     if (side <= 0) {
       this.built = false;
       return;
     }
 
-    this.cells = side;
     // Cell (0, 0)'s centre, half a cell in from the corner of the square.
     this.originX = centreX - (side * CELL) / 2 + CELL / 2;
     this.originZ = centreZ - (side * CELL) / 2 + CELL / 2;
+    // A window ({@link NavGrid.around}): the square of those very cells round
+    // the one holding its point — its corner on one of them, so every centre
+    // here is a centre of the space's own lattice.
+    const around = this.windowAround;
+    if (around) {
+      this.originX += (Math.round((around.x - this.originX) * INVERSE_CELL) - around.half) * CELL;
+      this.originZ += (Math.round((around.z - this.originZ) * INVERSE_CELL) - around.half) * CELL;
+      side = 2 * around.half + 1;
+    }
+    this.cells = side;
 
     const total = side * side;
     if (this.blocked.length !== total) {

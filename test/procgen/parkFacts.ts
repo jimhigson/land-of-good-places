@@ -1416,7 +1416,7 @@ export interface ParkFacts {
    * chute's mouth and world tangent, then sampling the **built** walk surface
    * under the answer — so this is the runtime result reproduced, not a
    * paraphrase of it. The same tactic `railRaceExitFitsTheParty` uses when it
-   * calls the real `resolveDismount` rather than modelling one.
+   * asks the real put-down rule (`putDownPlayer`) rather than modelling one.
    *
    * `groundY` comes from `WalkSurfaces.sample`, the sampler her own feet use,
    * and not from `terrainHeight`: the pit is scooped out of the hills and
@@ -1622,6 +1622,15 @@ export interface ParkFacts {
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
+  /**
+   * **Where `Player.endRide` would put her down for this exit** — the game's
+   * own put-down rule (`world/dismount.ts`'s `putDownSpot`), asked as `Player`
+   * asks it: her own body (`PLAYER_PUT_DOWN`), the sampler her feet use and
+   * the world's own `putDownSpace`. Here rather than
+   * imported by an invariant: `Player.ts` reaches the park manifest, and a
+   * static import of it from `invariants.ts` pins every seed to the default.
+   */
+  readonly putDownPlayer: (exit: { x: number; y: number; z: number; facing?: number }) => { x: number; z: number };
   /**
    * Where a walker of `radius` standing here actually ends up after collision
    * resolves — not merely whether she moved.
@@ -2002,7 +2011,8 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
     '../../src/world/coaster/castleWindows.ts'
   );
   const { cruiserStrikes } = await import('../../src/world/coaster/clearance.ts');
-  const { JUMP_APEX_HEIGHT } = await import('../../src/entities/Player.ts');
+  const { JUMP_APEX_HEIGHT, PLAYER_PUT_DOWN } = await import('../../src/entities/Player.ts');
+  const { putDownSpot } = await import('../../src/world/dismount.ts');
   const { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } = await import(
     '../../src/world/entrance/layout.ts'
   );
@@ -4151,6 +4161,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,
+    putDownPlayer: (exit) => putDownSpot(world.collision, sample, exit, PLAYER_PUT_DOWN, world.putDownSpace),
     pushedTo,
     buildMs,
   };

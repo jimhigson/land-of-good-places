@@ -16,7 +16,7 @@ import { glbCanvasTexture } from '../../art/style/glb';
 import { lineSeconds } from '../../ui/speechTiming';
 import { LiftAlcove } from '../lift/LiftAlcove';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
+import { HOTEL_PLAY_RADIUS, IRIS_OPEN_SECONDS, PLAYER_RADIUS } from '../../core/constants';
 import { hexToCss, PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { lerp, Rng, smoothstep } from '../../core/mathUtils';
@@ -25,7 +25,8 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { hasWalk, type CreatureHandle } from '../../art/style/asset';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
+import type { OpenAreaPoint, RideExit } from '../dismount';
 import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
 import type { LiftPanelSource } from '../building/liftRide';
@@ -359,8 +360,11 @@ const PICTURE_GLASS_MARGIN = 0.15;
  */
 const PICTURE_WALL_INSET = 0.31;
 
-/** The breakfast tables' flat top, metres — the asset's own figure. */
-const TABLE_TOP = 0.74;
+/**
+ * The breakfast tables' flat top, metres — the asset's own figure. Exported
+ * for `check:hotel`, which stands a child on one and hops her over one.
+ */
+export const TABLE_TOP = 0.74;
 
 /** The food moment: how long the camera takes to arrive, and how long it stays. */
 const FOOD_EASE_SECONDS = 2.5;
@@ -523,7 +527,7 @@ const DISCO_COLOURS: readonly number[] = [
  * ~5 m sideways, unprompted, before anything appeared. Verified
  * geometrically (no browser access) by projecting the desk and receptionist
  * through `IsoCamera` at the player's real teleport-in point
- * (`enterLobby`'s `LOBBY.halfZ - 2.2`): x=4.5 lands the whole desk footprint
+ * (`enterLobby`'s `LOBBY_FRONT_LANDING`): x=4.5 lands the whole desk footprint
  * (NDC x from 0.585 to 0.932) and the receptionist (NDC x=0.906) on-screen
  * — *technically*, per the same QA round that came back with real rendered
  * screenshots and found only ≈2 px of margin at x=4.5 (298→388 of 390 px),
@@ -599,6 +603,56 @@ const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
  * hundred lines away from the first.
  */
 const CHAIR_SEAT_Y = 0.42;
+
+/**
+ * **The lobby café's two tables**, room-local, and the spin that sets their
+ * chairs — `dressLobby` stands them here, and `check:hotel` reads them. z
+ * carries `LOBBY_FOYER_GROWTH` with the rest of the foyer.
+ *
+ * **Table A stands clear of the wall** (QA on PR #721, 17 Oct 2026). It stood
+ * at x −10.2 with its chairs north and south, and between them and the west
+ * wall that left a strip no walking child could leave: the north chair stood
+ * 1.21 m short of the reception partition, against a child 1.24 m wide, and
+ * the south one closer still to table B's. "Leave breakfast" put her in it on
+ * `main`; this PR's put-down rule stopped that, and still QA hopped into it 3
+ * times in 7 from the room, or walked off the table's north end into it, and
+ * once in, only Next day got her out on a phone. So the table is half a metre
+ * further from the wall and turned like table B, chairs east and west: the
+ * strip behind it is 1.68 m wide all along, and opens north of the table onto
+ * a 1.95 m channel to the room — floor she walks out of, not a pocket.
+ * `check:hotel` probe 33 attacks every pocket in the hotel to hold that.
+ */
+export const CAFE_TABLE_A = { x: -9.7, z: 9.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, spin: 1.35 } as const;
+export const CAFE_TABLE_B = { x: -10.3, z: 7.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, spin: 1.35 } as const;
+
+/**
+ * How long after the "Next day" iris reaches its middle she wakes up, seconds:
+ * the iris opening on her asleep in bed, then a beat to see her there in the
+ * morning before `Hotel.wakeNap` stands her up. A tap or a hop wakes her
+ * sooner, as it wakes any nap.
+ */
+const NEXT_DAY_WAKE_SECONDS = IRIS_OPEN_SECONDS + 1.4;
+
+/**
+ * **Where each of the hotel's doors lands her**, room-local — the one owner of
+ * each, read by the door that puts her there and by {@link Hotel.openArea},
+ * which names them as points of the room's open area (the lift's own is
+ * `HotelLift.landing`):
+ *
+ * - the suite's corridor door, walking in: just inside, facing down the hall;
+ * - the corridor's suite door, walking out of the suite: just outside it;
+ * - the lobby's front door, walking in from the park: just inside, facing the
+ *   statue.
+ */
+const SUITE_DOOR_LANDING = { x: -SUITE.halfX + 1.6, z: 0, facing: Math.PI / 2 } as const;
+const CORRIDOR_SUITE_LANDING = { x: CORRIDOR.halfX - 1.6, z: 0, facing: -Math.PI / 2 } as const;
+const LOBBY_FRONT_LANDING = { x: 0, z: LOBBY.halfZ - 2.2, facing: Math.PI } as const;
+
+/**
+ * The chair `/hotel-cafe` sits her at: the lobby café's middle chair, the one
+ * "Leave breakfast" used to strand her behind (Jim, 17 Oct 2026).
+ */
+const CAFE_LINK_CHAIR = 'lobby-a-1';
 
 /**
  * Honest tops for the scatter dressing, metres above the floor they stand on.
@@ -901,9 +955,10 @@ export interface PetParadeLink {
    * nothing, when that uid is not a live pet in the line right now — stowed,
    * carried in her hands, or a bed built before she owned a matching pet at
    * all — in which case the bed simply stays the empty furniture it already
-   * was.
+   * was. `asleep`: already lying in it, the walk and the climb done — the
+   * "Next day" morning's.
    */
-  sendPetToBed(uid: string, bed: PetBedSpot): boolean;
+  sendPetToBed(uid: string, bed: PetBedSpot, asleep?: boolean): boolean;
   /**
    * The nap is over, or ended early: this pet stands back up and rejoins the
    * line. Safe to call for a uid that was never sent to bed.
@@ -1188,6 +1243,8 @@ export class Hotel implements GameSystem {
    */
   private napping = false;
   private nappingAt: Bed | null = null;
+  /** Seconds until a "Next day" nap wakes by itself, or `null` — see {@link wakeTomorrowInSuite}. */
+  private nextDayWake: number | null = null;
   /**
    * How dimmed the hotel's own light rig is right now, 0 (wide awake) to 1
    * (fully settled into a nap) — {@link update} eases this toward
@@ -1623,6 +1680,86 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * **"Next day": her own bed, in her own suite, and waking up in it** — the
+   * one owner of going there and getting up (Jim, 17 Oct 2026: *"a 'manual
+   * rescue' feature like in the menu an option that says 'next day' and then
+   * you wake up in the hotel bed"*).
+   *
+   * Through the hotel's own iris — `SpaceManager.changeTo`, the door every
+   * room here uses, so the camera snaps and the space settles exactly as a
+   * doorway leaves them. Behind it, in order: `behindTheIris` (`World.nextDay`
+   * passes the clock moving to tomorrow morning and whichever building she was
+   * in letting go of her); her key, if reception had not given it yet — the
+   * suite she wakes in is hers, and its own door out to the corridor has no
+   * lock, but the corridor's door back in has ({@link suiteLock}): without the
+   * key she would be shut out of her own suite the moment she stepped out of
+   * it; the suite becomes where she is; and {@link nap} lays her in the middle
+   * bedroom's bed (it holds the most pet beds, `layout.ts`'s `petBedSlots`),
+   * with every pet she has already asleep in its own bed — the nap's own code,
+   * its pets' bedtime entered at its end, because the night has passed. The
+   * iris opens on them all asleep, and after {@link NEXT_DAY_WAKE_SECONDS}
+   * {@link wakeNap}, the very wake-up a tap gives, stands her up on the
+   * mattress and her pets up out of their beds to follow her.
+   *
+   * Refused (`false`) while a change of space is already running or while
+   * anything still has her: the caller lets go of whatever that is first.
+   */
+  wakeTomorrowInSuite(behindTheIris: () => void): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.spaces.isChanging) return false;
+    this.spaces.changeTo(() => {
+      behindTheIris();
+      if (!saveFlags.hasHotelKey()) saveFlags.giveHotelKey();
+      this.lightYoursStar(true);
+      this.inside = true;
+      this.hotelRoot.visible = true;
+      this.boundTo(SUITE);
+      const bed = this.beds.find((candidate) => candidate.bedIndex === MIDDLE_BEDROOM_INDEX) ?? this.beds[0];
+      if (!bed) return;
+      // In the room first, so everything that asks "which room is she in?"
+      // while the nap starts — the pets' beds, the dim — answers the suite.
+      player.teleportTo(bed.x, BED_MATTRESS_TOP, bed.z + NAP_FEET_Z, 0);
+      this.nap(bed, true);
+      this.nextDayWake = NEXT_DAY_WAKE_SECONDS;
+    });
+    return true;
+  }
+
+  /**
+   * **A hotel room's open area**, for the put-down rule (`world/dismount.ts`):
+   * every place a door or the lift lands her in it — read from the one owner of
+   * each ({@link SUITE_DOOR_LANDING} and its siblings, `HotelLift.landing`),
+   * never typed again here. Doors first: the first point is a room's way out.
+   * World metres.
+   */
+  openArea(room: HotelRoom): OpenAreaPoint[] {
+    const points: OpenAreaPoint[] = [];
+    const landing = (spot: { readonly x: number; readonly z: number }): OpenAreaPoint => ({
+      x: room.originX + spot.x,
+      z: room.originZ + spot.z,
+    });
+    if (room === LOBBY) points.push(landing(LOBBY_FRONT_LANDING));
+    if (room === SUITE) points.push(landing(SUITE_DOOR_LANDING));
+    if (room === CORRIDOR) points.push(landing(CORRIDOR_SUITE_LANDING));
+    if (hotelDoorBands(room).some((band) => band.kind === 'lift')) points.push(this.lift.landing(room));
+    return points;
+  }
+
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running.** The hotel stops being where she is — every room hidden, the
+   * receptionist's words stopped — as walking out of the front door would leave
+   * it; no teleport and no play bounds, which the space she went to owns.
+   */
+  releasePlayer(): void {
+    if (!this.inside) return;
+    this.inside = false;
+    this.hotelRoot.visible = false;
+    this.speech = null;
+    this.receptionBubble.setText(null);
+  }
+
+  /**
    * The `/hotel` deep link: straight into the lobby from wherever she is.
    * Safe from anywhere, the way the slide's own deep link is: the change
    * happens behind a closed iris and teleports, so it does not care where
@@ -1668,6 +1805,20 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
     this.spaces.changeTo(() => this.enterBreakfastRoom());
+    return true;
+  }
+
+  /**
+   * The `/hotel-cafe` deep link: the lobby café, already sat at its middle
+   * chair, `lobby-a-1` — the seat that used to leave her trapped between the
+   * tables and the west wall when she pressed "Leave breakfast" (Jim, 17 Oct
+   * 2026), so the fix is one chip away from the first frame. Same shape as
+   * {@link requestEnterBreakfast}.
+   */
+  requestEnterCafe(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
+    this.spaces.changeTo(() => this.enterCafe());
     return true;
   }
 
@@ -2231,6 +2382,11 @@ export class Hotel implements GameSystem {
       // reaches its own jump handler at all, so nothing there would ever see
       // this press regardless of which one runs first in a frame.
       if (input.justPressed('jump')) this.wakeNap();
+      else if (this.nextDayWake !== null) {
+        // "Next day": she wakes by herself, once the morning has been seen.
+        this.nextDayWake -= dt;
+        if (this.nextDayWake <= 0) this.wakeNap();
+      }
       return;
     }
 
@@ -2369,12 +2525,12 @@ export class Hotel implements GameSystem {
         return;
       }
       if (walkedThrough('suite-portal')) {
-        this.spaces.changeTo(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+        this.spaces.changeTo(() => this.stepThroughDoor(SUITE, SUITE_DOOR_LANDING));
       }
       return;
     }
     if (room === SUITE && walkedThrough('corridor-door')) {
-      this.spaces.changeTo(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
+      this.spaces.changeTo(() => this.stepThroughDoor(CORRIDOR, CORRIDOR_SUITE_LANDING));
     }
   }
 
@@ -2385,7 +2541,12 @@ export class Hotel implements GameSystem {
     this.hotelRoot.visible = true;
     this.boundTo(LOBBY);
     // Just inside the front door, facing the statue.
-    player.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2, Math.PI);
+    player.teleportTo(
+      LOBBY.originX + LOBBY_FRONT_LANDING.x,
+      0,
+      LOBBY.originZ + LOBBY_FRONT_LANDING.z,
+      LOBBY_FRONT_LANDING.facing,
+    );
     if (!saveFlags.hasHotelKey()) {
       this.greet();
       // …and the receptionist calls out from the desk a few strides away, so
@@ -2441,6 +2602,24 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * The other half of {@link requestEnterCafe}: sat at `lobby-a-1`. Should
+   * that chair ever be gone or taken, the link lands where `/hotel` does —
+   * just inside the front door — rather than at some other chair, so it never
+   * quietly shows a seat that is not the one it names.
+   */
+  private enterCafe(): void {
+    const chair = this.chairs.find((seat) => seat.id === CAFE_LINK_CHAIR);
+    if (!chair || chair.taken) {
+      this.enterLobby();
+      return;
+    }
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(LOBBY);
+    this.sitAt(chair);
+  }
+
+  /**
    * Lands just inside the suite's own corridor door, facing east down the
    * hall — the exact spot `stepThroughDoor(SUITE, ...)` puts a guest who
    * walked in from `CORRIDOR` (line ~1589), reused rather than re-picked so
@@ -2456,7 +2635,7 @@ export class Hotel implements GameSystem {
     if (!player) return;
     this.inside = true;
     this.hotelRoot.visible = true;
-    this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2);
+    this.stepThroughDoor(SUITE, SUITE_DOOR_LANDING);
   }
 
   private leaveToPark(): void {
@@ -2471,11 +2650,14 @@ export class Hotel implements GameSystem {
     player.teleportTo(x, this.surfaces.sample(x, z, 3), z, this.facadeYaw);
   }
 
-  private stepThroughDoor(room: HotelRoom, localX: number, localZ: number, facing: number): void {
+  private stepThroughDoor(
+    room: HotelRoom,
+    landing: { readonly x: number; readonly z: number; readonly facing: number },
+  ): void {
     const player = this.player;
     if (!player) return;
     this.boundTo(room);
-    player.teleportTo(room.originX + localX, 0, room.originZ + localZ, facing);
+    player.teleportTo(room.originX + landing.x, 0, room.originZ + landing.z, landing.facing);
   }
 
   /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
@@ -2485,6 +2667,10 @@ export class Hotel implements GameSystem {
     // is preserved rather than tidied here.
     this.spaces.hop(() => {
       const player = this.player;
+      // Only while the lift still has her: let off half way (the "Next day"
+      // button, from inside the car), she is somewhere else by now, and
+      // neither her pose nor the play bounds are the lift's to move.
+      if (!player || !this.lift.holds(player)) return;
       if (player) {
         // Behind the closed iris, like every other space change — posing
         // her before it closed gave a visible cross-space camera whip
@@ -2729,7 +2915,7 @@ export class Hotel implements GameSystem {
   private enterSuiteThroughDoor(): void {
     const player = this.player;
     if (!player || player.riding || this.spaces.isChanging) return;
-    this.spaces.changeTo(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+    this.spaces.changeTo(() => this.stepThroughDoor(SUITE, SUITE_DOOR_LANDING));
   }
 
   /**
@@ -2746,16 +2932,41 @@ export class Hotel implements GameSystem {
   private sitAt(chair: Chair): void {
     const player = this.player;
     if (!player || player.riding) return;
-    player.beginRide();
+    player.beginRide(this.chairHolder);
     player.setRidePose(chair.x, CHAIR_SEAT_Y, chair.z, chair.facing);
     this.seatedAt = chair.id;
   }
 
+  /**
+   * Whoever sits at breakfast is held by this — and let go by getting up, the
+   * food shot cut short first so its camera does not outlive the meal.
+   */
+  private readonly chairHolder: RideHolder = {
+    holding: 'a breakfast chair',
+    letGo: () => {
+      if (this.moment === 'food') this.cine.cancel();
+      this.standUp();
+    },
+  };
+
+  /** A nap is let go by waking up — the same wake a tap or a hop gives. */
+  private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap() };
+
   private standUp(): void {
     const player = this.player;
     if (!player) return;
+    const chair = this.chairs.find((seat) => seat.id === this.seatedAt);
     this.seatedAt = null;
-    player.endRide();
+    // Up where she sat, on the floor — and nothing breakfast-specific about
+    // where that leaves her. The seat is inside the chair and within her
+    // table's reach, and on the lobby café's middle and wall-side chairs the
+    // resolver used to escort her out of both into a strip between the tables
+    // and the west wall that no child could walk out of (Jim, 17 Oct 2026).
+    // `endRide`'s put-down rule (`world/dismount.ts`) is what refuses that now,
+    // for every seat in the game: it puts her on the nearest clear floor that
+    // reaches the room.
+    const seat = chair ?? player.position;
+    player.endRide({ x: seat.x, y: 0, z: seat.z, facing: chair?.facing ?? player.facing });
     // Breakfast is over: the bowls and the pet go with it. Hidden rather than
     // disposed — she may sit straight back down, and rebuilding a pet to eat a
     // second bowl of cereal is three models for one child changing her mind.
@@ -2969,6 +3180,10 @@ export class Hotel implements GameSystem {
   }
 
   /**
+   * **Lies her down in `bed`, and sends every pet she has to its own bed** —
+   * walking there and climbing in, or with `petsAsleep` already lying in it
+   * (the "Next day" morning, {@link wakeTomorrowInSuite}).
+   *
    * Sleep — visibly, in the bed (Jim, 8 August 2026: *"they should lie in a
    * bed visibly with a blanket on them"*).
    *
@@ -3002,7 +3217,8 @@ export class Hotel implements GameSystem {
    * #275, Jim's direct ask: *"when the player sleeps, all pets should also
    * go to sleep."* They are not *already* in those beds, and that is bug 1 of
    * the same 21 Aug report: a bed stands empty until this moment, and its pet
-   * trots into it now, in step with her — see {@link sendPetsToBed}. It does
+   * trots into it now, in step with her — see {@link sendPetsToBed} — unless
+   * `petsAsleep` opens the morning with every pet already asleep in it. It does
    * not matter which of the three bedrooms she napped
    * in; {@link napping} is one room-wide flag already (it is what disables
    * every other bed's own "Have a sleep" chip while it runs), so every pet
@@ -3021,17 +3237,17 @@ export class Hotel implements GameSystem {
    * **Runs until {@link wakeNap} ends it — no timer.** Jim, 24 Aug 2026:
    * *"make them stay in the bed until the player gets them out."*
    */
-  private nap(bed: Bed): void {
+  private nap(bed: Bed, petsAsleep = false): void {
     const player = this.player;
     if (!player || player.riding) return;
-    player.beginRide();
+    player.beginRide(this.bedHolder);
     player.ridePosture = 'sleeping';
     player.sleeping = true;
     player.setRidePose(bed.x, BED_MATTRESS_TOP + NAP_LIE_HEIGHT, bed.z + NAP_FEET_Z, 0);
     bed.blanket.visible = true;
     this.napping = true;
     this.nappingAt = bed;
-    this.sendPetsToBed(bed.bedIndex);
+    this.sendPetsToBed(bed.bedIndex, petsAsleep);
   }
 
   /**
@@ -3058,13 +3274,17 @@ export class Hotel implements GameSystem {
   wakeNap(): void {
     const player = this.player;
     if (!this.napping || !this.nappingAt || !player) return;
+    const bed = this.nappingAt;
+    this.nextDayWake = null;
     this.napping = false;
-    this.nappingAt.blanket.visible = false;
+    bed.blanket.visible = false;
     this.nappingAt = null;
     // `endRide` stands the model back up itself and opens her eyes again (it
     // clears `sleeping`); the group was never pitched (see `nap` — the
-    // posture owns the recline).
-    player.endRide();
+    // posture owns the recline). Up on the mattress where her feet were, the
+    // way she always got up: a bed is soft, its own floor, and open on its
+    // sides — and the put-down rule checks exactly that rather than trusting it.
+    player.endRide({ x: bed.x, y: BED_MATTRESS_TOP, z: bed.z + NAP_FEET_Z, facing: 0 });
     player.model.setExpression('happy');
     // The pets get up together too, and go back to being out and about
     // rather than standing in bed — the other half of `nap`'s issue #275
@@ -4045,9 +4265,10 @@ export class Hotel implements GameSystem {
     // The breakfast corner — "breakfast ... at the ground floor". Two tables
     // only (the *room* full of them is Floor 1 now), tucked in the south-west
     // corner by the west windows, where a café by the glass belongs — not
-    // scattered mid-floor where they read as lost furniture. z carries
-    // `LOBBY_FOYER_GROWTH` with the rest of the foyer.
-    this.placeBreakfastTable(shell, LOBBY, -10.2, 9.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 'lobby-a', 0.15);
+    // scattered mid-floor where they read as lost furniture — but table A a
+    // clear strip of floor out from the wall, never a pocket: see
+    // {@link CAFE_TABLE_A}.
+    this.placeBreakfastTable(shell, LOBBY, CAFE_TABLE_A.x, CAFE_TABLE_A.z, 'lobby-a', CAFE_TABLE_A.spin);
     // Spun so its chairs sit east-west (at the first spin a chair interleaved
     // with the west lounge's rug). "kept clear of the west wall's painting"
     // no longer describes this table specifically — the paintings that
@@ -4055,7 +4276,7 @@ export class Hotel implements GameSystem {
     // well north of here in the gap `LOBBY_FOYER_GROWTH` opened, not beside
     // the café — but the same two-metre clearance this spin bought is still
     // worth keeping for whatever else ends up on that wall.
-    this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, 'lobby-b', 1.35);
+    this.placeBreakfastTable(shell, LOBBY, CAFE_TABLE_B.x, CAFE_TABLE_B.z, 'lobby-b', CAFE_TABLE_B.spin);
 
     // **Two mirrored seating groups flanking the axis** — the symmetric pair
     // every grand lobby seats its guests in, shifted a stride south of the
@@ -5217,9 +5438,9 @@ export class Hotel implements GameSystem {
    * exactly as they do everywhere else in the park. {@link petBedShortfall}
    * is what says so out loud rather than letting it pass as success.
    */
-  private sendPetsToBed(bedIndex: number): void {
+  private sendPetsToBed(bedIndex: number, asleep = false): void {
     for (const { uid, spot } of this.petBedsForNapIn(bedIndex)) {
-      this.petParade?.sendPetToBed(uid, spot);
+      this.petParade?.sendPetToBed(uid, spot, asleep);
     }
   }
 
@@ -6189,13 +6410,16 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player || player.riding) return;
     this.controls.cancelWalk();
-    player.beginRide();
-    player.setRidePose(
-      art.x + art.normalX * 1.9,
-      0,
-      art.z + art.normalZ * 1.9,
-      Math.atan2(-art.normalX, -art.normalZ),
-    );
+    // A picture is let go by cutting the shot short: `cancel` runs the undo
+    // below, which is where she gets off.
+    player.beginRide({ holding: 'a painting', letGo: () => this.cine.cancel() });
+    const stand: RideExit = {
+      x: art.x + art.normalX * 1.9,
+      y: 0,
+      z: art.z + art.normalZ * 1.9,
+      facing: Math.atan2(-art.normalX, -art.normalZ),
+    };
+    player.setRidePose(stand.x, stand.y, stand.z, stand.facing ?? 0);
     this.moment = 'art';
     // The camera is her eyes for this moment, so the body steps out of the
     // frame entirely. The lens ends 0.3 m in front of where her face is
@@ -6206,7 +6430,7 @@ export class Hotel implements GameSystem {
     this.cine.play(this.artShotFor(art), () => {
       this.moment = null;
       player.group.visible = true;
-      player.endRide();
+      player.endRide(stand);
     });
   }
 
@@ -6243,12 +6467,35 @@ export class Hotel implements GameSystem {
     const eye = this.windowVantage(room);
 
     this.controls.cancelWalk();
-    player.beginRide();
+    // She stays where she stood to look, and gets off there.
+    const stood: RideExit = {
+      x: player.position.x,
+      y: this.surfaces.sample(player.position.x, player.position.z, player.position.y),
+      z: player.position.z,
+      facing: player.facing,
+    };
+    const holder: RideHolder = {
+      holding: 'a window view',
+      letGo: () => {
+        // Mid-shot, `cancel` runs the undo below. Before the iris has reached
+        // its middle there is no shot yet: get her off now, and the midpoint
+        // sees she is no longer this window's and starts nothing.
+        if (this.cine.running) {
+          this.cine.cancel();
+          return;
+        }
+        this.moment = null;
+        this.hotelRoot.visible = this.inside;
+        player.endRide(stood);
+      },
+    };
+    player.beginRide(holder);
     this.moment = 'window';
 
     // Behind the soft fade, both ways — the camera is jumping four hundred
     // metres and an ease would be a flight over the void between the spaces.
     this.controls.iris(() => {
+      if (player.rideHolder !== holder) return;
       this.hotelRoot.visible = false;
       this.cine.play(
         {
@@ -6265,7 +6512,7 @@ export class Hotel implements GameSystem {
         () => {
           this.moment = null;
           this.hotelRoot.visible = this.inside;
-          player.endRide();
+          player.endRide(stood);
         },
       );
     });

@@ -235,6 +235,9 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    * of the bed"*: every one of those is what two bodies for one animal looks
    * like from the sofa.
    *
+   * `asleep` puts it straight to sleep in it — `ParadeMember.goToBed`'s own
+   * last phase, for the "Next day" morning.
+   *
    * Returns `false`, and starts nothing, when this uid is not a live member of
    * the line right now — stowed, carried in her hands, or a bed built before
    * she owned a matching companion at all. That bed simply stays empty
@@ -247,10 +250,10 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    * narrower, disagreeing copy of it, and was: it silently refused every
    * fresh save's own starter companion, RiPika, who is catalogued `'toy'`.
    */
-  sendPetToBed(uid: string, bed: PetBedSpot): boolean {
+  sendPetToBed(uid: string, bed: PetBedSpot, asleep = false): boolean {
     const member = this.members.find((candidate) => candidate.uid === uid);
     if (!member) return false;
-    member.goToBed(bed);
+    member.goToBed(bed, asleep);
     return true;
   }
 

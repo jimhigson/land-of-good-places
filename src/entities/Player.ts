@@ -33,6 +33,7 @@ import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
 import { NameLabel } from '../ui/NameLabel';
 import { discoverSecret, gameStore, type PlayerState } from '../state';
+import { BARE_SPACE, putDownSpot, type PutDown, type PutDownSpace, type RideExit } from '../world/dismount';
 import type { WornHat } from './WornHat';
 import type { WornJetpack } from './WornJetpack';
 
@@ -108,6 +109,14 @@ const GRAVITY = 17;
 export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 
 /**
+ * **Her body, as the put-down rule measures it** — `world/dismount.ts`'s
+ * `putDownSpot`: her radius, and the hop she makes without being asked. One
+ * object, so `endRide`, `teleportTo`, `check:exits` and the procgen invariants
+ * all ask the rule about the same child.
+ */
+export const PLAYER_PUT_DOWN = { radius: PLAYER_RADIUS, hopApex: JUMP_APEX_HEIGHT } as const;
+
+/**
  * The ride pose now lives in `./ridePose.ts`, and everything it used to export
  * from here is re-exported below so that no importer had to move.
  *
@@ -138,6 +147,34 @@ export {
  * the way.
  */
 const AUTO_HOP_LOOKAHEAD = 0.5;
+
+/**
+ * **A wedge lets go of her.** How deep inside something solid she may stay,
+ * metres, and for how long, seconds, before she is put down somewhere she
+ * fits — see the wedge section of {@link Player.update}.
+ *
+ * `resolve` ends in exact contact, so overlap that is still this deep half a
+ * second later is not ordinary contact. Mostly it is a wedge: a gap narrower
+ * than she is, between things too tall to step over, that a hop dropped her
+ * into — and no walk gets her out of one.
+ *
+ * It can also be the tail of a deep escort. An escort walks her out at
+ * `Collision.ts`'s `MAX_DEPENETRATION_SPEED`, 3 m/s, so an overlap of more than
+ * about 1.5 m takes longer than this — the tortoise's bay or the library owl's
+ * capsule is added at runtime, and if she is standing where it lands, that is
+ * the depth she starts at. Then the rescue cuts the escort short and puts her
+ * down clear at once, which is where the escort was taking her anyway.
+ */
+const WEDGE_DEPTH = 0.05;
+const WEDGE_SECONDS = 0.5;
+/**
+ * **The longest a wedge waits before it tries again, seconds.** When the rule
+ * finds nowhere within reach to put her, it says so and leaves her where she
+ * is; asking again every half second would say so twice a second, each time
+ * after a full search. So each failure doubles the wait, up to this, and
+ * being free of the wedge resets it.
+ */
+const WEDGE_RETRY_MAX_SECONDS = 8;
 
 /**
  * ---------------------------------------------------------------------------
@@ -324,6 +361,28 @@ const REST_REACH = 0.1;
 const _restInverse = /* @__PURE__ */ new Matrix4();
 const _restMatrix = /* @__PURE__ */ new Matrix4();
 const _restVertex = /* @__PURE__ */ new Vector3();
+
+/**
+ * **Whatever has her while she rides — and how to give her back.**
+ *
+ * Required by {@link Player.beginRide}, for the reason {@link RideExit} is
+ * required by {@link Player.endRide}: a ride that can take a child must be able
+ * to say how she gets off, and say it to anybody who asks, not only to its own
+ * finish line. The "Next day" button asks — from a ride, a seat, a nap, a
+ * cinematic — and so does `check:exits`, which enters and leaves every one.
+ */
+export interface RideHolder {
+  /** What has her, in a few words, for a failure message: "the train", "a breakfast chair". */
+  readonly holding: string;
+  /**
+   * Give her back **now**, through this ride's own way off: the same exit it
+   * would have used, its own state cleared, `Player.endRide` called. Must leave
+   * her not riding; {@link Player.letGo} says so loudly if it does not.
+   */
+  letGo(): void;
+}
+
+export type { RideExit } from '../world/dismount';
 
 /**
  * The player character: movement, collision, and the walk animation.
@@ -526,9 +585,60 @@ export class Player implements GameSystem {
    * for ordinary contact and banked as speed.
    */
   private escorting = false;
+  /** How long she has been wedged inside something solid, seconds — see {@link WEDGE_SECONDS}. */
+  private wedgedFor = 0;
+  /**
+   * How long the current wedge must last before it lets go of her, seconds:
+   * {@link WEDGE_SECONDS}, doubled after each time the rule found nowhere to
+   * put her, up to {@link WEDGE_RETRY_MAX_SECONDS}.
+   */
+  private wedgeWait = WEDGE_SECONDS;
+  /**
+   * How many times a wedge has let go of her — put her down because she had
+   * been stuck inside something solid too long. Read by `check:hotel`'s probe
+   * 33, which says how many of its walks out of a pocket needed this, and by
+   * `check:exits`, which fails if ordinary walking ever needs it.
+   */
+  wedgeRescues = 0;
+  /**
+   * Where the last wedge held her, how deep, and how long after she last came
+   * down from a hop or a drop it took hold (`Infinity` if she had not) — for a
+   * check that has to say where a rescue fired, and whether it was a wedge
+   * she landed in.
+   */
+  lastWedge: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly depth: number;
+    readonly afterLanding: number;
+  } | null = null;
+  /** Seconds on her feet since she last came down from a real hop or drop — see {@link lastWedge}. */
+  private sinceLanding = Infinity;
+  /** How long the current time in the air has lasted, seconds. */
+  private airborneFor = 0;
+  /** {@link sinceLanding} at the moment the current wedge took hold. */
+  private wedgeTookHold = Infinity;
   /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
   private readonly face: FaceLife;
   private ridingFlag = false;
+  /** Who has her while {@link ridingFlag} is up — see {@link RideHolder}. */
+  private holder: RideHolder | null = null;
+  /**
+   * Where the last put-down left her — `endRide`, or a `teleportTo` that left
+   * her on her own feet — and how far the rule moved her from the spot asked
+   * for. Read by `check:exits`, which checks every placement went through it.
+   */
+  lastPutDown: PutDown | null = null;
+  /** How many put-downs she has had — `check:exits` counts them across a placement. */
+  putDowns = 0;
+  /**
+   * What the put-down rule asks of the space beyond her collision world and
+   * her floor — its open area, and the router's own stairs and bridges
+   * (`world/dismount.ts`'s `PutDownSpace`). `World` supplies its one object
+   * (`attachPlayer`); without a world, nothing beyond the collision world.
+   */
+  putDownSpace: PutDownSpace = BARE_SPACE;
   /** 0..1 of the tree-climb wave. See {@link setClimbWave}. */
   private climbWave = 0;
   /**
@@ -729,6 +839,17 @@ export class Player implements GameSystem {
    * answer.
    */
   teleportTo(x: number, y: number, z: number, facing?: number): void {
+    // **Through the put-down rule whenever it leaves her on her own feet** —
+    // every change of space, deep link, restored save and backstop is one of
+    // these (`world/dismount.ts`). A ride placing her (the keychain rack's
+    // stand, a slide's top) owns her pose and is not a put-down: the rule runs
+    // when that ride gives her back, in `endRide`.
+    if (!this.ridingFlag) {
+      const spot = this.putDown(facing === undefined ? { x, y, z } : { x, y, z, facing });
+      x = spot.x;
+      y = spot.y;
+      z = spot.z;
+    }
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
     // Collapsed onto the destination for exactly the reason `previousPosition`
@@ -886,9 +1007,15 @@ export class Player implements GameSystem {
     this.group.position.copy(this.position);
   }
 
-  /** Hands the character to a ride: input, collision and gravity stop applying. */
-  beginRide(): void {
+  /**
+   * Hands the character to a ride: input, collision and gravity stop applying.
+   *
+   * `holder` is required — see {@link RideHolder}: whatever takes her must be
+   * able to give her back on request.
+   */
+  beginRide(holder: RideHolder): void {
     this.ridingFlag = true;
+    this.holder = holder;
     // Every ride is sat in until it says otherwise, so a ride that has never
     // heard of postures cannot inherit one from the ride before it.
     this.ridePosture = 'seated';
@@ -1035,8 +1162,44 @@ export class Player implements GameSystem {
     this.scriptedWalkSpeed = Math.max(0, speed);
   }
 
-  /** Gives the character back, optionally still moving. */
-  endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
+  /** Whatever has her right now, or `null` on her own two feet. */
+  get rideHolder(): RideHolder | null {
+    return this.ridingFlag ? this.holder : null;
+  }
+
+  /**
+   * **Give her back from whatever has her, now** — the "Next day" button's
+   * first step, and `check:exits`' way off every ride. Asks the holder to let
+   * go through its own exit; a holder that leaves her riding is a bug, said out
+   * loud, and she is put down where she is through {@link endRide}'s own rule
+   * rather than left a statue.
+   */
+  letGo(): void {
+    const holder = this.rideHolder;
+    if (!holder) return;
+    holder.letGo();
+    if (!this.ridingFlag) return;
+    console.error(`Player.letGo: ${holder.holding} did not let her go — putting her down where she is`);
+    this.endRide({ x: this.position.x, y: this.position.y, z: this.position.z });
+  }
+
+  /**
+   * **Gives the character back, at `exit`.**
+   *
+   * `exit` is required: a ride cannot hand her back without saying where. And
+   * it is not taken on trust — {@link putDown}, the one put-down
+   * (`world/dismount.ts`), checks it is in bounds, solid underfoot, clear and
+   * connected to the space's open area, and moves her to the nearest spot that
+   * is when it is not (an exit that passes is used exactly as given). She is put
+   * there before anything else happens: `previousPosition` collapses onto it,
+   * as every teleport's does, so no doorway trigger sweeps the jump.
+   *
+   * Handed back moving when the exit says so — the slide's delivery into the
+   * balls, the tortoise's hop off — and standing still on the floor otherwise.
+   */
+  endRide(exit: RideExit): void {
+    const spot = this.putDown(exit);
+    this.holder = null;
     this.ridingFlag = false;
     // Stand her back up before handing her over, or she walks away lying down.
     this.ridePosture = 'seated';
@@ -1048,9 +1211,22 @@ export class Player implements GameSystem {
     // The sleeping pose lolls her head to one side; unloll it with the rest.
     this.model.head.rotation.z = 0;
     this.climbWave = 0;
-    this.velocity.set(velocityX, 0, velocityZ);
-    this.verticalVelocity = velocityY;
-    this.airborne = true;
+    const velocity = exit.velocity;
+    this.velocity.set(velocity?.x ?? 0, 0, velocity?.z ?? 0);
+    this.verticalVelocity = velocity?.y ?? 0;
+    this.position.set(spot.x, spot.y, spot.z);
+    this.previousPosition.copy(this.position);
+    // The surface under her, not the height she is let go at: the slide's
+    // little drop is gravity's to close, from the floor's own reference.
+    this.groundHeight = spot.floor;
+    // Moving, or let go above the floor: in the air, and gravity closes it.
+    // Otherwise on her feet already — a put-down is a placing, not a drop.
+    this.airborne = velocity !== undefined || spot.y > spot.floor + 1e-6;
+    this.flying = false;
+    this.jumpHeldFor = 0;
+    if (exit.facing !== undefined) this.facingAngle = exit.facing;
+    this.group.position.copy(this.position);
+    faceOnGround(this.group, this.facingAngle);
     // A ride hands back a fresh velocity of its own choosing; nothing about
     // the overlap she was in before it took over still applies.
     this.escorting = false;
@@ -1399,6 +1575,49 @@ export class Player implements GameSystem {
     // height she is drawn at. See `groundHeight`.
     this.groundHeight = groundY;
 
+    // --- a wedge lets go of her ---------------------------------------------
+    // Stood inside something solid, frame after frame, is a wedge (see
+    // `WEDGE_SECONDS`). QA on PR #721 hopped her into a pocket behind the
+    // lobby café's tables, and `check:hotel`'s probe 33, written to find every
+    // such place, found wedges in four of the hotel's six rooms: the gap
+    // behind a bathroom's pan and basin, behind a gallery sofa. Walking cannot
+    // get her out of one, and on a phone a hop cannot either — the button has
+    // no direction. So once it has held her for `WEDGE_SECONDS` she is put down
+    // through the one rule (`world/dismount.ts`): the nearest spot her body is
+    // clear and she can walk out of. On her feet only — mid-hop she may pass
+    // through a prop's footprint on her way over it.
+    // A landing is coming down from a real hop or drop — not the instant
+    // re-landing of a put-down (`launch(0)`), which is no time in the air.
+    if (this.airborne) {
+      this.airborneFor += dt;
+    } else {
+      this.sinceLanding = this.airborneFor > 0.1 ? 0 : this.sinceLanding + dt;
+      this.airborneFor = 0;
+    }
+    const wedgeDepth = this.airborne ? 0 : this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0);
+    if (wedgeDepth > WEDGE_DEPTH) {
+      if (this.wedgedFor === 0) this.wedgeTookHold = this.sinceLanding;
+      this.wedgedFor += dt;
+      if (this.wedgedFor >= this.wedgeWait) {
+        this.wedgedFor = 0;
+        this.wedgeRescues += 1;
+        this.lastWedge = {
+          x: this.position.x,
+          y: this.position.y,
+          z: this.position.z,
+          depth: wedgeDepth,
+          afterLanding: this.wedgeTookHold,
+        };
+        this.teleportTo(this.position.x, groundY, this.position.z);
+        // Nowhere within reach: the rule has said so and left her be. Wait
+        // longer before asking again — see `WEDGE_RETRY_MAX_SECONDS`.
+        this.wedgeWait = this.lastPutDown?.found === false ? Math.min(this.wedgeWait * 2, WEDGE_RETRY_MAX_SECONDS) : WEDGE_SECONDS;
+      }
+    } else {
+      this.wedgedFor = 0;
+      this.wedgeWait = WEDGE_SECONDS;
+    }
+
     // A little sparkle the moment the jump actually carries her over a wall's
     // footprint, rather than every frame she's above it.
     if (clearedWall && !this.wasClearingWall) this.spawnClearPoof();
@@ -1538,6 +1757,24 @@ export class Player implements GameSystem {
   /** One frame of vertical motion in the air; her head stops at an underside — `riseUnder`, its one owner. */
   private rise(dt: number): void {
     this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
+  }
+
+  /**
+   * **The one put-down** — `world/dismount.ts`'s rule, asked with her own
+   * collision world, her own ground sampler, her own body and the space's own
+   * {@link putDownSpace}. `endRide` and `teleportTo` are its only callers.
+   */
+  private putDown(spot: RideExit): PutDown {
+    const result = putDownSpot(
+      this.collision,
+      (x, z, y) => this.groundAt(x, z, y),
+      spot,
+      PLAYER_PUT_DOWN,
+      this.putDownSpace,
+    );
+    this.lastPutDown = result;
+    this.putDowns += 1;
+    return result;
   }
 
   /**

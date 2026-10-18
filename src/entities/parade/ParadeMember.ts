@@ -365,11 +365,17 @@ export class ParadeMember {
    *
    * Idempotent for a pet already on its way to the same bed, so a caller may
    * re-assert it every frame if it likes.
+   *
+   * `asleep` enters this routine at its end, already lying in `bed`: the
+   * "Next day" button's, for a night that passed behind an iris, so that the
+   * morning opens on her pets asleep beside her rather than on them only now
+   * walking to bed. The same bed, the same sleeping pose ({@link updateInBed}'s
+   * own) and the same {@link getOutOfBed} to end it.
    */
-  goToBed(bed: PetBedSpot): void {
-    if (this.bed === bed) return;
+  goToBed(bed: PetBedSpot, asleep = false): void {
+    if (this.bed === bed && !asleep) return;
     this.bed = bed;
-    this.phase_ = 'walking';
+    this.phase_ = asleep ? 'asleep' : 'walking';
     this.climbTimer = 0;
   }
 

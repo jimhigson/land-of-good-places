@@ -10,7 +10,7 @@ import { LampPosts } from './LampPosts';
 import { TreeLights } from './TreeLights';
 import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
-import { placedEntry } from './parkLayout';
+import { PARK_LAYOUT, placedEntry } from './parkLayout';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
@@ -30,6 +30,19 @@ import { PLAZA } from './paths';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
+import type { OpenAreaPoint, PutDownSpace } from './dismount';
+import type { LevelConnector } from './building/surfaces';
+import { castleFloorFor } from './building/floors';
+import { roomFor } from './hotel/layout';
+import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
+import {
+  SPACE_GARDEN,
+  SPACE_LIBRARY,
+  SPACE_REPTILE_FORECOURT,
+  SPACE_REPTILE_HOUSE,
+  spaceAt,
+  type SpaceId,
+} from './spaces';
 import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
 // Face painting stall (additive — see FacePaintStall.ts's own file-ownership
@@ -683,6 +696,108 @@ export class World implements GameSystem {
   }
 
   /**
+   * **The open area of whichever space `(x, z)` is in** — the points the
+   * put-down rule's flood may reach (`world/dismount.ts`), each from its own
+   * owner: the park's arrival at the gate and the doormats of the buildings
+   * standing in it; a castle floor's lift and `keepOutsFor`; a hotel room's
+   * entry; the Reptile House's arrival or doormat; the library's
+   * `libraryStandSpots`. Kept per space, once built: none of them moves.
+   */
+  openAreaAt(x: number, z: number): readonly OpenAreaPoint[] {
+    const space = spaceAt(x, z);
+    let points = this.openAreas.get(space);
+    if (!points) {
+      points = this.openAreaOf(space);
+      this.openAreas.set(space, points);
+    }
+    return points;
+  }
+
+  private readonly openAreas = new Map<SpaceId, readonly OpenAreaPoint[]>();
+
+  /**
+   * **The declared ways between levels** — the lobby's sweeping stair and
+   * whatever else declares a connector (`WalkSurfaces.connectors`). One of the
+   * two things the route lattice is built from beyond the collision world, and
+   * the one owner of where they come from: `Game`'s router, the put-down rule's
+   * window of that lattice ({@link putDownSpace}) and the checks that build a
+   * router "as Game does" all read this.
+   */
+  readonly routeConnectors = (): readonly LevelConnector[] => this.building.surfaces.connectors;
+
+  /**
+   * **Over a railway bridge's deck or ramps?** (issue #116, Decision 8) — the
+   * other thing the route lattice is built from, with the same readers as
+   * {@link routeConnectors}.
+   */
+  readonly routeBridgeCovers = (x: number, z: number): boolean =>
+    this.train.bridges.some((bridge) => bridge.covers(x, z));
+
+  /**
+   * **What the put-down rule asks of the space she is put down in** — its open
+   * area ({@link openAreaAt}) and the router's own stairs and bridges. The one
+   * object every asker of the rule passes: `Player` (`attachPlayer`), the
+   * procgen facts and `check:exits`.
+   */
+  readonly putDownSpace: PutDownSpace = {
+    openArea: (x, z) => this.openAreaAt(x, z),
+    connectors: this.routeConnectors,
+    bridgeCovers: this.routeBridgeCovers,
+  };
+
+  private openAreaOf(space: SpaceId): readonly OpenAreaPoint[] {
+    if (space === SPACE_GARDEN) {
+      const points: OpenAreaPoint[] = [{ x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z }];
+      for (const id of ['hotel', 'reptileHouse', 'library']) {
+        const plot = PARK_LAYOUT.entries.get(id);
+        if (plot) points.push({ x: plot.entranceX, z: plot.entranceZ });
+      }
+      return points;
+    }
+    const floor = castleFloorFor(space);
+    if (floor) return this.building.openArea(floor);
+    const room = roomFor(space);
+    if (room) return this.hotel.openArea(room);
+    if (space === SPACE_REPTILE_HOUSE || space === SPACE_REPTILE_FORECOURT) return this.reptileHouse.openArea(space);
+    if (space === SPACE_LIBRARY) return this.library.openArea();
+    return [];
+  }
+
+  /**
+   * **Board the world ride a booth sells** — the Rail Race, the Sky Cruiser,
+   * the space ferris wheel. The one owner of which stall is which ride: `Game`
+   * wires the booths' chips (`MiniGameHost.boardRide`) through it, and
+   * `check:exits` boards every one the same way. `null` when the stall is not
+   * a world ride (a curtain game is `MiniGameHost`'s).
+   */
+  boardStallRide(stallId: string): boolean | null {
+    if (stallId === 'railRacer') return this.railRace.requestBoard();
+    if (stallId === 'skyCruiser') return this.coaster.requestBoard();
+    if (stallId === 'spaceFerrisWheel') return this.ferrisWheel.requestBoard();
+    return null;
+  }
+
+  /**
+   * **"Next day"** — the ☰ menu's way out of anywhere: tomorrow morning, waking
+   * up in her own bed in her suite. The going there and the waking are the
+   * hotel's (`Hotel.wakeTomorrowInSuite`, the one owner); this hands it the two
+   * things only the world can do, behind its iris — the clock (`DayNight`'s
+   * `advanceToNextMorning`) and every other building letting go of being where
+   * she is (`releasePlayer`), so nothing of where she was is left switched on.
+   *
+   * Whatever had her must have let her go first (`Player.letGo`); returns false,
+   * and does nothing, if anything still does, or a change of space is running.
+   */
+  nextDay(): boolean {
+    return this.hotel.wakeTomorrowInSuite(() => {
+      this.dayNight.advanceToNextMorning();
+      this.building.releasePlayer();
+      this.reptileHouse.releasePlayer();
+      this.library.releasePlayer();
+    });
+  }
+
+  /**
    * Every tap target in the park (see `world/interact.ts`).
    *
    * Only the building has any for now; garden rides add theirs here as they are
@@ -729,6 +844,8 @@ export class World implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.labels.add(player.label);
+    // What her put-downs ask of the space — see `putDownSpace`.
+    player.putDownSpace = this.putDownSpace;
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.reptileHouse.attachPlayer(player);

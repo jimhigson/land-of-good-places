@@ -291,6 +291,16 @@ async function main(): Promise<void> {
     // that is playing, so the next lazy chunk the park generator asks for is
     // already gone. The rule is "nobody has touched this page yet", so touch it,
     // deploy again, and prove the page now *waits* — gate up, ride intact.
+    //
+    // **Only once the page can notice the touch.** Visit 3's wait ends the
+    // moment the new build's entry script is in the DOM, which is as soon as
+    // the adoption's reload has parsed its HTML — before `bootstrap.ts` has run
+    // `setupUpdateGate`, which builds the gate and then, in the same breath,
+    // starts `watchForFirstTouch`. A key pressed in that gap is pressed at
+    // nothing: the page stays "untouched", adopts the next deploy on its own,
+    // and this went red on PR #721's 1648d36a for a race of its own, not the
+    // app's. The gate's element in the DOM is the sign the watch is on.
+    await page.waitForSelector('.update-gate', { state: 'attached', timeout: ADOPT_TIMEOUT_MS });
     await page.keyboard.press('Shift');
     served = oldBuild.dir;
     trace.push(`>>> deploy while playing: ${newBuild.entry} -> ${oldBuild.entry}`);

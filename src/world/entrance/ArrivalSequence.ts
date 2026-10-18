@@ -11,7 +11,7 @@ import {
 import { altitudeAt, liftFromGround, terrainHeight } from '../terrain';
 import { eyeForFocus, faceOnGround } from '../up';
 import type { FrameContext } from '../../core/types';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
 import { GATE_ARCH_CLEAR_WIDTH } from '../../art/models/gateArch';
@@ -1635,9 +1635,15 @@ export class ArrivalSequence {
   attachPlayer(player: Player): void {
     this.player = player;
     if (this.doneFlag) return;
-    player.beginRide();
+    player.beginRide(this.holder);
     this.poseSeated();
   }
+
+  /**
+   * She rides the bus in held by this — and is let go by the arrival finishing
+   * now: {@link finish}, the same hand-over at the gate the ninth second gives.
+   */
+  private readonly holder: RideHolder = { holding: 'the cat bus', letGo: () => this.finish() };
 
   /**
    * **The walk in is planned round what is built, because it cannot collide
@@ -2322,12 +2328,8 @@ export class ArrivalSequence {
   }
 
   /**
-   * Gives her the controls, exactly once.
-   *
-   * `endRide` first, then `teleportTo`: `endRide` hands back a fresh velocity
-   * and marks her airborne, and `teleportTo` puts her feet on the ground with
-   * the momentum cleared. The other way round she drops the last few
-   * centimetres onto the grass the instant she is given the controls.
+   * Gives her the controls, exactly once, on her feet at the end of the walk
+   * in — `endRide` puts her down there, still, through the put-down rule.
    */
   private handOver(): void {
     if (this.handedOver) return;
@@ -2335,13 +2337,12 @@ export class ArrivalSequence {
     markArrived();
     const player = this.player;
     if (!player) return;
-    player.endRide();
-    player.teleportTo(
-      ENTRANCE_PLAYER_X,
-      terrainHeight(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z),
-      ENTRANCE_PLAYER_Z,
-      this.playerFacing,
-    );
+    player.endRide({
+      x: ENTRANCE_PLAYER_X,
+      y: terrainHeight(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z),
+      z: ENTRANCE_PLAYER_Z,
+      facing: this.playerFacing,
+    });
   }
 
   private finish(): void {

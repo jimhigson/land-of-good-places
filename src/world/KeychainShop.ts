@@ -45,7 +45,7 @@ import { standOnSphere, terrainHeight } from './terrain';
 import { screenBasis3DAt } from './up';
 import type { CollisionWorld } from './Collision';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { Player } from '../entities/Player';
+import type { Player, RideHolder } from '../entities/Player';
 import { gameStore, discoverSecret, type InventoryItem } from '../state';
 import { shopWords } from '../state/wording';
 import { playOpenChime, playSurpriseChime } from '../ui/chime';
@@ -964,7 +964,7 @@ export class KeychainShop implements GameSystem {
     // "holding on, delighted" (arms thrown back), which is a ride's pose,
     // not a girl standing at a counter's. At zero scripted speed
     // (`setScriptedWalk`) that posture is simply her ordinary standing idle.
-    player.beginRide();
+    player.beginRide(this.viewHolder);
     player.ridePosture = 'walking';
     player.setScriptedWalk(0);
 
@@ -993,9 +993,16 @@ export class KeychainShop implements GameSystem {
     this.backdrop.removeFromParent();
 
     const player = this.player;
-    if (player?.riding) player.endRide();
+    // Off where she stands — the view's own stand spot, which `openView` put
+    // her on — through `endRide`'s put-down rule.
+    if (player && player.rideHolder === this.viewHolder) {
+      player.endRide({ x: player.position.x, y: player.position.y, z: player.position.z, facing: this.viewFacing });
+    }
     this.turnedAt = null;
   }
+
+  /** She stands at the rack held by this while it is zoomed — let go by closing it. */
+  private readonly viewHolder: RideHolder = { holding: 'the keychain rack', letGo: () => this.closeView() };
 
   /**
    * Eases {@link viewFacing} towards {@link viewFacingTarget} and writes it
