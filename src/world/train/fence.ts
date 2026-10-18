@@ -322,8 +322,9 @@ export function buildRailFence(
 
   // --- 1b. how tall each stretch must stand -----------------------------------
   // **Taller than every jump she can make at it** (`jumpReach.ts`; QA on PR
-  // #722). On level ground her feet top out at 1.33 m over it and the rail is
-  // 1.67 m; but from a platform's end beside a box, or a bank falling towards
+  // #722). On level ground her feet top out at 1.28 m over it, a guard has to
+  // stand `GUARD_OVER_FEET` (0.2 m) over that, and the rail is 1.67 m; but
+  // from a platform's end beside a box, or a bank falling towards
   // the fence, she leaves from higher than the fence's foot, and a sprint off
   // the north station's end on seed 5 cleared the end cap into the box. So
   // each post stands as tall as the highest her feet can get over its line
