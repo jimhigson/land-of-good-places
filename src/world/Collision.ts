@@ -4,6 +4,7 @@ import { riseBetween } from './building/stepReach';
 import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../core/constants';
 import { planetRadiusAt, yAtRadius } from './terrain';
 import { SPACE_GARDEN, spaceAt } from './spaces';
+import { FOOT_HALF_WIDTH } from './measuredTop';
 
 /**
  * Deliberately simple solid-object handling.
@@ -19,13 +20,13 @@ import { SPACE_GARDEN, spaceAt } from './spaces';
  * collision.addWall(x1, z1, x2, z2, 0.35);
  * ```
  *
- * Colliders also carry a `topHeight` — how tall they are above their *own*
- * local ground, in metres. It defaults to `Infinity`, meaning "always solid,
- * however high you jump", which is exactly the old behaviour and is what every
- * caller gets for free by not passing one. Only the wooden and stone garden
- * walls pass a real number (their actual visual height), which is what lets a
- * jump clear a low wall but not a tall one — see `resolve`'s `clearance`
- * parameter.
+ * Colliders also carry a `topHeight` — their real top, the drawn top of the
+ * thing they are (Jim, 17 Oct 2026: anything is jumpable, and nothing is
+ * marked to make it so). Its sides are bumped, its top is landed on, and
+ * gravity drops her on the highest top beneath her (`highestTopAt`).
+ * `Infinity` is still the parameter's default for a caller that passes
+ * nothing, and `check:solids` fails any solid left with it: there is no such
+ * thing in the park as a wall of infinite height.
  *
  * A collider may also opt into `autoHoppable` — see {@link
  * CollisionWorld.wouldAutoHopClear}, design feedback #30e. It defaults to
@@ -53,9 +54,10 @@ import { SPACE_GARDEN, spaceAt } from './spaces';
  * the player is genuinely absolute, ground plus jump. Walking into it from
  * the floor blocks (feet at 0 against a 0.5 m top); a jump whose flight
  * carries her feet above the top sails on; and once she is *stood* on the
- * prop (a `WalkSurfaces` plate at exactly that top), her feet equal the top
- * and it holds still beneath her instead of ejecting her. One collider,
- * three honest answers, no second registration to fall out of step.
+ * prop — on its own top, which is the ground under her there
+ * (`highestTopAt`) — her feet equal the top and it holds still beneath her
+ * instead of ejecting her. One collider, three honest answers, no second
+ * registration to fall out of step.
  *
  * Not combinable with `autoHoppable`: the auto-hop planner reasons in
  * relative clearances, and nothing a child did not choose to jump onto
@@ -165,34 +167,22 @@ interface SolidHeights {
   topHalf: number;
   /**
    * **A closure of the route lattice, not a body** ({@link CollisionWorld.asClosure}):
-   * the railway's corridor between its two fences. The route lattice stamps
-   * it and the planner's ground queries ({@link CollisionWorld.isClearCircle},
+   * ground the planner and the route lattice must keep off where nothing she
+   * can see stands — the railway's corridor between its two fences, the walls
+   * a filled cart claims round its drawn body. The route lattice stamps it and
+   * the planner's ground queries ({@link CollisionWorld.isClearCircle},
    * {@link CollisionWorld.solidDepthAt}) read it, so nothing is routed or
-   * placed on the track; but nothing she can see is there, so no mover meets
-   * it, nothing stands on it and no head rises into it. What keeps her off the
-   * line is the fence and the railings she can see, by their height.
+   * placed there; but no mover meets it, nothing stands on it and no head
+   * rises into it. What keeps her off the line is the fence and the railings
+   * she can see, by their height; what stops her at a cart is the cart.
    */
   closure: boolean;
 }
 
-/**
- * **A top narrower than this either side of its line holds nobody** — her
- * feet need 20 cm of it. A fence's rail, a post's cap, a panel's edge: she
- * can jump over them, not stand on them, which is the difference between a
- * wall and a ledge (17 Oct 2026: the census stood her on 9 cm rails and 6 cm
- * panel edges and used them as launch pads onto roofs).
- */
-export const FOOT_HALF_WIDTH = 0.1;
-
-/**
- * **The part of something round in section she could stand on** — a tube, a
- * torus, a rolled rim: its crown, the middle 60 % of its width, where the
- * surface is within a fifth of its radius of the crest. A round rail under
- * a sixth of a metre thick is therefore no ledge at all.
- */
-export function roundTopHalf(radius: number): number {
-  return radius * 0.6;
-}
+// The width rule's two numbers live with the measure of a drawn top
+// (`measuredTop.ts`, a leaf module: the library's kit measures its chairs with
+// it at plan time, and an import of this file from there is a cycle).
+export { FOOT_HALF_WIDTH, roundTopHalf } from './measuredTop';
 
 /** Wide enough for her feet: `FOOT_HALF_WIDTH` or more, a top computed as exactly that (0.15 − 0.05) included. */
 function wideEnough(half: number): boolean {
@@ -290,12 +280,6 @@ export interface WallCollider extends SolidHeights {
 }
 
 /**
- * **Does a wall's top reach over `(x, z)` along its length?** — always, for a
- * round-ended top; for a square one ({@link WallCollider.topEnds}), only up to
- * `topEnds` past either end. The across-the-wall reach is the footprint's and
- * {@link standsWithin}'s question.
- */
-/**
  * **Is `(x, z)` on a wall's top?** — within its footprint and its standable
  * band, and along its length, all measured where the top is drawn: the
  * footprint moved by {@link WallCollider.topShiftX}/`Z`.
@@ -317,6 +301,12 @@ function unshifted(wall: Readonly<WallCollider>): boolean {
   return wall.topShiftX === 0 && wall.topShiftZ === 0;
 }
 
+/**
+ * **Does a wall's top reach over `(x, z)` along its length?** — always, for a
+ * round-ended top; for a square one ({@link WallCollider.topEnds}), only up to
+ * `topEnds` past either end. The across-the-wall reach is the footprint's and
+ * {@link standsWithin}'s question.
+ */
 function wallTopReaches(wall: Readonly<WallCollider>, x: number, z: number): boolean {
   if (Number.isNaN(wall.topEnds)) return true;
   const ax = wall.x2 - wall.x1;
@@ -1031,10 +1021,11 @@ export class CollisionWorld {
   /**
    * **Every collider `build` registers is a closure of the route lattice, not a
    * body** ({@link SolidHeights.closure}) — stamped by `NavGrid`, read by the
-   * planner's ground queries, met by nobody. For something invisible that the
-   * router and the park's planner must treat as taken — the railway's corridor
-   * — and that must never be what stops her: Jim's ruling is that what stops
-   * her is something she can see, of its real height. Nests like {@link kinded}.
+   * planner's ground queries, met by nobody. For ground the router and the
+   * park's planner must treat as taken where nothing she can see stands — the
+   * railway's corridor, the claim round a filled cart — and that must never be
+   * what stops her: Jim's ruling is that what stops her is something she can
+   * see, of its real height. Nests like {@link kinded}.
    */
   asClosure<T>(build: () => T): T {
     const outer = this.currentClosure;
@@ -2564,30 +2555,6 @@ export class CollisionWorld {
 }
 
 /**
- * The push-apart for two moving circles that must not overlap — the player
- * standing on a child, or a child standing on another child — as opposed to a
- * mover and a piece of static scenery (see {@link CollisionWorld.resolve} for
- * that). Deliberately outside `CollisionWorld`: neither side here is one of
- * its registered colliders, and there is nothing to register them as without
- * turning every child into a wall the others grind against (see
- * `NpcCharacter.separateFrom`, which already does exactly this for child↔child
- * and is the pattern this mirrors for player↔child).
- *
- * Splits the correction evenly and returns it rather than applying it, so the
- * caller decides how to move each side — `Player.nudge` for the player half,
- * a direct position write for an NPC, same as its own neighbours already get.
- * Returns `null` when the circles do not overlap at all.
- *
- * This never needs `SHALLOW_OVERLAP`'s instant/escorted split the way
- * `resolve` does: it is driven every frame while two circles overlap, so it
- * never has the chance to build up the kind of deep, spawned-inside overlap
- * that caused design feedback #17's fling in the first place. The caller
- * still caps how far it is willing to move something in one frame — see
- * `NpcSystem.separateFromPlayer`'s use of {@link MAX_DEPENETRATION_SPEED} —
- * as a second line of defence should two characters ever end up teleported
- * on top of each other.
- */
-/**
  * **How far apart in height two bodies can stand and still be pushed apart**,
  * metres along the local up — about half a metre.
  *
@@ -2618,6 +2585,30 @@ export function separatedByHeight(
   return Math.abs(riseBetween(ax, ay, az, bx, by, bz)) > SEPARATION_HEIGHT_GAP;
 }
 
+/**
+ * The push-apart for two moving circles that must not overlap — the player
+ * standing on a child, or a child standing on another child — as opposed to a
+ * mover and a piece of static scenery (see {@link CollisionWorld.resolve} for
+ * that). Deliberately outside `CollisionWorld`: neither side here is one of
+ * its registered colliders, and there is nothing to register them as without
+ * turning every child into a wall the others grind against (see
+ * `NpcCharacter.separateFrom`, which already does exactly this for child↔child
+ * and is the pattern this mirrors for player↔child).
+ *
+ * Splits the correction evenly and returns it rather than applying it, so the
+ * caller decides how to move each side — `Player.nudge` for the player half,
+ * a direct position write for an NPC, same as its own neighbours already get.
+ * Returns `null` when the circles do not overlap at all.
+ *
+ * This never needs `SHALLOW_OVERLAP`'s instant/escorted split the way
+ * `resolve` does: it is driven every frame while two circles overlap, so it
+ * never has the chance to build up the kind of deep, spawned-inside overlap
+ * that caused design feedback #17's fling in the first place. The caller
+ * still caps how far it is willing to move something in one frame — see
+ * `NpcSystem.separateFromPlayer`'s use of {@link MAX_DEPENETRATION_SPEED} —
+ * as a second line of defence should two characters ever end up teleported
+ * on top of each other.
+ */
 export function circleSeparation(
   ax: number,
   az: number,

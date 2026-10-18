@@ -1439,6 +1439,5 @@ function feast(plan: GreatHallPlan, deck: number): Object3D[] {
   return out;
 }
 
-/** Where the bench seat and table top ended up, for anything that asks. */
+/** Where the bench seat ended up, for anything that asks. */
 export const GREAT_HALL_SEAT_HEIGHT = CASTLE_BENCH_SEAT;
-export const GREAT_HALL_TABLE_HEIGHT = CASTLE_TABLE_TOP;

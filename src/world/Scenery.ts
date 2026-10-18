@@ -1159,10 +1159,13 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     // (`roundTopHalf`).
     //
     // **Banded, from the boards' top up** (a finite `baseHeight`). Below the
-    // boards the run's own capsule end is what anyone meets — the footprint is
-    // inside it — and a banded solid is one the planner, the route lattice and
-    // the crowd's hop band never read, so the park and its routes are the ones
-    // they were; only what stands over the boards is new.
+    // boards the run's own capsule end is what anyone meets, and a banded
+    // solid is one the planner and the crowd's hop band never read, so the
+    // park is the one it was; only what stands over the boards is new.
+    // **Stamped into the route lattice** (`navStamped`), though: the crowd
+    // walks with her height now, and the post stands 0.1 m proud of the run's
+    // capsule, so a child routed along a wall's face was nudged at every post
+    // (PR #722's review, 22 posts on seed 5). Routed clear of it instead.
     //
     // Only where the post stands over its boards: a run up a steep bank is
     // drawn from its lower end's ground, so at the upper end its boards and
@@ -1175,7 +1178,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     if (postTop > postBase + CAP_RADIUS * CAP_SQUASH) {
       collision.kinded('wooden wall post', () =>
         collision.toppedNarrow(roundTopHalf(CAP_RADIUS), () =>
-          collision.addCircle(corner.x, corner.z, POST_FOOT_RADIUS, postTop, false, true, postBase),
+          collision.addCircle(corner.x, corner.z, POST_FOOT_RADIUS, postTop, false, true, postBase, true),
         ),
       );
     }
