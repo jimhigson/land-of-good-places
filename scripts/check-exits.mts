@@ -71,12 +71,15 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { JUMP_APEX_HEIGHT, PLAYER_PUT_DOWN, Player } from '../src/entities/Player.ts';
+import { PLAYER_PUT_DOWN, Player } from '../src/entities/Player.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { BARE_SPACE, PUT_DOWN_WINDOW_CELLS, putDownSpot, SEARCH_REACH } from '../src/world/dismount.ts';
-import { NAV_CELL, NavGrid } from '../src/world/NavGrid.ts';
+import { NAV_CELL } from '../src/world/NavGrid.ts';
+import { playerNavGrid } from '../src/world/playerLattice.ts';
+import { feetSampler } from '../src/world/standing.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { DAY_LENGTH_SECONDS, DAY_START_TIME, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
@@ -126,8 +129,20 @@ const say = (line: string): void => {
     collision.setPlayBounds(circleBoundary(30, 0, 0));
     return collision;
   };
+  /**
+   * Four walls round a hollow middle — a pocket of floor, built as one on
+   * purpose. Not `addRectangle`: that is one filled box (#722), so a spot in
+   * its middle is inside a solid, which clause 3 answers, and the pocket these
+   * clauses are about would never be asked of clause 4 at all.
+   */
+  const walledRing = (collision: CollisionWorld, x: number, z: number, half: number, halfThickness: number): void => {
+    collision.addWall(x - half, z - half, x + half, z - half, halfThickness);
+    collision.addWall(x + half, z - half, x + half, z + half, halfThickness);
+    collision.addWall(x + half, z + half, x - half, z + half, halfThickness);
+    collision.addWall(x - half, z + half, x - half, z - half, halfThickness);
+  };
   const sealedRing = (collision: CollisionWorld, x: number, z: number, half: number): void => {
-    collision.addRectangle(x, z, half, half, 0.2);
+    walledRing(collision, x, z, half, 0.2);
   };
 
   // (a) CONTROL: an open spot is handed back exactly as given.
@@ -208,7 +223,7 @@ const say = (line: string): void => {
   for (const innerHalf of [0.66, 0.72, 0.8]) {
     const collision = world();
     const wall = 0.1;
-    collision.addRectangle(0, 0, innerHalf + wall, innerHalf + wall, wall);
+    walledRing(collision, 0, 0, innerHalf + wall, wall);
     const spot = putDownSpot(collision, flat, { x: 0, y: 0, z: 0 }, PLAYER_PUT_DOWN);
     const outside = Math.max(Math.abs(spot.x), Math.abs(spot.z)) >= innerHalf + 2 * wall + PLAYER_RADIUS - 1e-6;
     if (!spot.found || !outside) {
@@ -233,7 +248,7 @@ const say = (line: string): void => {
     const wall = 0.05;
     const cx = 0.2;
     const cz = 0;
-    collision.addRectangle(cx, cz, innerHalf + wall, innerHalf + wall, wall);
+    walledRing(collision, cx, cz, innerHalf + wall, wall);
     const spot = putDownSpot(collision, flat, { x: cx, y: 0, z: cz }, PLAYER_PUT_DOWN);
     const outside = Math.max(Math.abs(spot.x - cx), Math.abs(spot.z - cz)) >= innerHalf + 2 * wall + PLAYER_RADIUS - 1e-6;
     if (!spot.found || !outside) {
@@ -351,6 +366,8 @@ world.stalls.onEnter = (stallId: string) => {
   world.boardStallRide(stallId);
 };
 const sample = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
+/** Her feet's sampler — the walk surface or a solid's top within a step — as `Player.groundAt` stands her. */
+const feet = feetSampler(sample, collision);
 
 let elapsed = 1000;
 /** Nobody touching anything — with the input system's setters a ride may call on it. */
@@ -419,12 +436,12 @@ function tick(seconds: number, input = still): void {
 
 // ------------------------------------------------------------------ 2. the instrument
 
-/** The router, exactly as `Game` builds it — following the play bounds of the space she is in. */
-const router = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers);
+/** The router, exactly as `Game` builds it, from its one owner — following the play bounds of the space she is in. */
+const router = playerNavGrid(world);
 parade.setNavGrid(router);
-/** The rule, asked for a spot exactly as `Player` asks it. */
+/** The rule, asked for a spot exactly as `Player` asks it — with her feet's own sampler. */
 function putDownAt(x: number, y: number, z: number): ReturnType<typeof putDownSpot> {
-  return putDownSpot(collision, sample, { x, y, z }, PLAYER_PUT_DOWN, world.putDownSpace);
+  return putDownSpot(collision, feet, { x, y, z }, PLAYER_PUT_DOWN, world.putDownSpace);
 }
 /** The space's way out: its open area's first point — the arrival a door or lift lands her on. */
 function wayOut(x: number, z: number): { x: number; z: number } | null {
@@ -636,11 +653,13 @@ function settle(): void {
  * walk out of here?", and this holds it to that across a sample of real points
  * in every space — every cell of every railway bridge's deck and ramps, every
  * point of every declared stair, and a stride of every space's cells at each
- * of their top surfaces (the lobby's gallery, the castle's decks). A point is
- * in the sample when the router could stand there (`canStandAt`), her body is
- * clear there by the resolver's own test, the soft boundary leaves her alone,
- * and the router's flood from the space's way out reaches it. Every one of
- * those must come back from the rule unmoved.
+ * of their top surfaces (the lobby's gallery, the castle's decks — and the top
+ * of whatever she stands on there, by her feet's own sampler: a bench, a bed, a
+ * sofa within a step is a level of her lattice). A point is in the sample when
+ * the router could stand there (`canStandAt`), her body is clear there by the
+ * resolver's own test, her whole height asked, the soft boundary leaves her
+ * alone, and the router's flood from the space's way out reaches it. Every one
+ * of those must come back from the rule unmoved.
  */
 const TOP = 500;
 const AGREE_STRIDE = 3;
@@ -667,7 +686,7 @@ for (const visit of SPACES) {
     const onBridge = world.routeBridgeCovers(x, z);
     const strided = Math.round(x / NAV_CELL) % AGREE_STRIDE === 0 && Math.round(z / NAV_CELL) % AGREE_STRIDE === 0;
     if (visit.space === SPACE_GARDEN ? !onBridge : !strided) return;
-    points.push({ x, y: sample(x, z, TOP), z, what: onBridge ? 'a bridge' : 'a top surface' });
+    points.push({ x, y: feet(x, z, TOP), z, what: onBridge ? 'a bridge' : 'a top surface' });
   });
   for (const connector of world.routeConnectors()) {
     for (const point of connector.points) {
@@ -679,7 +698,7 @@ for (const visit of SPACES) {
   for (const point of points) {
     if (!router.canStandAt(point.x, point.z, point.y, sample)) continue;
     if (!collision.clearOfBoundary(point.x, point.z, PLAYER_RADIUS)) continue;
-    if (collision.deepestSolidOverlap(new Vector3(point.x, point.y, point.z), PLAYER_RADIUS, 0) > 1e-3) continue;
+    if (collision.deepestSolidOverlap(new Vector3(point.x, point.y, point.z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 1e-3) continue;
     if (!fromDoor.has(point.x, point.z, point.y)) continue;
     asked += 1;
     const spot = putDownAt(point.x, point.y, point.z);

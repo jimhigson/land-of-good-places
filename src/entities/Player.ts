@@ -110,11 +110,20 @@ export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 
 /**
  * **Her body, as the put-down rule measures it** — `world/dismount.ts`'s
- * `putDownSpot`: her radius, and the hop she makes without being asked. One
- * object, so `endRide`, `teleportTo`, `check:exits` and the procgen invariants
- * all ask the rule about the same child.
+ * `putDownSpot`: her radius, the hop she makes without being asked, how tall
+ * she is (a solid is in her way from its base to its top, as `resolve` asks
+ * with `KID_HEIGHT`), and that she stands on solids — her lattice, and so the
+ * rule's windows of it, takes a solid within a step for floor
+ * (`playerLattice.ts`, which builds from these same numbers). One object, so
+ * `endRide`, `teleportTo`, `check:exits` and the procgen invariants all ask the
+ * rule about the same child.
  */
-export const PLAYER_PUT_DOWN = { radius: PLAYER_RADIUS, hopApex: JUMP_APEX_HEIGHT } as const;
+export const PLAYER_PUT_DOWN = {
+  radius: PLAYER_RADIUS,
+  hopApex: JUMP_APEX_HEIGHT,
+  height: KID_HEIGHT,
+  standsOnSolids: true,
+} as const;
 
 /**
  * The ride pose now lives in `./ridePose.ts`, and everything it used to export
@@ -1594,7 +1603,11 @@ export class Player implements GameSystem {
       this.sinceLanding = this.airborneFor > 0.1 ? 0 : this.sinceLanding + dt;
       this.airborneFor = 0;
     }
-    const wedgeDepth = this.airborne ? 0 : this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0);
+    // Inside a body below its top — and above its base, her whole height asked,
+    // as `resolve` asks it: standing on a solid's top is standing, not a wedge.
+    const wedgeDepth = this.airborne
+      ? 0
+      : this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0, undefined, KID_HEIGHT);
     if (wedgeDepth > WEDGE_DEPTH) {
       if (this.wedgedFor === 0) this.wedgeTookHold = this.sinceLanding;
       this.wedgedFor += dt;

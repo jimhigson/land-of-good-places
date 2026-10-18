@@ -1338,7 +1338,9 @@ export class CollisionWorld {
    * search, which asks whether her body is clear at every spot it tries — and
    * would otherwise scan the whole park's three thousand colliders for each.
    * Every query on it answers exactly as this world would for a point within
-   * `reach` of `(x, z)`.
+   * `reach` of `(x, z)`: every kind of solid comes across — circles, walls,
+   * the filled boxes every rectangle is, and the walls whose tops are drawn
+   * off their footprints ({@link toppedShifted}), judged by where that top is.
    */
   near(x: number, z: number, reach: number): CollisionWorld {
     const view = new CollisionWorld();
@@ -1354,9 +1356,18 @@ export class CollisionWorld {
       const lengthSq = dx * dx + dz * dz;
       const t = lengthSq < 1e-8 ? 0 : Math.max(0, Math.min(1, ((x - wall.x1) * dx + (z - wall.z1) * dz) / lengthSq));
       const gap = Math.hypot(wall.x1 + t * dx - x, wall.z1 + t * dz - z) - wall.halfThickness;
-      if (gap > reach) continue;
+      // A top drawn off the footprint answers where it is drawn, that far over.
+      const shift = Math.hypot(wall.topShiftX, wall.topShiftZ);
+      if (gap - shift > reach) continue;
       view.walls.push(wall);
+      if (!unshifted(wall)) view.shiftedTops.push(wall);
       view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, wall.halfThickness);
+    }
+    for (const box of this.boxes) {
+      // `boxDepth` at radius 0 is minus the gap to the rounded box's side.
+      if (-boxDepth(box, x, z, 0) > reach) continue;
+      view.boxes.push(box);
+      view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, Math.min(box.halfX, box.halfZ) + box.rounding);
     }
     return view;
   }

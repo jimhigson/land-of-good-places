@@ -3,7 +3,7 @@ import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
 import { stepReferenceFor, withinStep } from './building/stepReach';
-import { solidStepCeiling, standingHeight } from './standing';
+import { feetSampler, solidStepCeiling } from './standing';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
@@ -621,6 +621,9 @@ export class NavGrid {
    * connector edges. There are only fewer of them: the `(2·half + 1)²` round the
    * cell holding `(x, z)`. Cells the space's lattice would not reach are outside
    * its boundary, so its band blocks them here as it would there.
+   *
+   * `standsOnSolids` as the space's lattice was built — true for the player's
+   * own (`playerLattice.ts`), whose solids within a step are floor to her.
    */
   static around(
     collision: CollisionWorld,
@@ -631,8 +634,9 @@ export class NavGrid {
     x: number,
     z: number,
     half: number,
+    standsOnSolids = false,
   ): NavGrid {
-    const grid = new NavGrid(collision, walkerRadius, hopApex, connectors, bridgeCovers);
+    const grid = new NavGrid(collision, walkerRadius, hopApex, connectors, bridgeCovers, null, standsOnSolids);
     grid.windowAround = { x, z, half };
     return grid;
   }
@@ -702,7 +706,7 @@ export class NavGrid {
   private levelsOf(sample: GroundSampler): GroundSampler {
     if (!this.standsOnSolids) return sample;
     if (this.levelsFor?.sample === sample) return this.levelsFor.levels;
-    const levels: GroundSampler = (x, z, y) => standingHeight(sample(x, z, y), this.collision, x, z, y);
+    const levels = feetSampler(sample, this.collision);
     this.levelsFor = { sample, levels };
     return levels;
   }

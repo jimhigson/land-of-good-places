@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three';
 import type { CollisionWorld } from './Collision';
+import type { GroundSampler } from '../entities/Player';
 import { carryReference, stepCeilingAt } from './building/stepReach';
 import { PLAYER_RADIUS } from '../core/constants';
 import { KID_HEIGHT } from '../art/models/kidHeight';
@@ -37,6 +38,17 @@ import { KID_HEIGHT } from '../art/models/kidHeight';
 export function standingHeight(ground: number, collision: CollisionWorld, x: number, z: number, y: number): number {
   const top = collision.highestTopAt(x, z, solidStepCeiling(collision, x, z, y));
   return top > ground ? top : ground;
+}
+
+/**
+ * **Her feet's sampler** — `ground`'s surface, or the top of a solid within a
+ * step, whichever is higher: {@link standingHeight} over a whole sampler. What
+ * `Player` stands on (`groundAt`), what her lattice reads its levels from
+ * (`NavGrid`'s `standsOnSolids`), and what a check that asks the put-down rule
+ * "as `Player` asks it" must hand the rule.
+ */
+export function feetSampler(ground: GroundSampler, collision: CollisionWorld): GroundSampler {
+  return (x, z, y) => standingHeight(ground(x, z, y), collision, x, z, y);
 }
 
 /**

@@ -40,14 +40,19 @@ import { withinStep } from './building/stepReach';
  *
  * 1. **inside the space's play bounds** — the soft boundary would not shove her
  *    ({@link CollisionWorld.clearOfBoundary});
- * 2. **solid underfoot, on the floor it names** — the walk surface there is
- *    within a step of it, so she is never put over a void or onto a deck;
- * 3. **clear** — a child's body there, at that floor's height, overlaps nothing
- *    solid by the resolver's own rule (`deepestSolidOverlap`); and
+ * 2. **solid underfoot, on the floor it names** — the surface her feet find
+ *    there is within a step of it, so she is never put over a void or onto a
+ *    deck. A solid's top is such a surface, as it is under her feet: a crate
+ *    she stood on when the game was saved is where she wakes;
+ * 3. **clear** — a child's body there, at that floor's height, is inside no
+ *    solid below its top by the resolver's own rule (`deepestSolidOverlap`,
+ *    her whole height asked); the top she stands on is never in her way; and
  * 4. **connected to the space's open area** — the router's own flood, from
  *    there, reaches its arrival, its way out or a designed stand spot, or floor
  *    too far off to be a pocket ({@link OpenFloor}). This is the clause the café
  *    needed: the strip was clear floor, perfectly supported, and a dead end.
+ *    On a solid's top she cannot walk off within a step, she gets down by
+ *    walking off its edge, and the flood is asked from where she comes down.
  *
  * The spot asked for is tried first, and **handed back unchanged when it
  * passes** — every exit and arrival that was already sound puts her exactly
@@ -138,8 +143,6 @@ const EXIT_WINDOW_HALF = Math.ceil(OPEN_FLOOR_REACH / NAV_CELL) + 1;
  */
 const SEARCH_WINDOW_HALF = Math.ceil((SEARCH_REACH + OPEN_FLOOR_REACH) / NAV_CELL) + 1;
 
-/** The most cells one put-down ever builds: both windows. */
-export const PUT_DOWN_WINDOW_CELLS = (2 * EXIT_WINDOW_HALF + 1) ** 2 + (2 * SEARCH_WINDOW_HALF + 1) ** 2;
 
 /** Overlap that still counts as clear: float noise, an ordinary resolve's exact contact. */
 const CLEAR_TOLERANCE = 1e-3;
@@ -184,14 +187,28 @@ export const BARE_SPACE: PutDownSpace = {
 };
 
 /**
- * The body being put down: her radius, and the apex of her hop — the two
- * numbers the router is built for her with (`Game`'s `NavGrid`), so the window
- * of its lattice is hers. Passed in rather than imported: `Player` owns
- * `JUMP_APEX_HEIGHT`, and `Player` imports this file.
+ * The body being put down: her radius and the apex of her hop — the numbers
+ * the router is built for her with (`playerLattice.ts`), so the window of its
+ * lattice is hers — how tall she is, and whether she stands on solids. Passed
+ * in rather than imported: `Player` owns `PLAYER_PUT_DOWN`, and `Player`
+ * imports this file.
  */
 export interface PutDownMover {
   readonly radius: number;
   readonly hopApex: number;
+  /**
+   * Her height, metres: a solid is in her way from its base to its top, as
+   * `resolve` asks it of her (`KID_HEIGHT`) — so a spot under a canopy's edge,
+   * her head inside it, is not clear, and a top she stands on never is in her
+   * way at all.
+   */
+  readonly height: number;
+  /**
+   * Whether she stands on solids (`NavGrid`'s `standsOnSolids`): her lattice
+   * takes a solid within a step for floor, so its windows must too, or a bench
+   * she stands on is a stamp the flood cannot start from.
+   */
+  readonly standsOnSolids: boolean;
 }
 
 /**
@@ -218,7 +235,7 @@ function floorOf(sample: GroundSampler, exit: RideExit): { floor: number; lift: 
   const reach = exit.velocity ? FLING_MAX_LIFT : BUILDING_STEP_UP;
   // A surface found *above* the height the exit names is never its floor —
   // within a step up, the sampler offers the top of whatever stands there, and
-  // a breakfast chair's seat plate (0.42 m) is not the floor a child getting up
+  // a breakfast chair's seat (0.42 m) is not the floor a child getting up
   // from it is put down on. A hair above is float noise; more is a prop.
   return lift >= -SAME_FLOOR && lift <= reach ? { floor: under, lift: Math.max(0, lift) } : { floor: exit.y, lift: 0 };
 }
@@ -228,11 +245,13 @@ const SAME_FLOOR = 0.05;
 
 /**
  * **The one rule** — see this file's header. `collision` and `sample` are the
- * two authorities her own walking obeys, and `space` the rest of what the
+ * two authorities her own walking obeys — `sample` her feet's own sampler
+ * (`world/standing.ts`'s `feetSampler`: a solid's top is somewhere she stands,
+ * so it is somewhere she may be put down) — and `space` the rest of what the
  * router is built from, with the open area a flood may reach: `Player` passes
  * its own.
  *
- * Bounded: one put-down builds at most two windows of the router's lattice,
+ * Bounded: one put-down builds at most three windows of the router's lattice,
  * {@link PUT_DOWN_WINDOW_CELLS} cells in all, each once — see {@link OpenFloor};
  * every flood after that is a flood of a window already built, and a spot in a
  * region already flooded is answered from it. `check:exits` prints the cost of
@@ -246,10 +265,11 @@ export function putDownSpot(
   space: PutDownSpace = BARE_SPACE,
 ): PutDown {
   const { floor: exitFloor, lift } = floorOf(sample, exit);
-  // Clauses 3 and 4 ask about solids round every spot the search tries, and
-  // along the walk from each to where the router would start her: the ones
+  // Clauses 3 and 4 ask about solids round every spot the search tries, along
+  // the walk from each to where the router would start her, and along a walk
+  // off a solid's top to where she comes down (`OpenFloor.getsDown`): the ones
   // within her reach of the farthest of those.
-  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + START_REACH + mover.radius + NAV_CELL);
+  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + WALK_OFF_REACH + WALK_OFF_CLEAR + START_REACH + mover.radius + NAV_CELL);
   const floor = new OpenFloor(collision, solids, sample, exit, mover, space);
   const probe = new Vector3();
 
@@ -261,7 +281,7 @@ export function putDownSpot(
     // top of a chair or a table is a surface too, and standing up from one
     // seat onto the next one's cushion is not being put down on the floor.
     probe.set(x, Math.min(surface, exitFloor), z);
-    if (solids.deepestSolidOverlap(probe, mover.radius, 0) > CLEAR_TOLERANCE) return null;
+    if (solids.deepestSolidOverlap(probe, mover.radius, 0, undefined, mover.height) > CLEAR_TOLERANCE) return null;
     if (!floor.isOpen(x, surface, z)) return null;
     return { x, z, y: surface + lift, floor: surface, moved: Math.hypot(x - exit.x, z - exit.z), found: true, cells: floor.cells };
   };
@@ -303,14 +323,45 @@ const START_REACH = 3 * NAV_CELL;
 const SWEEP_STEP = 0.1;
 
 /**
+ * **How far across a solid's top she may walk to find its edge**, metres — see
+ * {@link OpenFloor} on getting down. A garden wall's coping, a crate, the
+ * fountain's rim and a table are a step or two across. From a top wider than
+ * this every way she is moved to its edge by the search, like any spot shut in.
+ */
+const WALK_OFF_REACH = START_REACH;
+
+/**
+ * **How far past a top's edge she may come down**, metres: her own width and a
+ * hand's breadth. Off the edge she drops, and the side of what she was on
+ * pushes her clear of it as she passes its top — so she lands a body's width
+ * beyond the edge, wherever there is room for her body there.
+ */
+const WALK_OFF_CLEAR = 1;
+
+/** The bearings she tries walking off a top along. */
+const WALK_OFF_BEARINGS = 16;
+
+/**
+ * **The window a walk off a top is asked in**: every spot the search tries,
+ * walked off and come down, with a full {@link OPEN_FLOOR_REACH} of the
+ * router's lattice round where she lands. Built only for a spot on a solid's
+ * top that she cannot walk out of on foot.
+ */
+const DROP_WINDOW_HALF = Math.ceil((SEARCH_REACH + WALK_OFF_REACH + WALK_OFF_CLEAR + OPEN_FLOOR_REACH) / NAV_CELL) + 1;
+
+/** The most cells one put-down ever builds: all three windows. */
+export const PUT_DOWN_WINDOW_CELLS =
+  (2 * EXIT_WINDOW_HALF + 1) ** 2 + (2 * SEARCH_WINDOW_HALF + 1) ** 2 + (2 * DROP_WINDOW_HALF + 1) ** 2;
+
+/**
  * **Clause 4: can she walk out of here?** — asked of the router itself.
  *
  * A window of `NavGrid`'s own lattice round the exit ({@link NavGrid.around}),
- * built from the same inputs `Game`'s router is ({@link PutDownSpace}), and
- * flooded by the router's own `floodFrom` — its steps, hops, corners and
- * stairs. A spot is open when that flood reaches a cell beside a point of the
- * space's open area, or one {@link OPEN_FLOOR_REACH} from the spot: no pocket
- * is that big.
+ * built from the same inputs her router is ({@link PutDownSpace}, and her
+ * {@link PutDownMover}: her lattice stands on solids), and flooded by the
+ * router's own `floodFrom` — its steps, hops, corners and stairs. A spot is
+ * open when that flood reaches a cell beside a point of the space's open area,
+ * or one {@link OPEN_FLOOR_REACH} from the spot: no pocket is that big.
  *
  * **The flood starts only where she can get to**: the nearest cell of the
  * router's lattice within {@link START_REACH} that it could stand her in
@@ -319,12 +370,26 @@ const SWEEP_STEP = 0.1;
  * solid. Her own cell, when it is free, is that cell. A spot with no such cell
  * — inside four walls with no free cell between them, say — is not open.
  *
- * Two windows, each built lazily, at most once per put-down: the exit is asked
+ * **On a solid's top, she gets down the way anyone does: she walks off its
+ * edge.** Her lattice walks onto a solid within a step of the floor round it
+ * and no higher, so a garden wall's coping, a crate or the fountain's rim is
+ * no level of it: there is no cell within a step to start from, and the flood
+ * alone would call her shut in on anything she had jumped onto. So a spot on a
+ * top that she cannot walk out of on foot is walked off, along
+ * {@link WALK_OFF_BEARINGS} bearings at the height she stands at — each until
+ * a side in her way at that height shuts it, or the floor drops away under her
+ * by more than a step — and comes down past the edge where her body fits
+ * ({@link WALK_OFF_CLEAR}). It is open if the flood from where she lands is.
+ * Coming down is gravity, never refused; a top whose every way off is walled
+ * in above her, or lands her in a pocket, is shut as any pocket is.
+ *
+ * Windows are built lazily, each at most once per put-down: the exit is asked
  * in one just big enough to answer it ({@link EXIT_WINDOW_HALF}), and only when
  * the search goes looking are its spots asked in one big enough for every spot
- * it tries ({@link SEARCH_WINDOW_HALF}). Both answer exactly: a flood that
- * reaches a window's edge has reached floor {@link OPEN_FLOOR_REACH} away.
- * Every flood is kept, and a later spot in a region already flooded is
+ * it tries ({@link SEARCH_WINDOW_HALF}) — and a walk off a top in one big
+ * enough for every landing ({@link DROP_WINDOW_HALF}). All answer exactly: a
+ * flood that reaches a window's edge has reached floor {@link OPEN_FLOOR_REACH}
+ * away. Every flood is kept, and a later spot in a region already flooded is
  * answered from that region rather than flooded again.
  */
 class OpenFloor {
@@ -357,13 +422,19 @@ class OpenFloor {
     this.space = space;
   }
 
-  /** Is the floor at `(x, floor, z)` one the router walks her out of? See the class. */
+  /** Is the floor at `(x, floor, z)` one she gets out of? See the class. */
   isOpen(x: number, floor: number, z: number): boolean {
     // In another space altogether, as far as the play bounds go: the router has
     // no lattice there and nothing to say, as the soft boundary has no push.
     if (this.collision.inAnotherSpace(x, z)) return true;
     const atExit = x === this.exit.x && z === this.exit.z;
-    const window = this.window(atExit ? EXIT_WINDOW_HALF : SEARCH_WINDOW_HALF);
+    if (this.walksOut(atExit ? EXIT_WINDOW_HALF : SEARCH_WINDOW_HALF, x, floor, z)) return true;
+    return this.onSolidTop(x, floor, z) && this.getsDown(x, floor, z);
+  }
+
+  /** The router's own answer from `(x, floor, z)`, in the window of `half` cells. See the class. */
+  private walksOut(half: number, x: number, floor: number, z: number): boolean {
+    const window = this.window(half);
     const reachable = (cx: number, cz: number, cy: number): boolean => this.walksTo(x, floor, z, cx, cy, cz);
     const start = window.router.nearestStandable(x, z, floor, this.sample, START_REACH, reachable);
     // No cell she can get to: shut in, however open the floor beyond the walls.
@@ -378,11 +449,55 @@ class OpenFloor {
     return region.openFrom(x, z);
   }
 
+  /** Is `floor` the top of a solid at `(x, z)` — somewhere she can only be by standing on it? */
+  private onSolidTop(x: number, floor: number, z: number): boolean {
+    return Math.abs(this.solids.highestTopAt(x, z, floor + SAME_FLOOR) - floor) <= SAME_FLOOR;
+  }
+
+  /** Off a solid's top along any bearing, to a landing the router walks her out of? See the class. */
+  private getsDown(x: number, floor: number, z: number): boolean {
+    for (let i = 0; i < WALK_OFF_BEARINGS; i += 1) {
+      const angle = (i / WALK_OFF_BEARINGS) * Math.PI * 2;
+      const landing = this.walkOff(x, floor, z, Math.cos(angle), Math.sin(angle));
+      if (landing && this.walksOut(DROP_WINDOW_HALF, landing.x, landing.y, landing.z)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Walks off the top at `(x, floor, z)` along `(dx, dz)` and says where she
+   * comes down — or `null` if a side in her way at the height she walks at
+   * shuts this bearing, the top runs on past {@link WALK_OFF_REACH}, or there is
+   * no room for her body within {@link WALK_OFF_CLEAR} past its edge inside the
+   * play bounds.
+   */
+  private walkOff(x: number, floor: number, z: number, dx: number, dz: number): { x: number; y: number; z: number } | null {
+    let edge = -1;
+    for (let d = SWEEP_STEP; d <= WALK_OFF_REACH + WALK_OFF_CLEAR + 1e-9; d += SWEEP_STEP) {
+      const px = x + dx * d;
+      const pz = z + dz * d;
+      if (this.blocked(px, floor, pz)) return null;
+      const below = this.sample(px, pz, floor);
+      if (edge < 0) {
+        // Still on her top, or within a step of it: that is walking, the flood's.
+        if (below >= floor - BUILDING_STEP_UP) {
+          if (d >= WALK_OFF_REACH) return null;
+          continue;
+        }
+        edge = d;
+      }
+      if (!this.collision.clearOfBoundary(px, pz, this.mover.radius)) return null;
+      if (!this.blocked(px, below, pz)) return { x: px, y: below, z: pz };
+      if (d - edge >= WALK_OFF_CLEAR) return null;
+    }
+    return null;
+  }
+
   /**
    * Can she get from `(x, floor, z)` to the cell centre `(cx, cy, cz)` on her
-   * own feet? Its floor within a step of hers, either way, and a body of her
-   * radius swept along the straight line between them, at her own floor's
-   * height, overlapping nothing solid by the resolver's own rule.
+   * own feet? Its floor within a step of hers, either way, and her body swept
+   * along the straight line between them, at her own floor's height,
+   * overlapping nothing solid by the resolver's own rule.
    */
   private walksTo(x: number, floor: number, z: number, cx: number, cy: number, cz: number): boolean {
     if (!withinStep(x, floor, z, cx, cy, cz)) return false;
@@ -390,10 +505,19 @@ class OpenFloor {
     const steps = Math.max(1, Math.ceil(length / SWEEP_STEP));
     for (let i = 0; i <= steps; i += 1) {
       const t = i / steps;
-      this.probe.set(x + (cx - x) * t, floor, z + (cz - z) * t);
-      if (this.solids.deepestSolidOverlap(this.probe, this.mover.radius, 0) > CLEAR_TOLERANCE) return false;
+      if (this.blocked(x + (cx - x) * t, floor, z + (cz - z) * t)) return false;
     }
     return true;
+  }
+
+  /**
+   * Is her body at `(x, z)`, feet at `feet`, inside something solid — a body
+   * below its top and above its base, by the resolver's own rule
+   * (`deepestSolidOverlap`, her whole height asked)?
+   */
+  private blocked(x: number, feet: number, z: number): boolean {
+    this.probe.set(x, feet, z);
+    return this.solids.deepestSolidOverlap(this.probe, this.mover.radius, 0, undefined, this.mover.height) > CLEAR_TOLERANCE;
   }
 
   /** The window of `half` cells round the exit, built on first asking. */
@@ -401,7 +525,17 @@ class OpenFloor {
     let window = this.windows.get(half);
     if (!window) {
       const { exit, mover, space } = this;
-      const router = NavGrid.around(this.collision, mover.radius, mover.hopApex, space.connectors, space.bridgeCovers, exit.x, exit.z, half);
+      const router = NavGrid.around(
+        this.collision,
+        mover.radius,
+        mover.hopApex,
+        space.connectors,
+        space.bridgeCovers,
+        exit.x,
+        exit.z,
+        half,
+        mover.standsOnSolids,
+      );
       window = { router, regions: [] };
       this.windows.set(half, window);
       this.cells += (2 * half + 1) ** 2;

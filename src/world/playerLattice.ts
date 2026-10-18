@@ -1,14 +1,18 @@
-import { PLAYER_RADIUS } from '../core/constants';
-import { JUMP_APEX_HEIGHT } from '../entities/Player';
+import { PLAYER_PUT_DOWN } from '../entities/Player';
 import type { CollisionWorld } from './Collision';
 import { NavGrid } from './NavGrid';
 import type { LevelConnector } from './building/surfaces';
 
-/** What {@link playerNavGrid} needs of the world: its solids, its stairs, its bridges. */
+/**
+ * What {@link playerNavGrid} needs of the world: its solids, and the router's
+ * two other inputs from their one owner, `World` (`routeConnectors`,
+ * `routeBridgeCovers`) — which the put-down rule's windows of this lattice
+ * read too (`World.putDownSpace`).
+ */
 export interface PlayerLatticeWorld {
   readonly collision: CollisionWorld;
-  readonly building: { readonly surfaces: { readonly connectors: readonly LevelConnector[] } };
-  readonly train: { readonly bridges: readonly { covers(x: number, z: number): boolean }[] };
+  readonly routeConnectors: () => readonly LevelConnector[];
+  readonly routeBridgeCovers: (x: number, z: number) => boolean;
 }
 
 /**
@@ -21,21 +25,23 @@ export interface PlayerLatticeWorld {
  * repo's most common bug waiting to happen (CLAUDE.md, "two definitions of
  * one thing").
  *
- * - her own width and jump (`PLAYER_RADIUS`, `JUMP_APEX_HEIGHT`);
+ * - her own body, from the one object the put-down rule measures her by
+ *   (`PLAYER_PUT_DOWN`): her width and her jump;
  * - the declared ways between levels — the lobby's stair (Decision 11);
  * - every railway bridge's deck and ramps (#116, Decision 8);
  * - **and she stands on solids** (`NavGrid`'s `standsOnSolids`): a bed, a
  *   bench, a cushion within one step of the floor is somewhere she walks, so
- *   the route may cross it, as the engine lets her.
+ *   the route may cross it, as the engine lets her. The put-down rule's
+ *   windows (`NavGrid.around`) are built the same way, from the same object.
  */
 export function playerNavGrid(world: PlayerLatticeWorld): NavGrid {
   return new NavGrid(
     world.collision,
-    PLAYER_RADIUS,
-    JUMP_APEX_HEIGHT,
-    () => world.building.surfaces.connectors,
-    (x, z) => world.train.bridges.some((bridge) => bridge.covers(x, z)),
+    PLAYER_PUT_DOWN.radius,
+    PLAYER_PUT_DOWN.hopApex,
+    world.routeConnectors,
+    world.routeBridgeCovers,
     null,
-    true,
+    PLAYER_PUT_DOWN.standsOnSolids,
   );
 }
