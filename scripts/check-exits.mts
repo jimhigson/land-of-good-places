@@ -366,7 +366,7 @@ world.stalls.onEnter = (stallId: string) => {
   world.boardStallRide(stallId);
 };
 const sample = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
-/** Her feet's sampler — the walk surface or a solid's top within a step — as `Player.groundAt` stands her. */
+/** Her feet's sampler — the walk surface or a solid's top within a step — as `Player.groundAt` stands her: the levels of her lattice. */
 const feet = feetSampler(sample, collision);
 
 let elapsed = 1000;
@@ -439,9 +439,9 @@ function tick(seconds: number, input = still): void {
 /** The router, exactly as `Game` builds it, from its one owner — following the play bounds of the space she is in. */
 const router = playerNavGrid(world);
 parade.setNavGrid(router);
-/** The rule, asked for a spot exactly as `Player` asks it — with her feet's own sampler. */
+/** The rule, asked for a spot exactly as `Player` asks it. */
 function putDownAt(x: number, y: number, z: number): ReturnType<typeof putDownSpot> {
-  return putDownSpot(collision, feet, { x, y, z }, PLAYER_PUT_DOWN, world.putDownSpace);
+  return putDownSpot(collision, sample, { x, y, z }, PLAYER_PUT_DOWN, world.putDownSpace);
 }
 /** The space's way out: its open area's first point — the arrival a door or lift lands her on. */
 function wayOut(x: number, z: number): { x: number; z: number } | null {

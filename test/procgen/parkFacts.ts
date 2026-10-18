@@ -2013,7 +2013,6 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
   const { cruiserStrikes } = await import('../../src/world/coaster/clearance.ts');
   const { JUMP_APEX_HEIGHT, PLAYER_PUT_DOWN } = await import('../../src/entities/Player.ts');
   const { putDownSpot } = await import('../../src/world/dismount.ts');
-  const { feetSampler } = await import('../../src/world/standing.ts');
   const { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } = await import(
     '../../src/world/entrance/layout.ts'
   );
@@ -4162,8 +4161,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,
-    // Asked as `Player` asks it: with her feet's own sampler, a solid's top a floor.
-    putDownPlayer: (exit) => putDownSpot(world.collision, feetSampler(sample, world.collision), exit, PLAYER_PUT_DOWN, world.putDownSpace),
+    putDownPlayer: (exit) => putDownSpot(world.collision, sample, exit, PLAYER_PUT_DOWN, world.putDownSpace),
     pushedTo,
     buildMs,
   };

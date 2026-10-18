@@ -5,6 +5,7 @@ import type { LevelConnector } from './building/surfaces';
 import { BUILDING_STEP_UP } from '../core/constants';
 import { NAV_CELL, NavGrid, type ReachSet } from './NavGrid';
 import { withinStep } from './building/stepReach';
+import { feetSampler } from './standing';
 
 /**
  * **Where she may be put down — the one owner, for every way the game places
@@ -245,11 +246,16 @@ const SAME_FLOOR = 0.05;
 
 /**
  * **The one rule** — see this file's header. `collision` and `sample` are the
- * two authorities her own walking obeys — `sample` her feet's own sampler
- * (`world/standing.ts`'s `feetSampler`: a solid's top is somewhere she stands,
- * so it is somewhere she may be put down) — and `space` the rest of what the
- * router is built from, with the open area a flood may reach: `Player` passes
- * its own.
+ * two authorities her own walking obeys — `sample` the walk surface, the
+ * ground her lattice is built over — and `space` the rest of what the router
+ * is built from, with the open area a flood may reach: `Player` passes its own.
+ *
+ * **A mover that stands on solids is stood by her feet's own rule**
+ * (`world/standing.ts`'s `feetSampler` over `sample`): a solid's top within a
+ * step is somewhere she stands, so it is somewhere she may be put down. The
+ * rule composes it rather than being handed it, because her lattice needs the
+ * walk surface itself: given her feet's sampler, `NavGrid` would find every
+ * solid's own top "within a step of the ground under it" and walk onto them all.
  *
  * Bounded: one put-down builds at most three windows of the router's lattice,
  * {@link PUT_DOWN_WINDOW_CELLS} cells in all, each once — see {@link OpenFloor};
@@ -264,18 +270,19 @@ export function putDownSpot(
   mover: PutDownMover,
   space: PutDownSpace = BARE_SPACE,
 ): PutDown {
-  const { floor: exitFloor, lift } = floorOf(sample, exit);
-  // Clauses 3 and 4 ask about solids round every spot the search tries, along
-  // the walk from each to where the router would start her, and along a walk
-  // off a solid's top to where she comes down (`OpenFloor.getsDown`): the ones
-  // within her reach of the farthest of those.
-  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + WALK_OFF_REACH + WALK_OFF_CLEAR + START_REACH + mover.radius + NAV_CELL);
-  const floor = new OpenFloor(collision, solids, sample, exit, mover, space);
+  const feet = mover.standsOnSolids ? feetSampler(sample, collision) : sample;
+  const { floor: exitFloor, lift } = floorOf(feet, exit);
+  // Clauses 3 and 4 ask about solids round every spot the search tries, and
+  // along the walk from each to where the router would start her: the ones
+  // within her reach of the farthest of those. (A walk off a solid's top asks
+  // further out, in a wider view of its own — `OpenFloor.getsDown`.)
+  const solids = collision.near(exit.x, exit.z, SEARCH_REACH + START_REACH + mover.radius + NAV_CELL);
+  const floor = new OpenFloor(collision, solids, sample, feet, exit, mover, space);
   const probe = new Vector3();
 
   const accept = (x: number, z: number): PutDown | null => {
     if (!collision.clearOfBoundary(x, z, mover.radius)) return null;
-    const surface = sample(x, z, exit.y);
+    const surface = feet(x, z, exit.y);
     if (!withinStep(exit.x, exitFloor, exit.z, x, surface, z)) return null;
     // Clear at the exit's own floor, not only at the surface found here: the
     // top of a chair or a table is a surface too, and standing up from one
@@ -398,7 +405,18 @@ class OpenFloor {
 
   private readonly collision: CollisionWorld;
   private readonly solids: CollisionWorld;
+  /**
+   * The solids a walk off a top and its landing ask about — the walk's own
+   * reach and its landing's past {@link solids}'. Built on first asking: only a
+   * spot on a top she cannot walk out of on foot needs it.
+   */
+  private wideSolids: CollisionWorld | null = null;
+  /** The view {@link blocked} asks: {@link solids}, or the wide one while a walk off a top is asked. */
+  private view: CollisionWorld;
+  /** The walk surface her lattice is built over. */
   private readonly sample: GroundSampler;
+  /** What her feet stand on: {@link sample}, or a solid's top within a step. */
+  private readonly feet: GroundSampler;
   private readonly exit: RideExit;
   private readonly mover: PutDownMover;
   private readonly space: PutDownSpace;
@@ -410,13 +428,16 @@ class OpenFloor {
     collision: CollisionWorld,
     solids: CollisionWorld,
     sample: GroundSampler,
+    feet: GroundSampler,
     exit: RideExit,
     mover: PutDownMover,
     space: PutDownSpace,
   ) {
     this.collision = collision;
     this.solids = solids;
+    this.view = solids;
     this.sample = sample;
+    this.feet = feet;
     this.exit = exit;
     this.mover = mover;
     this.space = space;
@@ -456,12 +477,23 @@ class OpenFloor {
 
   /** Off a solid's top along any bearing, to a landing the router walks her out of? See the class. */
   private getsDown(x: number, floor: number, z: number): boolean {
-    for (let i = 0; i < WALK_OFF_BEARINGS; i += 1) {
-      const angle = (i / WALK_OFF_BEARINGS) * Math.PI * 2;
-      const landing = this.walkOff(x, floor, z, Math.cos(angle), Math.sin(angle));
-      if (landing && this.walksOut(DROP_WINDOW_HALF, landing.x, landing.y, landing.z)) return true;
+    const { exit, mover } = this;
+    this.wideSolids ??= this.collision.near(
+      exit.x,
+      exit.z,
+      SEARCH_REACH + WALK_OFF_REACH + WALK_OFF_CLEAR + START_REACH + mover.radius + NAV_CELL,
+    );
+    this.view = this.wideSolids;
+    try {
+      for (let i = 0; i < WALK_OFF_BEARINGS; i += 1) {
+        const angle = (i / WALK_OFF_BEARINGS) * Math.PI * 2;
+        const landing = this.walkOff(x, floor, z, Math.cos(angle), Math.sin(angle));
+        if (landing && this.walksOut(DROP_WINDOW_HALF, landing.x, landing.y, landing.z)) return true;
+      }
+      return false;
+    } finally {
+      this.view = this.solids;
     }
-    return false;
   }
 
   /**
@@ -477,7 +509,7 @@ class OpenFloor {
       const px = x + dx * d;
       const pz = z + dz * d;
       if (this.blocked(px, floor, pz)) return null;
-      const below = this.sample(px, pz, floor);
+      const below = this.feet(px, pz, floor);
       if (edge < 0) {
         // Still on her top, or within a step of it: that is walking, the flood's.
         if (below >= floor - BUILDING_STEP_UP) {
@@ -517,7 +549,7 @@ class OpenFloor {
    */
   private blocked(x: number, feet: number, z: number): boolean {
     this.probe.set(x, feet, z);
-    return this.solids.deepestSolidOverlap(this.probe, this.mover.radius, 0, undefined, this.mover.height) > CLEAR_TOLERANCE;
+    return this.view.deepestSolidOverlap(this.probe, this.mover.radius, 0, undefined, this.mover.height) > CLEAR_TOLERANCE;
   }
 
   /** The window of `half` cells round the exit, built on first asking. */

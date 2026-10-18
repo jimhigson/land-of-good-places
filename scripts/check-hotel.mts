@@ -57,6 +57,7 @@ import { BackSide, Box3, Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NAV_CELL, NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
+import { feetSampler } from '../src/world/standing.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
@@ -5035,8 +5036,8 @@ process.stderr.write(
  * wherever she ends up: *can she walk to the room's way out from here?*
  *
  * That question is answered by the floor she can walk on, measured — the
- * room's {@link WalkableFloor}: every cell of the router's own lattice the
- * router reaches from the way out, and then every cell from which a body of
+ * room's {@link WalkableFloor}: every cell of her own lattice (`playerLattice.ts`)
+ * the router reaches from the way out, and then every cell from which a body of
  * her radius walks into those (a swept circle, every 10 cm, at the higher of
  * the two floors, stepping up no more than {@link WALK_STEP_UP}, dropping any
  * height). The second half is
@@ -5044,8 +5045,14 @@ process.stderr.write(
  * solid, so floor a body stands on can be floor the router calls blocked, and
  * the review of 503bd56f found the router's own leniency calling sealed nooks
  * open. Here a spot counts only when her own body gets from it to that floor.
+ *
+ * **Her floor is what her feet stand on** (PR #722): the room's floor, or the
+ * top of a solid under her hop (`feetSampler`), as she lands on it — nothing
+ * marks a floor on a bed or a table any more. And her step is the engine's: she
+ * walks up onto a solid within {@link BUILDING_STEP_UP} (a pet bed, an ottoman),
+ * as onto a deck, so that is the step the floor is joined by.
  */
-const WALK_STEP_UP = 0.3;
+const WALK_STEP_UP = BUILDING_STEP_UP;
 const SWEEP = 0.1;
 const trapCamera = new IsoCamera();
 const trapBody = quietly(() => new Player(collision, trapCamera, new Vector3(LOBBY.originX, 0, LOBBY.originZ)));
@@ -5083,7 +5090,8 @@ function standBody(x: number, y: number, z: number): void {
 const bodyProbe = new Vector3();
 function bodyClear(x: number, y: number, z: number): boolean {
   bodyProbe.set(x, y, z);
-  return collision.deepestSolidOverlap(bodyProbe, PLAYER_RADIUS, 0) <= 1e-3;
+  // Her whole height, as `resolve` asks it: a rail at head height is in her way.
+  return collision.deepestSolidOverlap(bodyProbe, PLAYER_RADIUS, 0, undefined, KID_HEIGHT) <= 1e-3;
 }
 /** A body of her radius gets from `(ax, az)` to `(bx, bz)` at height `y` touching nothing solid. */
 function sweepClear(ax: number, az: number, bx: number, bz: number, y: number): boolean {
@@ -5095,6 +5103,8 @@ function sweepClear(ax: number, az: number, bx: number, bz: number, y: number): 
   return true;
 }
 const surfaceAt = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
+/** What her feet stand on: the walk surface, or a solid's top within a step (`feetSampler`, as `Player` stands). */
+const feetAt = feetSampler(surfaceAt, collision);
 
 /** One floor of one lattice cell: its centre, and the height she stands at there. */
 interface FloorCell {
@@ -5121,7 +5131,8 @@ interface WalkableFloor {
 }
 function walkableFloor(room: HotelRoom): WalkableFloor | string {
   collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, room.originX, room.originZ));
-  const grid = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers);
+  // Her own lattice, from its one owner: a solid within a step is floor to her.
+  const grid = playerNavGrid(world);
   const way = hotel.openArea(room)[0];
   if (!way) return `${room.space} publishes no way out to measure from`;
   const door = { x: way.x, y: surfaceAt(way.x, way.z, 3), z: way.z };
@@ -5131,7 +5142,7 @@ function walkableFloor(room: HotelRoom): WalkableFloor | string {
   }
   // The lattice's own cells, keyed by where they sit (the one owner of where a
   // cell is, `forEachCellCentre`), with every floor a body could stand on there:
-  // the room's floor or a furniture top under 3 m, and a deck over it.
+  // the room's floor or a furniture top under her hop, and a deck over it.
   let offsetX = NaN;
   let offsetZ = NaN;
   const keyOf = (x: number, z: number): string =>
@@ -5147,7 +5158,11 @@ function walkableFloor(room: HotelRoom): WalkableFloor | string {
     if (!inRoom(x, z)) return;
     const low = surfaceAt(x, z, 3);
     const high = surfaceAt(x, z, room.wallHeight + 1);
-    const levels = high > 3 && high - low > 2 ? [low, high] : [low];
+    // The top of whatever stands on that floor, if it is under her hop: her feet's
+    // own rule asked from a step under the hop's height, so its reach ends there.
+    const top = feetAt(x, z, low + JUMP_APEX_HEIGHT - BUILDING_STEP_UP);
+    const ground = top > low + 0.05 && top <= low + JUMP_APEX_HEIGHT ? [low, top] : [low];
+    const levels = high > 3 && high - low > 2 ? [...ground, high] : ground;
     const cells = levels.filter((y) => Number.isFinite(y) && bodyClear(x, y, z)).map((y) => ({ x, z, y }));
     if (cells.length > 0) floors.set(keyOf(x, z), cells);
   });
@@ -5195,7 +5210,8 @@ function walkableFloor(room: HotelRoom): WalkableFloor | string {
     !inRoom(x, z) ||
     y < door.y - 1 ||
     cellsAround(x, z).some(
-      (cell) => Math.abs(cell.y - y) <= WALK_STEP_UP && outKeys.has(floorKey(cell)) && sweepClear(x, z, cell.x, cell.z, Math.max(y, cell.y)),
+      // Up onto it by no more than a step, or down onto it from any height — the flood's own rule.
+      (cell) => cell.y - y <= WALK_STEP_UP && outKeys.has(floorKey(cell)) && sweepClear(x, z, cell.x, cell.z, Math.max(y, cell.y)),
     );
   return { room, out, cut, walksOut, cellsAround, door };
 }
@@ -5346,9 +5362,9 @@ function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: numb
  * floor that does not walk out, she then tries to walk out, sixteen ways, 3 s
  * each. **A pocket she gets into and cannot walk out of fails.**
  *
- * The control runs first, on the built lobby: a pen of four knee-high walls
- * (0.5 m, under her hop) on open floor must come back as a pocket she hops
- * into and cannot walk out of. If it does not, the instrument is measuring
+ * The control runs first, on the built lobby: a pen of four walls (0.8 m: over
+ * her step, which she would walk up, and under her hop) on open floor must
+ * come back as a pocket she hops into and cannot walk out of. If it does not, the instrument is measuring
  * something else, and the probe says so rather than reporting clean.
  */
 {
@@ -5436,7 +5452,8 @@ function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: numb
   } else {
     const PEN_HALF = 1.2;
     const PEN_WALL = 0.15;
-    const PEN_TOP = 0.5;
+    // Over her step (she walks up onto anything within one) and under her hop.
+    const PEN_TOP = 0.8;
     // Open floor for it: a spot whose every cell within 2.5 m walks out, at the way out's own floor.
     // flat-ok: the lobby is its own flat space off the sphere; a cell's floor against the way out's, in it
     const atDoorFloor = (cell: FloorCell): boolean => Math.abs(cell.y - lobbyFloor.door.y) < 0.05;
@@ -5465,14 +5482,14 @@ function patchesOf(floor: WalkableFloor, cells: readonly FloorCell[], rise: numb
       for (const wall of pen) collision.removeWall(wall);
       if (!found || found.traps.length === 0) {
         problems.push(
-          `probe 33 CONTROL FAILED: a pen of 0.5 m walls round local ${localOf(LOBBY, spot.x, spot.y, spot.z)} ` +
+          `probe 33 CONTROL FAILED: a pen of ${PEN_TOP} m walls round local ${localOf(LOBBY, spot.x, spot.y, spot.z)} ` +
             `came back with ${found ? `${found.pockets} pocket(s), ${found.tries} tries, ${found.endedCut} ending in it, no trap` : 'no floor measured'} — ` +
             'the instrument cannot see a trap it was handed, so nothing it says about the rooms means anything',
         );
       } else {
         controlled = true;
         process.stderr.write(
-          `probe 33 control: a pen of 0.5 m walls round local ${localOf(LOBBY, spot.x, spot.y, spot.z)} — ` +
+          `probe 33 control: a pen of ${PEN_TOP} m walls round local ${localOf(LOBBY, spot.x, spot.y, spot.z)} — ` +
             `${found.pockets} pocket, ${found.tries} tries, ${found.traps.length} trapped her (e.g. ${found.traps[0]})\n`,
         );
       }

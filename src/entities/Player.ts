@@ -1605,9 +1605,19 @@ export class Player implements GameSystem {
     }
     // Inside a body below its top — and above its base, her whole height asked,
     // as `resolve` asks it: standing on a solid's top is standing, not a wedge.
+    // Nor is leaning on one within a step of where she stands: that is a step
+    // she walks up onto (`resolve`'s 'stepped'), not a gap she is caught in —
+    // pressed into the corner between the suite's wall and a pet bed (0.41 m),
+    // the two pushes leave her 0.11 m into the bed, and she walks out of it.
     const wedgeDepth = this.airborne
       ? 0
-      : this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0, undefined, KID_HEIGHT);
+      : this.collision.deepestSolidOverlap(
+          this.position,
+          PLAYER_RADIUS,
+          0,
+          (x, z) => solidStepCeiling(this.collision, x, z, groundY),
+          KID_HEIGHT,
+        );
     if (wedgeDepth > WEDGE_DEPTH) {
       if (this.wedgedFor === 0) this.wedgeTookHold = this.sinceLanding;
       this.wedgedFor += dt;
@@ -1774,13 +1784,15 @@ export class Player implements GameSystem {
 
   /**
    * **The one put-down** — `world/dismount.ts`'s rule, asked with her own
-   * collision world, her own ground sampler, her own body and the space's own
-   * {@link putDownSpace}. `endRide` and `teleportTo` are its only callers.
+   * collision world, her own walk surface, her own body and the space's own
+   * {@link putDownSpace}. `endRide` and `teleportTo` are its only callers. The
+   * rule stands her on solids by her feet's own rule (`PLAYER_PUT_DOWN` says
+   * she stands on them), exactly as {@link groundAt} does.
    */
   private putDown(spot: RideExit): PutDown {
     const result = putDownSpot(
       this.collision,
-      (x, z, y) => this.groundAt(x, z, y),
+      (x, z, y) => this.walkSurfaceAt(x, z, y),
       spot,
       PLAYER_PUT_DOWN,
       this.putDownSpace,
@@ -1798,8 +1810,12 @@ export class Player implements GameSystem {
    * marks a floor on top of it.
    */
   private groundAt(x: number, z: number, y: number): number {
-    const ground = this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
-    return standingHeight(ground, this.collision, x, z, y);
+    return standingHeight(this.walkSurfaceAt(x, z, y), this.collision, x, z, y);
+  }
+
+  /** The walk surface at `(x, z)` from `y` — the sampler's ground, no solid's top: what her lattice is built over. */
+  private walkSurfaceAt(x: number, z: number, y: number): number {
+    return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
   }
 
   /**
