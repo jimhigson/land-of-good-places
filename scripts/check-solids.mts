@@ -1174,7 +1174,10 @@ if (spacesInPart.length) {
     }
   }
   say(walks > 0 && thrown === 0, `${walks} walks along ${walls.size} wall tops and rims she reaches, end to end at a walk: ${thrown} hopped her off${firstThrown.length ? ` — ${firstThrown.join('; ')}` : ''}`);
-  note(`clause 9: of ${walks} walks along a top, ${fellOff} stepped off its side before its end${firstFell.length ? ` (e.g. ${firstFell.join('; ')})` : ''} — a fall, not a hop, so not asserted: something beside the top (a bush's crown) nudged her off it`);
+  note(
+    `clause 9: of ${walks} walks along a top, ${fellOff} stepped off its side before its end${firstFell.length ? ` (e.g. ${firstFell.join('; ')})` : ''} — ` +
+      `a fall, not a hop, so not asserted here: what it asserts is that the auto-hop never throws her off (a bush's crown beside a wall can nudge her off a narrow top)`,
+  );
   // Up a low wall: from the ground beside every auto-hoppable solid, walking
   // in, wherever its top is a step over that ground.
   let ups = 0;
