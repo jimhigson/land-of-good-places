@@ -1,7 +1,8 @@
 import { Vector3 } from 'three';
 import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
 import { riseBetween } from './building/stepReach';
-import { GROUND_SPHERE_RADIUS } from '../core/constants';
+import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../core/constants';
+import { planetRadiusAt, yAtRadius } from './terrain';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 
 /**
@@ -162,6 +163,16 @@ interface SolidHeights {
    * landed on or stepped onto. See {@link CollisionWorld.toppedNarrow}.
    */
   topHalf: number;
+  /**
+   * **A closure of the route lattice, not a body** ({@link CollisionWorld.asClosure}):
+   * the railway's corridor between its two fences. The route lattice stamps
+   * it and the planner's ground queries ({@link CollisionWorld.isClearCircle},
+   * {@link CollisionWorld.solidDepthAt}) read it, so nothing is routed or
+   * placed on the track; but nothing she can see is there, so no mover meets
+   * it, nothing stands on it and no head rises into it. What keeps her off the
+   * line is the fence and the railings she can see, by their height.
+   */
+  closure: boolean;
 }
 
 /**
@@ -196,6 +207,7 @@ function standsWithin(solid: Readonly<SolidHeights>, distance: number): boolean 
 
 /** Is any of `solid`'s top wide enough to stand on? */
 function standableTop(solid: Readonly<SolidHeights>): boolean {
+  if (solid.closure) return false;
   return Number.isNaN(solid.topHalf) || wideEnough(solid.topHalf);
 }
 
@@ -351,15 +363,8 @@ export interface BoxCollider extends SolidHeights {
  */
 function radiusFor(x: number, z: number, y: number): number {
   if (!Number.isFinite(y) || spaceAt(x, z) !== SPACE_GARDEN) return Number.NaN;
-  const cy = y + GROUND_SPHERE_RADIUS;
-  if (cy <= 0) return Number.NaN;
-  return Math.hypot(x, cy, z);
-}
-
-/** The world `y` of the sphere of `radius` over column `(x, z)`, the inverse of {@link radiusFor}. */
-function yOnRadius(radius: number, x: number, z: number): number {
-  const above = radius * radius - x * x - z * z;
-  return above > 0 ? Math.sqrt(above) - GROUND_SPHERE_RADIUS : -Infinity;
+  if (y + GROUND_SPHERE_RADIUS <= 0) return Number.NaN;
+  return planetRadiusAt(x, y, z);
 }
 
 /**
@@ -375,14 +380,14 @@ export function solidTopAt(solid: Readonly<SolidHeights>, x: number, z: number):
     let t = slope.lengthSquared < 1e-8 ? 0 : ((x - slope.x1) * slope.dx + (z - slope.z1) * slope.dz) / slope.lengthSquared;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
     const top = slope.top1 + (slope.top2 - slope.top1) * t;
-    return slope.radial ? yOnRadius(top, x, z) : top;
+    return slope.radial ? yAtRadius(x, z, top) : top;
   }
-  return Number.isNaN(solid.topRadius) ? solid.topHeight : yOnRadius(solid.topRadius, x, z);
+  return Number.isNaN(solid.topRadius) ? solid.topHeight : yAtRadius(x, z, solid.topRadius);
 }
 
 /** A solid's base over column `(x, z)`, world `y` — `-Infinity` for one that stands on the ground. */
 export function solidBaseAt(solid: Readonly<SolidHeights>, x: number, z: number): number {
-  return Number.isNaN(solid.baseRadius) ? solid.baseHeight : yOnRadius(solid.baseRadius, x, z);
+  return Number.isNaN(solid.baseRadius) ? solid.baseHeight : yAtRadius(x, z, solid.baseRadius);
 }
 
 /**
@@ -696,6 +701,8 @@ function contactWith(
   moverHeight = 0,
   feetY = position.y,
 ): 'absent' | 'cleared' | 'stepped' | 'solid' {
+  // A closure of the route lattice is no body: nothing meets it.
+  if (collider.closure) return 'absent';
   // Below its base — her head under a canopy's underside, under the landing's
   // rail — it is not there at all. A mover with no height (a planning probe)
   // is a point at its feet, as every collider used to see every mover.
@@ -940,6 +947,8 @@ export class CollisionWorld {
 
   /** The kind every collider registered now is filed under — see {@link kinded}. */
   private currentKind = '';
+  /** Whether what is registered now is a closure, not a body — see {@link asClosure}. */
+  private currentClosure = false;
   private currentTopHalf = Number.NaN;
   private currentTopEnds = Number.NaN;
   private currentTopShiftX = 0;
@@ -1020,6 +1029,42 @@ export class CollisionWorld {
   }
 
   /**
+   * **Every collider `build` registers is a closure of the route lattice, not a
+   * body** ({@link SolidHeights.closure}) — stamped by `NavGrid`, read by the
+   * planner's ground queries, met by nobody. For something invisible that the
+   * router and the park's planner must treat as taken — the railway's corridor
+   * — and that must never be what stops her: Jim's ruling is that what stops
+   * her is something she can see, of its real height. Nests like {@link kinded}.
+   */
+  asClosure<T>(build: () => T): T {
+    const outer = this.currentClosure;
+    this.currentClosure = true;
+    try {
+      return build();
+    } finally {
+      this.currentClosure = outer;
+    }
+  }
+
+  /** How many closures ({@link asClosure}) are registered — for a measure's coverage line. */
+  get closureCount(): number {
+    let n = 0;
+    for (const solid of [...this.circles, ...this.walls, ...this.boxes]) if (solid.closure) n += 1;
+    return n;
+  }
+
+  /**
+   * **For a check's mutation only: every top is as wide as its footprint** —
+   * the width rule ({@link FOOT_HALF_WIDTH}, {@link toppedNarrow}) switched off
+   * for every solid registered so far, so `check:solids` can show that what
+   * guards the railway is height alone (`SOLIDS_PROVE=guards-alone`). Never
+   * called by the game.
+   */
+  everyTopWide(): void {
+    for (const solid of [...this.circles, ...this.walls, ...this.boxes]) solid.topHalf = Number.NaN;
+  }
+
+  /**
    * The heights record every registration shares — {@link SolidHeights}.
    * `(x, z)` is the solid's reference point, where its top and base were
    * measured; out in the park both are held as radii from there.
@@ -1048,6 +1093,7 @@ export class CollisionWorld {
       // unless it says how tall it stands.
       hopHeight: !topIsAbsolute ? topHeight : hopHeight,
       topHalf: this.currentTopHalf,
+      closure: this.currentClosure,
     };
   }
 
@@ -1132,7 +1178,7 @@ export class CollisionWorld {
     let best = -Infinity;
     for (const bucket of this.bucketsAt(x, z)) {
       for (const circle of bucket.circles) {
-        if (!circle.topIsAbsolute) continue;
+        if (!circle.topIsAbsolute || circle.closure) continue;
         const dx = x - circle.x;
         const dz = z - circle.z;
         if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
@@ -1144,14 +1190,14 @@ export class CollisionWorld {
       for (const wall of bucket.walls) {
         // A wall whose top is drawn away from its footprint is asked below,
         // where its top is — not by the bucket its footprint fell in.
-        if (!wall.topIsAbsolute || !unshifted(wall)) continue;
+        if (!wall.topIsAbsolute || !unshifted(wall) || wall.closure) continue;
         if (!wallTopCovers(wall, x, z)) continue;
         const top = solidTopAt(wall, x, z);
         if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
         best = top;
       }
       for (const box of bucket.boxes) {
-        if (!box.topIsAbsolute) continue;
+        if (!box.topIsAbsolute || box.closure) continue;
         if (boxDepth(box, x, z, 0) < 0) continue;
         if (!standableTop(box)) continue;
         const top = solidTopAt(box, x, z);
@@ -1161,7 +1207,7 @@ export class CollisionWorld {
     }
     // The few walls with shifted tops (the garden walls), every time.
     for (const wall of this.shiftedTops) {
-      if (!wall.topIsAbsolute) continue;
+      if (!wall.topIsAbsolute || wall.closure) continue;
       if (!wallTopCovers(wall, x, z)) continue;
       const top = solidTopAt(wall, x, z);
       if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
@@ -1181,7 +1227,7 @@ export class CollisionWorld {
   ceilingAt(x: number, z: number, fromY: number): number {
     let best = Infinity;
     const consider = (solid: SolidHeights): void => {
-      if (!banded(solid)) return;
+      if (!banded(solid) || solid.closure) return;
       const base = solidBaseAt(solid, x, z);
       if (base >= fromY && base < best) best = base;
     };
@@ -1797,6 +1843,7 @@ export class CollisionWorld {
    */
   forEachSolid(visit: (solid: SolidView) => void): void {
     for (const circle of this.circles) {
+      if (circle.closure) continue;
       visit({
         shape: 'circle',
         kind: circle.kind,
@@ -1820,6 +1867,7 @@ export class CollisionWorld {
       });
     }
     for (const wall of this.walls) {
+      if (wall.closure) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
@@ -1847,6 +1895,7 @@ export class CollisionWorld {
       });
     }
     for (const box of this.boxes) {
+      if (box.closure) continue;
       visit({
         shape: 'box',
         kind: box.kind,
@@ -2313,17 +2362,22 @@ export class CollisionWorld {
    * feet, in the direction it is actually trying to go, so the hop can fire a
    * moment before contact rather than after stopping dead against the wall.
    */
-  wouldAutoHopClear(position: Vector3, radius: number, apexClearance: number): boolean {
+  wouldAutoHopClear(
+    position: Vector3,
+    radius: number,
+    apexClearance: number,
+    feet?: Readonly<{ x: number; y: number; z: number }>,
+  ): boolean {
     for (const circle of this.circles) {
-      if (!circle.autoHoppable || !autoHopClears(circle.hopHeight, apexClearance)) continue;
+      if (!circle.autoHoppable) continue;
       const dx = position.x - circle.x;
       const dz = position.z - circle.z;
       const minimum = circle.radius + radius;
-      if (dx * dx + dz * dz < minimum * minimum) return true;
+      if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(circle, position, apexClearance, feet)) return true;
     }
 
     for (const wall of this.walls) {
-      if (!wall.autoHoppable || !autoHopClears(wall.hopHeight, apexClearance)) continue;
+      if (!wall.autoHoppable) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
@@ -2333,16 +2387,41 @@ export class CollisionWorld {
       const dx = position.x - (wall.x1 + ax * t);
       const dz = position.z - (wall.z1 + az * t);
       const minimum = wall.halfThickness + radius;
-      if (dx * dx + dz * dz < minimum * minimum) return true;
+      if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(wall, position, apexClearance, feet)) return true;
     }
 
     for (const box of this.boxes) {
-      if (!box.autoHoppable || !autoHopClears(box.hopHeight, apexClearance)) continue;
-      if (boxDepth(box, position.x, position.z, radius) > 0) return true;
+      if (!box.autoHoppable) continue;
+      if (boxDepth(box, position.x, position.z, radius) > 0 && this.hopsOver(box, position, apexClearance, feet)) return true;
     }
 
     return false;
   }
+
+  /**
+   * **Would a hop from her feet clear `solid`, met at `position`?** — judged
+   * from where she stands (PR #722's QA): how tall it stands *over her feet*
+   * where she meets it, not over its own ground. A top within a step of her
+   * feet is a step she walks up, never a hop — and the top of the very wall
+   * she stands on, met by her own lookahead, is no height at all: with the
+   * wall's own height in its place, her first step along a wall's top fired a
+   * full jump that threw her 4–6 m off its end. Without her feet (a probe
+   * that has none to give), its own height, as before.
+   */
+  private hopsOver(
+    solid: Readonly<SolidHeights>,
+    position: Vector3,
+    apexClearance: number,
+    feet: Readonly<{ x: number; y: number; z: number }> | undefined,
+  ): boolean {
+    if (!feet || !solid.topIsAbsolute) return autoHopClears(solid.hopHeight, apexClearance);
+    const top = solidTopAt(solid, position.x, position.z);
+    if (!Number.isFinite(top)) return autoHopClears(solid.hopHeight, apexClearance);
+    const over = riseBetween(feet.x, feet.y, feet.z, position.x, top, position.z);
+    if (over <= BUILDING_STEP_UP) return false;
+    return autoHopClears(over, apexClearance);
+  }
+
 
   /**
    * Boot-time check: **the sub-step budget must actually cover the longest

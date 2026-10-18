@@ -404,29 +404,29 @@ export function buildRailFence(
   // what a bridge already opened.
   //
   // **And it reaches the fences' inner faces.** At `TRACK_CLEARANCE` it
-  // stopped 0.52 m short of each, a slot narrower than she is: nothing put
-  // her in it while the fence had no top, but a fence she can see the top of
-  // is one she can stand on, and a child stepping off that top on the track
-  // side fell into the slot, wedged between rail and fence with a 1.67 m rail
-  // over her head — the census found ten such places on seed 5. A fill run
-  // down each side closes the slot, as the band itself closed the strip:
-  // invisible, solid at every height but the same seam under a deck, and
-  // inside the stamp the fences and the band already make, so no lattice
-  // cell changes — which is why each fill stops its own half-width short of
-  // the box's end: run to the end cap, its round end stamped one cell beyond
-  // the cap's own (seed 5, the north station). It also holds her centre
-  // further than the rail's own width from the fence's line, so the fence's
-  // top is not somewhere she can stand.
+  // stopped 0.52 m short of each, a strip the lattice left unstamped beside
+  // each fence; a fill run down each side closes it, as the band itself
+  // closed the strip down the middle, and inside the stamp the fences and the
+  // band already make, so no lattice cell changes — which is why each fill
+  // stops its own half-width short of the box's end: run to the end cap, its
+  // round end stamped one cell beyond the cap's own (seed 5, the north
+  // station).
   //
-  // **Nobody stands on it** (`toppedNarrow(0)`): its top under a deck is a
-  // seam for the deck's walkers to pass over, never a floor. The deck is the
-  // floor; past the deck's edge, where a run's seam reaches by its margin, the
-  // seam was a ledge in the air over the rails that the census stood her on,
-  // jumping off a bridge's parapet (17 Oct 2026).
+  // **A closure, not a body** (`CollisionWorld.asClosure`, PR #722). The band
+  // and its fills are invisible, so they are never what stops her: Jim's
+  // ruling is that what stops her is something she can see, of real height.
+  // They are here for the router and the planner — `NavGrid` stamps them, so
+  // no tap is routed along the track, and the planner's ground queries read
+  // them, so nothing is placed on it — and no mover meets them, nothing
+  // stands on them, and no NPC needs them: the crowd walks routes the band
+  // closes, between fences it cannot climb. What keeps a child off the line
+  // is the fence beside it and the railings on the bridges over it, by their
+  // height; `check:solids`' `guards-alone` mutation shows that with every
+  // top as wide as its footprint too.
   const linkBand = (a: Post, b: Post, half: number): void => {
     const deckY = deckSpanForSegment(a, b, half);
     collision.kinded('railway corridor', () =>
-      collision.toppedNarrow(0, () => {
+      collision.asClosure(() => {
         if (deckY === null) {
           collision.addWall(a.x, a.z, b.x, b.z, half);
         } else {
