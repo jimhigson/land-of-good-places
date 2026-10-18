@@ -95,6 +95,14 @@ marking; guards stop her by real height, never a flag.
     sampler under all ~3,800 solids): put-down 14.1 → 7.1 ms (main 5.8, idle). Gate at 450cb467
     (snap5): shards 1-9 exit 0 (/tmp/es-shards3; check:exits 582 put-downs 6.6 ms avg), test:procgen 0
     (46/2154), build 0. PR head pushed there; CI run on 60f43769 superseded.
+  - CI run 39111869119 on 05906dc9: ALL GREEN (88 success, 1 skipped) but Checks shard 5 took 26m45s of
+    its 30-min cap (watchdog: 89%). Cause: check:wall-tunnelling's ~200k fresh worlds each gridding a
+    10 km wall into 2,500 string-keyed cells (0.6 ms). c1ceb044: wide colliders (>256 cells) go in one
+    shared bucket; numeric keys. Local sweeps 75 s (main 46 s; was 130+ s). Gate at c1ceb044: shards 1-9
+    exit 0 (/tmp/es-shards4), test:procgen 0 (46/2154), build 0. PR head → c1ceb044+.
+  - CI parks (run 39111869119, /tmp/es-parks-c) vs main (/tmp/es-parks-main2): 14 same; seed 1 one
+    trestle 1 m along; seed 9 restart 0 (main 5: its bridge-standability probe at the wrong height).
+    vs (b): 16/16 same (digests differ: fence, railings, copings).
 - Previews: (a) pr-722-7defc91…/hotel; (b) https://pr-722-ff686cb-land-of-good-places.blockstack.workers.dev
   (from the PR's own comment). (c): the newest "Deploy PR preview" comment once CI deploys.
 - Next: CI green on the final head, compare CI parks (/tmp/es-compare-parks.mjs), preview check,
