@@ -60,7 +60,7 @@ marking; guards stop her by real height, never a flag.
 - Thinnest collider is the library plinth's 0.1 m edges → sub-step counts unchanged by boxes.
 - Hydrated digests: all 16 seeds identical to main after the switch-over (commit e95d83a3).
 
-## Status (18 Oct, 02:30)
+## Status (18 Oct, 09:00 BST)
 - [x] (a) switch-over — PR head 7defc913, CI green, preview
   https://pr-722-7defc91-land-of-good-places.blockstack.workers.dev/hotel (lobby sofas are steps).
 - [x] (b) real heights + census — PR head ff686cb6, CI green; CI parks in /tmp/es-parks-b (restarts,
@@ -79,9 +79,19 @@ marking; guards stop her by real height, never a flag.
     level is walked off on 16 bearings (OpenFloor.getsDown, DROP_WINDOW_HALF); CollisionWorld.near
     now carries boxes + shifted tops (the merge copied circles/walls only). check:exits pockets are
     four walls (addRectangle is a filled box here).
-- Next: check:exits, check:hotel (31-33), check:solids core+park, test:procgen, full check, build;
-  then PR head → final, CI all green, preview check, report (coordinator wants link + sentence +
-  visible-change list).
+  - 24376487: check:exits found 4 failures on fe450617, fixed: the rule handed her FEET sampler to a
+    standsOnSolids lattice (walksOnto then saw every solid's own top as "within a step of the ground"
+    → 689 vs 473 free cells; garden pocket called open). putDownSpot takes the WALK surface again and
+    composes feet itself (mover.standsOnSolids); the lattice gets the walk surface. Wedge depth asks
+    her step ceiling (a pet bed in a wall corner left her 0.11 m in it). Near view: main's reach;
+    walk-offs build a wider view lazily. check:hotel probe 33 now walks as she does (her lattice,
+    feet levels under her hop, BUILDING_STEP_UP, drops any height, KID_HEIGHT body; control pen 0.8 m).
+  - Local gate at 24376487 (snap5, b's parks restamped): shards 1-9 all exit 0 (parallel, ports
+    5791-5799, /tmp/es-shards2), test:procgen 0 (46 files, 2154 tests), build 0. Look (port 5813,
+    killed): railings, fence, put-down on a wall top (moved 0), café let-go (moved 1.0, found).
+  - Park hop (es-parkhop.mts, seed 5, real sim on the planet): branch 173/1550 not clean on 12 walls,
+    none stuck; main's code 276/1270 on 14 walls, 2 walls stuck from one side. Pre-existing; PR gap.
+- Next: PR head → 24376487+, CI green, compare CI parks, preview, PR body (/tmp/es-pr-body.md), report.
 - Planet note (measured, es-leanreach.mts): with the carry, a jump's apex over the ground is
   cos(lean) × flat (gravity is along world y): 1.23 m middle, 1.20 @44 m, 1.13 @85 m inward;
   outward adds the damp lag (to 1.41). Pre-existing physics; hop policy is position-blind.
