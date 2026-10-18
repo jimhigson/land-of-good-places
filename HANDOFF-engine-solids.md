@@ -106,6 +106,12 @@ marking; guards stop her by real height, never a flag.
   - 1322d72a: check:exits rules (i) a crate's top she walks off is left alone, (j) a crate in a sealed
     pit is not; both proved red (walk-off off → (i) found=false; any landing open → (j) left as given).
     Proofs at c1ceb044 (/tmp/es-proofs7): all 11 check:solids proofs exit 1 on their clauses.
+- **DONE (18 Oct 12:05 BST): PR head = 9edf7563, CI run 39124376616 SUCCESS** (all 9 check shards, 6 procgen
+  shards, build, coplanar, swept bus, entrance road, every seed builds, walk reach, preview; Deploy
+  skipped). Shard 5 11m55s, shard 3 15m05s (longest). Parks from cache (run 39119914321, 1a62e8e8):
+  byte-identical to 9c580b6e's. Preview (c): https://pr-722-9edf756-land-of-good-places.blockstack.workers.dev
+  (+ /spawn?pos=-8.2,42.1&seed=5 railings; /spawn?pos=-48.7,65.8&facing=34&seed=5 fence) — loaded in
+  headless Chrome, 0 page errors. PR body = /tmp/es-pr-body.md (posted). Not merged (Overseer merges).
 - Previews: (a) pr-722-7defc91…/hotel; (b) https://pr-722-ff686cb-land-of-good-places.blockstack.workers.dev
   (from the PR's own comment). (c): the newest "Deploy PR preview" comment once CI deploys.
 - Next: CI green on the final head, compare CI parks (/tmp/es-compare-parks.mjs), preview check,
