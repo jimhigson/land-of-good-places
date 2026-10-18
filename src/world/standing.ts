@@ -77,22 +77,33 @@ export function solidStepCeiling(collision: CollisionWorld, x: number, z: number
  */
 export const STEP_LOOKAHEAD = PLAYER_RADIUS + 0.1;
 
+/** How many points along her front half {@link walkingOntoStep} asks, from her middle to {@link STEP_LOOKAHEAD}. */
+const STEP_SAMPLES = 8;
+
 /**
  * **Is she walking straight into a solid she can step up onto?** — a top
- * within one step of the surface she stands on, under the point just past
- * her front edge in the direction she is walking (`dirX`/`dirZ`, a unit
- * vector).
+ * within one step of the surface she stands on, under any point of the
+ * stretch from her middle to just past her front edge in the direction she is
+ * walking (`dirX`/`dirZ`, a unit vector).
  *
  * A step up onto a 0.44 m bench is the step up onto a 0.44 m deck: one step,
  * `BUILDING_STEP_UP`, the same reach the walk sampler has always spent on the
  * castle's porch and the hotel's stairs. Floors are not a special kind of
  * thing any more, so neither is stepping onto one.
  *
- * Asked ahead rather than at her centre for the one reason that makes it
- * look right: walking *into* a bench she climbs it, and walking *past* one
- * she brushes along its side. Only a top the point ahead is over counts, so a
- * bench beside her is a side to slide along, never something her body sinks
- * into — and once her centre is over the top, the sampler stands her on it.
+ * Asked along the way she is walking, never beside her, for the one reason
+ * that makes it look right: walking *into* a bench she climbs it, and walking
+ * *past* one she brushes along its side — a bench beside her is a side to
+ * slide along, never something her body sinks into; once her middle is over
+ * the top, the sampler stands her on it.
+ *
+ * **The whole stretch, not its far end** (PR #722's QA). A top narrower than
+ * that stretch — the reptile house's foyer log, standable ±0.2 m either side
+ * of its line — is under the point past her front edge only for the first
+ * part of the way in: asked there alone, she was let in while that point was
+ * over the log, shoved back out the moment it had passed beyond it, and let
+ * in again, eight times a second, never climbing. Under any point of her
+ * front half, it is a step for the whole of the way in, and she stands on it.
  */
 export function walkingOntoStep(
   collision: CollisionWorld,
@@ -102,11 +113,22 @@ export function walkingOntoStep(
   dirZ: number,
   reference: number,
 ): boolean {
-  const aheadX = x + dirX * STEP_LOOKAHEAD;
-  const aheadZ = z + dirZ * STEP_LOOKAHEAD;
-  const ceiling = solidStepCeiling(collision, aheadX, aheadZ, carryReference(x, z, reference, aheadX, aheadZ));
-  return collision.highestTopAt(aheadX, aheadZ, ceiling) > -Infinity;
+  for (let i = 1; i <= STEP_SAMPLES; i += 1) {
+    const along = (STEP_LOOKAHEAD * i) / STEP_SAMPLES;
+    const aheadX = x + dirX * along;
+    const aheadZ = z + dirZ * along;
+    const from = carryReference(x, z, reference, aheadX, aheadZ);
+    const ceiling = solidStepCeiling(collision, aheadX, aheadZ, from);
+    // A top over the surface she stands on: a step *up*. The top she is
+    // already on — her own wall's, met by the near half of the stretch — is
+    // not one, or walking along a wall she would sink into a bench beside it.
+    if (collision.highestTopAt(aheadX, aheadZ, ceiling) > from + STEP_ABOVE) return true;
+  }
+  return false;
 }
+
+/** How far over the surface she stands on a top must be to be a step up rather than where she is: float noise and the clearance grace's flat edge. */
+const STEP_ABOVE = 0.02;
 
 /**
  * **One frame of vertical motion in the air, and a head that stops at an
