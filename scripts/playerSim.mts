@@ -86,7 +86,17 @@ function approach(current: Vector3, target: Vector3, maxDelta: number): void {
  * that policy is the very thing it exists to measure and asking it would only
  * confirm it back to us.
  */
-export type HopProbe = (probe: Vector3) => boolean;
+export type HopProbe = (probe: Vector3, feet: Vector3) => boolean;
+
+/**
+ * **The auto-hop `Player` has** — `CollisionWorld.wouldAutoHopClear`, judged
+ * from her feet. What a measure that means "her" must hand the sim: the census
+ * ran with no auto-hop at all, and so could not see her first step along a
+ * wall's top throw her off it (PR #722's QA).
+ */
+export function playerHopProbe(collision: CollisionWorld): HopProbe {
+  return (probe, feet) => collision.wouldAutoHopClear(probe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, feet);
+}
 
 /**
  * `WalkSurfaces.sample`'s shape: the highest walkable surface at (x, z) that is
@@ -187,6 +197,7 @@ export class SimPlayer {
   private readonly moveDirection = new Vector3();
   private readonly desired = new Vector3();
   private readonly probe = new Vector3();
+  private readonly feet = new Vector3();
 
   constructor(collision: CollisionWorld, options: SimOptions = {}) {
     this.collision = collision;
@@ -332,7 +343,10 @@ export class SimPlayer {
       this.probe
         .copy(this.position)
         .addScaledVector(this.moveDirection, AUTO_HOP_LOOKAHEAD * inverse);
-      autoHopWanted = this.hopProbe(this.probe);
+      // Her feet, as `Player` hands them to the probe: the auto-hop judges a
+      // wall's height from where she stands (`CollisionWorld.hopsOver`).
+      this.feet.set(this.position.x, groundY, this.position.z);
+      autoHopWanted = this.hopProbe(this.probe, this.feet);
     }
     let tookOff = false;
     if (autoHopWanted && !this.airborne) {

@@ -520,6 +520,8 @@ export class Player implements GameSystem {
   readonly previousPosition = new Vector3();
   /** Scratch point for the auto-hop lookahead — see `wouldAutoHopClear` below. */
   private readonly hopProbe = new Vector3();
+  /** Her feet, where the auto-hop judges a wall's height from. */
+  private readonly hopFeet = new Vector3();
 
   /** Start facing the camera, so the first thing you see is her face. */
   private facingAngle = CAMERA_YAW_DEGREES * DEG;
@@ -834,9 +836,16 @@ export class Player implements GameSystem {
    * that way" stays one operation with one owner of the ground question —
    * {@link groundAt} is private, so a caller that wanted both had no way to
    * ask for the height without a second teleport landing on top of the first.
+   *
+   * **Where a child standing there would be** (PR #722's QA): the floor at
+   * `(x, z)` — the walk surface, a deck or a bridge included — or the top of
+   * something she would step up onto from it, a bench or a bed. Never the
+   * highest top over the spot: asked from `Infinity`, her feet's rule found
+   * the station's awning over its bench, and the reptile house's roof 7 m up.
    */
   teleport(x: number, z: number, facing?: number): void {
-    this.teleportTo(x, this.groundAt(x, z, Infinity), z, facing);
+    const floor = this.walkSurfaceAt(x, z, Infinity);
+    this.teleportTo(x, this.groundAt(x, z, floor), z, facing);
   }
 
   /**
@@ -1496,7 +1505,10 @@ export class Player implements GameSystem {
       this.hopProbe
         .copy(this.position)
         .addScaledVector(this.moveDirection, AUTO_HOP_LOOKAHEAD * inverse);
-      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+      // Judged from her feet: a top within a step of them is a step, and the
+      // wall she stands on is no height at all (`CollisionWorld.hopsOver`).
+      this.hopFeet.set(this.position.x, groundY, this.position.z);
+      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, this.hopFeet);
     }
 
     // --- hop, and — held past a beat — the jet pack --------------------------
