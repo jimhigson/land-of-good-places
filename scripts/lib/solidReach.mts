@@ -345,15 +345,33 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       }
     }
   }
-  const near = (x: number, z: number, reach: number): Set<SolidView> => {
+  // And everything she might clear, by the same grid: a fence's rail holds
+  // nobody, but a top beside it may get her over it (stage 4b).
+  const overBuckets = new Map<string, SolidView[]>();
+  for (const solid of overable) {
+    const r = solid.reach;
+    for (let bx = Math.floor((solid.centreX - r) / BUCKET); bx <= Math.floor((solid.centreX + r) / BUCKET); bx += 1) {
+      for (let bz = Math.floor((solid.centreZ - r) / BUCKET); bz <= Math.floor((solid.centreZ + r) / BUCKET); bz += 1) {
+        const key = `${bx},${bz}`;
+        let list = overBuckets.get(key);
+        if (!list) overBuckets.set(key, (list = []));
+        list.push(solid);
+      }
+    }
+  }
+  const nearIn = (index: Map<string, SolidView[]>, x: number, z: number, reach: number): Set<SolidView> => {
     const found = new Set<SolidView>();
     for (let bx = Math.floor((x - reach) / BUCKET); bx <= Math.floor((x + reach) / BUCKET); bx += 1) {
       for (let bz = Math.floor((z - reach) / BUCKET); bz <= Math.floor((z + reach) / BUCKET); bz += 1) {
-        for (const solid of buckets.get(`${bx},${bz}`) ?? []) found.add(solid);
+        for (const solid of index.get(`${bx},${bz}`) ?? []) found.add(solid);
       }
     }
     return found;
   };
+  /** Tops near here: what she might land on. */
+  const near = (x: number, z: number, reach: number): Set<SolidView> => nearIn(buckets, x, z, reach);
+  /** Everything near here she might clear, stood on or not. */
+  const nearOverable = (x: number, z: number, reach: number): Set<SolidView> => nearIn(overBuckets, x, z, reach);
 
   const regions: { entry: Stand; via: string; has: (x: number, z: number, y: number) => boolean }[] = [];
   // She may start on a solid's top — a place a drop put her can be a stool —
@@ -776,7 +794,10 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
       //     the railway's corridor is no body now, so nothing invisible
       //     catches her there — only the fence, by its height, and only this
       //     stage asks whether a top beside a guard gets her past it).
-      for (const solid of near(source.solid.centreX, source.solid.centreZ, source.solid.reach + 2.5)) {
+      // Every solid beside it, stood on or not — a fence's rail holds nobody,
+      // and is exactly what a crate against it gets her over (the first cut
+      // asked only the tops she lands on, and so never tried a fence).
+      for (const solid of nearOverable(source.solid.centreX, source.solid.centreZ, source.solid.reach + 2.5)) {
         if (stopped) break;
         if (solid === source.solid) continue;
         const rise = solid.topAt(solid.centreX, solid.centreZ) - source.top;

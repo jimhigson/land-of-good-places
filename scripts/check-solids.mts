@@ -645,7 +645,12 @@ console.log('\n2. DRAWN TOPS — where she lands on a solid, its drawn top is un
    * it. Foliage is soft — leaves are what she brushes through — so a solid
    * under a plant stands to the solid and she stands in the leaves.
    */
-  const drawn = indexDrawnTops(park.scene);
+  // Every building's inside is hidden while she is in the park, which is where
+  // this one world stands; the census stood her in each, so each is measured
+  // as drawn while she is there. Spaces are disjoint in plan, so showing all
+  // four roots at once draws nothing over another space's floor. A building
+  // missing here reads "nothing drawn under her" at every landing in it.
+  const drawn = indexDrawnTops(park.scene, [world.building.interiorRoot, world.hotel.hotelRoot, world.library.roomRoot, world.reptileHouse.hallRoot]);
   const SOFT_OVER: Readonly<Record<string, string>> = {
     'roof trough': 'the shrubs in it are foliage (planters ruling, 7 Aug 2026)',
     'mall planter': 'the shrubs in it are foliage (planters ruling, 7 Aug 2026)',

@@ -35,8 +35,16 @@ export interface DrawnTopIndex {
 
 const CELL = 4;
 
-export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
+/**
+ * `spaceRoots`: each building's whole inside, hidden while she is anywhere
+ * else (`Building.interiorRoot`, `Hotel.hotelRoot`, `Library.roomRoot`,
+ * `ReptileHouse.hallRoot`). A census measures every space from one world, so
+ * these are taken as drawn — each space as it is drawn while she stands in it.
+ * Anything else hidden, at any depth, is not drawn.
+ */
+export function indexDrawnTops(scene: Object3D, spaceRoots: readonly Object3D[] = []): DrawnTopIndex {
   scene.updateMatrixWorld(true);
+  const shownRoots = new Set(spaceRoots);
   const entries: Entry[] = [];
   const local = new Matrix4();
   scene.traverse((object) => {
@@ -44,8 +52,9 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
     if (!(mesh as { isMesh?: boolean }).isMesh) return;
     // Drawn only if it and every one of its parents are: a hidden group's
     // children are hidden too (the suite's nap blanket, hidden as a group, read
-    // as "0.49 m sunk" under her on its beds — PR #722's review).
-    for (let at: Object3D | null = mesh; at; at = at.parent) if (!at.visible) return;
+    // as "0.49 m sunk" under her on its beds — PR #722's review). A space's
+    // own root is the exception: it is hidden only because she is not in it.
+    for (let at: Object3D | null = mesh; at; at = at.parent) if (!at.visible && !shownRoots.has(at)) return;
     const geometry = mesh.geometry;
     if (!geometry?.attributes['position']) return;
     const path: string[] = [];
