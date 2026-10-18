@@ -392,3 +392,14 @@ no-headroom need the census run.
   LESSON: run the whole `pnpm run check` (or at least shard 1) after ANY scripts/ change before pushing.
 - PENDING comment fix for the next src change (reverted in 188148dd to keep the parks cached): fence.ts 1b says
   "her feet top out at 1.33 m"; should be "1.28 m over it, a guard has to stand GUARD_OVER_FEET (0.2 m) over that".
+
+### Round 2 DONE (18 Oct, 21:05 BST)
+- PR head 61b753de, CI run 39159404420 SUCCESS (9 check shards, 6 procgen shards, build, coplanar, swept bus,
+  entrance road, every seed builds, walk reach, preview; parks reused from 39152595871, same hash 9af23e21).
+- Preview: https://pr-722-61b753d-land-of-good-places.blockstack.workers.dev (all four QA repros + the bench and
+  both spawns played there, 0 page errors; frames on qa-screenshots/pr722-r2/).
+- Parks vs round one (es-parks-final): same 16 parks (restart/features/planOrder/measures and acceptance outcomes);
+  digests differ (fence lifts, railings).
+- Posted: review reply issuecomment-6254433031, QA reply issuecomment-6254433232; PR body updated (/tmp/es-pr-body3.md).
+- Open for Jim: seed 6 stall awning (policy); sealed-shell put-down (reptile ring/library cella/hotel tower);
+  seed 15 bench lean. Pending comment fix in fence.ts (see above).
