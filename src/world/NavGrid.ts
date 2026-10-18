@@ -963,10 +963,22 @@ export class NavGrid {
     // the rail refuses, and stamping it would block the walkable floor
     // *beneath* the overhang — the lobby's walk-through arch — at every
     // level. See `Collision.ts`'s `baseHeight` header.
+    // A collider whose fattened footprint misses this lattice's square stamps
+    // nothing in it, so it is never asked about — which matters for a window
+    // (`NavGrid.around`), where `walksOnto` would otherwise ask the walk sampler
+    // under every solid in the space for the sake of a few hundred cells.
+    const stampReach = this.walkerRadius + CELL;
+    const lowX = this.originX - stampReach;
+    const lowZ = this.originZ - stampReach;
+    const highX = this.originX + (side - 1) * CELL + stampReach;
+    const highZ = this.originZ + (side - 1) * CELL + stampReach;
+    const misses = (minX: number, minZ: number, maxX: number, maxZ: number): boolean =>
+      maxX < lowX || minX > highX || maxZ < lowZ || minZ > highZ;
     this.collision.forEachCircle(
       (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight, standable) => {
         const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        if (misses(x - colliderRadius, z - colliderRadius, x + colliderRadius, z + colliderRadius)) return;
         if (this.walksOnto(topHeight, topIsAbsolute, x, z, sample, standable)) return;
         this.stampCircle(
           x,
@@ -980,6 +992,16 @@ export class NavGrid {
       (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, hopHeight, standable) => {
         const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
         if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
+        if (
+          misses(
+            Math.min(x1, x2) - halfThickness,
+            Math.min(z1, z2) - halfThickness,
+            Math.max(x1, x2) + halfThickness,
+            Math.max(z1, z2) + halfThickness,
+          )
+        ) {
+          return;
+        }
         if (this.walksOnto(topHeight, topIsAbsolute, (x1 + x2) / 2, (z1 + z2) / 2, sample, standable)) return;
         this.stampSegment(
           x1,
@@ -999,13 +1021,6 @@ export class NavGrid {
     this.collision.forEachBox((corners, rounding, inCore, topHeight, autoHoppable, baseHeight, navStamped, topIsAbsolute, centre, hopHeight, standable) => {
       const hoppable = autoHoppable && autoHopClears(hopHeight, this.hopApex);
       if (!hoppable && Number.isFinite(baseHeight) && !navStamped) return;
-      if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample, standable)) return;
-      const into = hoppable ? this.hopBand : this.blocked;
-      for (let i = 0; i < 4; i += 1) {
-        const a = corners[i] as readonly [number, number];
-        const b = corners[(i + 1) % 4] as readonly [number, number];
-        this.stampSegment(a[0], a[1], b[0], b[1], rounding + this.walkerRadius, into);
-      }
       let minX = Infinity;
       let minZ = Infinity;
       let maxX = -Infinity;
@@ -1015,6 +1030,14 @@ export class NavGrid {
         minZ = Math.min(minZ, z);
         maxX = Math.max(maxX, x);
         maxZ = Math.max(maxZ, z);
+      }
+      if (misses(minX - rounding, minZ - rounding, maxX + rounding, maxZ + rounding)) return;
+      if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample, standable)) return;
+      const into = hoppable ? this.hopBand : this.blocked;
+      for (let i = 0; i < 4; i += 1) {
+        const a = corners[i] as readonly [number, number];
+        const b = corners[(i + 1) % 4] as readonly [number, number];
+        this.stampSegment(a[0], a[1], b[0], b[1], rounding + this.walkerRadius, into);
       }
       this.stampRegion(minX, minZ, maxX, maxZ, inCore, into);
     });
