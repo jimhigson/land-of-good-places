@@ -114,6 +114,13 @@ export interface SimOptions {
    */
   stepSamples?: number;
   /**
+   * Standing, her feet for the resolver are the surface she stands on
+   * (`Player`'s own rule) — `false` hands it her drawn height instead, damping
+   * up behind them, as it was before the foyer log's shuttle was fixed
+   * (`check:solids`' `drawn-feet` proof).
+   */
+  feetOnGround?: boolean;
+  /**
    * Uneven ground. Omitted, everything stands on y = 0 and the vertical loop
    * is the flat-world one the wall harnesses have always used.
    */
@@ -194,6 +201,7 @@ export class SimPlayer {
   private readonly collision: CollisionWorld;
   private readonly hopProbe: HopProbe;
   private readonly stepSamples: number;
+  private readonly feetOnGround: boolean;
   readonly radius: number;
   private readonly substepping: boolean;
   private readonly ground: GroundSampler | null;
@@ -214,6 +222,7 @@ export class SimPlayer {
     this.groundSubstepping = options.groundSubstepping ?? true;
     this.groundReference = options.groundReference ?? 'surface';
     this.stepSamples = options.stepSamples ?? STEP_SAMPLES;
+    this.feetOnGround = options.feetOnGround ?? true;
   }
 
   /**
@@ -307,6 +316,8 @@ export class SimPlayer {
         this.groundSubstepping ? onStep : carryOnly,
         stepCeiling,
         KID_HEIGHT,
+        // `Player`'s own: standing, her feet are the surface she stands on.
+        following && this.feetOnGround ? Math.max(this.position.y, this.groundHeight) : undefined,
       );
     } else {
       // The whole frame in one move and one `resolve`: one sub-step of

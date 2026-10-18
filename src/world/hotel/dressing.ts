@@ -23,7 +23,7 @@ import { ART } from '../../art/style/artPalette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { BED_MATTRESS_TOP } from '../../art/models/hotelAssets';
-import { CREST_DEPTH, type PropPart } from '../measuredTop';
+
 
 /**
  * The furniture that stops a hotel room being a rectangle with a statue in it.
@@ -294,12 +294,8 @@ const SOFA_PILLOW_Y = 0.62;
 const SOFA_PILLOW_Z = -0.19;
 
 /**
- * A chunky sofa, seat at {@link SOFA_SEAT_TOP}, facing **+Z**.
- *
- * Solid as drawn: `Hotel` registers {@link sofaParts} as its colliders, the
- * seat to the cushion, the back and the arms each to its own top — so the
- * back is a back to bump, and a top to stand on, rather than air above the
- * seat's height (PR #722).
+ * A chunky sofa, seat at {@link SOFA_SEAT_TOP}, facing **+Z**. `Hotel` stands
+ * it on {@link sofaPlan}: its drawn footprint, solid to the seat.
  */
 export function sofa(width: number, colour: number, cushion: number): Group {
   const group = new Group();
@@ -341,59 +337,26 @@ export function sofa(width: number, colour: number, cushion: number): Group {
 }
 
 /**
- * **Everything a sofa's placement needs to know about its shape** — its
- * footprint, its {@link sofaParts} and the highest of them — so every call
- * site stands the sofa it draws (the suite's had a 2.2 × 2.6 m footprint
- * under a 3.2 × 0.95 m sofa).
+ * **Everything a sofa's placement needs to know about its shape** — the
+ * drawn sofa's own footprint, so every call site stands the sofa it draws
+ * (the suite's had a 2.2 × 2.6 m footprint under a 3.2 × 0.95 m sofa, swept
+ * to its axis-aligned box, and the census stood her on its air corners) —
+ * and its top, the seat's.
+ *
+ * **One solid, to the seat.** Not its parts: her body is `PLAYER_RADIUS`
+ * (0.62 m) round, and the seat in front of the back is 0.7 m deep, so with
+ * the back solid to its own 0.92 m there is nowhere on the seat her body
+ * fits — measured, the seat pushed every stand off it, and she stood on the
+ * back instead. So the back above the seat is open to her jump, as this
+ * file's own rule has always had it ("sailing over the backrest on the way is
+ * a visual graze a six-year-old reads as bouncing onto the cushions").
  */
-export function sofaPlan(width: number): { readonly halfX: number; readonly halfZ: number; readonly parts: readonly PropPart[]; readonly top: number } {
-  const parts = sofaParts(width);
+export function sofaPlan(width: number): { readonly halfX: number; readonly halfZ: number; readonly top: number } {
   return {
     halfX: width / 2,
     halfZ: Math.max(SOFA_DEPTH / 2, -(SOFA_BACK_Z - SOFA_BACK_DEPTH / 2)),
-    parts,
-    top: Math.max(...parts.map((part) => part.top)),
+    top: SOFA_SEAT_TOP,
   };
-}
-
-
-/**
- * **A {@link sofa} as the solids she meets**, from the numbers it is built
- * from: the seat between the arms to the cushion, each arm and the back to
- * its own top, and the two pillows on the seat to theirs. One box at the
- * seat's height made the back air from 0.5 m up — "sailing over the backrest"
- * — and the suite's, swept to its turned box, stood her on air past its
- * corners (`check:solids`, PR #722). The parts tile the sofa's plan.
- */
-export function sofaParts(width: number): readonly PropPart[] {
-  const backFront = SOFA_BACK_Z + SOFA_BACK_DEPTH / 2;
-  const backRear = SOFA_BACK_Z - SOFA_BACK_DEPTH / 2;
-  const front = SOFA_DEPTH / 2;
-  const inner = width / 2 - SOFA_ARM_WIDTH;
-  const box = (minX: number, maxX: number, minZ: number, maxZ: number, top: number): PropPart => ({
-    x: (minX + maxX) / 2,
-    z: (minZ + maxZ) / 2,
-    halfX: (maxX - minX) / 2,
-    halfZ: (maxZ - minZ) / 2,
-    top,
-  });
-  const pillowHalfX = SOFA_PILLOW_RADIUS * SOFA_PILLOW_SQUASH.x;
-  const pillowHalfZ = SOFA_PILLOW_RADIUS * SOFA_PILLOW_SQUASH.z;
-  const pillowRise = SOFA_PILLOW_RADIUS * SOFA_PILLOW_SQUASH.y;
-  const pillowTop = SOFA_PILLOW_Y + pillowRise;
-  // A squashed sphere's crown, cut `CREST_DEPTH` under its top (`measureTop`'s
-  // own rule): an ellipse whose narrow half is this — 7 cm, too little for
-  // her feet, so a pillow is a bump on the seat and not a step.
-  const pillowCrest = pillowHalfZ * Math.sqrt(1 - (1 - CREST_DEPTH / pillowRise) ** 2);
-  const pillowX = width / 2 - SOFA_PILLOW_IN;
-  return [
-    box(-inner, inner, backFront, front, SOFA_SEAT_TOP),
-    box(-width / 2, -inner, backFront, front, SOFA_ARM_Y + SOFA_ARM_HEIGHT / 2),
-    box(inner, width / 2, backFront, front, SOFA_ARM_Y + SOFA_ARM_HEIGHT / 2),
-    box(-width / 2, width / 2, backRear, backFront, SOFA_BACK_Y + SOFA_BACK_HEIGHT / 2),
-    { ...box(-pillowX - pillowHalfX, -pillowX + pillowHalfX, SOFA_PILLOW_Z - pillowHalfZ, SOFA_PILLOW_Z + pillowHalfZ, pillowTop), topHalf: pillowCrest },
-    { ...box(pillowX - pillowHalfX, pillowX + pillowHalfX, SOFA_PILLOW_Z - pillowHalfZ, SOFA_PILLOW_Z + pillowHalfZ, pillowTop), topHalf: pillowCrest },
-  ];
 }
 
 /**

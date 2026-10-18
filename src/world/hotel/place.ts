@@ -262,7 +262,7 @@ export interface PropPlan {
   readonly topHalf?: number;
   /**
    * **The solids it really is**, prop-local before {@link spin}, each to its
-   * own top — a sofa's seat, arms, back and pillows (`sofaParts`). Given,
+   * own top — a toilet's bowl, cistern and flush handle (`panParts`). Given,
    * these are its colliders, each a crisp box turned with the model, and
    * `top` must be the highest of them; `halfX`/`halfZ` stay its keep-out.
    */

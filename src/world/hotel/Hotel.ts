@@ -37,6 +37,7 @@ import {
   buildPan,
   buildPrivacyRoof,
   panParts,
+  panReachBehind,
   privacyRoofSpan,
   TOILET_APPROACH,
   ToiletRoutine,
@@ -4282,9 +4283,7 @@ export class Hotel implements GameSystem {
         [side * 5.9, PALETTE.markerSky],
         [side * 9.2, PALETTE.markerMint],
       ] as const) {
-        // Solid as drawn (`sofaPlan`): the seat to the cushion, the back and
-        // the arms to their own tops — a back to bump and to stand on, where
-        // one box at the seat's height left it air (PR #722).
+        // The drawn sofa's own footprint, solid to the seat (`sofaPlan`).
         this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
           x,
           z: 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
@@ -6033,6 +6032,10 @@ export class Hotel implements GameSystem {
     // the doorway, its mirror against the hall wall.
     // panX/standX shifted 3.8 m west with the bathroom wall (see the method
     // header); panZ/basin offsets are untouched since #274 only moved x.
+    // Her stand spot is behind the pan, clear of its cistern: 1.1 m behind
+    // its middle stood her body 0.14 m into the cistern once the cistern was
+    // solid as drawn (`panParts`, PR #722) — `check:hotel`'s "asks her to
+    // stand inside something solid".
     this.buildBathroomFixtures(
       shell,
       SUITE,
@@ -6040,7 +6043,7 @@ export class Hotel implements GameSystem {
       -11.6,
       4.6,
       -11.6,
-      4.6 - 1.1,
+      4.6 - (panReachBehind() + PLAYER_RADIUS + 0.05),
       rect.minX + 1.1,
       rect.minZ + 0.55,
     );

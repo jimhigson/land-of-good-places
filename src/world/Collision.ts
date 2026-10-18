@@ -2030,6 +2030,7 @@ export class CollisionWorld {
     onStep?: (position: Vector3) => void,
     stepCeiling?: StepCeiling,
     moverHeight = 0,
+    feetY?: number,
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     const distance = Math.hypot(deltaX, deltaZ);
     const limit = this.maxSafeStep(radius);
@@ -2041,13 +2042,13 @@ export class CollisionWorld {
     let clearedWall = false;
     let escorting = false;
     let corrected = false;
-    let depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight);
+    let depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight, feetY ?? position.y);
     for (let step = 0; step < steps; step += 1) {
       const fromX = position.x;
       const fromZ = position.z;
       position.x += stepX;
       position.z += stepZ;
-      let result = this.resolve(position, radius, clearance, stepDt, stepCeiling, moverHeight);
+      let result = this.resolve(position, radius, clearance, stepDt, stepCeiling, moverHeight, feetY ?? position.y);
       // **The pinch guard: a step may not leave her deeper in stone than it
       // found her.** `resolve` pushes out of each collider in turn, twice.
       // Between two colliders closer together than she is wide — a lamp post
@@ -2060,12 +2061,12 @@ export class CollisionWorld {
       // who cannot squeeze through would — and `resolve` is asked there with
       // no movement, so an escort already under way still progresses.
       // `check:castle-towers` marches 48 bearings at every turret.
-      const depthAfter = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight);
+      const depthAfter = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight, feetY ?? position.y);
       if (depthAfter > Math.max(depthBefore, 0) + PINCH_TOLERANCE) {
         position.x = fromX;
         position.z = fromZ;
-        result = this.resolve(position, radius, clearance, stepDt, stepCeiling, moverHeight);
-        depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight);
+        result = this.resolve(position, radius, clearance, stepDt, stepCeiling, moverHeight, feetY ?? position.y);
+        depthBefore = this.deepestSolidOverlap(position, radius, clearance, stepCeiling, moverHeight, feetY ?? position.y);
       } else {
         depthBefore = depthAfter;
       }
@@ -2100,7 +2101,13 @@ export class CollisionWorld {
    * working.
    *
    * `feetY` is the height a solid with a real (absolute) top is cleared from:
-   * the mover's own `y` unless it says otherwise. **The crowd says otherwise.**
+   * the mover's own `y` unless it says otherwise. **She says otherwise while
+   * she stands:** her feet are on the surface she stands on, and her drawn `y`
+   * damps up to it behind them — at a step's edge that lag read her feet as
+   * under the top she was already standing on, the step's side shoved her off
+   * it, and she shuttled in and out at eight times a second (QA on PR #722,
+   * the reptile house's foyer log). `resolveMovement` hands her ground through.
+   * **The crowd says otherwise too.**
    * Only she and her parade stand on tops; an NPC walks the ground layer and
    * nothing else, so a giggle-hop that carried one over a bench or a fence rail
    * would put it down *inside* that footprint, to be shoved back out — a jolt
@@ -2169,14 +2176,14 @@ export class CollisionWorld {
    * ({@link contactWith}); the soft park boundary is not stone and is not
    * counted. Read-only — the measuring half of `resolveMovement`'s pinch guard.
    */
-  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling, moverHeight = 0): number {
+  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling, moverHeight = 0, feetY = position.y): number {
     let deepest = 0;
     const stepHere = stepCeiling ? stepCeiling(position.x, position.z) : -Infinity;
     for (const circle of this.circles) {
       const minimum = circle.radius + radius;
       const depth = minimum - Math.hypot(position.x - circle.x, position.z - circle.z);
       if (depth <= deepest) continue;
-      if (contactWith(circle, position, clearance, stepHere, moverHeight) !== 'solid') continue;
+      if (contactWith(circle, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
       deepest = depth;
     }
     for (const wall of this.walls) {
@@ -2190,13 +2197,13 @@ export class CollisionWorld {
         wall.halfThickness + radius -
         Math.hypot(position.x - (wall.x1 + ax * t), position.z - (wall.z1 + az * t));
       if (depth <= deepest) continue;
-      if (contactWith(wall, position, clearance, stepHere, moverHeight) !== 'solid') continue;
+      if (contactWith(wall, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
       deepest = depth;
     }
     for (const box of this.boxes) {
       const depth = boxDepth(box, position.x, position.z, radius);
       if (depth <= deepest) continue;
-      if (contactWith(box, position, clearance, stepHere, moverHeight) !== 'solid') continue;
+      if (contactWith(box, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
       deepest = depth;
     }
     return deepest;

@@ -490,6 +490,11 @@ export function panParts(): readonly PropPart[] {
   ];
 }
 
+/** How far behind its own middle a pan's solids reach — its cistern's back — for a stand spot behind it. */
+export function panReachBehind(): number {
+  return -(CISTERN_Z - CISTERN_DEPTH / 2);
+}
+
 /**
  * **A basin as the solids she meets**, fitting-local (its splashback on −Z):
  * the bowl on its column to the rim — an open bowl, so its rim is an edge

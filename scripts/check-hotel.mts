@@ -3627,8 +3627,9 @@ for (const room of ROOMS) {
 // probe accepts the suite's bathroom, one door down the same corridor and
 // answering to the same "Yours! · Floor 50" lift button, in its place. For
 // every floor it checks the built result behaves like the castle's:
-//  * the pan and basin are solid (place.ts registered them), the pan
-//    mountable like any low flat-topped prop;
+//  * the pan and basin are solid (place.ts registered their parts), and the
+//    pan is not stood on from the nook's floor: its lid is over a step, her
+//    body meets its cistern, and the nook's own lid is lower than her head;
 //  * a bathroom zone exists, offers a real action, and its stand spot is
 //    walkable;
 //  * a player standing in the bathroom is covered by the roof, and the wash
@@ -3659,18 +3660,24 @@ for (const room of ROOMS) {
       continue;
     }
     const { pan, basin } = fixtures;
-    if (deflection(pan.x, pan.z) < 0.1) {
+    // Solid, asked as "is a body stood here inside something?" — a push from
+    // a fitting's exact middle has no direction to go in, and the fittings
+    // are several solids each now (`panParts`, `basinParts`).
+    const inside = (x: number, z: number): number => collision.deepestSolidOverlap(new Vector3(x, 0, z), PLAYER_RADIUS);
+    if (inside(pan.x, pan.z) < 0.1) {
       problems.push(`${room.space}'s bathroom pan is not solid — a child walks straight through it`);
     }
-    if (deflection(basin.x, basin.z) < 0.1) {
+    if (inside(basin.x, basin.z) < 0.1) {
       problems.push(`${room.space}'s bathroom basin is not solid — a child walks straight through it`);
     }
-    const atopPan = deflectionAt(pan.x, 0.75, pan.z);
-    if (atopPan > 0.01) {
-      problems.push(
-        `${room.space}'s bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m ` +
-          'sideways — solid and standable are fighting (place.ts)',
-      );
+    // **Not mountable, now, and by what is drawn** (PR #722): her body
+    // (`PLAYER_RADIUS`, 0.62 m round) is wider than the pan's lid and meets
+    // the cistern rising 0.6 m behind it, and the nook's lid (`privacyRoofSpan`)
+    // is lower than her head would be on it. Asked as her feet are: from the
+    // nook's floor, walking up to the pan does not stand her on it.
+    const onPan = standingAt(collision, (px, pz, py) => world.building.surfaces.sample(px, pz, py), pan.x, pan.z, 0);
+    if (onPan > 0.05) {
+      problems.push(`${room.space}'s bathroom pan stands a child on its lid (${onPan.toFixed(2)} m) from the nook's floor — under a lid lower than her head`);
     }
 
     hotel.attachPlayer(fallenPlayer as never);

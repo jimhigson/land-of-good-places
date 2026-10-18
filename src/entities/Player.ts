@@ -1437,6 +1437,10 @@ export class Player implements GameSystem {
       // her (a canopy, the underside of a rail's deck) meets her only once her
       // head is up there with it.
       KID_HEIGHT,
+      // Standing, her feet are on the surface she stands on — not her drawn
+      // height, damping up to it behind them (see `CollisionWorld.resolve`'s
+      // `feetY`: the foyer log's shuttle).
+      following ? Math.max(this.position.y, this.groundHeight) : undefined,
     );
 
     // An escort runs until the pushing stops, not until it goes quiet.

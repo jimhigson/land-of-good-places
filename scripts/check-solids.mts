@@ -1021,10 +1021,23 @@ if (spacesInPart.length) {
     if (axis.half < 0.5) continue;
     collision.setPlayBounds(boundsOfSpace(space));
     for (const sign of [1, -1]) {
-      const from = { x: wall.centreX - axis.ux * axis.half * sign, z: wall.centreZ - axis.uz * axis.half * sign };
-      const to = { x: wall.centreX + axis.ux * axis.half * sign, z: wall.centreZ + axis.uz * axis.half * sign };
+      // From the end, or as near it as her body is clear of anything else —
+      // at an L's corner the other arm and its post stand there — to the far
+      // end's like point.
+      const clearAt = (t: number): boolean => {
+        const x = wall.centreX + axis.ux * t;
+        const z = wall.centreZ + axis.uz * t;
+        return wall.standsAt(x, z) && collision.deepestSolidOverlap(scratchBody.set(x, wall.topAt(x, z), z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) <= 0.02;
+      };
+      let t0 = -axis.half * sign;
+      while (Math.abs(t0) > 0 && !clearAt(t0)) t0 += 0.1 * sign;
+      let t1 = axis.half * sign;
+      while (Math.abs(t1) > 0 && !clearAt(t1)) t1 -= 0.1 * sign;
+      if ((t1 - t0) * sign < 0.5) continue;
+      const from = { x: wall.centreX + axis.ux * t0, z: wall.centreZ + axis.uz * t0 };
+      const to = { x: wall.centreX + axis.ux * t1, z: wall.centreZ + axis.uz * t1 };
       const startY = wall.topAt(from.x, from.z);
-      if (!Number.isFinite(startY) || !wall.standsAt(from.x, from.z)) continue;
+      if (!Number.isFinite(startY)) continue;
       walks += 1;
       const sim = new SimPlayer(collision, { ground: sample, hopProbe: hopProbeFor(collision) });
       sim.position.set(from.x, startY, from.z);
@@ -1094,7 +1107,8 @@ if (spacesInPart.length) {
       }
     }
   }
-  say(ups > 0 && hopsOver === 0, `${ups} walks into ${hoppable.length} hoppable walls where they stand a step high: ${hopsOver} hopped her over instead of stepping up${firstHop.length ? ` — ${firstHop.join('; ')}` : ''}`);
+  if (hoppable.length === 0) note(`clause 9: no wall in ${spacesInPart.map((run) => run.name).join(', ')} is auto-hoppable, so the step-up half asserts nothing in this part`);
+  else say(ups > 0 && hopsOver === 0, `${ups} walks into ${hoppable.length} hoppable walls where they stand a step high: ${hopsOver} hopped her over instead of stepping up${firstHop.length ? ` — ${firstHop.join('; ')}` : ''}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,26 +1179,39 @@ if (spacesInPart.length) {
       if (altitudeAt(sx, solid.topAt(solid.centreX, solid.centreZ), sz) - altitudeAt(sx, ground, sz) > BUILDING_STEP_UP) continue;
       if (collision.deepestSolidOverlap(scratchBody.set(sx, ground, sz), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02) continue;
       pushes += 1;
-      const sim = new SimPlayer(collision, { ground: sample, hopProbe: hopProbeFor(collision), stepSamples: PROVE === 'single-step' ? 1 : STEP_SAMPLES });
+      const sim = new SimPlayer(collision, { ground: sample, hopProbe: hopProbeFor(collision), stepSamples: PROVE === 'single-step' ? 1 : STEP_SAMPLES, feetOnGround: PROVE !== 'drawn-feet' });
       sim.position.set(sx, ground, sz);
       sim.previousPosition.copy(sim.position);
       sim.groundHeight = ground;
       sim.groundY = ground;
-      let furthest = -Infinity;
-      let reversals = 0;
-      for (let f = 0; f < Math.ceil(1.5 / dt); f += 1) {
+      // How far in she has got along her push, frame by frame, for 2 s; a
+      // shuttle is the push still swinging in and out once she has had time
+      // to step up or come to rest — in its last 0.75 s, three or more swings
+      // of 5 cm or more. A stutter on the way up (a step's edge, a chair she
+      // steps off towards its table) settles; the foyer log's never did.
+      const inward: number[] = [];
+      for (let f = 0; f < Math.ceil(2 / dt); f += 1) {
         sim.step(dt, -ux * 0.5, -uz * 0.5, false);
-        // How far in she has got along her push.
-        const inward = -((sim.position.x - sx) * ux + (sim.position.z - sz) * uz);
-        if (inward < furthest - 0.1) {
-          reversals += 1;
-          furthest = inward;
-        }
-        furthest = Math.max(furthest, inward);
+        inward.push(-((sim.position.x - sx) * ux + (sim.position.z - sz) * uz));
       }
-      if (reversals > 1) {
+      const tail = inward.slice(-Math.ceil(0.75 / dt));
+      let swings = 0;
+      let extreme = tail[0] ?? 0;
+      let rising: boolean | null = null;
+      for (const at of tail) {
+        if (rising !== false && at < extreme - 0.05) {
+          if (rising === true) swings += 1;
+          rising = false;
+          extreme = at;
+        } else if (rising !== true && at > extreme + 0.05) {
+          if (rising === false) swings += 1;
+          rising = true;
+          extreme = at;
+        } else if ((rising === true && at > extreme) || (rising === false && at < extreme)) extreme = at;
+      }
+      if (swings >= 3) {
         shuttled += 1;
-        if (firstShuttle.length < 4) firstShuttle.push(`${solid.kind || solid.owner} in ${space} from (${sx.toFixed(1)}, ${sz.toFixed(1)}): thrown back ${reversals} times in 1.5 s`);
+        if (firstShuttle.length < 4) firstShuttle.push(`${solid.kind || solid.owner} in ${space} from (${sx.toFixed(1)}, ${sz.toFixed(1)}): ${swings} swings in her last 0.75 s of pushing`);
       }
     }
   }
@@ -1245,7 +1272,8 @@ if (inPart('park')) {
   // Her own sprint-jumps at the closest calls: from a run-up behind the
   // takeoff the measure found, through the guard point, jumping at the
   // takeoff. None may come down on the far side of the guard.
-  const closest = [...points].sort((a, b) => a.top - a.need - (b.top - b.need)).slice(0, 24);
+  // The closest calls on walls: a post is in the walls either side of it.
+  const closest = [...points].filter((point) => point.solid.shape !== 'circle').sort((a, b) => a.top - a.need - (b.top - b.need)).slice(0, 24);
   let crossed = 0;
   let tried = 0;
   const firstCrossed: string[] = [];
@@ -1265,9 +1293,15 @@ if (inPart('park')) {
       tried += 1;
       const landed = runAndJump({ collision, sample }, start, point.x + ux * 2, point.z + uz * 2, d + 2, CENSUS_FPS);
       if (!landed) continue;
-      // Past the guard's line, on its far side, is over it.
-      const beyond = (landed.x - point.x) * ux + (landed.z - point.z) * uz > point.solid.halfWidth + PLAYER_RADIUS;
-      if (beyond && point.solid.depthAt(landed.x, landed.z) < 0) {
+      // Over it is on the far side of its line from where she took off, and
+      // within its length — not round its end, where a ramp's foot meets the
+      // ground and the parapet stops.
+      const axis = wallAxis(point.solid);
+      const nx = -axis.uz;
+      const nz = axis.ux;
+      const sideOf = (x: number, z: number): number => Math.sign((x - point.solid.centreX) * nx + (z - point.solid.centreZ) * nz);
+      const along = Math.abs((landed.x - point.solid.centreX) * axis.ux + (landed.z - point.solid.centreZ) * axis.uz);
+      if (sideOf(landed.x, landed.z) !== sideOf(from.x, from.z) && along <= axis.half + 0.5 && point.solid.depthAt(landed.x, landed.z) < 0) {
         crossed += 1;
         if (firstCrossed.length < 3) firstCrossed.push(`${point.solid.kind} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}), run from ${spawnAt(sx, sz)}, came down at (${landed.x.toFixed(1)}, ${landed.z.toFixed(1)})`);
       }
