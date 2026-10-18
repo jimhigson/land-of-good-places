@@ -416,7 +416,9 @@ const spaceRuns: SpaceRun[] = [
     name: 'the park',
     start: { x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z, y: sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 500) },
     bounds: GARDEN_PLAY_BOUNDARY,
-    link: (s) => `/spawn?pos=${s.x.toFixed(1)},${s.z.toFixed(1)}&facing=${yaw(-s.x, -s.z)}&seed=${seed}`,
+    // With her height: a link with none stands her on the floor there
+    // (`teleportHeight`), and these are tops she stood on.
+    link: (s) => `/spawn?pos=${s.x.toFixed(1)},${s.y.toFixed(2)},${s.z.toFixed(1)}&facing=${yaw(-s.x, -s.z)}&seed=${seed}`,
   },
   ...CASTLE_FLOORS.map((floor) => ({
     name: `the castle's ${floor.name.replace(/^The /, '').toLowerCase()}`,
