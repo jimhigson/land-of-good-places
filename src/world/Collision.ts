@@ -1037,6 +1037,31 @@ export class CollisionWorld {
     }
   }
 
+  /**
+   * **Is `(x, z)` inside a closure's footprint** ({@link asClosure}) — ground
+   * the route lattice keeps off, such as the railway's corridor between its
+   * fences? For a measure asking where she could stand to jump from, which
+   * is never the line itself. Bucketed.
+   */
+  closedAt(x: number, z: number): boolean {
+    for (const bucket of this.bucketsAt(x, z)) {
+      for (const circle of bucket.circles) {
+        if (circle.closure && (x - circle.x) ** 2 + (z - circle.z) ** 2 <= circle.radius * circle.radius) return true;
+      }
+      for (const wall of bucket.walls) {
+        if (!wall.closure) continue;
+        const ax = wall.x2 - wall.x1;
+        const az = wall.z2 - wall.z1;
+        const lengthSquared = ax * ax + az * az;
+        let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t)) <= wall.halfThickness) return true;
+      }
+      for (const box of bucket.boxes) if (box.closure && boxDepth(box, x, z, 0) >= 0) return true;
+    }
+    return false;
+  }
+
   /** How many closures ({@link asClosure}) are registered — for a measure's coverage line. */
   get closureCount(): number {
     let n = 0;

@@ -78,7 +78,7 @@ export function solidStepCeiling(collision: CollisionWorld, x: number, z: number
 export const STEP_LOOKAHEAD = PLAYER_RADIUS + 0.1;
 
 /** How many points along her front half {@link walkingOntoStep} asks, from her middle to {@link STEP_LOOKAHEAD}. */
-const STEP_SAMPLES = 8;
+export const STEP_SAMPLES = 8;
 
 /**
  * **Is she walking straight into a solid she can step up onto?** — a top
@@ -112,9 +112,10 @@ export function walkingOntoStep(
   dirX: number,
   dirZ: number,
   reference: number,
+  samples = STEP_SAMPLES,
 ): boolean {
-  for (let i = 1; i <= STEP_SAMPLES; i += 1) {
-    const along = (STEP_LOOKAHEAD * i) / STEP_SAMPLES;
+  for (let i = 1; i <= samples; i += 1) {
+    const along = (STEP_LOOKAHEAD * i) / samples;
     const aheadX = x + dirX * along;
     const aheadZ = z + dirZ * along;
     const from = carryReference(x, z, reference, aheadX, aheadZ);
@@ -125,6 +126,19 @@ export function walkingOntoStep(
     if (collision.highestTopAt(aheadX, aheadZ, ceiling) > from + STEP_ABOVE) return true;
   }
   return false;
+}
+
+/**
+ * **Where a teleport that gives no height stands her** (`Player.teleport`, a
+ * `/spawn?pos=x,z` link): on the walk surface at `(x, z)` — the highest floor
+ * there — or a top she could step onto from it. Never a roof: asked from the
+ * floor, a canopy over it is out of a step's reach (QA on PR #722 — asked from
+ * `Infinity`, the station-bench link stood her on the station's awning and
+ * another on the reptile house's roof).
+ */
+export function teleportHeight(ground: GroundSampler, collision: CollisionWorld, x: number, z: number): number {
+  const floor = ground(x, z, Infinity);
+  return standingHeight(ground(x, z, floor), collision, x, z, floor);
 }
 
 /** How far over the surface she stands on a top must be to be a step up rather than where she is: float noise and the clearance grace's flat edge. */

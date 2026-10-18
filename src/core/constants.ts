@@ -367,6 +367,16 @@ export const PLAYER_SPRINT_MULTIPLIER = 1.5;
 /** Acceleration towards the desired velocity, metres/second². */
 export const PLAYER_ACCELERATION = 46;
 
+/**
+ * Her jump: the upward speed it gives her, metres/second, and the gravity
+ * that brings her down, metres/second² — `Player`'s, and so every measure of
+ * how high and how far she can jump (`world/jumpReach.ts`, `playerSim`). Out
+ * here so nothing has to restate them (`playerSim` once did, beside a note
+ * that `Player.ts` could not be imported).
+ */
+export const JUMP_SPEED = 6.6;
+export const GRAVITY = 17;
+
 /** Deceleration applied when there is no input, metres/second². */
 export const PLAYER_DECELERATION = 34;
 

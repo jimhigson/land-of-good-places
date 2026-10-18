@@ -161,6 +161,27 @@ Work list (tick as done, commit each):
     toppedShifted inward t/2 + topHalf t/2 (END_HALF 0.2 -> band 0.1 = standable): sides become steps
     where <= 0.62 m (visible change; QA's 'plinth SE' answer).
 
+### Round 2, later (18 Oct evening)
+- 84f05839 R2 (measuredTop.ts, sofa/pan/basin parts, privacy roof lid, armchair kitTop, plinth edgeRuns,
+  cart walls closures, check:hotel lobby 6 declared); 33f38f6c minors (Collision docs, GREAT_HALL,
+  wooden posts navStamped). JUMP_SPEED/GRAVITY now in core/constants.
+- Q2 DECISION: (a) guard height against the highest her feet can get (src/world/jumpReach.ts: jumpRiseAt,
+  runLagOver, guardRadiusNeeded, GUARD_MARGIN 0.05). Reason: her jump is right (same every direction);
+  (b) world-y flight would only move the problem to outward ramps and re-bias jumps.
+  - bridges.ts: BridgeWall.guardTop/guardTopEnd from deck takeoffs (3 lines across, 0.25 m along);
+    railing draws extra rails every 0.5 m; ParkTrain collider uses guardTop. Seed 5: up to ~3.3 m over ramps.
+  - fence.ts: per-post `lift` (liftAt over a cached 0.25 m takeoff grid: terrain + station platform
+    decks, minus closures (corridor bands built FIRST now) and bridge masonry), liftBay for mid-bays,
+    capLift for end caps, station far-side posts too. Found: platform ends cleared end caps into boxes
+    (sim: landed (-28.3,11.4) seed 5) and platform edges cleared the far fence into the stranded strip.
+  - scripts/lib/guardReach.mts + check-solids clause 8 (analytic, both sides, closures/solids/parked
+    train out; control = guard height alone; sims at 24 closest calls). Seed 5: 0 short.
+  - ParkTrain.onCarriage(x,z) for the check (parked train's floors are not takeoffs).
+- Q1/Q3/Q4 clauses 9/10/11 in check-solids; proofs SOLIDS_PROVE=blind-hop / spawn-highest / single-step.
+  standing.ts: teleportHeight (Player.teleport uses it), walkingOntoStep(samples), STEP_SAMPLES exported;
+  SimPlayer option stepSamples.
+- Collision.closedAt(x,z) (bucketed closure query).
+
 ## Decisions made in (b) (with reasons)
 - **solidInFrame** (terrain.ts): a rigid group stood on the sphere (plots, shelter, station) puts a
   solid at the column its middle is drawn in, top = hypot(R+top, lx, lz). Plots used centre+local,

@@ -14,7 +14,7 @@ import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
 import { rideFrame } from '../rail/sweptRail';
 import { computeCrossings, type LevelCrossing } from './crossings';
-import { GUARD_RAIL_WIDTH, RAILWAY_GUARD_TOP, buildRailFence } from './fence';
+import { GUARD_RAIL_WIDTH, buildRailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
 import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
@@ -283,9 +283,10 @@ export class ParkTrain implements GameSystem, TrainService {
       // walker beside the bridge), with an ABSOLUTE top — see `bridges.ts`'s
       // `BridgeWall`.
       //
-      // **Its top is the railing's, at the railway's guard height over the
-      // road** (`RAILWAY_GUARD_TOP`, from one end's road to the other's), and
-      // nobody stands on it: a rail is an edge, not a ledge. The coping under
+      // **Its top is the railing's** (`BridgeWall.guardTop`): the railway's
+      // guard height over the road, or as high as a jump from the deck can
+      // carry her feet over this line, whichever is higher — and nobody
+      // stands on it: a rail is an edge, not a ledge. The coping under
       // the railing is inside the solid. The coping alone was a top she
       // jumped onto from the road and stepped off on the far side, down onto
       // the track between the fences (`bridges.ts`'s `buildParapetRailing`).
@@ -297,13 +298,13 @@ export class ParkTrain implements GameSystem, TrainService {
             rail.x2,
             rail.z2,
             BRIDGE_WALL_THICKNESS / 2,
-            Math.max(rail.topHeight, rail.surface + RAILWAY_GUARD_TOP),
+            rail.guardTop,
             false,
             true,
             -Infinity,
             false,
             Number.NaN,
-            Math.max(rail.topHeightEnd, rail.surfaceEnd + RAILWAY_GUARD_TOP),
+            rail.guardTopEnd,
           ),
         ),
       );
@@ -356,7 +357,7 @@ export class ParkTrain implements GameSystem, TrainService {
         this.route,
         collision,
         this.bridges,
-        this.stations.map((station) => ({ distance: station.distance })),
+        this.stations.map((station) => ({ distance: station.distance, platform: station.asPlatform() })),
       ),
     );
 
@@ -370,6 +371,15 @@ export class ParkTrain implements GameSystem, TrainService {
 
     this.placeCars();
     setTrainService(this);
+  }
+
+  /**
+   * Is `(x, z)` over a carriage's floor where the train stands now? A moving
+   * floor she rides on, not ground she runs and jumps from — for a measure
+   * asking where she can take off (`check:solids`' guards).
+   */
+  onCarriage(x: number, z: number): boolean {
+    return this.carriages.some((carriage) => carriageFloor(carriage).covers(x, z));
   }
 
   /** Platforms, carriage floors and every bridge deck/tread, for

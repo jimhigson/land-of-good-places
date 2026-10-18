@@ -35,11 +35,13 @@
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
 import { carryReference } from '../src/world/building/surfaces.ts';
-import { riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { STEP_SAMPLES, riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
+  GRAVITY,
+  JUMP_SPEED,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
   PLAYER_HEIGHT_DAMP_HALF_LIFE,
@@ -49,14 +51,11 @@ import {
 } from '../src/core/constants.ts';
 
 /**
- * `Player.ts`'s own numbers, restated. Not imported: `Player.ts` pulls in
- * three.js meshes and the DOM, neither of which exists here, and only
- * `JUMP_APEX_HEIGHT` is exported anyway. `CollisionWorld.checkHoppableColliders`
- * is what stops these drifting unnoticed — it compares the live apex against
- * the one recorded in `Collision.ts` as having been measured.
+ * `Player`'s jump, from the one place it is written (`core/constants.ts`), and
+ * the apex it gives — re-exported for the scripts that measured against them
+ * here.
  */
-export const JUMP_SPEED = 6.6;
-export const GRAVITY = 17;
+export { JUMP_SPEED, GRAVITY };
 export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 export const AUTO_HOP_LOOKAHEAD = 0.5;
 
@@ -108,6 +107,12 @@ export type GroundSampler = (x: number, z: number, y: number) => number;
 export interface SimOptions {
   hopProbe?: HopProbe;
   radius?: number;
+  /**
+   * How many points along her front half the step-up asks (`walkingOntoStep`):
+   * `Player`'s own number unless a check's control asks for the one point
+   * past her front edge it used to be (`check:solids`' `single-step` proof).
+   */
+  stepSamples?: number;
   /**
    * Uneven ground. Omitted, everything stands on y = 0 and the vertical loop
    * is the flat-world one the wall harnesses have always used.
@@ -188,6 +193,7 @@ export class SimPlayer {
   groundY = 0;
   private readonly collision: CollisionWorld;
   private readonly hopProbe: HopProbe;
+  private readonly stepSamples: number;
   readonly radius: number;
   private readonly substepping: boolean;
   private readonly ground: GroundSampler | null;
@@ -207,6 +213,7 @@ export class SimPlayer {
     this.ground = options.ground ?? null;
     this.groundSubstepping = options.groundSubstepping ?? true;
     this.groundReference = options.groundReference ?? 'surface';
+    this.stepSamples = options.stepSamples ?? STEP_SAMPLES;
   }
 
   /**
@@ -283,7 +290,7 @@ export class SimPlayer {
     const stepping =
       following &&
       inputLength > 1e-4 &&
-      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference);
+      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples);
     const stepCeiling = stepping
       ? (x: number, z: number): number => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z))
       : undefined;

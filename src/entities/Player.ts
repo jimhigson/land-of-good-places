@@ -5,6 +5,8 @@ import {
   PLAYER_BOB_CYCLES_PER_METRE,
   PLAYER_BOB_HEIGHT,
   FALL_THRESHOLD,
+  GRAVITY,
+  JUMP_SPEED,
   PLAYER_DECELERATION,
   PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_MAX_SPEED,
@@ -21,7 +23,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
-import { riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../world/standing';
+import { riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
@@ -90,8 +92,6 @@ const DUST_STANCE = 0.14;
  * (1.00 m, against a measured limit of 1.07–1.10 m) and the reasons. Buildings
  * and tree trunks stay `Infinity` (unjumpable) — see `Collision.ts`.
  */
-const JUMP_SPEED = 6.6;
-const GRAVITY = 17;
 
 /**
  * The height a jump actually reaches, in metres — the ≈1.28 m the doc above
@@ -844,8 +844,7 @@ export class Player implements GameSystem {
    * the station's awning over its bench, and the reptile house's roof 7 m up.
    */
   teleport(x: number, z: number, facing?: number): void {
-    const floor = this.walkSurfaceAt(x, z, Infinity);
-    this.teleportTo(x, this.groundAt(x, z, floor), z, facing);
+    this.teleportTo(x, teleportHeight((px, pz, py) => this.walkSurfaceAt(px, pz, py), this.collision, x, z), z, facing);
   }
 
   /**

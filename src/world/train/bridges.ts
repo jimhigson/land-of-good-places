@@ -59,7 +59,8 @@ function decideBridgeFootprints(crossings: readonly LevelCrossing[], real: RealW
 import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
 import { GUARD_RAIL_DEPTH, GUARD_RAIL_WIDTH, RAILWAY_GUARD_TOP } from './fence';
-import { terrainHeight } from '../terrain';
+import { planetRadiusAt, terrainHeight, yAtRadius } from '../terrain';
+import { guardRadiusNeeded, type Takeoff } from '../jumpReach';
 import { Geo, altitude, scratchGeo, worldYAtAltitude } from '../geo';
 import { PALETTE } from '../../core/palette';
 import { archStoneTexture, pinkStoneTexture } from '../../core/textures';
@@ -491,6 +492,17 @@ export interface BridgeWall {
    */
   readonly surface: number;
   readonly surfaceEnd: number;
+  /**
+   * **The railing's top over `(x1, z1)` and `(x2, z2)`**, world `y`: the
+   * guard height over the road, or higher — as high as her feet can get over
+   * this line from anywhere on the deck (`jumpReach.ts`'s
+   * `guardRadiusNeeded`). On a ramp that is well over the road beside it: a
+   * sprint down from the crown carries her feet up to 3.3 m over the ramp's
+   * edge, and the 1.67 m railing that stood there was cleared by half a metre
+   * (QA on PR #722). The solid's top and the drawn rail's are both this.
+   */
+  readonly guardTop: number;
+  readonly guardTopEnd: number;
 }
 
 export interface Bridge {
@@ -704,6 +716,10 @@ const RAILING_POST_OVER = 0.085;
  * (`check:coplanar`, seed 1). At 0.07 the faces stand 1.6 cm off it.
  */
 const RAILING_POST_RADIUS = 0.07;
+/** How far apart along a bridge's road its jump takeoffs are sampled (`guardRadiusNeeded`). */
+const DECK_TAKEOFF_STEP = 0.25;
+/** How far apart a tall railing's rails are, at most: below its top rail, a rail every this far down to the guard height's. */
+const RAILING_RAIL_GAP = 0.5;
 /** How far a railing post's foot is set down into the coping it stands on. */
 const RAILING_POST_SEAT = 0.03;
 /** A railing post at every `RAILING_POST_EVERY`th parapet piece's end — a post every metre and a half or so. */
@@ -744,27 +760,39 @@ function buildParapetRailing(walls: readonly BridgeWall[]): Group {
   let previous: BridgeWall | null = null;
   // A post stands a few centimetres down into the coping, so no light shows
   // under it where the coping's weathered top falls away from its middle.
-  const postAt = (x: number, z: number, top: number, surface: number): void => {
-    posts.push({ foot: lift(x, top, z, top - RAILING_POST_SEAT, new Vector3()), head: lift(x, top, z, surface + RAILWAY_GUARD_TOP + RAILING_POST_OVER, new Vector3()) });
+  // Its posts reach over its top rail, which is at its guard top (`guardTop`):
+  // the guard height over the road, or as high as a jump down the deck can
+  // carry her feet over this line.
+  const postAt = (x: number, z: number, top: number, guard: number): void => {
+    posts.push({ foot: lift(x, top, z, top - RAILING_POST_SEAT, new Vector3()), head: lift(x, top, z, guard + RAILING_POST_OVER, new Vector3()) });
   };
   for (const wall of walls) {
     const joined = previous !== null && Math.hypot(wall.x1 - previous.x2, wall.z1 - previous.z2) < 1e-6;
     if (!joined) {
       // A run's first post, and the last one of the run before it.
-      if (previous) postAt(previous.x2, previous.z2, previous.topHeightEnd, previous.surfaceEnd);
+      if (previous) postAt(previous.x2, previous.z2, previous.topHeightEnd, previous.guardTopEnd);
       runIndex = 0;
-      postAt(wall.x1, wall.z1, wall.topHeight, wall.surface);
+      postAt(wall.x1, wall.z1, wall.topHeight, wall.guardTop);
     } else if (runIndex % RAILING_POST_EVERY === 0) {
-      postAt(wall.x1, wall.z1, wall.topHeight, wall.surface);
+      postAt(wall.x1, wall.z1, wall.topHeight, wall.guardTop);
     }
-    rails.push({
-      from: lift(wall.x1, wall.topHeight, wall.z1, wall.surface + railCentre, new Vector3()),
-      to: lift(wall.x2, wall.topHeightEnd, wall.z2, wall.surfaceEnd + railCentre, new Vector3()),
-    });
+    // The top rail, then one every `RAILING_RAIL_GAP` down to the guard
+    // height's own, so a railing raised for a ramp reads as a railing all
+    // the way up rather than a rail on stilts.
+    const topRail = (end: 0 | 1): number => (end === 0 ? wall.guardTop : wall.guardTopEnd) - GUARD_RAIL_DEPTH / 2;
+    const lowest = (end: 0 | 1): number => (end === 0 ? wall.surface : wall.surfaceEnd) + railCentre;
+    const extra = Math.max(0, Math.ceil(Math.max(topRail(0) - lowest(0), topRail(1) - lowest(1)) / RAILING_RAIL_GAP - 1e-6));
+    for (let k = 0; k <= extra; k += 1) {
+      const at = (end: 0 | 1): number => topRail(end) + ((lowest(end) - topRail(end)) * k) / Math.max(1, extra);
+      rails.push({
+        from: lift(wall.x1, wall.topHeight, wall.z1, at(0), new Vector3()),
+        to: lift(wall.x2, wall.topHeightEnd, wall.z2, at(1), new Vector3()),
+      });
+    }
     runIndex += 1;
     previous = wall;
   }
-  if (previous) postAt(previous.x2, previous.z2, previous.topHeightEnd, previous.surfaceEnd);
+  if (previous) postAt(previous.x2, previous.z2, previous.topHeightEnd, previous.guardTopEnd);
   if (posts.length === 0) return group;
 
   const postMesh = new InstancedMesh(new CylinderGeometry(RAILING_POST_RADIUS, RAILING_POST_RADIUS, 1, 6), toonMaterial(PALETTE.stonePink), posts.length);
@@ -1186,6 +1214,29 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // kerb, and a wall there severs the path junctions the ramp feet land in.
   const walls: BridgeWall[] = [];
   const wallLine = roadHalf + BRIDGE_WALL_THICKNESS / 2;
+  // **Everywhere she can jump from on this deck** — the road where her middle
+  // can stand (`walkHalf` either side of the axis, and the axis), every
+  // `DECK_TAKEOFF_STEP` along it, with how fast the road falls along the axis
+  // there: what a railing on this bridge has to be taller than every jump from
+  // (`guardRadiusNeeded`).
+  const takeoffs: Takeoff[] = [];
+  for (let along = -lengthNeg; along <= lengthPos + 1e-6; along += DECK_TAKEOFF_STEP) {
+    const ahead = Math.min(along + DECK_TAKEOFF_STEP, lengthPos);
+    const behind = Math.max(along - DECK_TAKEOFF_STEP, -lengthNeg);
+    for (const across of [-walkHalf, 0, walkHalf]) {
+      const at = frame.worldAt(along, across, shift);
+      const front = frame.worldAt(ahead, across, shift);
+      const back = frame.worldAt(behind, across, shift);
+      const radius = planetRadiusAt(at.x, surfaceProfile(at.x, at.z, along), at.z);
+      const run = Math.hypot(front.x - back.x, front.z - back.z);
+      const rise = planetRadiusAt(front.x, surfaceProfile(front.x, front.z, ahead), front.z) - planetRadiusAt(back.x, surfaceProfile(back.x, back.z, behind), back.z);
+      const slope = run > 1e-6 ? rise / run : 0;
+      takeoffs.push({ x: at.x, z: at.z, radius, slopeX: run > 1e-6 ? (slope * (front.x - back.x)) / run : 0, slopeZ: run > 1e-6 ? (slope * (front.z - back.z)) / run : 0 });
+    }
+  }
+  /** The railing's top at `(x, z)`: the guard height over the road, or every jump's reach, whichever is higher — and never under the coping. */
+  const guardTopAt = (x: number, z: number, coping: number, surface: number): number =>
+    Math.max(coping, surface + RAILWAY_GUARD_TOP, yAtRadius(x, z, guardRadiusNeeded(takeoffs, x, z)));
   for (const side of [1, -1] as const) {
     let previous = frame.worldAt(-lengthNeg, wallLine * side, shift);
     let previousAlong = -lengthNeg;
@@ -1226,7 +1277,18 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           const z = previous.z + (point.z - previous.z) * t;
           const surface = k === PARAPET_PIECES ? topB : surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t);
           const top = drawnTop(surface, x, z);
-          walls.push({ x1: pieceX, z1: pieceZ, x2: x, z2: z, topHeight: pieceTop, topHeightEnd: top, surface: pieceSurface, surfaceEnd: surface });
+          walls.push({
+            x1: pieceX,
+            z1: pieceZ,
+            x2: x,
+            z2: z,
+            topHeight: pieceTop,
+            topHeightEnd: top,
+            surface: pieceSurface,
+            surfaceEnd: surface,
+            guardTop: guardTopAt(pieceX, pieceZ, pieceTop, pieceSurface),
+            guardTopEnd: guardTopAt(x, z, top, surface),
+          });
           pieceX = x;
           pieceZ = z;
           pieceTop = top;
