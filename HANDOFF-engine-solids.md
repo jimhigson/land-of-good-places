@@ -357,3 +357,14 @@ no-headroom need the census run.
     stalls out of jump reach of tall walls. Left red on seed 6, reported.
 - 61678960: unknown SOLIDS_PROVE throws (a typo used to run unbroken and look green).
 - Reruns at 61678960: /tmp/es-r8 (job list jobs4.txt, runner job.sh; 16 seeds + proofs).
+
+### Round 2, guards and the grace (18 Oct, 19:00 BST)
+- Rerun at 7c74ac25 (/tmp/es-r8): seeds 0-3, 7, 8, 12-14 green; remaining: 4 (railway reached over a bridge
+  parapet), 6 (stall awning), 9/10 (clause 8 sim crossings), 4/11 (step-up rise 0.60 borderline).
+- ROOT CAUSE seed 4: JUMP_CLEARANCE_GRACE (0.15) lets her through any top within 0.15 m of her feet; guards were
+  built to feet's highest + 0.05 only. a252dc03: guardRadiusNeeded adds GUARD_OVER_FEET = grace + margin (bridges
+  and fence lifts 0.15 m taller where a jump sets them; seed 5: 30 posts lifted 0.01-0.77, tallest railing 3.59 m
+  over its deck). guardReach counted no takeoff on a bridge span (corridor closure under it) - fixed.
+  Step-up exemption uses riseBetween (hop's own rise). check:coplanar OK on 16 seeds at a252dc03.
+- PR head -> a252dc03 (CI run 39150059422). Full rerun (16 seeds + proofs) at a252dc03: /tmp/es-r9.
+- Local at 7c74ac25: check:library, check:hop-clearance, check:wall-tunnelling, check:exits exit 0.
