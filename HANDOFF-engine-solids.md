@@ -387,3 +387,8 @@ no-headroom need the census run.
   sealed ring (as main), not the roof. #721's put-down rule calls any region >= 6 m walkable a room; the ring's hollow is
   18 m. Fix = fill sealed insides (reptile ring, library cella, hotel tower) with bodies; own change.
 - Waiting on CI run 39152595871 (737aafc1); then preview repros, parks identity (artifact parks-9af23e21...), post.
+- CI run 39152595871 (737aafc1): shard 1 RED at check:flat-primitives — my second copy of Player's fall test in
+  playerSim (`this.position.y - groundY`). 0539d9ce: one helper `fallIfOff`; check:shard-1 exit 0 locally.
+  LESSON: run the whole `pnpm run check` (or at least shard 1) after ANY scripts/ change before pushing.
+- PENDING comment fix for the next src change (reverted in 188148dd to keep the parks cached): fence.ts 1b says
+  "her feet top out at 1.33 m"; should be "1.28 m over it, a guard has to stand GUARD_OVER_FEET (0.2 m) over that".
