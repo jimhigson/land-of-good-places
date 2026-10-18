@@ -355,6 +355,19 @@ export class SimPlayer {
       }
     }
 
+    // `Player.update`'s order: walked off an edge, she starts falling before
+    // the auto-hop is asked, so a step off a wall's top is a fall — never a
+    // hop judged from the ground she is now over, fired from the top she has
+    // just left. The census's walks along wall tops, the first to give this
+    // rig a hop that can fire, found the difference: a bush beside the wall
+    // nudged her off its top, and here alone she was thrown up from it
+    // (seeds 9 and 12). The control path has not sampled the ground yet, so
+    // for it this asks the frame's start, and the fall below still stands.
+    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+      this.airborne = true;
+      this.verticalVelocity = 0;
+    }
+
     let autoHopWanted = false;
     if (!this.airborne && inputLength > 1e-4) {
       const inverse = 1 / inputLength;

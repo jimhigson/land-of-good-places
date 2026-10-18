@@ -137,6 +137,10 @@ function outline(solid: SolidView, spacing: number): { x: number; z: number; nx:
  * (and the clearance grace), nothing she can do lands her on it — the contact
  * rule now meets it side-on. The rest of the fall and the settle are spent on
  * nothing; on the park they were most of what the census cost.
+ *
+ * With `trail`, every frame's plan position is pushed onto it, the start
+ * first: the path she took, for a caller asking what she crossed rather than
+ * only where she came down.
  */
 export function runAndJump(
   options: Pick<ReachOptions, 'collision' | 'sample'>,
@@ -146,6 +150,7 @@ export function runAndJump(
   jumpAt: number,
   fps: number,
   onto: SolidView | null = null,
+  trail?: { x: number; z: number }[],
 ): Stand | null {
   const dt = 1 / fps;
   let fire = false;
@@ -164,6 +169,7 @@ export function runAndJump(
   sim.previousPosition.copy(sim.position);
   sim.groundHeight = from.y;
   sim.groundY = from.y;
+  trail?.push({ x: sim.position.x, z: sim.position.z });
   let jumped = false;
   let landedAt = -1;
   const frames = Math.ceil(3 / dt);
@@ -192,6 +198,7 @@ export function runAndJump(
     // Steer at the aim until she has landed after the jump, then stand still.
     const steer = landedAt < 0 && d > 0.15;
     sim.step(dt, steer ? dx / d : 0, steer ? dz / d : 0, true);
+    trail?.push({ x: sim.position.x, z: sim.position.z });
     if (jumped && landedAt < 0 && wasAirborne && !sim.airborne) landedAt = frame;
     if (landedAt >= 0 && frame >= landedAt + Math.ceil(0.6 / dt)) break;
   }

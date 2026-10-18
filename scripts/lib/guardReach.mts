@@ -18,7 +18,6 @@ import type { CollisionWorld, SolidView } from '../../src/world/Collision.ts';
 import { JUMP_PLAN_REACH, guardRadiusNeeded, type Takeoff } from '../../src/world/jumpReach.ts';
 import { planetRadiusAt } from '../../src/world/terrain.ts';
 import { standingHeight } from '../../src/world/standing.ts';
-import { FENCE_OFFSET } from '../../src/world/train/clearance.ts';
 
 export type GroundSampler = (x: number, z: number, fromY: number) => number;
 

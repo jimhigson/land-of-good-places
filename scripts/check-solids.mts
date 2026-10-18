@@ -36,6 +36,17 @@
  * 6. **Headroom.** Every top she can reach has room for all of her over it.
  * 7. **The boundary at height.** The park's edge holds a body pushed at it at
  *    every height from the grass to ten metres up.
+ * 8. **Guards.** No sprint-jump at the railway's fence or a bridge's railing
+ *    clears it, from anywhere she can run within a jump of it, either side
+ *    (`lib/guardReach.mts`, against `world/jumpReach.ts`'s highest her feet
+ *    can get); and her own sprint-jumps at the closest calls never cross one.
+ * 9. **Along the tops.** She walks every wall top and rim she reaches end to
+ *    end without the auto-hop throwing her off, and walks up every hoppable
+ *    wall where it stands a step high instead of hopping it.
+ * 10. **Spawns.** A teleport with no height (`/spawn?pos=x,z`) never stands
+ *    her on a roof.
+ * 11. **Steps.** Pushing into a top she steps up onto steps her up or holds
+ *    her at its face — never shuttles her in and out.
  *
  * And where only the jet pack takes her, said on stderr and asserted nowhere:
  * she flies out the way she flew in (see the note at the end).
@@ -92,6 +103,24 @@ import { STEP_SAMPLES, standingHeight, teleportHeight } from '../src/world/stand
  *   to by a staircase of blocks — clause 4's every-top-leavable clause.
  * - `no-headroom` (park): a canopy hung 1 m over a reached top — clause 6.
  * - `no-bounds` (core): the park's leash taken off — clause 7.
+ * - `reptile-roof` (park): a step by the gate kinded as the reptile house's
+ *   roof (the review's control) — clause 4's roofs.
+ * - `every-roof` (park): one such step for every kind in `ROOF_KINDS`, in a
+ *   ring round the gate — clause 4 must name every one.
+ * - `new-roof` (core): a step kinded `proof: a garage roof`, named like a roof
+ *   and in neither list — clause 4a.
+ * - `fence-crate` (park): a crate a metre tall against the fence post nearest
+ *   the gate — clause 4 must find her over the fence, on the line.
+ * - `guards-alone` (park): every top as wide as its footprint, so no rail is
+ *   kept from being stood on by how narrow it is — the one proof that must
+ *   stay **green** on the railway (heights alone hold it); clause 2 goes red
+ *   where the widened rails are stood on.
+ * - `low-guard` (park): a run of `railway fence` 3 m long and a metre over the
+ *   grass in front of the gate — clause 8's measure and her sprint-jumps.
+ * - `blind-hop` (park): the auto-hop judged from nothing, as it was — clause 9.
+ * - `spawn-highest` (park): a spawn asked from `Infinity`, as it was — clause 10.
+ * - `single-step`, `drawn-feet` (core): the step-up's one point past her front
+ *   edge, and her drawn height as her feet, as each was — clause 11.
  */
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -258,6 +287,15 @@ const ROOF_KINDS: Readonly<Record<string, string>> = {
       const cz = post.centreZ + uz * (post.reach + 0.75);
       collision.kinded('proof: a crate against the fence', () => collision.addBox(cx, cz, 0.6, 0.6, Math.atan2(ux, uz), 0, sample(cx, cz, 50) + 1.0, false, true));
     }
+  }
+  // **A fence she can jump** — clause 8's own control, both halves of it: a
+  // run of fence 3 m long and a metre over the grass, on the open ground in
+  // front of the gate. A jump clears it, so the instrument must say so, and
+  // her own sprint-jumps at it must come down past it.
+  if (PROVE === 'low-guard') {
+    const cx = ENTRANCE_PLAYER_X;
+    const cz = ENTRANCE_PLAYER_Z - 8;
+    collision.kinded('railway fence', () => collision.addWall(cx - 1.5, cz, cx + 1.5, cz, 0.09, sample(cx, cz, 50) + 1.0, false, true));
   }
   if (PROVE === 'low-roof') stepNearGate('stall awning');
   // The review's own control (PR #722): a step kinded as one of the roofs the
@@ -1008,6 +1046,41 @@ function wallAxis(solid: SolidView): { ux: number; uz: number; half: number } {
   }
   return { ...best, half: Math.max(0, best.half - solid.halfWidth) };
 }
+/** A wall's line: its core segment, end to end (its footprint less its half-width at each end). */
+function guardSegment(solid: SolidView): { ax: number; az: number; bx: number; bz: number } {
+  const axis = wallAxis(solid);
+  return {
+    ax: solid.centreX - axis.ux * axis.half,
+    az: solid.centreZ - axis.uz * axis.half,
+    bx: solid.centreX + axis.ux * axis.half,
+    bz: solid.centreZ + axis.uz * axis.half,
+  };
+}
+/**
+ * **Did a path cross a segment, net?** Each step of the path that crosses the
+ * segment between its ends counts one way or the other by which way it went;
+ * a path that ends on the side it started has crossed it net zero times,
+ * however it got there. A step that meets the line beyond an end is round the
+ * end, not over it.
+ */
+function crossesSegment(path: readonly { x: number; z: number }[], seg: { ax: number; az: number; bx: number; bz: number }): boolean {
+  const ex = seg.bx - seg.ax;
+  const ez = seg.bz - seg.az;
+  const side = (x: number, z: number): number => ex * (z - seg.az) - ez * (x - seg.ax);
+  let net = 0;
+  for (let i = 1; i < path.length; i += 1) {
+    const p = path[i - 1]!;
+    const q = path[i]!;
+    const d1 = side(p.x, p.z);
+    const d2 = side(q.x, q.z);
+    if (d1 < 0 === d2 < 0) continue;
+    // Where the step meets the line, as a fraction of the segment.
+    const t = ((p.x - seg.ax) * (q.z - p.z) - (p.z - seg.az) * (q.x - p.x)) / (ex * (q.z - p.z) - ez * (q.x - p.x));
+    if (!(t >= 0 && t <= 1)) continue;
+    net += d2 < 0 ? -1 : 1;
+  }
+  return net !== 0;
+}
 const scratchBody = new Vector3();
 const boundsOfSpace = (name: string): ParkBoundary => spaceRuns.find((run) => run.name === name)?.bounds ?? GARDEN_PLAY_BOUNDARY;
 if (spacesInPart.length) {
@@ -1015,7 +1088,9 @@ if (spacesInPart.length) {
   const dt = 1 / CENSUS_FPS;
   let walks = 0;
   let thrown = 0;
+  let fellOff = 0;
   const firstThrown: string[] = [];
+  const firstFell: string[] = [];
   const walls = new Map<SolidView, string>();
   for (const { space, top } of allReached) if (top.solid.shape === 'capsule') walls.set(top.solid, space);
   for (const [wall, space] of walls) {
@@ -1031,10 +1106,14 @@ if (spacesInPart.length) {
         const z = wall.centreZ + axis.uz * t;
         return wall.standsAt(x, z) && collision.deepestSolidOverlap(scratchBody.set(x, wall.topAt(x, z), z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) <= 0.02;
       };
+      // Each search stops at the other end: a wall whose top has no clear
+      // stretch at all (under something, or never wide enough to stand on) is
+      // walked nowhere (seeds 4, 11 and 15: searched while |t| > 0, it ran
+      // past the far end and never stopped).
       let t0 = -axis.half * sign;
-      while (Math.abs(t0) > 0 && !clearAt(t0)) t0 += 0.1 * sign;
+      while (t0 * sign <= axis.half && !clearAt(t0)) t0 += 0.1 * sign;
       let t1 = axis.half * sign;
-      while (Math.abs(t1) > 0 && !clearAt(t1)) t1 -= 0.1 * sign;
+      while ((t1 - t0) * sign >= 0.5 && !clearAt(t1)) t1 -= 0.1 * sign;
       if ((t1 - t0) * sign < 0.5) continue;
       const from = { x: wall.centreX + axis.ux * t0, z: wall.centreZ + axis.uz * t0 };
       const to = { x: wall.centreX + axis.ux * t1, z: wall.centreZ + axis.uz * t1 };
@@ -1072,6 +1151,15 @@ if (spacesInPart.length) {
           if (!taller) hopped = true;
           break;
         }
+        // Off its top without a hop — stepped off its side: a fall, not the
+        // auto-hop, and the walk along this top is over (seeds 9 and 12: a
+        // bush beside the wall nudged her off its edge, and the first cut
+        // walked on and counted her hop back over the wall from the grass).
+        if (!was && sim.airborne) {
+          fellOff += 1;
+          if (firstFell.length < 3) firstFell.push(`${wall.kind || wall.owner} in ${space} at (${sim.position.x.toFixed(1)}, ${sim.position.z.toFixed(1)})`);
+          break;
+        }
       }
       if (hopped) {
         thrown += 1;
@@ -1080,10 +1168,12 @@ if (spacesInPart.length) {
     }
   }
   say(walks > 0 && thrown === 0, `${walks} walks along ${walls.size} wall tops and rims she reaches, end to end at a walk: ${thrown} hopped her off${firstThrown.length ? ` — ${firstThrown.join('; ')}` : ''}`);
+  note(`clause 9: of ${walks} walks along a top, ${fellOff} stepped off its side before its end${firstFell.length ? ` (e.g. ${firstFell.join('; ')})` : ''} — a fall, not a hop, so not asserted: something beside the top (a bush's crown) nudged her off it`);
   // Up a low wall: from the ground beside every auto-hoppable solid, walking
   // in, wherever its top is a step over that ground.
   let ups = 0;
   let hopsOver = 0;
+  let hopsAtTaller = 0;
   const firstHop: string[] = [];
   const hoppable: SolidView[] = [];
   collision.forEachSolid((solid) => {
@@ -1107,7 +1197,17 @@ if (spacesInPart.length) {
         if (!(rise > 0.03 && rise <= BUILDING_STEP_UP - 0.02)) continue;
         if (collision.deepestSolidOverlap(scratchBody.set(sx, ground, sz), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02) continue;
         ups += 1;
-        const sim = new SimPlayer(collision, { ground: sample, hopProbe: hopProbeFor(collision) });
+        // Where the hop she takes was asked from: her probe and her feet.
+        const probe = hopProbeFor(collision);
+        let asked: { px: number; pz: number; fx: number; fy: number; fz: number } | null = null;
+        const sim = new SimPlayer(collision, {
+          ground: sample,
+          hopProbe: (at, feet) => {
+            const hop = probe(at, feet);
+            if (hop) asked = { px: at.x, pz: at.z, fx: feet.x, fy: feet.y, fz: feet.z };
+            return hop;
+          },
+        });
         sim.position.set(sx, ground, sz);
         sim.previousPosition.copy(sim.position);
         sim.groundHeight = ground;
@@ -1115,7 +1215,28 @@ if (spacesInPart.length) {
         for (let f = 0; f < Math.ceil(1.2 / dt); f += 1) {
           const was = sim.airborne;
           sim.step(dt, -nx * side * 0.5, -nz * side * 0.5, false);
+          // Stood on its top: she stepped up, and what she walks into beyond
+          // it is another wall's question (seeds 2, 3 and 7: walked on over
+          // this one, she hopped the next, and the first cut counted it here).
+          if (!sim.airborne && solid.standsAt(sim.position.x, sim.position.z) && Math.abs(sim.groundHeight - solid.topAt(sim.position.x, sim.position.z)) < 0.03) break;
           if (!was && sim.airborne && sim.verticalVelocity > JUMP_SPEED * 0.5) {
+            // A hop is hers to take where something more than a step over her
+            // feet stands at her probe — an L's other arm, taller where they
+            // meet (seeds 1, 2 and 8). Hopped over instead of stepping up is a
+            // hop with nothing of the kind there.
+            const at = asked as { px: number; pz: number; fx: number; fy: number; fz: number } | null;
+            let overStep = false;
+            if (at) {
+              collision.forEachSolid((other) => {
+                if (overStep || !other.autoHoppable || other.depthAt(at.px, at.pz) <= -PLAYER_RADIUS) return;
+                const top = other.topAt(at.px, at.pz);
+                if (altitudeAt(at.px, top, at.pz) - altitudeAt(at.fx, at.fy, at.fz) > BUILDING_STEP_UP) overStep = true;
+              });
+            }
+            if (overStep) {
+              hopsAtTaller += 1;
+              break;
+            }
             hopsOver += 1;
             if (firstHop.length < 4) firstHop.push(`${solid.kind || solid.owner} ${rise.toFixed(2)} m over the ground at (${sx.toFixed(1)}, ${sz.toFixed(1)})`);
             break;
@@ -1125,7 +1246,10 @@ if (spacesInPart.length) {
     }
   }
   if (hoppable.length === 0) note(`clause 9: no wall in ${spacesInPart.map((run) => run.name).join(', ')} is auto-hoppable, so the step-up half asserts nothing in this part`);
-  else say(ups > 0 && hopsOver === 0, `${ups} walks into ${hoppable.length} hoppable walls where they stand a step high: ${hopsOver} hopped her over instead of stepping up${firstHop.length ? ` — ${firstHop.join('; ')}` : ''}`);
+  else {
+    say(ups > 0 && hopsOver === 0, `${ups} walks into ${hoppable.length} hoppable walls where they stand a step high: ${hopsOver} hopped her over instead of stepping up${firstHop.length ? ` — ${firstHop.join('; ')}` : ''}`);
+    note(`clause 9: of the ${ups} walks into a wall a step high, ${hopsAtTaller} hopped where something more than a step over her feet stood at her probe (an L's other arm, taller where they meet) — the hop doing its job, so not counted against the wall; a walk ends once she stands on the wall's top`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1320,17 +1444,17 @@ if (inPart('park')) {
       const sz = from.z - uz * runUp;
       const start = { x: sx, z: sz, y: sample(sx, sz, 1e3) };
       tried += 1;
-      const landed = runAndJump({ collision, sample }, start, point.x + ux * 2, point.z + uz * 2, d + 2, CENSUS_FPS);
+      const trail: { x: number; z: number }[] = [];
+      const landed = runAndJump({ collision, sample }, start, point.x + ux * 2, point.z + uz * 2, d + 2, CENSUS_FPS, null, trail);
       if (!landed) continue;
-      // Over it is on the far side of its line from where she took off, and
-      // within its length — not round its end, where a ramp's foot meets the
-      // ground and the parapet stops.
-      const axis = wallAxis(point.solid);
-      const nx = -axis.uz;
-      const nz = axis.ux;
-      const sideOf = (x: number, z: number): number => Math.sign((x - point.solid.centreX) * nx + (z - point.solid.centreZ) * nz);
-      const along = Math.abs((landed.x - point.solid.centreX) * axis.ux + (landed.z - point.solid.centreZ) * axis.uz);
-      if (sideOf(landed.x, landed.z) !== sideOf(from.x, from.z) && along <= axis.half + 0.5 && point.solid.depthAt(landed.x, landed.z) < 0) {
+      // Over it is her path crossing the guard's own line between its ends,
+      // and coming down off it on the far side. Round an end is not over it —
+      // at a station, where the fence turns into the end cap across the
+      // track, a run off the platform's end comes down beside the fence's far
+      // side without ever crossing it (seeds 1, 3, 6, 7 and 8: the first cut
+      // asked which side of the line's extension she landed on, and called
+      // each of those a crossing).
+      if (crossesSegment(trail, guardSegment(point.solid)) && point.solid.depthAt(landed.x, landed.z) < 0) {
         crossed += 1;
         if (firstCrossed.length < 3) firstCrossed.push(`${point.solid.kind} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}), run from ${spawnAt(sx, sz)}, came down at (${landed.x.toFixed(1)}, ${landed.z.toFixed(1)})`);
       }
