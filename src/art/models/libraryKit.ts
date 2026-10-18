@@ -1,4 +1,5 @@
-import { Mesh, MeshBasicMaterial, Raycaster, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
+import { Matrix4, Mesh, MeshBasicMaterial, Raycaster, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
+import { geometryTriangles, measureTriangleSets, type MeasuredTop } from '../../world/measuredTop';
 import { LIBRARY_GLB_BASE64 } from '../assets/libraryGlb';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
 
@@ -60,6 +61,22 @@ function eachVertex(name: string, visit: (x: number, y: number, z: number) => vo
     p.fromBufferAttribute(position, i).multiply(part.scale).applyQuaternion(part.quaternion).add(part.position);
     visit(p.x, p.y, p.z);
   }
+}
+
+/**
+ * **The named nodes' top, and how much of it she could stand on**, within the
+ * part of the plan `keep` admits — `measureTop`'s slice of the kit's own
+ * triangles (`world/measuredTop.ts`): a rolled arm measures the crown of its
+ * tube, a cushion's top its board. In the asset's frame.
+ */
+export function kitTop(names: readonly string[], keep?: (x: number, z: number) => boolean): MeasuredTop {
+  return measureTriangleSets(
+    names.map((name) => {
+      const part = libraryPart(name);
+      return geometryTriangles(part.geometry, new Matrix4().compose(part.position, part.quaternion, part.scale));
+    }),
+    keep,
+  );
 }
 
 /** The extent of the named nodes' vertices — never a bounding box of a bounding box. */

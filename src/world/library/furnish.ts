@@ -621,11 +621,11 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         place(piece, createLibraryArmchair(cloth).root, 0);
         // Its seat to the cushion, and its arms and back each to its own top,
         // tiling the chair's drawn plan (`libraryArmchairParts`): she sits and
-        // stands on the seat; the rolled arms and the wings are met square,
-        // never stood on.
-        for (const [index, part] of libraryArmchairParts().entries()) {
+        // stands on the seat; the rolled arms and the back's roll measure too
+        // narrow a crown for her feet, so the width rule has her bump them.
+        for (const part of libraryArmchairParts()) {
           const centre = turned(piece, part.centreX, part.centreZ);
-          props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: part.halfX, halfDepth: part.halfZ }, part.top, index === 0);
+          props.box(piece.id, { x: centre.x, z: centre.z, facing: piece.facing, halfLength: part.halfX, halfDepth: part.halfZ }, part.top, part.topHalf);
         }
         break;
       }

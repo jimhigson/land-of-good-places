@@ -11,6 +11,7 @@ import { BUILDING_FADE_SECONDS } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { playFlush, playHandwash } from '../../ui/chime';
 import { castAndReceive, interiorMaterial, softMaterial } from './parts';
+import { roundTopHalf, type PropPart } from '../measuredTop';
 import {
   TOILET_BASIN_X,
   TOILET_BASIN_Z,
@@ -421,19 +422,100 @@ export function buildPrivacyRoof(
   // screens sit inside these bounds so there is no seam to cover, and the
   // "Toilets" sign stands 6cm clear of the front edge — an overhang would put
   // the lid straight through it.
-  const band = new Mesh(new BoxGeometry(width, 0.1, depth), fading(PALETTE.buildingRoofDeep));
-  band.position.set(centreX, roofY + 0.05, centreZ);
+  const band = new Mesh(new BoxGeometry(width, ROOF_BAND_THICKNESS, depth), fading(PALETTE.buildingRoofDeep));
+  band.position.set(centreX, roofY + ROOF_BAND_THICKNESS / 2, centreZ);
   group.add(band);
 
   // An inset panel on top, the same two-tone as the tower's own roof.
-  const panel = new Mesh(new BoxGeometry(width - 0.5, 0.12, depth - 0.5), fading(PALETTE.buildingRoof));
-  panel.position.set(centreX, roofY + 0.16, centreZ);
+  const panel = new Mesh(new BoxGeometry(width - 0.5, ROOF_PANEL_THICKNESS, depth - 0.5), fading(PALETTE.buildingRoof));
+  panel.position.set(centreX, roofY + ROOF_PANEL_Y, centreZ);
   group.add(panel);
 
   return { group, materials };
 }
 
 // --------------------------------------------------------------- fittings
+
+/** The pan's rim: a torus round the bowl's top — its ring radius, its tube, its height. */
+const PAN_RIM_RADIUS = 0.34;
+const PAN_RIM_TUBE = 0.07;
+const PAN_RIM_Y = 0.67;
+/** The cistern behind the bowl: its size and where its middle stands. */
+const CISTERN_WIDTH = 0.72;
+const CISTERN_HEIGHT = 0.62;
+const CISTERN_DEPTH = 0.28;
+const CISTERN_Y = 1.02;
+const CISTERN_Z = -0.48;
+/** The flush handle on the cistern's front. */
+const HANDLE_RADIUS = 0.09;
+const HANDLE_X = 0.28;
+const HANDLE_Y = 1.2;
+const HANDLE_Z = -0.33;
+/** The basin: its column, its bowl (a hemisphere squashed in height) and where the bowl's rim stands. */
+const BASIN_COLUMN_RADIUS = 0.2;
+const BASIN_BOWL_RADIUS = 0.36;
+const BASIN_BOWL_Y = 0.82;
+/** The tap: a short upright, then a spout along the basin to its front. */
+const TAP_RADIUS = 0.05;
+const TAP_HEIGHT = 0.34;
+const TAP_Y = 1.02;
+const TAP_Z = -0.26;
+const SPOUT_RADIUS = 0.045;
+const SPOUT_LENGTH = 0.2;
+const SPOUT_Y = 1.16;
+const SPOUT_Z = -0.16;
+/** The mirror on the wall over the basin. */
+const MIRROR_WIDTH = 0.7;
+const MIRROR_HEIGHT = 0.8;
+const MIRROR_DEPTH = 0.08;
+const MIRROR_Y = 1.72;
+const MIRROR_Z = -0.42;
+/** The privacy roof's band and inset panel: their thicknesses, and how far the panel's middle stands over the band's foot. */
+const ROOF_BAND_THICKNESS = 0.1;
+const ROOF_PANEL_THICKNESS = 0.12;
+const ROOF_PANEL_Y = 0.16;
+
+/**
+ * **A pan as the solids she meets**, from the numbers it is built from,
+ * fitting-local (its cistern on −Z): the bowl to its rim and lid, a flat top
+ * as wide as the bowl; the cistern to its own top; the flush handle on its
+ * front. A room hands these to its collision world as it stands the pan.
+ */
+export function panParts(): readonly PropPart[] {
+  const rimOuter = PAN_RIM_RADIUS + PAN_RIM_TUBE;
+  return [
+    { x: 0, z: 0, radius: rimOuter, top: PAN_RIM_Y + PAN_RIM_TUBE },
+    { x: 0, z: CISTERN_Z, halfX: CISTERN_WIDTH / 2, halfZ: CISTERN_DEPTH / 2, top: CISTERN_Y + CISTERN_HEIGHT / 2 },
+    { x: HANDLE_X, z: HANDLE_Z, radius: HANDLE_RADIUS, base: HANDLE_Y - HANDLE_RADIUS, top: HANDLE_Y + HANDLE_RADIUS, topHalf: roundTopHalf(HANDLE_RADIUS) },
+  ];
+}
+
+/**
+ * **A basin as the solids she meets**, fitting-local (its splashback on −Z):
+ * the bowl on its column to the rim — an open bowl, so its rim is an edge
+ * with nothing to stand on (`topHalf` 0, by its shape: a hemisphere's edge
+ * has no width, and what is inside it is a hollow, not a top); the tap, the
+ * spout and the mirror over it, each held off the floor at its own height.
+ */
+export function basinParts(): readonly PropPart[] {
+  return [
+    { x: 0, z: 0, radius: Math.max(BASIN_BOWL_RADIUS, BASIN_COLUMN_RADIUS), top: BASIN_BOWL_Y, topHalf: 0 },
+    { x: 0, z: TAP_Z, radius: TAP_RADIUS, base: TAP_Y - TAP_HEIGHT / 2, top: TAP_Y + TAP_HEIGHT / 2, topHalf: TAP_RADIUS },
+    { x: 0, z: SPOUT_Z, halfX: SPOUT_RADIUS, halfZ: SPOUT_LENGTH / 2, base: SPOUT_Y - SPOUT_RADIUS, top: SPOUT_Y + SPOUT_RADIUS, topHalf: roundTopHalf(SPOUT_RADIUS) },
+    { x: 0, z: MIRROR_Z, halfX: MIRROR_WIDTH / 2, halfZ: MIRROR_DEPTH / 2, base: MIRROR_Y - MIRROR_HEIGHT / 2, top: MIRROR_Y + MIRROR_HEIGHT / 2, topHalf: MIRROR_DEPTH / 2 },
+  ];
+}
+
+/**
+ * **The privacy roof's own height**, foot to top: what a room registers as its
+ * ceiling, so the lid she sees slide over her is the lid her head meets. She
+ * is `KID_HEIGHT` (2.12 m) tall and the lid is 2.42 m up, so it is what keeps
+ * her off a pan's lid and cistern — on the lid her head would be through it —
+ * by her height and its, not by any mark on the pan (PR #722).
+ */
+export function privacyRoofSpan(roofY = ROOF_Y): { readonly base: number; readonly top: number } {
+  return { base: roofY, top: roofY + ROOF_PANEL_Y + ROOF_PANEL_THICKNESS / 2 };
+}
 
 export function buildPan(x: number, z: number): PanParts {
   const group = new Group();
@@ -457,11 +539,11 @@ export function buildPan(x: number, z: number): PanParts {
   group.add(bowl);
 
   const rim = new Mesh(
-    new TorusGeometry(0.34, 0.07, 8, 18),
+    new TorusGeometry(PAN_RIM_RADIUS, PAN_RIM_TUBE, 8, 18),
     interiorMaterial(PALETTE.markerPink, 0.5),
   );
   rim.rotation.x = Math.PI / 2;
-  rim.position.y = 0.67;
+  rim.position.y = PAN_RIM_Y;
   group.add(rim);
 
   const swirl = new Mesh(
@@ -483,18 +565,18 @@ export function buildPan(x: number, z: number): PanParts {
   group.add(lid);
 
   const cistern = new Mesh(
-    new BoxGeometry(0.72, 0.62, 0.28),
+    new BoxGeometry(CISTERN_WIDTH, CISTERN_HEIGHT, CISTERN_DEPTH),
     interiorMaterial(PALETTE.blossomWhite, 0.42),
   );
-  cistern.position.set(0, 1.02, -0.48);
+  cistern.position.set(0, CISTERN_Y, CISTERN_Z);
   cistern.receiveShadow = true;
   group.add(cistern);
 
   const handle = new Mesh(
-    new SphereGeometry(0.09, 10, 8),
+    new SphereGeometry(HANDLE_RADIUS, 10, 8),
     interiorMaterial(PALETTE.markerLemon, 0.4),
   );
-  handle.position.set(0.28, 1.2, -0.33);
+  handle.position.set(HANDLE_X, HANDLE_Y, HANDLE_Z);
   group.add(handle);
 
   return { group, lid, swirl };
@@ -506,7 +588,7 @@ export function buildBasin(x: number, z: number): BasinParts {
   group.position.set(x, 0, z);
 
   const column = new Mesh(
-    new CylinderGeometry(0.16, 0.2, 0.7, 12),
+    new CylinderGeometry(0.16, BASIN_COLUMN_RADIUS, 0.7, 12),
     interiorMaterial(PALETTE.blossomWhite, 0.42),
   );
   column.position.y = 0.35;
@@ -516,27 +598,27 @@ export function buildBasin(x: number, z: number): BasinParts {
   // An open half-sphere: the cheapest thing that reads as a basin you could
   // actually put your hands in.
   const bowl = new Mesh(
-    new SphereGeometry(0.36, 16, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+    new SphereGeometry(BASIN_BOWL_RADIUS, 16, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
     interiorMaterial(PALETTE.blossomWhite, 0.4),
   );
-  bowl.position.y = 0.82;
+  bowl.position.y = BASIN_BOWL_Y;
   bowl.scale.y = 0.7;
   bowl.receiveShadow = true;
   group.add(bowl);
 
   const tap = new Mesh(
-    new CylinderGeometry(0.05, 0.05, 0.34, 10),
+    new CylinderGeometry(TAP_RADIUS, TAP_RADIUS, TAP_HEIGHT, 10),
     interiorMaterial(PALETTE.markerLemon, 0.4),
   );
-  tap.position.set(0, 1.02, -0.26);
+  tap.position.set(0, TAP_Y, TAP_Z);
   group.add(tap);
 
   const spout = new Mesh(
-    new CylinderGeometry(0.045, 0.045, 0.2, 10),
+    new CylinderGeometry(SPOUT_RADIUS, SPOUT_RADIUS, SPOUT_LENGTH, 10),
     interiorMaterial(PALETTE.markerLemon, 0.4),
   );
   spout.rotation.x = Math.PI / 2;
-  spout.position.set(0, 1.16, -0.16);
+  spout.position.set(0, SPOUT_Y, SPOUT_Z);
   group.add(spout);
 
   const stream = new Mesh(
@@ -548,10 +630,10 @@ export function buildBasin(x: number, z: number): BasinParts {
   group.add(stream);
 
   const mirror = new Mesh(
-    new BoxGeometry(0.7, 0.8, 0.08),
+    new BoxGeometry(MIRROR_WIDTH, MIRROR_HEIGHT, MIRROR_DEPTH),
     interiorMaterial(PALETTE.buildingWindow, 0.3),
   );
-  mirror.position.set(0, 1.72, -0.42);
+  mirror.position.set(0, MIRROR_Y, MIRROR_Z);
   group.add(mirror);
 
   return { group, stream };

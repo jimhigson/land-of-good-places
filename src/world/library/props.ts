@@ -1,4 +1,5 @@
 import type { BoxCollider, CollisionWorld, WallCollider } from '../Collision';
+import { FOOT_HALF_WIDTH } from '../measuredTop';
 import { BUILDING_STEP_UP } from '../../core/constants';
 import { LIBRARY_ARRIVAL, LIBRARY_STAND_KEEP_OUT, libraryStandSpots, type LocalPoint } from './layout';
 
@@ -192,7 +193,7 @@ export class LibraryProps {
    * Returns the box's collider ({@link BoxWalls}), so a box that must come and
    * go can be {@link detach}ed and {@link attach}ed whole.
    */
-  box(what: string, footprint: BoxFootprint, top: PropTop, ledge = true): BoxWalls {
+  box(what: string, footprint: BoxFootprint, top: PropTop, topHalf = Number.NaN): BoxWalls {
     const yaw = (footprint.facing * Math.PI) / 180;
     // The box's length runs across its facing: `(cos, -sin)` is local +X, so
     // the collider's own yaw (local +X onto `(cos θ, sin θ)`) is `-yaw`.
@@ -212,12 +213,11 @@ export class LibraryProps {
     this.checkBoxKeepOuts(what, footprint, top);
     const worldX = this.originX + footprint.x;
     const worldZ = this.originZ + footprint.z;
-    // `ledge` false: met square, never stood on — a chair's arms and back
-    // (`CollisionWorld.toppedNarrow`), not a top her feet look for.
-    const handle = ledge
-      ? this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true)
-      : this.collision.toppedNarrow(0, () => this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true));
-    if (ledge) this.standables.push({ what, top, footprint });
+    // `topHalf`: how much of its top she could stand on, measured off what is
+    // drawn (a chair's rolled arm, `libraryArmchairParts`) — the width rule
+    // (`CollisionWorld.toppedNarrow`) decides, never a flag. Omitted, all of it.
+    const handle = this.collision.toppedNarrow(topHalf, () => this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true));
+    if (Number.isNaN(topHalf) || topHalf >= FOOT_HALF_WIDTH) this.standables.push({ what, top, footprint });
     this.solids.push({ what, shape: 'box', top, points: corners, radius: 0, handle });
     return [handle];
   }

@@ -4836,6 +4836,14 @@ if (!lobbyShellForDisco) {
  */
 const KNOWN_UNREACHABLE_CELLS: Readonly<Record<string, number>> = {
   'hotel.garden': 12,
+  // The gallery's two outer nooks, beyond its outer sofas (local x ±10.9..
+  // ±12.8, z ≈ −24): 1.5 m² she walks into over a sofa — up its seat (0.5 m,
+  // a step) and its arm (0.64 m: a step from the seat, not from the floor) —
+  // which a lattice that judges a solid's top from the floor under it cannot
+  // plan. One box at the seat's height let it walk the whole sofa, and the
+  // sofa's back was air (PR #722, round two). Probe 33's real child walks in
+  // and out; a tap there is the gap, written down here so it cannot grow.
+  'hotel.lobby': 6,
 };
 
 const REACH_CELL = 0.5;

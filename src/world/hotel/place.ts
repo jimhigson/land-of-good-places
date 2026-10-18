@@ -3,6 +3,7 @@ import type { CollisionWorld } from '../Collision';
 import type { MovingPlatform } from '../building/surfaces';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { doorwayClearanceZones, type DoorwayZone, type HotelRoom } from './layout';
+import type { PropPart } from '../measuredTop';
 
 /**
  * **Putting a thing in a hotel room is one call, and that call decides
@@ -222,7 +223,10 @@ export interface PropPlan {
   readonly z: number;
   /** Height off the floor for the *model* — purely visual (a centred mesh). */
   readonly y?: number;
-  /** Yaw, radians. The footprint stays axis-aligned — see {@link place}. */
+  /**
+   * Yaw, radians. The solid turns with the model; the doorway check and the
+   * guests' keep-out take the axis-aligned box it sweeps — see {@link place}.
+   */
   readonly spin?: number;
   /** Round footprint: the radius a child's body meets. */
   readonly radius?: number;
@@ -247,10 +251,22 @@ export interface PropPlan {
    */
   readonly solid?: boolean;
   /**
-   * `false` for a solid whose top is no ledge — crystals that come to points:
-   * met square and jumped against, never stood on (`CollisionWorld.toppedNarrow`).
+   * **How much of its top she could stand on**, measured off the model
+   * (`measureTop`): the widest a foot can be centred on what is drawn just
+   * under its highest point — a crystal's point a few millimetres, a column's
+   * capital its inradius. Her feet need `FOOT_HALF_WIDTH`, and the width
+   * rule (`CollisionWorld.toppedNarrow`) decides. Omitted, the top is flat
+   * across the footprint. A measurement, never a flag: there is no value
+   * here that means "never stood on" whatever is drawn.
    */
-  readonly ledge?: boolean;
+  readonly topHalf?: number;
+  /**
+   * **The solids it really is**, prop-local before {@link spin}, each to its
+   * own top — a sofa's seat, arms, back and pillows (`sofaParts`). Given,
+   * these are its colliders, each a crisp box turned with the model, and
+   * `top` must be the highest of them; `halfX`/`halfZ` stay its keep-out.
+   */
+  readonly parts?: readonly PropPart[];
 }
 
 /**
@@ -341,38 +357,66 @@ export class HotelProps {
     const worldX = room.originX + plan.x;
     const worldZ = room.originZ + plan.z;
     const solid = plan.solid ?? true;
-    const worldTop = (plan.base ?? 0) + plan.top;
-    const topHalf = plan.ledge === false ? 0 : Number.NaN;
+    const base = plan.base ?? 0;
+    const worldTop = base + plan.top;
+    const topHalf = plan.topHalf ?? Number.NaN;
+    // **Turned with the model**, not swept to its axis-aligned box: the swept
+    // box's corners are air, and with a real top she stood on that air beside
+    // the suite's turned sofa, 0.5 m over the rug (check:solids, PR #722). The
+    // keep-out below stays the swept box — a guest's keep-out wants the
+    // superset. `prop.rotation.y = spin` carries local +X to (cos, −sin) in
+    // world x, z, so `addBox`'s yaw (local +X onto (cos θ, sin θ)) is −spin.
+    const spin = plan.spin ?? 0;
+    const cos = Math.cos(spin);
+    const sin = Math.sin(spin);
 
     if (solid) this.checkDoorwayClearance(room, plan);
 
+    if (solid && plan.parts) {
+      const highest = Math.max(...plan.parts.map((part) => part.top));
+      if (Math.abs(highest - plan.top) > 1e-6) {
+        throw new Error(`HotelProps: a prop at ${room.space} (${plan.x}, ${plan.z}) says its top is ${plan.top} m but its parts reach ${highest} m`);
+      }
+      // Crisp boxes and discs on the drawn faces: a part is thinner than the
+      // rounding a whole prop's box is inset by, and is drawn square.
+      for (const part of plan.parts) {
+        const px = worldX + part.x * cos + part.z * sin;
+        const pz = worldZ - part.x * sin + part.z * cos;
+        const partBase = part.base === undefined ? -Infinity : base + part.base;
+        this.collision.toppedNarrow(part.topHalf ?? Number.NaN, () =>
+          'radius' in part
+            ? this.collision.addCircle(px, pz, part.radius, base + part.top, false, true, partBase)
+            : this.collision.addBox(px, pz, part.halfX, part.halfZ, -spin, 0, base + part.top, false, true, partBase),
+        );
+      }
+    }
+
     if (plan.radius !== undefined) {
-      if (solid) this.collision.toppedNarrow(topHalf, () => this.collision.addCircle(worldX, worldZ, plan.radius!, worldTop, false, true));
+      if (solid && !plan.parts) this.collision.toppedNarrow(topHalf, () => this.collision.addCircle(worldX, worldZ, plan.radius!, worldTop, false, true));
       this.keepOuts.push({ room, x: plan.x, z: plan.z, radius: plan.radius });
       return;
     }
 
     // {@link effectiveHalfExtents} — the box a rotated rectangle actually
-    // occupies, or the plain box unrotated. Both consumers below (the solid
-    // and the guest keep-out) use this, not the raw `plan.halfX`/`plan.halfZ`,
-    // so a `spin` can never make one of them disagree with what the model
-    // visually covers.
+    // occupies, or the plain box unrotated: the guests' keep-out, which wants
+    // the superset of what the model covers.
     const { halfX, halfZ } = effectiveHalfExtents(
       plan.halfX ?? 0.5,
       plan.halfZ ?? 0.5,
       plan.spin,
     );
-    if (solid) {
+    if (solid && !plan.parts) {
       // One filled box, inset by its own rounding so its outline lands on the
       // visual edge rather than {@link WALL_HALF_THICKNESS} beyond it. Floored
       // well above zero so a shallow prop still makes a box rather than a
       // degenerate one.
       this.collision.toppedNarrow(topHalf, () =>
-        this.collision.addRectangle(
+        this.collision.addBox(
           worldX,
           worldZ,
-          Math.max(0.05, halfX - WALL_HALF_THICKNESS),
-          Math.max(0.05, halfZ - WALL_HALF_THICKNESS),
+          Math.max(0.05, (plan.halfX ?? 0.5) - WALL_HALF_THICKNESS),
+          Math.max(0.05, (plan.halfZ ?? 0.5) - WALL_HALF_THICKNESS),
+          -spin,
           WALL_HALF_THICKNESS,
           worldTop,
           false,

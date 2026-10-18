@@ -316,41 +316,40 @@ export function addBoothCollision(
   const sin = Math.sin(yaw);
   const cos = Math.cos(yaw);
   const toWorld = (lx: number, lz: number): [number, number] => [x + lx * cos + lz * sin, z - lx * sin + lz * cos];
-  return collision.ownedBy('booth', () =>
-    collision.kinded('stall booth', () => (h.filled ? collision.toppedNarrow(0, build) : build())),
-  );
+  return collision.ownedBy('booth', () => collision.kinded('stall booth', build));
   function build(): (WallCollider | BoxCollider)[] {
-      // The back wall and the side panels, narrow-topped where they are panels.
-      const panel = (a: [number, number], b: [number, number], height: number): WallCollider =>
-        h.panelHalf === undefined ? wall(a, b, height) : collision.toppedNarrow(h.panelHalf, () => wall(a, b, height));
-      const solids: (WallCollider | BoxCollider)[] = [wall(frontLeft, frontRight, h.front), panel(backLeft, backRight, h.back)];
-      if (h.sideFront === undefined) {
-        solids.push(panel(frontLeft, backLeft, h.sides), panel(frontRight, backRight, h.sides));
-      } else {
-        // Each side's whole length is one solid to the counter's height —
-        // the very wall the booth claims, end for end, which is how
-        // `stallsAreDrawnClaimedAndSolidTogether` finds a booth's collider —
-        // and the drawn panel stands over the back of it to its own height.
-        // Split in two instead, the claim matched no collider and every
-        // restart with a booth in it was rejected.
-        for (const [side, front, back] of [[-1, frontLeft, backLeft], [1, frontRight, backRight]] as const) {
-          solids.push(wall(front, back, h.front), panel(back, toWorld(side * box.halfWidth, h.sideFront), h.sides));
+      const walls = (): WallCollider[] => {
+        // The back wall and the side panels, narrow-topped where they are panels.
+        const panel = (a: [number, number], b: [number, number], height: number): WallCollider =>
+          h.panelHalf === undefined ? wall(a, b, height) : collision.toppedNarrow(h.panelHalf, () => wall(a, b, height));
+        const list: WallCollider[] = [wall(frontLeft, frontRight, h.front), panel(backLeft, backRight, h.back)];
+        if (h.sideFront === undefined) {
+          list.push(panel(frontLeft, backLeft, h.sides), panel(frontRight, backRight, h.sides));
+        } else {
+          // Each side's whole length is one solid to the counter's height —
+          // the very wall the booth claims, end for end, which is how
+          // `stallsAreDrawnClaimedAndSolidTogether` finds a booth's collider —
+          // and the drawn panel stands over the back of it to its own height.
+          // Split in two instead, the claim matched no collider and every
+          // restart with a booth in it was rejected.
+          for (const [side, front, back] of [[-1, frontLeft, backLeft], [1, frontRight, backRight]] as const) {
+            list.push(wall(front, back, h.front), panel(back, toWorld(side * box.halfWidth, h.sideFront), h.sides));
+          }
         }
-      }
-      // **A cart's top is its board, not its walls'**: the walls round a
-      // filled cart are what she bumps, a wall's thickness outside the drawn
-      // body, and as tops they stood her a third of a metre out past the
+        return list;
+      };
+      // **A filled cart is its own drawn body**: the filled core below, the
+      // cart's outline to its board. The four walls round it are the ground
+      // it claims — centred on the outline, so half of each is air outside the
+      // body — and as tops they stood her a third of a metre out past the
       // cart's edge, on air (seeds 6 and 12, "0.50 m over the drawn
-      // keychainShop"). So they hold nobody (`toppedNarrow(0)`, round the
-      // whole build) and the filled core — the cart's own outline — is the
-      // top she lands on.
+      // keychainShop"). So for a filled cart they are a closure
+      // (`CollisionWorld.asClosure`): the route lattice and the placers read
+      // them as before, and no mover meets them — she meets the cart she sees.
+      const solids: (WallCollider | BoxCollider)[] = h.filled ? collision.asClosure(walls) : walls();
       if (h.filled) {
         const [cx, cz] = toWorld(0, (box.front + box.back) / 2);
-        solids.push(
-          collision.toppedNarrow(Number.NaN, () =>
-            collision.addBox(cx, cz, box.halfWidth, (box.front - box.back) / 2, -yaw, 0, yAtRadius(cx, cz, foot + h.front), false, true),
-          ),
-        );
+        solids.push(collision.addBox(cx, cz, box.halfWidth, (box.front - box.back) / 2, -yaw, 0, yAtRadius(cx, cz, foot + h.front), false, true));
       }
       if (h.awning) {
         const a = h.awning;

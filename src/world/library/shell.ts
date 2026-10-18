@@ -259,13 +259,13 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
     const b = frame.foot(x2, z2);
     const topA = frame.topY(a.x, a.z, x1, z1, height);
     const topB = frame.topY(b.x, b.z, x2, z2, height);
-    // A plinth's edge is what she bumps, not what she stands on: centred on
-    // the drawn edge, half of it stood out over the ground beside the plinth,
-    // and the census stood her there, 0.15 m over the step below (seven seeds).
-    // The plinth's top is its plate (`registerLibrarySteps`), which she walks.
+    // An edge stands wholly on the stone (its outer face on the drawn edge)
+    // and to the stone's own top where it runs (`edgeRun`): a top to stand on
+    // like the plate beside it, and a riser to step up where it is a step
+    // high — nothing marks it otherwise (PR #722). Run at the plinth's height
+    // past the steps, it once stood her 0.18 m over the bottom tread.
     const edge = height !== plan.height;
-    const build = (): WallCollider => collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, -Infinity, false, Number.NaN, topB);
-    list.push(collision.kinded(edge ? 'library plinth edge' : 'library walls', () => (edge ? collision.toppedNarrow(0, build) : build())));
+    list.push(collision.kinded(edge ? 'library plinth edge' : 'library walls', () => collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, -Infinity, false, Number.NaN, topB)));
   };
   const H = SHELL_HALF;
   const t = EDGE_HALF;
@@ -306,9 +306,12 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
 
   const edges: WallCollider[] = [];
   const px = plan.plinthHalfX - t;
-  add(edges, px, plan.stepFrontZ - t, px, plan.plinthBackZ + t, t, plan.plinthTop);
+  // Each side, back to front, in runs of one drawn height: the plinth, then
+  // each tread of the steps down to the path (`edgeRun`).
+  for (const x of [px, -px]) {
+    for (const run of edgeRuns(x, plan.plinthBackZ + t, plan.stepFrontZ - t)) add(edges, x, run.fromZ, x, run.toZ, t, run.top);
+  }
   add(edges, px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, t, plan.plinthTop);
-  add(edges, -px, plan.plinthBackZ + t, -px, plan.stepFrontZ - t, t, plan.plinthTop);
 
   const columns = plan.columns.map((column) => {
     const at = frame.foot(column.x, column.z);
@@ -316,6 +319,32 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
     return collision.kinded('library column', () => collision.addCircle(at.x, at.z, column.radius, top, false, true));
   });
   return { walls, corners, edges, columns };
+}
+
+/** How finely a plinth edge is walked to find where the drawn stone steps down. */
+const EDGE_RUN_STEP = 0.02;
+
+/**
+ * **A plinth edge in runs of one drawn height** — along `x` from `fromZ` to
+ * `toZ`, the stone's own top under it (`libraryTopOver`, a ray down the kit),
+ * split at each riser: the plinth's top, then each tread of the steps.
+ */
+function edgeRuns(x: number, fromZ: number, toZ: number): { readonly fromZ: number; readonly toZ: number; readonly top: number }[] {
+  const runs: { fromZ: number; toZ: number; top: number }[] = [];
+  const count = Math.max(1, Math.ceil((toZ - fromZ) / EDGE_RUN_STEP));
+  for (let i = 0; i <= count; i += 1) {
+    const z = fromZ + ((toZ - fromZ) * i) / count;
+    const top = libraryTopOver(['shell-plinth', 'shell-steps'], x, z);
+    if (top === null) continue;
+    const last = runs[runs.length - 1];
+    if (last && Math.abs(last.top - top) < 0.005) last.toZ = z;
+    else {
+      // A riser: split halfway between the two heights' samples.
+      if (last) last.toZ = (last.toZ + z) / 2;
+      runs.push({ fromZ: last ? last.toZ : z, toZ: z, top });
+    }
+  }
+  return runs.filter((run) => run.toZ - run.fromZ > 1e-3);
 }
 
 /** The library roof's strips: about this wide across the cella, and this long front to back, so each top lies on the roof's slope. */

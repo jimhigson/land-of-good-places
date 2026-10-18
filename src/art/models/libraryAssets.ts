@@ -23,7 +23,7 @@ import { ART } from '../style/artPalette';
 import { addOutline, addSmoothOutline, decal, markShared, solid, toonMaterial, type ToonOptions } from '../style/materials';
 import { visibleBounds, visiblePoints } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
-import { kitBounds, kitTreads, libraryPart, libraryPartNames, LIBRARY_SHELF_FOOTPRINT, LIBRARY_SHELL_NODES } from './libraryKit';
+import { kitBounds, kitTop, kitTreads, libraryPart, libraryPartNames, LIBRARY_SHELF_FOOTPRINT, LIBRARY_SHELL_NODES } from './libraryKit';
 
 /**
  * **The Library's models** (#716) — the building and everything that
@@ -748,13 +748,18 @@ export function libraryArmchairSize(): {
   };
 }
 
-/** One solid part of the armchair, chair-local: its middle, half-extents across (x) and back-to-front (z), and its top. */
+/**
+ * One solid part of the armchair, chair-local: its middle, half-extents across
+ * (x) and back-to-front (z), its top, and how much of that top she could stand
+ * on (`kitTop`'s measure; omitted, all of it).
+ */
 export interface ArmchairPart {
   readonly centreX: number;
   readonly centreZ: number;
   readonly halfX: number;
   readonly halfZ: number;
   readonly top: number;
+  readonly topHalf?: number;
 }
 
 /**
@@ -768,7 +773,13 @@ export interface ArmchairPart {
 export function libraryArmchairParts(): readonly ArmchairPart[] {
   const plan = kitBounds(['armchair-frame', 'armchair-seat', 'armchair-feet']);
   const seat = kitBounds(['armchair-seat']);
-  const frameOver = (keep: (x: number, z: number) => boolean): number => kitBounds(['armchair-frame'], (x, _y, z) => keep(x, z)).maxY;
+  // The frame over a part of the plan: its top, and the crown of it a foot
+  // could stand on — a rolled arm's tube, the back's roll (PR #722: these
+  // were `ledge: false`, never stood on whatever they measured).
+  const frameOver = (minX: number, maxX: number, minZ: number, maxZ: number): ArmchairPart => {
+    const measured = kitTop(['armchair-frame'], (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ);
+    return { ...box(minX, maxX, minZ, maxZ, measured.top), topHalf: measured.topHalf };
+  };
   const box = (minX: number, maxX: number, minZ: number, maxZ: number, top: number): ArmchairPart => ({
     centreX: (minX + maxX) / 2,
     centreZ: (minZ + maxZ) / 2,
@@ -776,11 +787,27 @@ export function libraryArmchairParts(): readonly ArmchairPart[] {
     halfZ: (maxZ - minZ) / 2,
     top,
   });
+  // Where the back stands: the arms and the seat begin where the frame over
+  // an arm is no taller than the arm's own crown (measured over its front
+  // half, clear of the back) — found by halving, because the back leans and
+  // its front face is not one z. Split at the seat's back instead, the back's
+  // ends reached into the arms and stood them 1.1 m tall, where the roll is
+  // 0.72.
+  const overArm = (fromZ: number): number => kitTop(['armchair-frame'], (x, z) => x < seat.minX && z >= fromZ).top;
+  const armCrest = overArm((seat.minZ + plan.maxZ) / 2);
+  let behind = plan.minZ;
+  let clear = (seat.minZ + plan.maxZ) / 2;
+  for (let i = 0; i < 16; i += 1) {
+    const mid = (behind + clear) / 2;
+    if (overArm(mid) > armCrest + 0.01) behind = mid;
+    else clear = mid;
+  }
+  const backFront = clear;
   return [
-    box(seat.minX, seat.maxX, seat.minZ, plan.maxZ, seat.maxY),
-    box(plan.minX, seat.minX, seat.minZ, plan.maxZ, frameOver((x, z) => x < seat.minX && z >= seat.minZ)),
-    box(seat.maxX, plan.maxX, seat.minZ, plan.maxZ, frameOver((x, z) => x > seat.maxX && z >= seat.minZ)),
-    box(plan.minX, plan.maxX, plan.minZ, seat.minZ, frameOver((_x, z) => z < seat.minZ)),
+    box(seat.minX, seat.maxX, backFront, plan.maxZ, seat.maxY),
+    frameOver(plan.minX, seat.minX, backFront, plan.maxZ),
+    frameOver(seat.maxX, plan.maxX, backFront, plan.maxZ),
+    frameOver(plan.minX, plan.maxX, plan.minZ, backFront),
   ];
 }
 

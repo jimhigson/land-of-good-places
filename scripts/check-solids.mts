@@ -159,6 +159,30 @@ const world = park.world;
 const collision = world.collision;
 const sample = park.sample;
 
+/**
+ * **The escapes, by what she reaches** (the brief: out of the park, onto the
+ * railway, into an enclosure, over a ride's fence, onto a roof). Each is
+ * asserted as the place itself, never as a guard's top: a guard stood on but
+ * not passed has guarded, and is reported, not failed.
+ *
+ * - Roofs: standing on one is the escape.
+ * - Enclosures: an exhibit's solid is its habitat — standing on it is
+ *   standing over the animals.
+ * - The railway: its own clause below, and any top of its corridor.
+ * - Out of the park: clause 7, at every height.
+ */
+const ROOF_KINDS: Readonly<Record<string, string>> = {
+  'stall awning': "a stall's roof",
+  'stall parasol': "the keychain cart's parasol",
+  'station canopy': "a station's roof",
+  'bus shelter canopy': "the bus shelter's roof",
+  'castle roof deck': "the castle's roof",
+  'library roof': "the library's roof",
+  'reptile house roof': "the reptile house's roof",
+  'roof pavilion': "the roof garden pavilion's roof",
+  'roof turret': "a roof garden turret's top",
+  'toilet privacy roof': "a hotel bathroom nook's roof",
+};
 // The proofs that add a solid add it here, before anything is measured. None
 // edits a solid in place: a clause must go red because the park it measures is
 // broken, never because its own bookkeeping was.
@@ -239,7 +263,7 @@ const sample = park.sample;
   // Every roof the clause names, one step each, in a ring round the gate's
   // arrival: the clause must name all of them.
   if (PROVE === 'every-roof') {
-    const roofs = ['stall awning', 'stall parasol', 'station canopy', 'bus shelter canopy', 'castle roof deck', 'library roof', 'reptile house roof', 'roof pavilion', 'roof turret'];
+    const roofs = Object.keys(ROOF_KINDS);
     roofs.forEach((kind, i) => {
       const a = (i / roofs.length) * Math.PI * 2;
       const x = ENTRANCE_PLAYER_X + Math.cos(a) * 4.5;
@@ -434,29 +458,6 @@ const spaceRuns: SpaceRun[] = [
   },
 ];
 
-/**
- * **The escapes, by what she reaches** (the brief: out of the park, onto the
- * railway, into an enclosure, over a ride's fence, onto a roof). Each is
- * asserted as the place itself, never as a guard's top: a guard stood on but
- * not passed has guarded, and is reported, not failed.
- *
- * - Roofs: standing on one is the escape.
- * - Enclosures: an exhibit's solid is its habitat — standing on it is
- *   standing over the animals.
- * - The railway: its own clause below, and any top of its corridor.
- * - Out of the park: clause 7, at every height.
- */
-const ROOF_KINDS: Readonly<Record<string, string>> = {
-  'stall awning': "a stall's roof",
-  'stall parasol': "the keychain cart's parasol",
-  'station canopy': "a station's roof",
-  'bus shelter canopy': "the bus shelter's roof",
-  'castle roof deck': "the castle's roof",
-  'library roof': "the library's roof",
-  'reptile house roof': "the reptile house's roof",
-  'roof pavilion': "the roof garden pavilion's roof",
-  'roof turret': "a roof garden turret's top",
-};
 /**
  * **A kind named like a roof must be one of the roofs above, or say here why it
  * is not** — so a roof added later cannot be missing from the clause, as the
