@@ -1,16 +1,14 @@
 import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng, damp } from '../../core/mathUtils';
-import { PLAYER_RADIUS } from '../../core/constants';
 import type { InputSystem } from '../../core/input';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import { createConfetti, type Confetti } from '../../minigames/railRacer/confetti';
 import { gameStore } from '../../state';
 import { discoverSecret } from '../../state/secrets';
 import { terrainHeight } from '../terrain';
-import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
@@ -400,7 +398,6 @@ export class RailRace implements GameSystem {
   /** The touch half of duck: true for as long as a finger is dragged down and held. */
   touchDucking: (() => boolean) | null = null;
 
-  private readonly collision: CollisionWorld;
   /** The ring the rivals live on between races. Always visible; always solid. */
   private readonly walkPastRing: Ring;
   /** The ring a race is run on. Visible only between `requestBoard` and `arrive`. */
@@ -443,7 +440,6 @@ export class RailRace implements GameSystem {
   private standings: number[] = [];
 
   constructor(collision: CollisionWorld, groundClaims: GroundClaims, findSpots: TrestleSpotFinder) {
-    this.collision = collision;
     this.group.name = 'railRace';
 
     // Both rings, built here and never again — see {@link Ring}. Level-
@@ -600,11 +596,14 @@ export class RailRace implements GameSystem {
     this.rideView = new RaceCamera(RAIL_RACE_PLAN.raceRing);
   }
 
+  /** Whoever races is held by this — and let go by arriving back at the booth now. */
+  private readonly holder: RideHolder = { holding: 'the Rail Race', letGo: () => this.arrive() };
+
   /** The stall's interact press lands here. */
   requestBoard(): boolean {
     if (this.riding || !this.player || this.phase !== 'waiting') return false;
     this.riding = true;
-    this.player.beginRide();
+    this.player.beginRide(this.holder);
     // RIDE_SCALE scales her own live model too, not just the decorative
     // rivals — reset in arrive() so she is her normal size again once she is
     // walking around the park.
@@ -1237,17 +1236,14 @@ export class RailRace implements GameSystem {
       // `setRiderLegsVisible` for the bug this shape exists to avoid.
       setRiderLegsVisible(this.player.model, true);
       // The planned exit (`railRace/plan.ts`) — a clear patch beside the booth
-      // — with the runtime safety net on top (see `world/dismount.ts`).
-      const { x, z } = resolveDismount(
-        this.collision,
-        RAIL_RACE_PLAN.exitX,
-        RAIL_RACE_PLAN.exitZ,
-        PLAYER_RADIUS,
-      );
-      this.player.setRidePose(x, terrainHeight(x, z), z, 0);
+      // — checked by `endRide`'s put-down rule (see `world/dismount.ts`).
+      const exitX = RAIL_RACE_PLAN.exitX;
+      const exitZ = RAIL_RACE_PLAN.exitZ;
       // Undo the RIDE_SCALE boarding scale-up now she's back on foot.
       this.player.model.root.scale.setScalar(1);
-      this.player.endRide();
+      this.player.endRide({ x: exitX, y: terrainHeight(exitX, exitZ), z: exitZ, facing: 0 });
+      // Where the rule actually put her, for the party gathered round her.
+      const { x, z } = this.player.position;
       this.onRideChange?.(false);
       this.input?.setMouseCaptureActive(false);
 

@@ -42,9 +42,11 @@ import {
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAY_RADIUS,
+  libraryStandSpots,
   type LibraryExteriorPlan,
   type LocalPoint,
 } from './layout';
+import type { OpenAreaPoint } from '../dismount';
 
 /**
  * **The Library** (#714, part 2: #716) — Jim, 13 October 2026: *"a library,
@@ -441,6 +443,28 @@ export class Library implements GameSystem {
     player.teleportTo(LIBRARY_ORIGIN_X + spot.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + spot.z, facing);
     // A fresh visit starts with every stack solid.
     for (const stack of this.stacks) stack.setAlpha(1);
+  }
+
+  /**
+   * **The reading room's open area**, for the put-down rule
+   * (`world/dismount.ts`): `libraryStandSpots`, the single owner of every spot
+   * a child must be able to stand on in here — the arrival, the doorway, the
+   * desk, every seat's front, every readable book's stand. World metres.
+   */
+  openArea(): OpenAreaPoint[] {
+    return libraryStandSpots().map((spot) => ({ x: LIBRARY_ORIGIN_X + spot.x, z: LIBRARY_ORIGIN_Z + spot.z }));
+  }
+
+  /**
+   * **She has been taken somewhere else, behind an iris somebody else is
+   * running** — the "Next day" button, from the reading room. The room stops
+   * being where she is, as walking out would leave it; no teleport and no play
+   * bounds, which the space she was taken to owns.
+   */
+  releasePlayer(): void {
+    if (!this.inside) return;
+    this.inside = false;
+    this.roomRoot.visible = false;
   }
 
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */

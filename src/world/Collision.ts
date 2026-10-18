@@ -394,6 +394,11 @@ export const MAX_DEPENETRATION_SPEED = 3;
  */
 const BOUNDARY_LEASH_REACH = 100;
 
+/** An edge gap that far outside the boundary is another space — {@link BOUNDARY_LEASH_REACH}'s one comparison. */
+function beyondLeash(edgeGap: number): boolean {
+  return edgeGap <= -BOUNDARY_LEASH_REACH;
+}
+
 /**
  * How much of a collider's own half-footprint a single movement sub-step is
  * allowed to cover — see {@link CollisionWorld.resolveMovement}.
@@ -647,6 +652,64 @@ export class CollisionWorld {
   /** The soft boundary, for anything that has to map the space inside it. */
   get playBounds(): ParkBoundary {
     return this.bounds;
+  }
+
+  /**
+   * **The soft boundary's gap where it would push a mover of `radius` at
+   * `(x, z)`, or `null` where it leaves her alone** — a full radius inside the
+   * edge, or so far outside it that she is in another space entirely
+   * ({@link inAnotherSpace}). The one owner of that rule: `resolve` pushes by
+   * it, and the put-down rule (`world/dismount.ts`) asks it before putting a
+   * child down, so it never puts her where the boundary would shove.
+   */
+  boundaryShortfall(x: number, z: number, radius: number): number | null {
+    const edgeGap = this.bounds.distanceToEdge(x, z);
+    return edgeGap < radius && !beyondLeash(edgeGap) ? edgeGap : null;
+  }
+
+  /** {@link boundaryShortfall}'s "leaves her alone", as a yes or no. */
+  clearOfBoundary(x: number, z: number, radius: number): boolean {
+    return this.boundaryShortfall(x, z, radius) === null;
+  }
+
+  /**
+   * **Somewhere else entirely, as far as these play bounds are concerned** —
+   * {@link BOUNDARY_LEASH_REACH} or more outside them, where the edge has
+   * nothing to say: another space, whose own bounds are not the ones set.
+   */
+  inAnotherSpace(x: number, z: number): boolean {
+    return beyondLeash(this.bounds.distanceToEdge(x, z));
+  }
+
+  /**
+   * **A small world of just the solids near `(x, z)`** — every collider whose
+   * footprint comes within `reach` metres, the same objects (never copies, so
+   * nothing can drift), the same play bounds. For a caller that asks hundreds of
+   * point questions about one neighbourhood — `world/dismount.ts`'s ring
+   * search, which asks whether her body is clear at every spot it tries — and
+   * would otherwise scan the whole park's three thousand colliders for each.
+   * Every query on it answers exactly as this world would for a point within
+   * `reach` of `(x, z)`.
+   */
+  near(x: number, z: number, reach: number): CollisionWorld {
+    const view = new CollisionWorld();
+    view.bounds = this.bounds;
+    for (const circle of this.circles) {
+      if (Math.hypot(circle.x - x, circle.z - z) - circle.radius > reach) continue;
+      view.circles.push(circle);
+      view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, circle.radius);
+    }
+    for (const wall of this.walls) {
+      const dx = wall.x2 - wall.x1;
+      const dz = wall.z2 - wall.z1;
+      const lengthSq = dx * dx + dz * dz;
+      const t = lengthSq < 1e-8 ? 0 : Math.max(0, Math.min(1, ((x - wall.x1) * dx + (z - wall.z1) * dz) / lengthSq));
+      const gap = Math.hypot(wall.x1 + t * dx - x, wall.z1 + t * dz - z) - wall.halfThickness;
+      if (gap > reach) continue;
+      view.walls.push(wall);
+      view.thinnestHalfWidth = Math.min(view.thinnestHalfWidth, wall.halfThickness);
+    }
+    return view;
   }
 
   /**
@@ -1240,8 +1303,8 @@ export class CollisionWorld {
       // four extra queries only happen when the walker is actually within her
       // own radius of the edge, which is rare — everywhere else this is the one
       // `distanceToEdge` call it always was.
-      const edgeGap = this.bounds.distanceToEdge(position.x, position.z);
-      if (edgeGap < radius && edgeGap > -BOUNDARY_LEASH_REACH) {
+      const edgeGap = this.boundaryShortfall(position.x, position.z, radius);
+      if (edgeGap !== null) {
         const e = 0.25;
         const gradientX =
           this.bounds.distanceToEdge(position.x + e, position.z) -
