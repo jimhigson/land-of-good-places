@@ -80,7 +80,7 @@ import { REPTILE_ARRIVAL_X, REPTILE_ARRIVAL_Z, REPTILE_HOUSE_ORIGIN_X, REPTILE_H
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
 import { altitudeAt, planetRadiusAt, terrainHeight } from '../src/world/terrain.ts';
-import { carryReference } from '../src/world/building/stepReach.ts';
+import { carryReference, riseBetween } from '../src/world/building/stepReach.ts';
 import { STEP_SAMPLES, standingHeight, teleportHeight } from '../src/world/standing.ts';
 
 /**
@@ -1238,8 +1238,8 @@ if (spacesInPart.length) {
             if (at) {
               collision.forEachSolid((other) => {
                 if (overStep || !other.autoHoppable || other.depthAt(at.px, at.pz) <= -PLAYER_RADIUS) return;
-                const top = other.topAt(at.px, at.pz);
-                if (altitudeAt(at.px, top, at.pz) - altitudeAt(at.fx, at.fy, at.fz) > BUILDING_STEP_UP) overStep = true;
+                // Over her feet as the hop itself asks it (`CollisionWorld.hopsOver`).
+                if (riseBetween(at.fx, at.fy, at.fz, at.px, other.topAt(at.px, at.pz), at.pz) > BUILDING_STEP_UP) overStep = true;
               });
             }
             if (overStep) {

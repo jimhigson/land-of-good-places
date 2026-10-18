@@ -1,4 +1,5 @@
 import { GRAVITY, JUMP_SPEED, PLAYER_HEIGHT_DAMP_HALF_LIFE, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../core/constants';
+import { JUMP_CLEARANCE_GRACE } from './Collision';
 
 /**
  * **How high her feet can be, anywhere a jump can take them** — the one owner
@@ -55,12 +56,24 @@ export function runLagOver(descent: number): number {
 }
 
 /**
- * How much a guard keeps over the highest her feet get. Her frame clock only
- * ever takes her lower than the continuous arc {@link jumpRiseAt} is (1.2267 m
- * at 60 fps, 1.2538 m at 120, against 1.2812 m in the limit), so this is for
- * the guard's own sampling, not for her.
+ * How much a guard keeps over what she can clear, past the clearance grace
+ * below. Her frame clock only ever takes her lower than the continuous arc
+ * {@link jumpRiseAt} is (1.2267 m at 60 fps, 1.2538 m at 120, against
+ * 1.2812 m in the limit), so this is for the guard's own sampling, not for her.
  */
 export const GUARD_MARGIN = 0.05;
+
+/**
+ * **What a guard has to stand over the highest her feet get**: the resolver
+ * lets her through anything whose top is within `JUMP_CLEARANCE_GRACE` of her
+ * feet (a jump that grazes a wall's top hops it), so a guard under her feet's
+ * highest by less than that is a guard she clears — and once she is over its
+ * line, it pushes her out on the far side. Seed 4: a sprint along a bridge's
+ * deck over the line, a jump down the ramp, her feet 3.7 cm under the railing,
+ * and she was through it and on the track five metres below. Plus
+ * {@link GUARD_MARGIN}.
+ */
+export const GUARD_OVER_FEET = JUMP_CLEARANCE_GRACE + GUARD_MARGIN;
 
 /** A place she can jump from: its plan position, the radius her feet leave from, and how fast that ground falls away along each axis. */
 export interface Takeoff {
@@ -77,8 +90,8 @@ export interface Takeoff {
  * **The radius a guard at `(x, z)` must stand to, to stop every jump she can
  * make at it** from `takeoffs` — the highest her feet get over its line
  * ({@link jumpRiseAt} from each, with the lag a run down that ground leaves
- * her at, {@link runLagOver}), plus {@link GUARD_MARGIN}. `-Infinity` when no
- * takeoff is within a jump of it.
+ * her at, {@link runLagOver}), plus {@link GUARD_OVER_FEET}. `-Infinity` when
+ * no takeoff is within a jump of it.
  */
 export function guardRadiusNeeded(takeoffs: Iterable<Takeoff>, x: number, z: number): number {
   let need = -Infinity;
@@ -91,5 +104,5 @@ export function guardRadiusNeeded(takeoffs: Iterable<Takeoff>, x: number, z: num
     const descent = distance > 1e-6 ? -(q.slopeX * dx + q.slopeZ * dz) / distance : 0;
     need = Math.max(need, q.radius + runLagOver(descent) + jumpRiseAt(distance));
   }
-  return need + GUARD_MARGIN;
+  return need + GUARD_OVER_FEET;
 }

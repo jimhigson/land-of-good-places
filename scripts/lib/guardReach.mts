@@ -104,7 +104,10 @@ export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: num
   // ceilings and all), so this is every run she can make on the walk to a
   // guard. Never the line itself: the corridor between the fences is a
   // closure (`CollisionWorld.closedAt`) — and a station's own stretch, which
-  // has none, is where she stands to board.
+  // has none, is where she stands to board. But a bridge's deck over the line
+  // is hers: the closure is the ground under it, and the first cut left out
+  // every takeoff on the span (seed 4: a sprint along the span and a jump
+  // down the ramp went through a railing this instrument called tall enough).
   const cells = new Map<string, { x: number; z: number; radius: number }>();
   const key = (i: number, j: number): string => `${i},${j}`;
   const reach = JUMP_PLAN_REACH + GRID;
@@ -120,7 +123,7 @@ export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: num
         const ground = sample(x, z, 1e3);
         if (!Number.isFinite(ground)) continue;
         // Not where a solid stands: nobody runs inside a trunk or a booth.
-        if (collision.closedAt(x, z) || onVehicle(x, z) || standingHeight(ground, collision, x, z, ground) > ground + 1e-6 || insideSolid(x, z, ground)) continue;
+        if ((collision.closedAt(x, z) && !onDeck(x, z)) || onVehicle(x, z) || standingHeight(ground, collision, x, z, ground) > ground + 1e-6 || insideSolid(x, z, ground)) continue;
         cells.set(k, { x, z, radius: planetRadiusAt(x, ground, z) });
       }
     }
