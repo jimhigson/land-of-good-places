@@ -91,7 +91,14 @@ marking; guards stop her by real height, never a flag.
     killed): railings, fence, put-down on a wall top (moved 0), café let-go (moved 1.0, found).
   - Park hop (es-parkhop.mts, seed 5, real sim on the planet): branch 173/1550 not clean on 12 walls,
     none stuck; main's code 276/1270 on 14 walls, 2 walls stuck from one side. Pre-existing; PR gap.
-- Next: PR head → 24376487+, CI green, compare CI parks, preview, PR body (/tmp/es-pr-body.md), report.
+  - 450cb467: NavGrid skips colliders that miss the lattice before walksOnto (a window asked the walk
+    sampler under all ~3,800 solids): put-down 14.1 → 7.1 ms (main 5.8, idle). Gate at 450cb467
+    (snap5): shards 1-9 exit 0 (/tmp/es-shards3; check:exits 582 put-downs 6.6 ms avg), test:procgen 0
+    (46/2154), build 0. PR head pushed there; CI run on 60f43769 superseded.
+- Previews: (a) pr-722-7defc91…/hotel; (b) https://pr-722-ff686cb-land-of-good-places.blockstack.workers.dev
+  (from the PR's own comment). (c): the newest "Deploy PR preview" comment once CI deploys.
+- Next: CI green on the final head, compare CI parks (/tmp/es-compare-parks.mjs), preview check,
+  PR body (/tmp/es-pr-body.md), report.
 - Planet note (measured, es-leanreach.mts): with the carry, a jump's apex over the ground is
   cos(lean) × flat (gravity is along world y): 1.23 m middle, 1.20 @44 m, 1.13 @85 m inward;
   outward adds the damp lag (to 1.41). Pre-existing physics; hop policy is position-blind.
