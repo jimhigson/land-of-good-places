@@ -177,6 +177,13 @@ interface SolidHeights {
    * she can see, by their height; what stops her at a cart is the cart.
    */
   closure: boolean;
+  /**
+   * The last bucketed query that gathered it ({@link CollisionWorld.gatherNear}),
+   * so one query gathers it once however many of its cells it is filed in.
+   * Shared by every world it is in (a {@link CollisionWorld.near} view holds
+   * the same objects), so the stamps come from one counter for all of them.
+   */
+  visit: number;
 }
 
 // The width rule's two numbers live with the measure of a drawn top
@@ -835,6 +842,13 @@ interface SolidBucket {
   readonly circles: CircleCollider[];
   readonly walls: WallCollider[];
   readonly boxes: BoxCollider[];
+  /**
+   * The walls whose tops are drawn away from their footprints (the garden
+   * walls, `toppedShifted`), filed by where their tops are — what
+   * `highestTopAt` asks of them. They are filed by footprint in `walls` too,
+   * for everything that meets their sides.
+   */
+  readonly shiftedTops: WallCollider[];
 }
 
 /**
@@ -857,7 +871,34 @@ interface SolidGrid {
   readonly revision: number;
   readonly cells: Map<number, SolidBucket>;
   readonly wide: SolidBucket;
+  /** What `bucketsAt` hands back: each cell with the wide bucket, built once, so a query allocates nothing. */
+  readonly withWide: Map<number, readonly SolidBucket[]>;
+  readonly wideOnly: readonly SolidBucket[];
+  /** Each collider's place in its own list as the grid was built: the order a gathered query visits them in ({@link CollisionWorld.gatherNear}). */
+  readonly order: Map<SolidHeights, number>;
 }
+
+/**
+ * Every bucketed gather's stamp ({@link SolidHeights.visit}): one counter for
+ * every world, because a collider can be in several (a `near` view holds the
+ * same objects as the world it was cut from).
+ */
+let gatherStamp = 0;
+
+/**
+ * **How far a gathered `resolve` may push her from where it gathered** before
+ * it stops trusting what it gathered: further than this, it starts again from
+ * where she was over every collider in the world. A push is her overlap at
+ * most, a few centimetres walking into a wall and an escort's budget beyond;
+ * a metre is far more than one call ever moves her.
+ */
+const RESOLVE_REACH = 1;
+
+/** More grid cells than this round a gather, and the query scans every collider instead. */
+const GATHER_MAX_CELLS = 64;
+
+/** A world with no more colliders than this is scanned whole: gathering costs more than it saves there. */
+const GATHER_MIN_SOLIDS = 48;
 
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
@@ -1110,6 +1151,7 @@ export class CollisionWorld {
       hopHeight: !topIsAbsolute ? topHeight : hopHeight,
       topHalf: this.currentTopHalf,
       closure: this.currentClosure,
+      visit: 0,
     };
   }
 
@@ -1192,6 +1234,7 @@ export class CollisionWorld {
    */
   highestTopAt(x: number, z: number, ceiling: number): number {
     let best = -Infinity;
+    if (!this.anyTopToStandOn()) return best;
     for (const bucket of this.bucketsAt(x, z)) {
       for (const circle of bucket.circles) {
         if (!circle.topIsAbsolute || circle.closure) continue;
@@ -1220,14 +1263,14 @@ export class CollisionWorld {
         if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
         best = top;
       }
-    }
-    // The few walls with shifted tops (the garden walls), every time.
-    for (const wall of this.shiftedTops) {
-      if (!wall.topIsAbsolute || wall.closure) continue;
-      if (!wallTopCovers(wall, x, z)) continue;
-      const top = solidTopAt(wall, x, z);
-      if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
-      best = top;
+      // The walls with shifted tops (the garden walls), filed by where their tops are.
+      for (const wall of bucket.shiftedTops) {
+        if (!wall.topIsAbsolute || wall.closure) continue;
+        if (!wallTopCovers(wall, x, z)) continue;
+        const top = solidTopAt(wall, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
     }
     return best;
   }
@@ -1242,18 +1285,19 @@ export class CollisionWorld {
    */
   ceilingAt(x: number, z: number, fromY: number): number {
     let best = Infinity;
-    const consider = (solid: SolidHeights): void => {
-      if (!banded(solid) || solid.closure) return;
-      const base = solidBaseAt(solid, x, z);
-      if (base >= fromY && base < best) best = base;
-    };
+    // Only banded solids have an underside, and they are few: each is asked
+    // its band before its footprint (this runs several times a frame).
     for (const bucket of this.bucketsAt(x, z)) {
       for (const circle of bucket.circles) {
+        if (!banded(circle) || circle.closure) continue;
         const dx = x - circle.x;
         const dz = z - circle.z;
-        if (dx * dx + dz * dz <= circle.radius * circle.radius) consider(circle);
+        if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
+        const base = solidBaseAt(circle, x, z);
+        if (base >= fromY && base < best) best = base;
       }
       for (const wall of bucket.walls) {
+        if (!banded(wall) || wall.closure) continue;
         const ax = wall.x2 - wall.x1;
         const az = wall.z2 - wall.z1;
         const lengthSquared = ax * ax + az * az;
@@ -1261,10 +1305,15 @@ export class CollisionWorld {
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const dx = x - (wall.x1 + ax * t);
         const dz = z - (wall.z1 + az * t);
-        if (dx * dx + dz * dz <= wall.halfThickness * wall.halfThickness) consider(wall);
+        if (dx * dx + dz * dz > wall.halfThickness * wall.halfThickness) continue;
+        const base = solidBaseAt(wall, x, z);
+        if (base >= fromY && base < best) best = base;
       }
       for (const box of bucket.boxes) {
-        if (boxDepth(box, x, z, 0) >= 0) consider(box);
+        if (!banded(box) || box.closure) continue;
+        if (boxDepth(box, x, z, 0) < 0) continue;
+        const base = solidBaseAt(box, x, z);
+        if (base >= fromY && base < best) best = base;
       }
     }
     return best;
@@ -1273,16 +1322,30 @@ export class CollisionWorld {
   /** The grid cell's bucket at `(x, z)`, if any, and the wide bucket every point shares. */
   private bucketsAt(x: number, z: number): readonly SolidBucket[] {
     const grid = this.solidGrid();
-    const cell = grid.cells.get(gridKey(Math.floor(x / SOLID_GRID), Math.floor(z / SOLID_GRID)));
-    return cell ? [cell, grid.wide] : [grid.wide];
+    return grid.withWide.get(gridKey(Math.floor(x / SOLID_GRID), Math.floor(z / SOLID_GRID))) ?? grid.wideOnly;
   }
+
+  /**
+   * **Is there any top in this world to stand on at all?** — a solid with an
+   * absolute, finite top that is not a closure. A world of walls that only say
+   * how tall they are relative to whoever meets them (a measure's test wall)
+   * has none, and every question about tops is answered before it is asked.
+   */
+  anyTopToStandOn(): boolean {
+    if (this.topsMemo.revision !== this.revisionCounter) {
+      const standable = (solid: SolidHeights): boolean => solid.topIsAbsolute && !solid.closure && Number.isFinite(solid.topHeight);
+      this.topsMemo = { revision: this.revisionCounter, any: this.circles.some(standable) || this.walls.some(standable) || this.boxes.some(standable) };
+    }
+    return this.topsMemo.any;
+  }
+  private topsMemo = { revision: -1, any: false };
 
   /** {@link solidDepthAt}'s bucket grid, rebuilt whenever the world's revision moves. */
   private solidGridMemo: SolidGrid | null = null;
   private solidGrid(): SolidGrid {
     if (this.solidGridMemo && this.solidGridMemo.revision === this.revisionCounter) return this.solidGridMemo;
     const cells = new Map<number, SolidBucket>();
-    const wide: SolidBucket = { circles: [], walls: [], boxes: [] };
+    const wide: SolidBucket = { circles: [], walls: [], boxes: [], shiftedTops: [] };
     const stamp = (minX: number, minZ: number, maxX: number, maxZ: number, add: (cell: SolidBucket) => void): void => {
       const i0 = Math.floor(minX / SOLID_GRID);
       const i1 = Math.floor(maxX / SOLID_GRID);
@@ -1296,7 +1359,7 @@ export class CollisionWorld {
         for (let j = j0; j <= j1; j += 1) {
           const key = gridKey(i, j);
           let cell = cells.get(key);
-          if (!cell) cells.set(key, (cell = { circles: [], walls: [], boxes: [] }));
+          if (!cell) cells.set(key, (cell = { circles: [], walls: [], boxes: [], shiftedTops: [] }));
           add(cell);
         }
       }
@@ -1312,7 +1375,24 @@ export class CollisionWorld {
       const reachZ = Math.abs(b.sin) * b.halfX + Math.abs(b.cos) * b.halfZ + b.rounding;
       stamp(b.cx - reachX, b.cz - reachZ, b.cx + reachX, b.cz + reachZ, (cell) => cell.boxes.push(b));
     }
-    this.solidGridMemo = { revision: this.revisionCounter, cells, wide };
+    // A shifted top, where it is: its footprint's bound moved by its shift.
+    for (const w of this.shiftedTops) {
+      const h = w.halfThickness;
+      stamp(
+        Math.min(w.x1, w.x2) - h + w.topShiftX,
+        Math.min(w.z1, w.z2) - h + w.topShiftZ,
+        Math.max(w.x1, w.x2) + h + w.topShiftX,
+        Math.max(w.z1, w.z2) + h + w.topShiftZ,
+        (cell) => cell.shiftedTops.push(w),
+      );
+    }
+    const withWide = new Map<number, readonly SolidBucket[]>();
+    for (const [key, cell] of cells) withWide.set(key, [cell, wide]);
+    const order = new Map<SolidHeights, number>();
+    this.circles.forEach((c, index) => order.set(c, index));
+    this.walls.forEach((w, index) => order.set(w, index));
+    this.boxes.forEach((b, index) => order.set(b, index));
+    this.solidGridMemo = { revision: this.revisionCounter, cells, wide, withWide, wideOnly: [wide], order };
     return this.solidGridMemo;
   }
 
@@ -2179,14 +2259,20 @@ export class CollisionWorld {
   deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling, moverHeight = 0, feetY = position.y): number {
     let deepest = 0;
     const stepHere = stepCeiling ? stepCeiling(position.x, position.z) : -Infinity;
-    for (const circle of this.circles) {
+    // Only what reaches within her radius can overlap her: the gathered few,
+    // or every collider when the gather would be too wide to be worth it.
+    const gathered = this.gatherNear(position.x, position.z, radius);
+    const circles = gathered ? this.nearCircles : this.circles;
+    const walls = gathered ? this.nearWalls : this.walls;
+    const boxes = gathered ? this.nearBoxes : this.boxes;
+    for (const circle of circles) {
       const minimum = circle.radius + radius;
       const depth = minimum - Math.hypot(position.x - circle.x, position.z - circle.z);
       if (depth <= deepest) continue;
       if (contactWith(circle, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
       deepest = depth;
     }
-    for (const wall of this.walls) {
+    for (const wall of walls) {
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
@@ -2200,13 +2286,77 @@ export class CollisionWorld {
       if (contactWith(wall, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
       deepest = depth;
     }
-    for (const box of this.boxes) {
+    for (const box of boxes) {
       const depth = boxDepth(box, position.x, position.z, radius);
       if (depth <= deepest) continue;
       if (contactWith(box, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
       deepest = depth;
     }
     return deepest;
+  }
+
+  /** Scratch {@link gatherNear} fills: reused by every call, never handed out past the query that filled it. */
+  private readonly nearCircles: CircleCollider[] = [];
+  private readonly nearWalls: WallCollider[] = [];
+  private readonly nearBoxes: BoxCollider[] = [];
+
+  /**
+   * **Every collider whose bound reaches into the square `reach` either side
+   * of `(x, z)`, each once, in the order the full lists hold them** — into
+   * {@link nearCircles}, {@link nearWalls} and {@link nearBoxes}. Anything
+   * whose bound misses that square cannot touch a body of radius `reach`
+   * there, so a query that visits these, in this order, does exactly what a
+   * scan of every collider would — over a handful instead of the park's
+   * thousands. PR #722's review: her movement cost a quarter more than
+   * `main`'s a frame, almost all of it `resolve` and the pinch guard
+   * scanning every collider for each sub-step. False, and nothing gathered,
+   * when the square spans more than {@link GATHER_MAX_CELLS} cells.
+   */
+  private gatherNear(x: number, z: number, reach: number): boolean {
+    // A world of a few colliders (a measure's test wall) is quicker to scan whole.
+    if (this.circles.length + this.walls.length + this.boxes.length <= GATHER_MIN_SOLIDS) return false;
+    const i0 = Math.floor((x - reach) / SOLID_GRID);
+    const i1 = Math.floor((x + reach) / SOLID_GRID);
+    const j0 = Math.floor((z - reach) / SOLID_GRID);
+    const j1 = Math.floor((z + reach) / SOLID_GRID);
+    if (!((i1 - i0 + 1) * (j1 - j0 + 1) <= GATHER_MAX_CELLS)) return false;
+    const grid = this.solidGrid();
+    gatherStamp += 1;
+    this.nearCircles.length = 0;
+    this.nearWalls.length = 0;
+    this.nearBoxes.length = 0;
+    for (let i = i0; i <= i1; i += 1) {
+      for (let j = j0; j <= j1; j += 1) {
+        const cell = grid.cells.get(gridKey(i, j));
+        if (cell) this.takeBucket(cell);
+      }
+    }
+    this.takeBucket(grid.wide);
+    const order = grid.order;
+    const byOrder = (a: SolidHeights, b: SolidHeights): number => (order.get(a) as number) - (order.get(b) as number);
+    if (this.nearCircles.length > 1) this.nearCircles.sort(byOrder);
+    if (this.nearWalls.length > 1) this.nearWalls.sort(byOrder);
+    if (this.nearBoxes.length > 1) this.nearBoxes.sort(byOrder);
+    return true;
+  }
+
+  /** One bucket's colliders into the gather, each once ({@link SolidHeights.visit}). */
+  private takeBucket(bucket: SolidBucket): void {
+    for (const circle of bucket.circles) {
+      if (circle.visit === gatherStamp) continue;
+      circle.visit = gatherStamp;
+      this.nearCircles.push(circle);
+    }
+    for (const wall of bucket.walls) {
+      if (wall.visit === gatherStamp) continue;
+      wall.visit = gatherStamp;
+      this.nearWalls.push(wall);
+    }
+    for (const box of bucket.boxes) {
+      if (box.visit === gatherStamp) continue;
+      box.visit = gatherStamp;
+      this.nearBoxes.push(box);
+    }
   }
 
   resolve(
@@ -2218,10 +2368,50 @@ export class CollisionWorld {
     moverHeight = 0,
     feetY = position.y,
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
-    let clearedAny = false;
     // Asked once, where she is as this call begins: a push moves her by her
     // overlap at most, over which a step's reach does not change.
     const stepHere = stepCeiling ? stepCeiling(position.x, position.z) : -Infinity;
+    // Over the colliders that can reach her while she stays within
+    // `RESOLVE_REACH` of here, in the full lists' order (`gatherNear`) — and,
+    // should a push carry her further, again from where she was over every
+    // collider, so the answer is always the full scan's.
+    const originX = position.x;
+    const originZ = position.z;
+    if (this.gatherNear(originX, originZ, radius + RESOLVE_REACH)) {
+      const near = this.resolveAmong(this.nearCircles, this.nearWalls, this.nearBoxes, position, radius, clearance, dt, stepHere, moverHeight, feetY, true);
+      if (near) return near;
+      position.x = originX;
+      position.z = originZ;
+    }
+    return this.resolveAmong(this.circles, this.walls, this.boxes, position, radius, clearance, dt, stepHere, moverHeight, feetY, false) as {
+      clearedWall: boolean;
+      escorting: boolean;
+      corrected: boolean;
+    };
+  }
+
+  /**
+   * {@link resolve} over the colliders given, in their order. With `guarded`,
+   * `null` the moment a push carries her more than {@link RESOLVE_REACH} from
+   * where she began (`position` is then wherever that push left her).
+   */
+  private resolveAmong(
+    circles: readonly CircleCollider[],
+    walls: readonly WallCollider[],
+    boxes: readonly BoxCollider[],
+    position: Vector3,
+    radius: number,
+    clearance: number,
+    dt: number,
+    stepHere: number,
+    moverHeight: number,
+    feetY: number,
+    guarded: boolean,
+  ): { clearedWall: boolean; escorting: boolean; corrected: boolean } | null {
+    const originX = position.x;
+    const originZ = position.z;
+    let strayed = false;
+    let clearedAny = false;
     let escorting = false;
     let corrected = false;
     // Shared across every collider and both passes below, so a mover pinned
@@ -2239,20 +2429,25 @@ export class CollisionWorld {
         // Correct it fully and instantly: this is what keeps blocking crisp.
         position.x += correctionX;
         position.z += correctionZ;
-        return;
+      } else {
+        escorting = true;
+        const allowed = Math.min(magnitude, depenetrationBudget);
+        depenetrationBudget -= allowed;
+        const scale = allowed / magnitude;
+        position.x += correctionX * scale;
+        position.z += correctionZ * scale;
       }
-      escorting = true;
-      const allowed = Math.min(magnitude, depenetrationBudget);
-      depenetrationBudget -= allowed;
-      const scale = allowed / magnitude;
-      position.x += correctionX * scale;
-      position.z += correctionZ * scale;
+      if (guarded) {
+        const dx = position.x - originX;
+        const dz = position.z - originZ;
+        if (dx * dx + dz * dz > RESOLVE_REACH * RESOLVE_REACH) strayed = true;
+      }
     };
 
     for (let pass = 0; pass < 2; pass += 1) {
       let moved = false;
 
-      for (const circle of this.circles) {
+      for (const circle of circles) {
         const dx = position.x - circle.x;
         const dz = position.z - circle.z;
         const minimum = circle.radius + radius;
@@ -2269,14 +2464,16 @@ export class CollisionWorld {
           // Exactly on the centre: shove in an arbitrary but stable direction.
           applyCorrection(minimum, 0);
           moved = true;
+          if (strayed) return null;
           continue;
         }
         const push = (minimum - distance) / distance;
         applyCorrection(dx * push, dz * push);
         moved = true;
+        if (strayed) return null;
       }
 
-      for (const wall of this.walls) {
+      for (const wall of walls) {
         const ax = wall.x2 - wall.x1;
         const az = wall.z2 - wall.z1;
         const lengthSquared = ax * ax + az * az;
@@ -2307,17 +2504,19 @@ export class CollisionWorld {
             applyCorrection(-az * invLength * minimum, ax * invLength * minimum);
           }
           moved = true;
+          if (strayed) return null;
           continue;
         }
         const push = (minimum - distance) / distance;
         applyCorrection(dx * push, dz * push);
         moved = true;
+        if (strayed) return null;
       }
 
       // Filled boxes: out through the nearest face from anywhere inside, away
       // from the nearest core point from outside. One shape, no hollow middle
       // for opposite pushes to cancel in — see {@link BoxCollider}.
-      for (const box of this.boxes) {
+      for (const box of boxes) {
         const reading = readBox(box, position.x, position.z);
         const depth = box.rounding + radius - reading.distance + reading.inside;
         if (depth <= 0) continue; // not overlapping at all
@@ -2329,6 +2528,7 @@ export class CollisionWorld {
         }
         applyCorrection(reading.outX * depth, reading.outZ * depth);
         moved = true;
+        if (strayed) return null;
       }
 
       // Soft boundary — you can never walk out of the park, nor off the edge of
@@ -2358,6 +2558,7 @@ export class CollisionWorld {
           const step = radius - edgeGap;
           applyCorrection((gradientX / length) * step, (gradientZ / length) * step);
           moved = true;
+          if (strayed) return null;
         }
       }
 
@@ -2391,7 +2592,8 @@ export class CollisionWorld {
     apexClearance: number,
     feet?: Readonly<{ x: number; y: number; z: number }>,
   ): boolean {
-    for (const circle of this.circles) {
+    const gathered = this.gatherNear(position.x, position.z, radius);
+    for (const circle of gathered ? this.nearCircles : this.circles) {
       if (!circle.autoHoppable) continue;
       const dx = position.x - circle.x;
       const dz = position.z - circle.z;
@@ -2399,7 +2601,7 @@ export class CollisionWorld {
       if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(circle, position, apexClearance, feet)) return true;
     }
 
-    for (const wall of this.walls) {
+    for (const wall of gathered ? this.nearWalls : this.walls) {
       if (!wall.autoHoppable) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
@@ -2413,7 +2615,7 @@ export class CollisionWorld {
       if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(wall, position, apexClearance, feet)) return true;
     }
 
-    for (const box of this.boxes) {
+    for (const box of gathered ? this.nearBoxes : this.boxes) {
       if (!box.autoHoppable) continue;
       if (boxDepth(box, position.x, position.z, radius) > 0 && this.hopsOver(box, position, apexClearance, feet)) return true;
     }
