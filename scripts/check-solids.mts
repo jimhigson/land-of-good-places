@@ -52,7 +52,7 @@ import { reachWithJumps, joinsMain, runAndJump, type ReachCost, type ReachedTop,
 import { measureGuards } from './lib/guardReach.mts';
 import { GUARD_MARGIN, JUMP_PLAN_REACH } from '../src/world/jumpReach.ts';
 import { RAILWAY_GUARD_TOP } from '../src/world/train/fence.ts';
-import { GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe } from './playerSim.mts';
+import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
@@ -1054,7 +1054,22 @@ if (spacesInPart.length) {
         const was = sim.airborne;
         // At a walk: half her speed, which the stick gives her held half over.
         sim.step(dt, (dx / d) * 0.5, (dz / d) * 0.5, false);
-        if (!was && sim.airborne && sim.verticalVelocity > JUMP_SPEED * 0.5) hopped = true;
+        if (!was && sim.airborne && sim.verticalVelocity > JUMP_SPEED * 0.5) {
+          // A hop is hers to take where the wall's end meets something more
+          // than a step over its top within her probe's reach — an L's taller
+          // arm, its corner post: that is the auto-hop doing its job. Thrown
+          // off is a hop with nothing of the kind ahead of her.
+          let taller = false;
+          collision.forEachSolid((other) => {
+            if (taller || other === wall) return;
+            const reach = PLAYER_RADIUS + AUTO_HOP_LOOKAHEAD + 0.1;
+            if (other.depthAt(sim.position.x, sim.position.z) < -reach) return;
+            const step = other.topAt(sim.position.x, sim.position.z) - wall.topAt(sim.position.x, sim.position.z);
+            if (step > BUILDING_STEP_UP) taller = true;
+          });
+          if (!taller) hopped = true;
+          break;
+        }
       }
       if (hopped) {
         thrown += 1;
@@ -1161,6 +1176,7 @@ if (spacesInPart.length) {
   const dt = 1 / CENSUS_FPS;
   let pushes = 0;
   let shuttled = 0;
+  let steppedUp = 0;
   const firstShuttle: string[] = [];
   for (const { space, top } of allReached) {
     if (top.how !== 'step') continue;
@@ -1189,10 +1205,20 @@ if (spacesInPart.length) {
       // to step up or come to rest — in its last 0.75 s, three or more swings
       // of 5 cm or more. A stutter on the way up (a step's edge, a chair she
       // steps off towards its table) settles; the foyer log's never did.
+      // Until she has stood on the top for a fifth of a second — stepped up,
+      // which is what this asks — or for the whole 2 s if she never does.
       const inward: number[] = [];
+      let onTop = 0;
       for (let f = 0; f < Math.ceil(2 / dt); f += 1) {
         sim.step(dt, -ux * 0.5, -uz * 0.5, false);
         inward.push(-((sim.position.x - sx) * ux + (sim.position.z - sz) * uz));
+        const standing = !sim.airborne && solid.depthAt(sim.position.x, sim.position.z) >= 0 && Math.abs(sim.groundY - solid.topAt(sim.position.x, sim.position.z)) < 0.05;
+        onTop = standing ? onTop + dt : 0;
+        if (onTop >= 0.2) break;
+      }
+      if (onTop >= 0.2) {
+        steppedUp += 1;
+        continue;
       }
       const tail = inward.slice(-Math.ceil(0.75 / dt));
       let swings = 0;
@@ -1215,7 +1241,8 @@ if (spacesInPart.length) {
       }
     }
   }
-  say(pushes > 0 && shuttled === 0, `${pushes} pushes into the tops she steps up onto, 8 bearings each: ${shuttled} shuttled her${firstShuttle.length ? ` — ${firstShuttle.join('; ')}` : ''}`);
+  say(pushes > 0 && shuttled === 0, `${pushes} pushes into the tops she steps up onto, 8 bearings each: ${steppedUp} stepped her up, ${pushes - steppedUp - shuttled} held her, ${shuttled} shuttled her${firstShuttle.length ? ` — ${firstShuttle.join('; ')}` : ''}`);
+  note(`clause 11 asks the step up and stops once she has stood on the top for 0.2 s: it says nothing about walking on across it — off its far side into a gap narrower than her body, against a wall, she jitters at the edge (a bed's far side in the suite on seed 5), written down on PR #722 as a gap`);
 }
 
 // ---------------------------------------------------------------------------

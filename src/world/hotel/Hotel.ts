@@ -5883,11 +5883,14 @@ export class Hotel implements GameSystem {
    * over you (on before you are out of sight); use it and the flush plays,
    * then the tap while you wash (*"good manners are part of the game"*); the
    * wash beat lifts the roof, and stepping out always clears everything, so
-   * it can never trap her. The one thing the castle's room could not have is
-   * the one thing every room here adds: **real solidity** — the castle's
-   * collision is height-blind across decks so its toilet room is open
-   * geometry, while the hotel's fixtures go through `place.ts` like every
-   * other prop, solid and (the pan) mountable.
+   * it can never trap her. What every room here adds is **real solidity**:
+   * the hotel's fixtures go through `place.ts` like every other prop, as the
+   * solids they are drawn as (`panParts`, `basinParts`), under a lid her head
+   * meets (`privacyRoofSpan`). The castle's toilet room still has none — its
+   * screens, pan and basin are drawn with no solid. That was once because
+   * the castle's collision was height-blind across decks; it is not any more
+   * (its decks are disjoint spaces, CLAUDE.md), so it is simply a gap, written
+   * down on PR #722 for its own change.
    *
    * Every caller hands this the room, the rectangle its own walls (real
    * ones, or `layout.ts` partition data) already enclose, and where the two
