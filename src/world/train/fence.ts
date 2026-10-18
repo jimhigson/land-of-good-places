@@ -87,13 +87,21 @@ interface StationSpan {
   readonly distance: number;
   /** Its platform's deck, where a jump at the fence beside it can leave from higher than the ground. */
   readonly platform?: MovingPlatform;
+  /** Its waiting train's carriage floors (`ParkTrain.dwellFloors`): stepped onto from the platform, and a jump's takeoff too. */
+  readonly floors?: readonly MovingPlatform[];
 }
 
+/**
+ * @param walkSurface The highest surface she can walk on at `(x, z)` — the
+ *   ground, a path, a plinth: where a jump at the fence can leave from. The
+ *   terrain when not given.
+ */
 export function buildRailFence(
   route: TrainRoute,
   collision: CollisionWorld,
   bridges: readonly Bridge[],
   stations: readonly StationSpan[],
+  walkSurface: (x: number, z: number) => number = terrainHeight,
 ): Group {
   const group = new Group();
   group.name = 'rail-fence';
@@ -320,9 +328,12 @@ export function buildRailFence(
   // the north station's end on seed 5 cleared the end cap into the box. So
   // each post stands as tall as the highest her feet can get over its line
   // from the ground she can reach beside it, where that is over the rail.
-  const platforms = stations.flatMap((station) => (station.platform ? [station.platform] : []));
+  // That ground is everything she walks on — a building's plinth by the line
+  // as much as a platform (seed 6: a sprint off the library's plinth cleared
+  // the fence beside it) — and a waiting train's floors (seed 8).
+  const platforms = stations.flatMap((station) => [...(station.platform ? [station.platform] : []), ...(station.floors ?? [])]);
   const walkY = (x: number, z: number): number => {
-    let y = terrainHeight(x, z);
+    let y = walkSurface(x, z);
     for (const platform of platforms) if (platform.surfaceY > y && platform.covers(x, z)) y = platform.surfaceY;
     return y;
   };

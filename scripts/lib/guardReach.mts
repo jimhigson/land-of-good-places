@@ -34,8 +34,14 @@ export interface GuardWorld {
   readonly onDeck: (x: number, z: number) => boolean;
   /** Is this plan point on or over a bridge's masonry at all (`Bridge.footprintNear`)? */
   readonly onBridge: (x: number, z: number) => boolean;
-  /** Is this plan point on a vehicle's moving floor (`ParkTrain.onCarriage`) — not ground she runs on? */
-  readonly onVehicle: (x: number, z: number) => boolean;
+  /**
+   * The waiting train's floor at this plan point, at any station
+   * (`ParkTrain.dwellFloors`), or `-Infinity`: a floor she steps onto from the
+   * platform and jumps from. The first cut called the parked train's floors
+   * no takeoff at all, and her own sprint-jumps off one cleared a station's
+   * end cap into the box (seed 8).
+   */
+  readonly dwellFloorAt: (x: number, z: number) => number;
 }
 
 /** What guards what: the fence keeps her off the line from outside it, a parapet keeps her on its deck. */
@@ -65,7 +71,7 @@ const GRID = 0.25;
  * (each guard's own top, or a hypothetical one for a control).
  */
 export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: number, z: number) => number): GuardPoint[] {
-  const { collision, sample, route, onDeck, onBridge, onVehicle } = world;
+  const { collision, sample, route, onDeck, onBridge, dwellFloorAt } = world;
   const guards: SolidView[] = [];
   collision.forEachSolid((solid) => {
     if (solid.kind in GUARD_KINDS && solid.topIsAbsolute && Number.isFinite(solid.topHeight)) guards.push(solid);
@@ -120,10 +126,10 @@ export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: num
         if (cells.has(k)) continue;
         const x = i * GRID;
         const z = j * GRID;
-        const ground = sample(x, z, 1e3);
+        const ground = Math.max(sample(x, z, 1e3), dwellFloorAt(x, z));
         if (!Number.isFinite(ground)) continue;
         // Not where a solid stands: nobody runs inside a trunk or a booth.
-        if ((collision.closedAt(x, z) && !onDeck(x, z)) || onVehicle(x, z) || standingHeight(ground, collision, x, z, ground) > ground + 1e-6 || insideSolid(x, z, ground)) continue;
+        if ((collision.closedAt(x, z) && !onDeck(x, z)) || standingHeight(ground, collision, x, z, ground) > ground + 1e-6 || insideSolid(x, z, ground)) continue;
         cells.set(k, { x, z, radius: planetRadiusAt(x, ground, z) });
       }
     }

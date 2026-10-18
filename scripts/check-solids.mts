@@ -1405,7 +1405,11 @@ if (inPart('park')) {
     route: world.train.route,
     onDeck: (x: number, z: number): boolean => bridges.some((bridge) => bridge.covers(x, z)),
     onBridge: (x: number, z: number): boolean => bridges.some((bridge) => bridge.footprintNear(x, z, 0.1)),
-    onVehicle: (x: number, z: number): boolean => world.train.onCarriage(x, z),
+    dwellFloorAt: (x: number, z: number): number => {
+      let y = -Infinity;
+      for (const floor of world.train.dwellFloors) if (floor.surfaceY > y && floor.covers(x, z)) y = floor.surfaceY;
+      return y;
+    },
   };
   const points = measureGuards(guardWorld);
   // Within half the guard's margin of the need: the builders and this measure

@@ -232,10 +232,14 @@ export class World implements GameSystem {
     // No tree exists yet when the railway builds — the world phase plants
     // them afterwards, against the bridges' footprints — so there is nothing
     // to fell and nothing fellable.
+    // Everything she walks on is registered by now — the ground, the paths,
+    // every building's plinth and steps — and the fence's height answers to
+    // a jump from any of it (`buildRailFence`).
     this.train = new ParkTrain(
       this.collision,
       () => 0,
       () => false,
+      (x, z) => this.building.surfaces.sample(x, z, 1e3),
     );
     // The path goes up and over each bridge, rather than a bridge growing its
     // own separate floor (Jim, 2026-08-24) — and rather than the ground ribbon

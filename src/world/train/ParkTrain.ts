@@ -205,10 +205,26 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly tangent = new Vector3();
   private readonly seatWorld = new Vector3();
 
+  /**
+   * Where the carriages stand while the train waits at each station: floors
+   * she can step onto from the platform and jump from, so floors the fence
+   * beside a station must answer to (`buildRailFence`), as the platform does.
+   * Seed 8: a sprint-jump off a waiting carriage's floor, 0.13 m over the
+   * platform, cleared a station's end cap into the box.
+   */
+  readonly dwellFloors: readonly MovingPlatform[];
+
+  /**
+   * @param walkSurface The highest surface she can walk on at `(x, z)` — the
+   *   ground, a path, a building's plinth — as the world has registered it by
+   *   the time the railway is built: where a jump at the fence can leave from
+   *   (`buildRailFence`). The terrain alone when not given.
+   */
   constructor(
     collision: CollisionWorld,
     clearTreesNear?: (x: number, z: number, radius: number) => number,
     hasFellableTreeNear?: (x: number, z: number, radius: number) => boolean,
+    walkSurface?: (x: number, z: number) => number,
   ) {
     this.group.name = 'park-train';
 
@@ -349,6 +365,15 @@ export class ParkTrain implements GameSystem, TrainService {
       );
     }
 
+    // Each station's waiting train: its carriages' floors where they stop.
+    const dwell = this.stations.map((station) => {
+      const trainAt = this.route.wrap(station.distance + this.stopOffset);
+      const floors: MovingPlatform[] = [];
+      for (let i = 1; i < this.carOffsets.length; i += 1) floors.push(floorAtDistance(this.route, this.route.wrap(trainAt - (this.carOffsets[i] ?? 0))));
+      return floors;
+    });
+    this.dwellFloors = dwell.flat();
+
     // --- the fence (Decision 4 §6: keeping feet off the track) -------------
     // Built last of all the trackside furniture, so it can seam around every
     // bridge and gap for every platform.
@@ -357,7 +382,8 @@ export class ParkTrain implements GameSystem, TrainService {
         this.route,
         collision,
         this.bridges,
-        this.stations.map((station) => ({ distance: station.distance, platform: station.asPlatform() })),
+        this.stations.map((station, k) => ({ distance: station.distance, platform: station.asPlatform(), floors: dwell[k] ?? [] })),
+        walkSurface,
       ),
     );
 
@@ -371,15 +397,6 @@ export class ParkTrain implements GameSystem, TrainService {
 
     this.placeCars();
     setTrainService(this);
-  }
-
-  /**
-   * Is `(x, z)` over a carriage's floor where the train stands now? A moving
-   * floor she rides on, not ground she runs and jumps from — for a measure
-   * asking where she can take off (`check:solids`' guards).
-   */
-  onCarriage(x: number, z: number): boolean {
-    return this.carriages.some((carriage) => carriageFloor(carriage).covers(x, z));
   }
 
   /** Platforms, carriage floors and every bridge deck/tread, for
@@ -833,10 +850,13 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 }
 
+/** Half a carriage floor's width: where she can stand on it. */
+const CARRIAGE_FLOOR_HALF_WIDTH = 0.72;
+
 /** A carriage floor, as a surface you can stand on. */
 function carriageFloor(carriage: TrainCar): MovingPlatform {
   const halfLength = CARRIAGE_LENGTH / 2;
-  const halfWidth = 0.72;
+  const halfWidth = CARRIAGE_FLOOR_HALF_WIDTH;
   return {
     get surfaceY(): number {
       return carriage.root.position.y + CAR_FLOOR_Y;
@@ -850,6 +870,28 @@ function carriageFloor(carriage: TrainCar): MovingPlatform {
       const along = dx * sin + dz * cos;
       const across = dx * cos - dz * sin;
       return Math.abs(along) <= halfLength && Math.abs(across) <= halfWidth;
+    },
+  };
+}
+
+/**
+ * A carriage's floor as it stands with the carriage at route distance `at` —
+ * `carriageFloor`'s own surface (`placeCars` stands a car on `pointAt` and
+ * turns it along `tangentAt`), without moving a carriage there.
+ */
+function floorAtDistance(route: TrainRoute, at: number): MovingPlatform {
+  const point = route.pointAt(at, new Vector3());
+  const tangent = route.tangentAt(at, new Vector3());
+  const yaw = Math.atan2(tangent.x, tangent.z);
+  const sin = Math.sin(yaw);
+  const cos = Math.cos(yaw);
+  const surfaceY = point.y + CAR_FLOOR_Y;
+  return {
+    surfaceY,
+    covers(x: number, z: number): boolean {
+      const dx = x - point.x;
+      const dz = z - point.z;
+      return Math.abs(dx * sin + dz * cos) <= CARRIAGE_LENGTH / 2 && Math.abs(dx * cos - dz * sin) <= CARRIAGE_FLOOR_HALF_WIDTH;
     },
   };
 }
