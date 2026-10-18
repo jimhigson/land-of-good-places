@@ -244,8 +244,9 @@ export interface LibraryShellSolids {
  *   from (and the waves rise and fall under), so a riser there can be more
  *   than she can step up — and the plate does not lift her past
  *   `BUILDING_STEP_UP`, so without a collider she walked on into the slab.
- *   A thin wall on each drawn edge, back corner to front step, keeps her to
- *   the full-width steps: the one way up, the way the paths arrive.
+ *   A thin wall on each drawn edge, back corner to front step, to the stone's
+ *   own top: a step where the riser is one, a side to bump or jump where it
+ *   is not. Nothing marks it otherwise (PR #722).
  */
 export function registerLibraryShellCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): LibraryShellSolids {
   // Every solid to its real top, in the building's own leaning frame
@@ -306,12 +307,25 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
 
   const edges: WallCollider[] = [];
   const px = plan.plinthHalfX - t;
+  // In pieces no longer than `EDGE_PIECE`: a top runs straight between its
+  // two ends, and the drawn stone is flat in the building's frame, which on
+  // the sphere bows under that straight line — by L²/8R, 0.16 m along the
+  // 17 m back edge, where she stood over the drawn plinth (seeds 2, 3, 7, 9, 13
+  // and 14). Two metres is under 3 mm.
+  const addPieces = (x1: number, z1: number, x2: number, z2: number, height: number): void => {
+    const pieces = Math.max(1, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / EDGE_PIECE));
+    for (let i = 0; i < pieces; i += 1) {
+      const u0 = i / pieces;
+      const u1 = (i + 1) / pieces;
+      add(edges, x1 + (x2 - x1) * u0, z1 + (z2 - z1) * u0, x1 + (x2 - x1) * u1, z1 + (z2 - z1) * u1, t, height);
+    }
+  };
   // Each side, back to front, in runs of one drawn height: the plinth, then
   // each tread of the steps down to the path (`edgeRun`).
   for (const x of [px, -px]) {
-    for (const run of edgeRuns(x, plan.plinthBackZ + t, plan.stepFrontZ - t)) add(edges, x, run.fromZ, x, run.toZ, t, run.top);
+    for (const run of edgeRuns(x, plan.plinthBackZ + t, plan.stepFrontZ - t)) addPieces(x, run.fromZ, x, run.toZ, run.top);
   }
-  add(edges, px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, t, plan.plinthTop);
+  addPieces(px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, plan.plinthTop);
 
   const columns = plan.columns.map((column) => {
     const at = frame.foot(column.x, column.z);
@@ -323,6 +337,8 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
 
 /** How finely a plinth edge is walked to find where the drawn stone steps down. */
 const EDGE_RUN_STEP = 0.02;
+/** The longest piece a plinth edge is built of, so its straight top stays on the drawn stone (see `registerLibraryShellCollision`). */
+const EDGE_PIECE = 2;
 
 /**
  * **A plinth edge in runs of one drawn height** — along `x` from `fromZ` to

@@ -427,7 +427,7 @@ if (openEdge) {
   const edge = library.shellSolids.edges[index - 1];
   if (!Number.isInteger(index) || !edge) throw new Error(`LIBRARY_CHECK_OPEN_EDGE=${openEdge}: edges are 1..${library.shellSolids.edges.length}`);
   collision.removeWall(edge);
-  note(`OPENED the plinth's edge ${index} (east, back, west) on purpose — this run must go red`);
+  note(`OPENED the plinth's edge piece ${index} of ${library.shellSolids.edges.length} (each side's runs, tread by tread, then the back; each in pieces of up to 2 m) on purpose — this run must go red`);
 }
 const bounds = collision.playBounds;
 collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 } as never);
