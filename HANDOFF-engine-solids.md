@@ -182,6 +182,21 @@ Work list (tick as done, commit each):
   SimPlayer option stepSamples.
 - Collision.closedAt(x,z) (bucketed closure query).
 
+### Round 2, state at 1897d5e0 (18 Oct night)
+- check:solids green at this head: park (504 tops, 84 regions; clause 8 0/4203, control 1170; 9: 66 walks,
+  71 step-ups; 10: 0/3163; 11: 0/91) and core (161 tops; 9: 18 walks; 11: 0/532). check:hotel green.
+- Proofs red at this head: reptile-roof, every-roof (10), new-roof, fence-crate, blind-hop (33/66, 71/71),
+  spawn-highest (3163), single-step (52), drawn-feet (66). guards-alone: railway 0 places (green!).
+- d4f6d525: resolveMovement feetY (standing feet = groundHeight) fixes the trough flicker; sofas back to ONE
+  box at the seat on the drawn turned footprint (PLAYER_RADIUS 0.62 doesn't fit a 0.7 m seat before a solid
+  back); check:hotel bathroom probes use deepestSolidOverlap; suite toilet stand 0.19 m back.
+- Known gap: walking on across a bed into a wall (gap < body) jitters at the edge (clause 11 notes it).
+- Replies drafted: /tmp/es-reply-review.md, /tmp/es-reply-qa.md; body /tmp/es-pr-body2.md (placeholders
+  PREVIEW_*, SIXTEEN, GATE, IDENTITY). Repro scripts: /tmp/es-qa/ (repros.mjs, devtrace.mjs, devbridge.mjs;
+  rim/post links need a height: /spawn?pos=-2.1,1.08,-6.9 and /spawn?pos=24.1,-2.233,31.1).
+- Next: gate (check/procgen/build) -> 16-seed park census (/tmp/es-seeds.sh) -> move PR head -> CI ->
+  compare parks with /tmp/es-parks-final -> preview repros -> post replies -> body -> handoff -> report.
+
 ## Decisions made in (b) (with reasons)
 - **solidInFrame** (terrain.ts): a rigid group stood on the sphere (plots, shelter, station) puts a
   solid at the column its middle is drawn in, top = hypot(R+top, lx, lz). Plots used centre+local,
