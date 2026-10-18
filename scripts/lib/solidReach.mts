@@ -24,7 +24,7 @@ import { Vector3 } from 'three';
 import { JUMP_CLEARANCE_GRACE, type CollisionWorld, type SolidView } from '../../src/world/Collision.ts';
 import type { NavGrid } from '../../src/world/NavGrid.ts';
 import { PLAYER_RADIUS, BUILDING_STEP_UP } from '../../src/core/constants.ts';
-import { SimPlayer } from '../playerSim.mts';
+import { SimPlayer, playerHopProbe } from '../playerSim.mts';
 import { stepCeilingAt } from '../../src/world/building/stepReach.ts';
 import { solidStepCeiling, standingHeight } from '../../src/world/standing.ts';
 
@@ -149,10 +149,13 @@ export function runAndJump(
 ): Stand | null {
   const dt = 1 / fps;
   let fire = false;
+  // Her own auto-hop as well as the jump this run presses: a run at a low wall
+  // hops it as she would, and a run along a wall's top does not.
+  const autoHop = playerHopProbe(options.collision);
   const sim = new SimPlayer(options.collision, {
     ground: options.sample,
-    hopProbe: () => {
-      if (!fire) return false;
+    hopProbe: (probe, feet) => {
+      if (!fire) return autoHop(probe, feet);
       fire = false;
       return true;
     },
@@ -164,11 +167,21 @@ export function runAndJump(
   let jumped = false;
   let landedAt = -1;
   const frames = Math.ceil(3 / dt);
+  // Where she was a tenth of a second ago, to tell a run that has stopped.
+  const recent: number[] = [];
+  const stall = Math.max(1, Math.round(0.1 / dt));
   for (let frame = 0; frame < frames; frame += 1) {
     const dx = aimX - sim.position.x;
     const dz = aimZ - sim.position.z;
     const d = Math.hypot(dx, dz);
-    if (!jumped && !sim.airborne && d <= jumpAt) {
+    recent.push(d);
+    // At the distance asked — or pressed against whatever stands between her
+    // and the aim, her run stopped short of it: a child running at a fence
+    // presses jump there, and so does she (PR #722: a crate against the
+    // railway fence was a way over it that a jump only at the distances
+    // asked never tried, because the fence held her further off than that).
+    const stalled = recent.length > stall && (recent[recent.length - 1 - stall] ?? d) - d < 0.01;
+    if (!jumped && !sim.airborne && (d <= jumpAt || stalled)) {
       fire = true;
       jumped = true;
     }
@@ -196,7 +209,7 @@ export function runAndJump(
  */
 function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: SolidView, o: { x: number; z: number; nx: number; nz: number }, fps: number): Stand | null {
   const dt = 1 / fps;
-  const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: () => false });
+  const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: playerHopProbe(options.collision) });
   const x = o.x - o.nx * 0.1;
   const z = o.z - o.nz * 0.1;
   const top = source.topAt(x, z);
@@ -273,7 +286,7 @@ export function joinsMain(
   const targets = [...bySector.values()].sort((a, b) => a.r - b.r);
   const dt = 1 / fps;
   for (const target of targets) {
-    const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: () => false });
+    const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: playerHopProbe(options.collision) });
     sim.position.set(from.x, from.y, from.z);
     sim.previousPosition.copy(sim.position);
     sim.groundHeight = from.y;
@@ -758,6 +771,65 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
         }
       }
       spent('drop');
+      // 4b. Hops from the top over whatever stands beside it, to the ground
+      //     beyond: a crate against a fence is a way over the fence (PR #722:
+      //     the railway's corridor is no body now, so nothing invisible
+      //     catches her there — only the fence, by its height, and only this
+      //     stage asks whether a top beside a guard gets her past it).
+      for (const solid of near(source.solid.centreX, source.solid.centreZ, source.solid.reach + 2.5)) {
+        if (stopped) break;
+        if (solid === source.solid) continue;
+        const rise = solid.topAt(solid.centreX, solid.centreZ) - source.top;
+        if (rise <= 0 || rise > 1.6) continue;
+        // From the point of the top nearest it, backed off for a run-up.
+        let best: Stand | null = null;
+        let bestD = Infinity;
+        for (const o of outline(source.solid, 0.4)) {
+          const ix = o.x - o.nx * 0.05;
+          const iz = o.z - o.nz * 0.05;
+          const d = -solid.depthAt(ix, iz);
+          if (d < bestD) {
+            bestD = d;
+            best = { x: ix, z: iz, y: source.solid.topAt(ix, iz) };
+          }
+        }
+        if (!best || bestD > 2.5) continue;
+        const bx = best.x + (source.at.x - best.x) * 0.8;
+        const bz = best.z + (source.at.z - best.z) * 0.8;
+        if (source.solid.depthAt(bx, bz) < 0) continue;
+        const start = { x: bx, z: bz, y: source.solid.topAt(bx, bz) };
+        // Through it, along the line from her start, to a body's width beyond its far face.
+        const dx = solid.centreX - start.x;
+        const dz = solid.centreZ - start.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 1e-6) continue;
+        const ux = dx / d;
+        const uz = dz / d;
+        let through = Math.max(0, d - solid.reach);
+        while (through < d + solid.reach && solid.depthAt(start.x + ux * through, start.z + uz * through) < -0.02) through += 0.05;
+        while (through < d + solid.reach + 0.1 && solid.depthAt(start.x + ux * through, start.z + uz * through) >= -0.02) through += 0.05;
+        const lx = start.x + ux * (through + PLAYER_RADIUS + 0.3);
+        const lz = start.z + uz * (through + PLAYER_RADIUS + 0.3);
+        if (collision.playBounds.distanceToEdge(lx, lz) < PLAYER_RADIUS) continue;
+        for (const jumpAt of [0.3, 0.8, 1.3]) {
+          jumps += 1;
+          cost.sims.over += 1;
+          const landed = runAndJump(options, start, lx, lz, jumpAt, fps);
+          if (!landed || groundReached(landed.x, landed.z, landed.y)) continue;
+          if (reached.has(solid) && standsOn(solid, landed)) continue;
+          if (options.until?.(landed)) {
+            stopped = true;
+            break;
+          }
+          if (walksBack(landed)) break;
+          const flood = grid.floodFrom(landed.x, landed.z, landed.y, sample);
+          const has = flood && flood.has(landed.x, landed.z, landed.y) ? flood.has : (x: number, z: number) => Math.hypot(x - landed.x, z - landed.z) < 0.5;
+          regions.push({ entry: landed, via: `a hop over ${solid.kind || solid.owner || 'a solid'} from the top of ${source.solid.kind || source.solid.owner || 'a solid'}`, has });
+          changed = true;
+          break;
+        }
+      }
+      spent('over');
     }
     say(`  round ${round}: ${reached.size} tops, ${regions.length} region(s), ${jumps} jumps simulated`);
   }

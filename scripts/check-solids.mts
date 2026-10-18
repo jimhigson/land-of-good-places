@@ -49,10 +49,10 @@ import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { indexDrawnTops } from './lib/drawnTops.mts';
 import { reachWithJumps, joinsMain, runAndJump, type ReachCost, type ReachedTop, type Stand } from './lib/solidReach.mts';
-import { SimPlayer } from './playerSim.mts';
-import { CollisionWorld, FOOT_HALF_WIDTH, type SolidView } from '../src/world/Collision.ts';
+import { GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe } from './playerSim.mts';
+import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
-import { PLAYER_LONGEST_STEP, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
+import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, PLAYER_LONGEST_STEP, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_BOUNDARY, circleBoundary, type ParkBoundary } from '../src/world/boundary.ts';
@@ -60,7 +60,7 @@ import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layo
 import { CASTLE_FLOORS, floorX, floorZ } from '../src/world/building/floors.ts';
 import { castleFloorBounds } from '../src/world/building/floorBounds.ts';
 import { LIFT_DOOR_MAX_Z, LIFT_DOOR_MIN_Z, LIFT_STAND_X } from '../src/world/building/layout.ts';
-import { LOBBY } from '../src/world/hotel/layout.ts';
+import { LOBBY, ROOMS } from '../src/world/hotel/layout.ts';
 import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
 import { REPTILE_ARRIVAL_X, REPTILE_ARRIVAL_Z, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z } from '../src/world/reptileHouse/layout.ts';
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
@@ -91,6 +91,21 @@ import { standingHeight } from '../src/world/standing.ts';
  * - `no-bounds` (core): the park's leash taken off — clause 7.
  */
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
+/** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
+const CENSUS_FPS = Number(process.env['SOLIDS_FPS'] ?? 60);
+/** The top of her jump as a frame clock at `fps` samples it — the sim's own integration, from the ground. */
+function sampledApex(fps: number): number {
+  const dt = 1 / fps;
+  let v = JUMP_SPEED;
+  let y = 0;
+  let top = 0;
+  while (v > -JUMP_SPEED) {
+    v -= GRAVITY * dt;
+    y += v * dt;
+    top = Math.max(top, y);
+  }
+  return top;
+}
 /** Clause 4 is minutes long; `SOLIDS_SKIP_CENSUS=1` runs the rest alone (never in the chain). */
 const SKIP_CENSUS = process.env['SOLIDS_SKIP_CENSUS'] === '1';
 /** And `SOLIDS_SPACES=park,library` runs the census over the spaces whose names hold one of those words (never in the chain). */
@@ -134,15 +149,6 @@ function costLine(cost: ReachCost): string {
   return `${stages} (simulated: ${sims}; jumps aimed/won by kind: ${kinds})`;
 }
 
-/**
- * **Solids with nothing drawn to measure, and why each exists.** Every other
- * solid has a real top (clause 1). A kind here is held to its reason: it must
- * stay out of her reach, which clause 4 measures.
- */
-const INVISIBLE_SOLIDS: Readonly<Record<string, string>> = {
-  'railway corridor':
-    "the railway's corridor between its fences (`train/fence.ts`): the route lattice's closure of it, the floor of the track under a bridge, and no slot beside the rail she could be wedged in",
-};
 
 if (PART_ASKED !== null) {
   note(`this is --part=${PART_ASKED}: the rest of the check is ${PARTS.filter((part) => part !== PART_ASKED).map((part) => `${STEP_OF[part]} (--part=${part})`).join(' and ')}, run as their own steps`);
@@ -199,7 +205,50 @@ const sample = park.sample;
     collision.kinded("proof: the pit's floor", () => collision.addCircle(cx, cz, 1.3, g + 0.8, false, true));
   }
   if (PROVE === 'rail-step') stepNearGate('railway corridor');
+  // **The railway's guards, by height alone** (PR #722's review): every top as
+  // wide as its footprint — the width rule off, so no rail, post or parapet is
+  // kept from being stood on by how narrow it is. The corridor between the
+  // fences is a closure, never a body, so nothing invisible holds her either.
+  // What must hold her off the line is then the height of the fence and the
+  // railings she can see: the railway clause stays green. (The one proof that
+  // edits solids in place, by design; the clauses about where she stands go
+  // red with rails for floors, as they should.)
+  if (PROVE === 'guards-alone') collision.everyTopWide();
+  // ... and its control: a crate a metre tall against the fence nearest the
+  // gate, the kind of thing that lets her over a fence — from its top a jump
+  // clears the fence, and the railway clause must see her land on the line.
+  if (PROVE === 'fence-crate') {
+    const route = world.train.route;
+    const post = before
+      .filter((s) => s.kind === 'railway fence post')
+      .sort((a, b) => Math.hypot(a.centreX - ENTRANCE_PLAYER_X, a.centreZ - ENTRANCE_PLAYER_Z) - Math.hypot(b.centreX - ENTRANCE_PLAYER_X, b.centreZ - ENTRANCE_PLAYER_Z))[0];
+    if (post) {
+      const rail = route.pointAt(route.distanceNear(post.centreX, post.centreZ), new Vector3());
+      const out = Math.hypot(post.centreX - rail.x, post.centreZ - rail.z) || 1;
+      const ux = (post.centreX - rail.x) / out;
+      const uz = (post.centreZ - rail.z) / out;
+      const cx = post.centreX + ux * (post.reach + 0.75);
+      const cz = post.centreZ + uz * (post.reach + 0.75);
+      collision.kinded('proof: a crate against the fence', () => collision.addBox(cx, cz, 0.6, 0.6, Math.atan2(ux, uz), 0, sample(cx, cz, 50) + 1.0, false, true));
+    }
+  }
   if (PROVE === 'low-roof') stepNearGate('stall awning');
+  // The review's own control (PR #722): a step kinded as one of the roofs the
+  // clause used not to know. It stayed green; it must go red.
+  if (PROVE === 'reptile-roof') stepNearGate('reptile house roof');
+  // Every roof the clause names, one step each, in a ring round the gate's
+  // arrival: the clause must name all of them.
+  if (PROVE === 'every-roof') {
+    const roofs = ['stall awning', 'stall parasol', 'station canopy', 'bus shelter canopy', 'castle roof deck', 'library roof', 'reptile house roof', 'roof pavilion', 'roof turret'];
+    roofs.forEach((kind, i) => {
+      const a = (i / roofs.length) * Math.PI * 2;
+      const x = ENTRANCE_PLAYER_X + Math.cos(a) * 4.5;
+      const z = ENTRANCE_PLAYER_Z + Math.sin(a) * 4.5;
+      collision.kinded(kind, () => collision.addCircle(x, z, 0.7, sample(x, z, 50) + 0.4, false, true));
+    });
+  }
+  // A roof nobody told the clause about: the kinds guard must name it.
+  if (PROVE === 'new-roof') stepNearGate('proof: a garage roof');
   if (PROVE === 'low-exhibit') stepNearGate("proof's enclosure");
 }
 
@@ -212,19 +261,18 @@ collision.forEachSolid((solid) => solids.push(solid));
 if (inPart('core')) {
 console.log('1. REAL TOPS — every solid stands to a real top:');
   const flagged = new Map<string, number>();
-  let invisible = 0;
   for (const solid of solids) {
     const finite = solid.topIsAbsolute && Number.isFinite(solid.topHeight);
     if (finite) continue;
-    if (solid.kind in INVISIBLE_SOLIDS) {
-      invisible += 1;
-      continue;
-    }
     const key = `${solid.kind || `(no kind, owner '${solid.owner}', ${solid.shape} ${solid.halfWidth.toFixed(2)})`}${solid.topIsAbsolute ? '' : ' [relative top]'}`;
     flagged.set(key, (flagged.get(key) ?? 0) + 1);
   }
-  say(flagged.size === 0, `${solids.length} solids, ${solids.length - invisible - [...flagged.values()].reduce((a, b) => a + b, 0)} with a real top, ${invisible} invisible by declared reason, ${[...flagged.values()].reduce((a, b) => a + b, 0)} without one${flagged.size ? `: ${[...flagged].map(([k, n]) => `${k} ×${n}`).join('; ')}` : ''}`);
-  note(`clause 1 covers ${solids.length} solids in every space; invisible by reason: ${Object.entries(INVISIBLE_SOLIDS).map(([kind, why]) => `${kind} — ${why}`).join('; ')}`);
+  const without = [...flagged.values()].reduce((a, b) => a + b, 0);
+  say(flagged.size === 0, `${solids.length} solids, ${solids.length - without} with a real top, ${without} without one${flagged.size ? `: ${[...flagged].map(([k, n]) => `${k} ×${n}`).join('; ')}` : ''}`);
+  // The railway's corridor between its fences is no solid at all: a closure
+  // the route lattice and the planner read, which no body meets
+  // (`CollisionWorld.asClosure`). Nothing invisible stops her.
+  note(`clause 1 covers ${solids.length} solids in every space, every one with nothing exempt; ${collision.closureCount} closures (the railway's corridor) are not solids — the route lattice and the planner read them, and no body meets them`);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +286,7 @@ console.log('1. REAL TOPS — every solid stands to a real top:');
 function hopOnto(world: CollisionWorld, ground: (x: number, z: number, y: number) => number, solid: SolidView, from: Stand): Stand | null {
   // Something no higher than a step she walks onto: the step rule, not a jump.
   {
-    const sim = new SimPlayer(world, { ground, hopProbe: () => false });
+    const sim = new SimPlayer(world, { ground, hopProbe: playerHopProbe(world) });
     sim.position.set(from.x, from.y, from.z);
     sim.previousPosition.copy(sim.position);
     sim.groundHeight = from.y;
@@ -328,6 +376,13 @@ interface SpaceRun {
   readonly link: (stand: Stand) => string;
 }
 const seed = PARK_SEED_ASKED;
+/** The deep link into each hotel room (`main.ts`'s list); the corridor has none of its own. */
+const HOTEL_ROOM_LINKS: Readonly<Record<string, string>> = {
+  'hotel.breakfast': '/hotel-bathroom',
+  'hotel.garden': '/hotel-bathroom-garden',
+  'hotel.ocean': '/hotel-bathroom-ocean',
+  'hotel.suite': '/hotel-suite',
+};
 const yaw = (dx: number, dz: number): number => Math.round((Math.atan2(dx, dz) * 180) / Math.PI);
 const spaceRuns: SpaceRun[] = [
   {
@@ -352,6 +407,19 @@ const spaceRuns: SpaceRun[] = [
     bounds: circleBoundary(60, LOBBY.originX, LOBBY.originZ),
     link: () => `/hotel?seed=${seed}`,
   },
+  // Every other room of the hotel, each from its own way in, in the play
+  // bounds the game gives it (PR #722's review: the suite's beds and pet beds
+  // became solids here, and five rooms went uncensused).
+  ...ROOMS.filter((room) => room !== LOBBY).map((room) => {
+    const way = world.hotel.openArea(room)[0] ?? { x: room.originX, z: room.originZ };
+    const link = HOTEL_ROOM_LINKS[room.space] ?? '/hotel';
+    return {
+      name: `the hotel's ${room.space.replace(/^hotel\./, '')} room`,
+      start: { x: way.x, z: way.z, y: sample(way.x, way.z, 3) },
+      bounds: circleBoundary(HOTEL_PLAY_RADIUS, room.originX, room.originZ),
+      link: () => `${link}?seed=${seed}`,
+    };
+  }),
   {
     name: 'the library',
     start: { x: LIBRARY_ORIGIN_X + LIBRARY_ARRIVAL.x, z: LIBRARY_ORIGIN_Z + LIBRARY_ARRIVAL.z, y: 0 },
@@ -383,6 +451,23 @@ const ROOF_KINDS: Readonly<Record<string, string>> = {
   'stall parasol': "the keychain cart's parasol",
   'station canopy': "a station's roof",
   'bus shelter canopy': "the bus shelter's roof",
+  'castle roof deck': "the castle's roof",
+  'library roof': "the library's roof",
+  'reptile house roof': "the reptile house's roof",
+  'roof pavilion': "the roof garden pavilion's roof",
+  'roof turret': "a roof garden turret's top",
+};
+/**
+ * **A kind named like a roof must be one of the roofs above, or say here why it
+ * is not** — so a roof added later cannot be missing from the clause, as the
+ * castle's, the library's, the reptile house's and the roof garden's were
+ * (PR #722's review: a step kinded `reptile house roof` stayed green).
+ */
+const ROOFISH = /\b(roof|canopy|awning|parasol|turret|pavilion|lid)\b/i;
+const NOT_ROOF_KINDS: Readonly<Record<string, string>> = {
+  'roof trough': "a trough of shrubs standing on the roof garden's floor, the floor she walks",
+  'castle roof battlement': "the roof garden's parapet: a guard, held by the garden's bounds (`castleFloorBounds`)",
+  'station canopy post': "a post under a station's roof, its top under the roof",
 };
 const isEnclosure = (kind: string): boolean => /'s enclosure$/.test(kind);
 /** Guards whose top she may stand on without getting past them: reported with how, never failed. */
@@ -390,7 +475,17 @@ const PERCH_KINDS: Readonly<Record<string, string>> = {
   'railway fence': 'the railway',
   'railway fence post': 'the railway',
   'bridge parapet': 'the drop beside a bridge',
+  'castle roof battlement': "the drop off the castle's roof garden",
 };
+if (inPart('core')) {
+  console.log('\n4a. ROOFS — every kind named like a roof is one the census asserts, or says why not:');
+  const kinds = [...new Set(solids.map((solid) => solid.kind))].filter((kind) => ROOFISH.test(kind));
+  const unclassified = kinds.filter((kind) => !(kind in ROOF_KINDS) && !(kind in NOT_ROOF_KINDS));
+  say(
+    unclassified.length === 0,
+    `${kinds.length} kinds named like a roof in the built park and its buildings: ${kinds.filter((kind) => kind in ROOF_KINDS).length} roofs the census asserts, ${kinds.filter((kind) => kind in NOT_ROOF_KINDS).length} not roofs, with their reasons${unclassified.length ? ` — and ${unclassified.length} neither: ${unclassified.join(', ')}` : ''}`,
+  );
+}
 
 const allReached: { space: string; top: ReachedTop }[] = [];
 /** The census's spaces in this part: the park in `park`, every building in `core`. */
@@ -431,7 +526,7 @@ if (SKIP_CENSUS) {
       grid,
       start: run.start,
       inSpace: (x, z) => spaceAt(x, z) === id,
-      fps: 60,
+      fps: CENSUS_FPS,
     });
     const main = result.regions[0]!.has;
     for (const top of result.tops) allReached.push({ space: run.name, top });
@@ -496,7 +591,7 @@ if (SKIP_CENSUS) {
           grid,
           start: region.entry,
           inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - region.entry.x, z - region.entry.z) < 14,
-          fps: 60,
+          fps: CENSUS_FPS,
           until: outside,
         }).stopped;
       } catch {
@@ -520,7 +615,7 @@ if (SKIP_CENSUS) {
           grid,
           start: top.at,
           inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - top.at.x, z - top.at.z) < 14,
-          fps: 60,
+          fps: CENSUS_FPS,
           until: outside,
         }).stopped;
       } catch {
@@ -531,7 +626,12 @@ if (SKIP_CENSUS) {
     say(strandedOn.length === 0, `${run.name}: every one of ${result.tops.length} top(s) she reaches, she can get down from again (${result.hemmedIn.length} with no edge to walk off, each searched)${strandedOn.length ? ` — stranded on: ${strandedOn.join('; ')}` : ''}`);
   }
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
-  note(`clause 4 simulated her jumps at 60 fps over ${runs.length} spaces and reached ${allReached.length} tops; a slower frame rate reaches less (fewer, shorter steps up the arc), so 60 is the bound that matters for escapes`);
+  note(
+    `clause 4 simulated her jumps at ${CENSUS_FPS} fps over ${runs.length} spaces and reached ${allReached.length} tops. ` +
+      `A faster frame rate jumps higher: her jump's top is ${sampledApex(CENSUS_FPS).toFixed(4)} m at ${CENSUS_FPS} fps and ` +
+      `${sampledApex(120).toFixed(4)} m at 120 fps (${JUMP_APEX_HEIGHT.toFixed(4)} m in the limit), so a faster screen can reach ` +
+      `a little higher than this run measured; SOLIDS_FPS=120 runs the census at 120 fps (PR #722's review did, on seed 5: clean)`,
+  );
   note(`clause 4 censused seed ${PARK_SEED_ASKED}'s park and nothing else: the other shipped parks are not censused by this run (LGP_SEED=<n> asks for another)`);
 }
 
@@ -694,7 +794,7 @@ console.log('\n5. MARCHES — walked at from sixteen bearings, at 5 cm and at a 
             p.y = sample(p.x, p.z, p.y);
             // Inside it: her body overlapping its footprint between its base
             // and its top — not stood on it, not walked under it.
-            if (p.y + 0.15 < solid.topAt(p.x, p.z) && p.y + KID_HEIGHT > solid.baseAt(p.x, p.z)) {
+            if (p.y + JUMP_CLEARANCE_GRACE < solid.topAt(p.x, p.z) && p.y + KID_HEIGHT > solid.baseAt(p.x, p.z)) {
               deepest = Math.max(deepest, solid.depthAt(p.x, p.z) + PLAYER_RADIUS);
             }
           }
@@ -837,7 +937,7 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
         const next = cells.get(nk);
         // Within a step of each other as heights over the ground, which is
         // what she climbs — not as world y, which the planet bends.
-        if (next && Math.abs(altitudeAt(next.x, next.y, next.z) - altitudeAt(cell.x, cell.y, cell.z)) <= 0.62) {
+        if (next && Math.abs(altitudeAt(next.x, next.y, next.z) - altitudeAt(cell.x, cell.y, cell.z)) <= BUILDING_STEP_UP) {
           if (!seen.has(nk)) {
             seen.add(nk);
             stack.push(nk);
@@ -848,8 +948,8 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
           if (offTheEdge) break;
           const nx = (i + di * reach) * STEP;
           const nz = (j + dj * reach) * STEP;
-          const ny = sample(nx, nz, cell.y + 0.62);
-          if (ny <= cell.y + 0.62 && main(nx, nz, ny)) offTheEdge = true;
+          const ny = sample(nx, nz, cell.y + BUILDING_STEP_UP);
+          if (ny <= cell.y + BUILDING_STEP_UP && main(nx, nz, ny)) offTheEdge = true;
         }
       }
     }

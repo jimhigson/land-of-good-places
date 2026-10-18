@@ -42,7 +42,10 @@ export function indexDrawnTops(scene: Object3D): DrawnTopIndex {
   scene.traverse((object) => {
     const mesh = object as Mesh;
     if (!(mesh as { isMesh?: boolean }).isMesh) return;
-    if (!mesh.visible) return;
+    // Drawn only if it and every one of its parents are: a hidden group's
+    // children are hidden too (the suite's nap blanket, hidden as a group, read
+    // as "0.49 m sunk" under her on its beds — PR #722's review).
+    for (let at: Object3D | null = mesh; at; at = at.parent) if (!at.visible) return;
     const geometry = mesh.geometry;
     if (!geometry?.attributes['position']) return;
     const path: string[] = [];
