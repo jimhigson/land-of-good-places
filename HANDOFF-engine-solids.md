@@ -427,3 +427,12 @@ Work list (tick as done, commit each):
 - [ ] Q3 wall-and-bush loop /spawn?pos=-35.9,-9.2&seed=5 hold up+right: lands 0.17 m inside the bush, rescue blinks
       back, repeats. She must land ON it; the rescue never re-wedges under the same held input.
 - [ ] Preview plays: bush-to-fence (/spawn?pos=-36.5,-2.03,4.2&facing=35&seed=5), the wall, the armchair, the loop.
+- SCOPE CUT (coordinator, from Jim): ONLY R1 (tops -> guards, 4c + controls + fence-bush, 0 box landings x16),
+  Q1 (knee wall: step or hop, never stopped; clause 9 fails pressed walks; deterministic), Q2 (armchair bodies;
+  census counts wedged landings as failures), Q3 (wall-and-bush: lands ON the bush; rescue never loops).
+  DEFERRED (list under "Follow-ups" in the PR body, do not start): railing styling/lowering (heights only where R1
+  needs), CI shard-5 speed-up + per-frame cost (4b950ba7/97f157f6 already done+green: kept), toilet nook ceiling,
+  roof-name guard, Player.ts orphan comment, everyTopWide hook. Local runs: only the clauses these touch + tsc.
+- Q1 cause found: wall (-51.88,61.57)-(-47.29,61.57) half 0.34, top shifted (-0.108, +0.135) by the lean. Her
+  step stretch (STEP_LOOKAHEAD 0.72 m) ends 0.1 m into the footprint, 0.035 m short of the shifted top; the
+  hop probe calls it a step (0.12-0.41 m over her feet) -> neither. Rig repro: es-q1wall.mts (stops at z 60.605).
