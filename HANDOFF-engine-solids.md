@@ -338,3 +338,22 @@ no-headroom need the census run.
 - After CI: download its parks, `node /tmp/es-compare-parks.mjs /tmp/es-parks-final <ci-parks-dir>`;
   preview from the newest "Deploy PR preview" comment; `PREVIEW=<url> node /tmp/es-qa/repros.mjs`;
   fill /tmp/es-pr-body2.md + /tmp/es-reply-*.md placeholders; post; report via SubagentHandback.
+
+### Round 2, the fifteen other parks (18 Oct, 18:00 BST)
+- 15-seed census at 73dba6a6 (/tmp/es-seeds): only seed 0 green. Classified:
+  - clause 8 sims "crossed" at station ends (1,3,6,7,8,9,10,13,14): a run off a platform's end round the corner
+    where the fence turns into the end cap — never over the guard. Fix 628db46a: crossing = her path over the
+    guard's own segment, net (trail from runAndJump). New proof SOLIDS_PROVE=low-guard (1 m fence by the gate).
+  - clause 9 step-ups: hop at the NEXT wall after stepping over this one (2,3,7), hop at an L's taller arm (1,2,8).
+    Fix: walk ends once she stands on the top; a hop is legit where something > a step over her feet is at her probe.
+  - clause 9 along-walks hung on seeds 4, 11, 15 (search `while |t| > 0` never ends) — bounded.
+  - playerSim asked the auto-hop BEFORE the fall check (Player: after) — a bush nudging her off a wall top made the
+    sim hop (9, 12). Sim now falls first; along-walk ends at a fall (stderr count).
+  - clause 2: library plinth edges 0.15-0.16 off on 2,3,7,9,13,14 = chord sag L²/8R of a 17 m straight top.
+    Fix bf7bc61e: edges in pieces ≤ 2 m (src → park hash changed; restamped).
+  - seed 6: a stall awning reached: bush → 2.4 m wooden wall top (chain) → sprint-jump 8.6 m onto the awning.
+    Honest geometry + physics. OPEN QUESTION (not fixed): brief says roofs are escapes "where the camera can't
+    follow"; the census (and review) hold every roof. Recommend: open-air canopies are tops, or procgen keeps
+    stalls out of jump reach of tall walls. Left red on seed 6, reported.
+- 61678960: unknown SOLIDS_PROVE throws (a typo used to run unbroken and look green).
+- Reruns at 61678960: /tmp/es-r8 (job list jobs4.txt, runner job.sh; 16 seeds + proofs).
