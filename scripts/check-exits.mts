@@ -23,8 +23,9 @@
  * 1. **The rule's own clauses**, on small worlds built here: an open spot is
  *    left exactly where it is (the control); a spot in a sealed pocket is moved
  *    to one that reaches open floor; a spot inside a collider is moved out; a
- *    pocket holding a point of the space's open area is left alone; and the
- *    cost of one put-down is bounded.
+ *    pocket holding a point of the space's open area is left alone; a crate's
+ *    top she can walk off is left alone, and one in a sealed pit is not; and
+ *    the cost of one put-down is bounded.
  * 2. **The instrument, and its controls.** "She can walk out" is the router's
  *    own whole-space flood (`NavGrid.floodFrom` — what a tap can reach) from
  *    where she stands to the space's way out (`World.openAreaAt`'s first point:
@@ -260,6 +261,43 @@ const say = (line: string): void => {
     notes.push(
       `rule (g) thin-walled box ${(innerHalf * 2).toFixed(2)} m inside, walls 0.10 m: moved ${spot.moved.toFixed(2)} m to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`,
     );
+  }
+
+  // (i) A spot on a solid's top is a place she may be put down (#722): a
+  // 0.9 m crate on open floor — more than a step up, so no level of her
+  // lattice — and the exit names its top. She gets down by walking off its
+  // edge, so it is left exactly where it is. Without the walk-off
+  // (`OpenFloor.getsDown`) nothing within reach at that height is open, and
+  // the rule finds nowhere.
+  const CRATE_TOP = 0.9;
+  {
+    const collision = world();
+    collision.addRectangle(0, 0, 0.6, 0.6, 0.05, CRATE_TOP, false, true);
+    const spot = putDownSpot(collision, flat, { x: 0, y: CRATE_TOP, z: 0 }, PLAYER_PUT_DOWN);
+    if (!spot.found || spot.moved !== 0 || Math.abs(spot.y - CRATE_TOP) > 1e-6) {
+      fail(
+        `rule (i) a crate's top: asked (0, ${CRATE_TOP}, 0) on a ${CRATE_TOP} m crate on open floor, got ` +
+          `(${spot.x.toFixed(2)}, ${spot.y.toFixed(2)}, ${spot.z.toFixed(2)}) moved ${spot.moved.toFixed(2)} found=${spot.found} — ` +
+          'she can walk off its edge, so it must be left alone',
+      );
+    }
+    notes.push(`rule (i) a crate's top: left at (0, ${spot.y.toFixed(2)}, 0), moved ${spot.moved}, ${spot.cells} cells`);
+  }
+
+  // (j) The same crate in a sealed pit — four walls round it, 3.6 m of floor
+  // inside — is not left as it is: every way off its top lands her in the pit.
+  {
+    const collision = world();
+    walledRing(collision, 0, 0, 2, 0.2);
+    collision.addRectangle(0, 0, 0.6, 0.6, 0.05, CRATE_TOP, false, true);
+    const warn = console.warn;
+    console.warn = (): void => {};
+    const spot = putDownSpot(collision, flat, { x: 0, y: CRATE_TOP, z: 0 }, PLAYER_PUT_DOWN);
+    console.warn = warn;
+    if (spot.found && spot.moved === 0) {
+      fail(`rule (j) a crate in a sealed pit: its top was left as given — every way off it lands in the pit, so it is not open`);
+    }
+    notes.push(`rule (j) a crate in a sealed pit: found=${spot.found}, moved ${spot.moved.toFixed(2)} m`);
   }
 
   // (f) The cost bound: one window of the router's lattice, however bad the
