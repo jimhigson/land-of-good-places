@@ -378,3 +378,12 @@ no-headroom need the census run.
   guards-alone keeps the railway green.
 - Local at 737aafc1: test:procgen 0 (46/2154), build 0, check:park 0, check:coplanar 0, check:solids core 0.
 - PR head -> 737aafc1, CI run 39152595871.
+
+### Round 2, finishing (18 Oct, 20:00 BST)
+- Drafts: PR body /tmp/es-pr-body3.md (placeholders PREVIEW_ROOT, PREVIEW_BRIDGE, PREVIEW_STATION, PREVIEW_WALL,
+  CIRESULT, IDENTITY); replies /tmp/es-reply-review3.md, /tmp/es-reply-qa3.md (HEADSHA, PREVIEWURL, PREVIEWQ1..Q4,
+  PREVIEWQ4BENCH). Repro script for the preview: /tmp/es-qa/repros2.mjs (verified on a local prod build).
+- FOUND (not fixed, in the gaps): QA's reptile link /spawn?pos=49.19,-8.58 now puts her on the floor INSIDE Sunny's
+  sealed ring (as main), not the roof. #721's put-down rule calls any region >= 6 m walkable a room; the ring's hollow is
+  18 m. Fix = fill sealed insides (reptile ring, library cella, hotel tower) with bodies; own change.
+- Waiting on CI run 39152595871 (737aafc1); then preview repros, parks identity (artifact parks-9af23e21...), post.
