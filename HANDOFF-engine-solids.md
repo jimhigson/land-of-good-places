@@ -368,3 +368,13 @@ no-headroom need the census run.
   Step-up exemption uses riseBetween (hop's own rise). check:coplanar OK on 16 seeds at a252dc03.
 - PR head -> a252dc03 (CI run 39150059422). Full rerun (16 seeds + proofs) at a252dc03: /tmp/es-r9.
 - Local at 7c74ac25: check:library, check:hop-clearance, check:wall-tunnelling, check:exits exit 0.
+
+### Round 2, the waiting train and the walk surface (18 Oct, 20:00 BST)
+- 737aafc1: fence takeoffs = WalkSurfaces.sample (every plinth/step; World hands it to ParkTrain) + each
+  station's waiting train (ParkTrain.dwellFloors). Seed 6: a sprint off the library plinth cleared the fence;
+  seed 8: a jump off a waiting carriage's floor cleared an end cap. guardReach counts dwell floors (onCarriage gone).
+- Final 16-seed census at 737aafc1 (/tmp/es-r10): 14/16 green. Seed 6: stall awning (open question, see above).
+  Seed 15: far station bench 0.20 m (lean gap, documented since round one). Proofs all red as intended;
+  guards-alone keeps the railway green.
+- Local at 737aafc1: test:procgen 0 (46/2154), build 0, check:park 0, check:coplanar 0, check:solids core 0.
+- PR head -> 737aafc1, CI run 39152595871.
