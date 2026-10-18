@@ -403,3 +403,27 @@ no-headroom need the census run.
 - Posted: review reply issuecomment-6254433031, QA reply issuecomment-6254433232; PR body updated (/tmp/es-pr-body3.md).
 - Open for Jim: seed 6 stall awning (policy); sealed-shell put-down (reptile ring/library cella/hotel tower);
   seed 15 bench lean. Pending comment fix in fence.ts (see above).
+
+## Round 3 (19 Oct): review 6254802924 (changes requested) + QA 6255523819 (not approved)
+Review copy: /tmp/review-722b/review2.md (its stage code is gone; outputs in /tmp/review-722b/mut/TG*.out).
+QA copy: /tmp/es-qa3.md (scripts: .claude/library-build-scratch/qa722b/).
+Work list (tick as done, commit each):
+- [x] cost: per-frame gather (4b950ba7), step-up fast paths (97f157f6): census 194 s -> 15 s on seed 5, same output.
+- [ ] R1 BLOCKER tops as takeoffs: fence relift after the world phase (reachable tops BFS, World calls it),
+      census stage 4c (every reached top -> every guard within JUMP_PLAN_REACH, aimed 1.5 m past, run-ups),
+      box landings per seed = 0 on 16 seeds; proofs fence-crate (red on 4c), fences-4m (GREEN, 0), fence-bush (red).
+      clause 8 analytic counts the census's reached tops as takeoffs.
+- [ ] R2/Q4 railings: far side rule (taller only where a jump over it lands on the line); friendly continuous line.
+- [ ] R3 toilet lid: its solid only while drawn (toggle), body lists every invisible solid honestly.
+- [ ] R4 cost: deep-links +2m45s on CI = boot cost (fence lift 0.23 s/boot: WalkSurfaces.sample 2.9 us, 141
+      platforms scanned per call) -> platform index; wall-tunnelling 52 s local (main 48).
+- [ ] R5 minors: roof classes by structure (gazebo), Player.ts orphan comment, everyTopWide out of Collision.ts,
+      fence.ts 1b comment ("1.28 m", GUARD_OVER_FEET 0.2 m).
+- [ ] Q1 stone wall (-49.6,61.6) seed 5: top 0.12-0.41 m over feet, no step-up, no hop -> stopped dead. Fix at cause;
+      step-or-hop deterministic (15/49 hop, varies 12/15); clause 9 fails a walk pressed at a face; sweep every wall
+      face 16 seeds both sides several points; prove red on this wall.
+- [ ] Q2 library armchairs: arms/back/seat bodies as drawn; census counts wedged landings as failures; sweep every
+      chair/sofa/bed/armchair in every space (jumps + walk-ins): on its top or turned away, never wedged.
+- [ ] Q3 wall-and-bush loop /spawn?pos=-35.9,-9.2&seed=5 hold up+right: lands 0.17 m inside the bush, rescue blinks
+      back, repeats. She must land ON it; the rescue never re-wedges under the same held input.
+- [ ] Preview plays: bush-to-fence (/spawn?pos=-36.5,-2.03,4.2&facing=35&seed=5), the wall, the armchair, the loop.
