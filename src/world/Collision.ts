@@ -840,6 +840,28 @@ interface SolidBucket {
   readonly boxes: BoxCollider[];
 }
 
+/**
+ * **More cells than this, and a collider is not filed cell by cell** — it goes
+ * in the grid's `wide` bucket, which every query reads. A 10 km test wall
+ * (`measure-wall-tunnelling.mts`) filed into 2,500 cells cost 0.6 ms to grid,
+ * in every one of the ~200,000 fresh worlds that check builds: ten times
+ * `main`'s whole running time for it on CI. A wide collider is asked about at
+ * every point instead, which its own distance test answers exactly.
+ */
+const WIDE_CELLS = 256;
+
+/** The grid's cell key: one number, `i` and `j` packed (|j| well under 2^21). */
+function gridKey(i: number, j: number): number {
+  return i * 4194304 + j;
+}
+
+/** The solids grid: its cells, the wide colliders every cell shares, and the revision it was built at. */
+interface SolidGrid {
+  readonly revision: number;
+  readonly cells: Map<number, SolidBucket>;
+  readonly wide: SolidBucket;
+}
+
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
   private readonly walls: WallCollider[] = [];
@@ -1042,45 +1064,44 @@ export class CollisionWorld {
     let depth = -Infinity;
     let what = '';
     let owner = '';
-    const grid = this.solidGrid();
-    const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
-    if (!bucket) return { depth, what, owner };
-    for (const circle of bucket.circles) {
-      if (banded(circle)) continue;
-      if (owners && !owners.has(circle.owner)) continue;
-      const here = circle.radius - Math.hypot(x - circle.x, z - circle.z);
-      if (here > depth) {
-        depth = here;
-        owner = circle.owner;
-        what = `circle#${circle.id} at (${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}) r=${circle.radius.toFixed(2)} top=${circle.topHeight.toFixed(2)}`;
+    for (const bucket of this.bucketsAt(x, z)) {
+      for (const circle of bucket.circles) {
+        if (banded(circle)) continue;
+        if (owners && !owners.has(circle.owner)) continue;
+        const here = circle.radius - Math.hypot(x - circle.x, z - circle.z);
+        if (here > depth) {
+          depth = here;
+          owner = circle.owner;
+          what = `circle#${circle.id} at (${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}) r=${circle.radius.toFixed(2)} top=${circle.topHeight.toFixed(2)}`;
+        }
       }
-    }
-    for (const wall of bucket.walls) {
-      if (banded(wall)) continue;
-      if (owners && !owners.has(wall.owner)) continue;
-      const abx = wall.x2 - wall.x1;
-      const abz = wall.z2 - wall.z1;
-      const lengthSq = abx * abx + abz * abz || 1;
-      const t = Math.max(0, Math.min(1, ((x - wall.x1) * abx + (z - wall.z1) * abz) / lengthSq));
-      const here = wall.halfThickness - Math.hypot(x - (wall.x1 + abx * t), z - (wall.z1 + abz * t));
-      if (here > depth) {
-        depth = here;
-        owner = wall.owner;
-        what =
-          `wall (${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)})-(${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}) ` +
-          `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(2)}${wall.topIsAbsolute ? ' abs' : ''}${wall.autoHoppable ? ' hoppable' : ''}`;
+      for (const wall of bucket.walls) {
+        if (banded(wall)) continue;
+        if (owners && !owners.has(wall.owner)) continue;
+        const abx = wall.x2 - wall.x1;
+        const abz = wall.z2 - wall.z1;
+        const lengthSq = abx * abx + abz * abz || 1;
+        const t = Math.max(0, Math.min(1, ((x - wall.x1) * abx + (z - wall.z1) * abz) / lengthSq));
+        const here = wall.halfThickness - Math.hypot(x - (wall.x1 + abx * t), z - (wall.z1 + abz * t));
+        if (here > depth) {
+          depth = here;
+          owner = wall.owner;
+          what =
+            `wall (${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)})-(${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}) ` +
+            `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(2)}${wall.topIsAbsolute ? ' abs' : ''}${wall.autoHoppable ? ' hoppable' : ''}`;
+        }
       }
-    }
-    for (const box of bucket.boxes) {
-      if (banded(box)) continue;
-      if (owners && !owners.has(box.owner)) continue;
-      const here = boxDepth(box, x, z, 0);
-      if (here > depth) {
-        depth = here;
-        owner = box.owner;
-        what =
-          `box at (${box.cx.toFixed(1)}, ${box.cz.toFixed(1)}) ${(2 * box.halfX).toFixed(2)}x${(2 * box.halfZ).toFixed(2)} ` +
-          `round=${box.rounding.toFixed(2)} top=${box.topHeight.toFixed(2)}${box.topIsAbsolute ? ' abs' : ''}`;
+      for (const box of bucket.boxes) {
+        if (banded(box)) continue;
+        if (owners && !owners.has(box.owner)) continue;
+        const here = boxDepth(box, x, z, 0);
+        if (here > depth) {
+          depth = here;
+          owner = box.owner;
+          what =
+            `box at (${box.cx.toFixed(1)}, ${box.cz.toFixed(1)}) ${(2 * box.halfX).toFixed(2)}x${(2 * box.halfZ).toFixed(2)} ` +
+            `round=${box.rounding.toFixed(2)} top=${box.topHeight.toFixed(2)}${box.topIsAbsolute ? ' abs' : ''}`;
+        }
       }
     }
     return { depth, what: owner ? `${owner} ${what}` : what, owner };
@@ -1109,9 +1130,7 @@ export class CollisionWorld {
    */
   highestTopAt(x: number, z: number, ceiling: number): number {
     let best = -Infinity;
-    const grid = this.solidGrid();
-    const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
-    if (bucket) {
+    for (const bucket of this.bucketsAt(x, z)) {
       for (const circle of bucket.circles) {
         if (!circle.topIsAbsolute) continue;
         const dx = x - circle.x;
@@ -1161,44 +1180,59 @@ export class CollisionWorld {
    */
   ceilingAt(x: number, z: number, fromY: number): number {
     let best = Infinity;
-    const grid = this.solidGrid();
-    const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
-    if (!bucket) return best;
     const consider = (solid: SolidHeights): void => {
       if (!banded(solid)) return;
       const base = solidBaseAt(solid, x, z);
       if (base >= fromY && base < best) best = base;
     };
-    for (const circle of bucket.circles) {
-      const dx = x - circle.x;
-      const dz = z - circle.z;
-      if (dx * dx + dz * dz <= circle.radius * circle.radius) consider(circle);
-    }
-    for (const wall of bucket.walls) {
-      const ax = wall.x2 - wall.x1;
-      const az = wall.z2 - wall.z1;
-      const lengthSquared = ax * ax + az * az;
-      let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const dx = x - (wall.x1 + ax * t);
-      const dz = z - (wall.z1 + az * t);
-      if (dx * dx + dz * dz <= wall.halfThickness * wall.halfThickness) consider(wall);
-    }
-    for (const box of bucket.boxes) {
-      if (boxDepth(box, x, z, 0) >= 0) consider(box);
+    for (const bucket of this.bucketsAt(x, z)) {
+      for (const circle of bucket.circles) {
+        const dx = x - circle.x;
+        const dz = z - circle.z;
+        if (dx * dx + dz * dz <= circle.radius * circle.radius) consider(circle);
+      }
+      for (const wall of bucket.walls) {
+        const ax = wall.x2 - wall.x1;
+        const az = wall.z2 - wall.z1;
+        const lengthSquared = ax * ax + az * az;
+        let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = x - (wall.x1 + ax * t);
+        const dz = z - (wall.z1 + az * t);
+        if (dx * dx + dz * dz <= wall.halfThickness * wall.halfThickness) consider(wall);
+      }
+      for (const box of bucket.boxes) {
+        if (boxDepth(box, x, z, 0) >= 0) consider(box);
+      }
     }
     return best;
   }
 
+  /** The grid cell's bucket at `(x, z)`, if any, and the wide bucket every point shares. */
+  private bucketsAt(x: number, z: number): readonly SolidBucket[] {
+    const grid = this.solidGrid();
+    const cell = grid.cells.get(gridKey(Math.floor(x / SOLID_GRID), Math.floor(z / SOLID_GRID)));
+    return cell ? [cell, grid.wide] : [grid.wide];
+  }
+
   /** {@link solidDepthAt}'s bucket grid, rebuilt whenever the world's revision moves. */
-  private solidGridMemo: { revision: number; cells: Map<string, SolidBucket> } | null = null;
-  private solidGrid(): { revision: number; cells: Map<string, SolidBucket> } {
+  private solidGridMemo: SolidGrid | null = null;
+  private solidGrid(): SolidGrid {
     if (this.solidGridMemo && this.solidGridMemo.revision === this.revisionCounter) return this.solidGridMemo;
-    const cells = new Map<string, SolidBucket>();
+    const cells = new Map<number, SolidBucket>();
+    const wide: SolidBucket = { circles: [], walls: [], boxes: [] };
     const stamp = (minX: number, minZ: number, maxX: number, maxZ: number, add: (cell: SolidBucket) => void): void => {
-      for (let i = Math.floor(minX / SOLID_GRID); i <= Math.floor(maxX / SOLID_GRID); i += 1) {
-        for (let j = Math.floor(minZ / SOLID_GRID); j <= Math.floor(maxZ / SOLID_GRID); j += 1) {
-          const key = `${i},${j}`;
+      const i0 = Math.floor(minX / SOLID_GRID);
+      const i1 = Math.floor(maxX / SOLID_GRID);
+      const j0 = Math.floor(minZ / SOLID_GRID);
+      const j1 = Math.floor(maxZ / SOLID_GRID);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > WIDE_CELLS) {
+        add(wide);
+        return;
+      }
+      for (let i = i0; i <= i1; i += 1) {
+        for (let j = j0; j <= j1; j += 1) {
+          const key = gridKey(i, j);
           let cell = cells.get(key);
           if (!cell) cells.set(key, (cell = { circles: [], walls: [], boxes: [] }));
           add(cell);
@@ -1216,7 +1250,7 @@ export class CollisionWorld {
       const reachZ = Math.abs(b.sin) * b.halfX + Math.abs(b.cos) * b.halfZ + b.rounding;
       stamp(b.cx - reachX, b.cz - reachZ, b.cx + reachX, b.cz + reachZ, (cell) => cell.boxes.push(b));
     }
-    this.solidGridMemo = { revision: this.revisionCounter, cells };
+    this.solidGridMemo = { revision: this.revisionCounter, cells, wide };
     return this.solidGridMemo;
   }
 
