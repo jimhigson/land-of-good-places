@@ -60,28 +60,32 @@ marking; guards stop her by real height, never a flag.
 - Thinnest collider is the library plinth's 0.1 m edges → sub-step counts unchanged by boxes.
 - Hydrated digests: all 16 seeds identical to main after the switch-over (commit e95d83a3).
 
-## Status
-- [x] (a) switch-over — DRAFT PR #722, head `feat/engine-solids-pr` = 7defc913. Local gate on the
-  snapshot: check 0, test:procgen 0 (46 files, 2154 tests), build 0. Looks: /tmp/es-look/shots-a/.
-  CI run 39032883089: 89 pass, Deploy skipped (PRs). CI's 16 parks vs main's: restart, features,
-  planOrder, digest, measures all identical on 16/16. Preview:
-  https://pr-722-7defc91-land-of-good-places.blockstack.workers.dev (+ /hotel: sofas are steps now).
-- [~] (b) real heights + census. Done (each family named + kinded, meshes byte-identical, digests 16/16):
-  garden walls, fountain, railway fence, stall booths, dodgems (+posts), ferris (legs, step-up deck,
-  railings where drawn), water fight (pool rims, hedges, sprinkler, rack), lamps, fairy poles, trees,
-  bushes, cruiser pylons, rail race trestles, slide legs, gate piers, welcome sign posts, bus shelter
-  (posts, NEW bench + canopy), stations (posts, NEW bench + awning).
-  Also done: boundary wall + pillars, castle (storeys, battlement, pavilion, turrets, curtain wall,
-  towers, shop counters, NEW decor solids: crates/woodpile/troughs/dais/throne/armour/chest/fireside
-  bench), hotel (walls, partitions, stair flanks, balustrades, tower, locked door), library (shell,
-  plinth edges w/ TopSlope, room walls; no 'wall' PropTop), reptile (shell by sector top, discs, posts,
-  log, stall, meter, palms, tortoise; no 'wall' PropTop), face-paint open sides (post height).
-  **Probes take a real y** (parkFacts, castle/hotel tower marches, gateway sweep, library/reptile
-  checks): y=0 probes cleared real tops on the sphere → seed 5 restarts all rejected until fixed.
-  Seed 5 acceptance at 95a91d32: restart 0 rejected (coplanar, as main), restart 1 accepted (= main).
-  TODO: check:solids, census (garden run: 797 tops, 24 regions, 316 s — see below), hop re-measure.
-  Left Infinity: the rail centre band (NavGrid closure; (c)), the roof slide mouth (invisible).
-- [ ] (c) guards tall
+## Status (18 Oct, 02:30)
+- [x] (a) switch-over — PR head 7defc913, CI green, preview
+  https://pr-722-7defc91-land-of-good-places.blockstack.workers.dev/hotel (lobby sofas are steps).
+- [x] (b) real heights + census — PR head ff686cb6, CI green; CI parks in /tmp/es-parks-b (restarts,
+  features, planOrder = main's on 16/16). Preview pr-722-ff686cb… (+ /spawn?pos=16.5,-13.9&facing=-90&seed=5).
+- [~] (c) guards tall — work done through f7b39e60 (sections below). Since then:
+  - d8e01cd4: check:wall-tunnelling was red (identity clause): the sim's FLAT world carried her
+    flight over the planet's curve (306b5218). Flat world now keeps flight height; the control
+    carries once after resolve. fb2e0999 + 3b3e3834 (hop refits measured under that sinking flight)
+    REVERTED: measuredHopCeiling = main's 1.574 − 0.3c; hop-clearance = main's numbers. Both green.
+  - 59e2506b: merged origin/main (#721: put-down rule, wedge rescue, check:exits). shard-3 chain =
+    main's + check:solids + check:solids-park (parsed, 179 scripts).
+  - fe450617: #721 adapted to the engine (coordinator's brief): feetSampler (standing.ts) is what
+    the rule samples; deepestSolidOverlap with KID_HEIGHT for clause 3, sweeps and the wedge depth;
+    windows stand on solids (NavGrid.around flag, PLAYER_PUT_DOWN.height/standsOnSolids,
+    playerLattice builds from it + World.routeConnectors/routeBridgeCovers); a top with no lattice
+    level is walked off on 16 bearings (OpenFloor.getsDown, DROP_WINDOW_HALF); CollisionWorld.near
+    now carries boxes + shifted tops (the merge copied circles/walls only). check:exits pockets are
+    four walls (addRectangle is a filled box here).
+- Next: check:exits, check:hotel (31-33), check:solids core+park, test:procgen, full check, build;
+  then PR head → final, CI all green, preview check, report (coordinator wants link + sentence +
+  visible-change list).
+- Planet note (measured, es-leanreach.mts): with the carry, a jump's apex over the ground is
+  cos(lean) × flat (gravity is along world y): 1.23 m middle, 1.20 @44 m, 1.13 @85 m inward;
+  outward adds the damp lag (to 1.41). Pre-existing physics; hop policy is position-blind.
+- My dev server PID 87427 (port 5798) — stopped 02:10.
 
 ## Decisions made in (b) (with reasons)
 - **solidInFrame** (terrain.ts): a rigid group stood on the sphere (plots, shelter, station) puts a
