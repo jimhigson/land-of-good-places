@@ -1241,7 +1241,7 @@ if (spacesInPart.length) {
       }
     }
   }
-  say(pushes > 0 && shuttled === 0, `${pushes} pushes into the tops she steps up onto, 8 bearings each: ${steppedUp} stepped her up, ${pushes - steppedUp - shuttled} held her, ${shuttled} shuttled her${firstShuttle.length ? ` — ${firstShuttle.join('; ')}` : ''}`);
+  say(pushes > 0 && shuttled === 0, `${pushes} pushes into the tops she steps up onto, 8 bearings each: ${steppedUp} stood her on the top, ${pushes - steppedUp - shuttled} walked her across it or held her at its face, ${shuttled} shuttled her${firstShuttle.length ? ` — ${firstShuttle.join('; ')}` : ''}`);
   note(`clause 11 asks the step up and stops once she has stood on the top for 0.2 s: it says nothing about walking on across it — off its far side into a gap narrower than her body, against a wall, she jitters at the edge (a bed's far side in the suite on seed 5), written down on PR #722 as a gap`);
 }
 
