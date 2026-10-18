@@ -563,13 +563,10 @@ export function clearsTop(topHeight: number, clearance: number): boolean {
  * 3. **So the honest limit depends on the footprint**, and is far below the
  *    apex. Measured (`scripts/measure-hop-clearance.mts`, worst case over
  *    20–120 fps, walk and sprint, approach angles 0–40°, every phase of the
- *    frame clock): 1.057 m across the 0.22 m-thick wooden walls, 1.028 m
- *    across the 0.34 m stone ones, 0.833 m across a 0.60 m one (re-measured
- *    17 Oct 2026, after a jump's flight began carrying her height over the
- *    planet's curve and taking off from the ground under her — the corners
- *    at 20–30 fps came down by up to 5 cm). Square-on at 60 fps the stone
- *    figure is 1.176 m — the low numbers are the corners, and the corners are
- *    what a route has to be planned for.
+ *    frame clock): 1.100 m across the 0.22 m-thick wooden walls, 1.045 m
+ *    across the 0.34 m stone ones, 0.879 m across a 0.60 m one. Square-on at
+ *    60 fps the stone figure is 1.176 m — the low numbers are the corners, and
+ *    the corners are what a route has to be planned for.
  *
  * A wall above this but below the old 1.4312 m did not merely feel bad. Either
  * the wall went solid again underneath her mid-footprint and *ejected* her out
@@ -580,7 +577,7 @@ export function clearsTop(topHeight: number, clearance: number): boolean {
  * `[3,19]→[-4,20]` was exactly that, and `NavGrid` had started routing over it.
  *
  * 1.00 m sits below the measured limit for every wall thickness the park
- * actually uses (the worst, 1.028 m, across the stone walls). It keeps every low garden wall hoppable — 0.7, 0.85 and 0.95 m,
+ * actually uses. It keeps every low garden wall hoppable — 0.7, 0.85 and 0.95 m,
  * both materials, eight walls — and drops the four the flight never honestly
  * managed: 1.15, 1.2, 1.2 and 1.25 m. {@link
  * CollisionWorld.checkHoppableColliders} enforces at boot that no registered
@@ -617,19 +614,11 @@ export const HOP_APEX_TOLERANCE = 0.001;
  * collider — `2·(halfThickness + moverRadius)`, its full footprint plus her own
  * width on both sides.
  *
- * **The lower envelope of the measurement itself** (`scripts/measure-hop-
- * clearance.mts`): at each wall thickness it measures, the worst clean crossing
- * over 20–120 fps, walk and sprint, 0–40°, less a millimetre — joined straight
- * between, and carried on straight past the ends. So it is a lower bound on
- * the truth everywhere it was measured, and as tight as the measurement allows.
- *
- * It was a straight line, `1.574 − 0.3·crossing`, fitted under the points.
- * Re-measured on 17 Oct 2026 — a jump's flight now carries her height over the
- * planet's curve and takes off from the ground under her, and the corners at
- * 20–30 fps came down by up to 5 cm — no straight line fits under the new
- * points without falling below the fountain rim's 1.0 m at its 1.88 m
- * crossing, which the measurement itself clears by 2.8 cm (1.028 m): the
- * worst points are a bend, not a line.
+ * A straight line fitted *underneath* every measured point (see the table in
+ * {@link MAX_AUTO_HOP_HEIGHT}), so it is a lower bound on the truth everywhere,
+ * not a best fit through it: at 1.54 m of crossing it reads 1.112 against a
+ * measured 1.112, at 1.92 m it reads 0.998 against a measured 1.045, at 2.44 m
+ * it reads 0.842 against a measured 0.879.
  *
  * Used only by the boot check. The predicate itself stays a flat ceiling,
  * because a route's idea of what is hoppable should not quietly change with the
@@ -637,28 +626,8 @@ export const HOP_APEX_TOLERANCE = 0.001;
  * collider fat enough to fall below it, which is precisely what this catches.
  */
 export function measuredHopCeiling(crossing: number): number {
-  const knots = MEASURED_HOP_ENVELOPE;
-  let i = 1;
-  while (i < knots.length - 1 && crossing > (knots[i] as readonly [number, number])[0]) i += 1;
-  const [x0, y0] = knots[i - 1] as readonly [number, number];
-  const [x1, y1] = knots[i] as readonly [number, number];
-  return y0 + ((y1 - y0) * (crossing - x0)) / (x1 - x0);
+  return 1.574 - 0.3 * crossing;
 }
-
-/**
- * The knots of {@link measuredHopCeiling}: `[crossing, ceiling]`, the worst
- * clean crossing at each measured wall half-thickness (0.15, 0.22, 0.28, 0.32,
- * 0.34, 0.45 and 0.60 m, so crossings `2·(half + PLAYER_RADIUS)`) less 1 mm.
- */
-const MEASURED_HOP_ENVELOPE: readonly (readonly [number, number])[] = [
-  [1.54, 1.061],
-  [1.68, 1.056],
-  [1.8, 1.026],
-  [1.88, 1.027],
-  [1.92, 1.027],
-  [2.14, 0.919],
-  [2.44, 0.832],
-];
 
 /**
  * "Can a hop actually *carry* a mover over something this tall?"

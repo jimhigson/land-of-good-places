@@ -251,7 +251,7 @@ export class SimPlayer {
       else {
         // `Player.update`'s flight, name for name: her own height travels
         // with her at her distance from the planet's centre.
-        at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
+        at.y = this.carryFlight(fromX, fromZ, at.y, at.x, at.z);
         reference = at.y;
       }
       fromX = at.x;
@@ -262,7 +262,7 @@ export class SimPlayer {
     // The flight's carry is motion, not sampling, so the pre-#358 control
     // (one ground sample a frame) keeps it too.
     const carryOnly = (at: Vector3): void => {
-      if (this.airborne) at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
+      if (this.airborne) at.y = this.carryFlight(fromX, fromZ, at.y, at.x, at.z);
       fromX = at.x;
       fromZ = at.z;
     };
@@ -291,13 +291,19 @@ export class SimPlayer {
         KID_HEIGHT,
       );
     } else {
-      const movedX = this.position.x + deltaX;
-      const movedZ = this.position.z + deltaZ;
-      if (this.airborne) this.position.y = carryReference(this.position.x, this.position.z, this.position.y, movedX, movedZ);
-      this.position.x = movedX;
-      this.position.z = movedZ;
+      // The whole frame in one move and one `resolve`: one sub-step of
+      // `resolveMovement`, less its pinch guard. So the flight is carried the
+      // way that sub-step's `carryOnly` carries it, once, from where the frame
+      // began to where `resolve` left her. Carried before `resolve` as well,
+      // the two paths asked `resolve` about different feet and parted by
+      // 1e-13 m on frames where nothing touched her, which check:wall-
+      // tunnelling's "ordinary movement is untouched" reads as a change.
+      const startX = this.position.x;
+      const startZ = this.position.z;
+      this.position.x += deltaX;
+      this.position.z += deltaZ;
       result = this.collision.resolve(this.position, this.radius, this.hopClearance, dt, stepCeiling, KID_HEIGHT);
-      if (this.airborne) this.position.y = carryReference(movedX, movedZ, this.position.y, this.position.x, this.position.z);
+      if (this.airborne) this.position.y = this.carryFlight(startX, startZ, this.position.y, this.position.x, this.position.z);
     }
 
     this.clearedWall = result.clearedWall;
@@ -373,6 +379,21 @@ export class SimPlayer {
     }
     this.hopClearance = hopHeight;
     this.groundHeight = groundY;
+  }
+
+  /**
+   * Her height in flight, carried from one point to the next: `Player.update`'s
+   * flight on the planet, name for name — `carryReference`, her distance from
+   * the planet's centre kept. **The flat world (no `ground`) has no planet.**
+   * Its ground and every top in it are level, so a height there carries
+   * unchanged, as it always did. Carried over a curve that world does not
+   * have, her flight sank about 9 cm per metre travelled outwards at 20 m from
+   * the middle while the walls stayed put: hops came down inside walls they
+   * would have cleared (check:wall-tunnelling's identity clause, walks 1-3 m
+   * apart) and the auto-hop measured up to 5 cm short of the planet's.
+   */
+  private carryFlight(fromX: number, fromZ: number, y: number, toX: number, toZ: number): number {
+    return this.ground ? carryReference(fromX, fromZ, y, toX, toZ) : y;
   }
 
   /**
