@@ -328,3 +328,13 @@ no-headroom need the census run.
 - 16-seed census at 81861e39: 15/16 green; seed 15 far station bench 0.20 m (documented gap).
 - Proofs at 81861e39 (/tmp/es-proofs6): all 11 red, controls green. PR body draft /tmp/es-pr-body.md.
 - Full local check restarted at 3b3e3834 (snap5, /tmp/es-gate-d). Then: push PR head, CI, preview.
+
+### Round 2, gate and PR head (18 Oct, 17:30 BST)
+- Local gate at 73dba6a6 (live worktree, final-CI parks restamped, hash c0daaa03…): test:procgen exit 0
+  (46 files, 2154 tests), build exit 0, check:coplanar exit 0 (186 seams, all in baseline);
+  `pnpm run check` running -> /tmp/es-gate/check.log (ends "exit N").
+- PR head feat/engine-solids-pr fast-forwarded 9edf7563 -> 73dba6a6; CI run 39145152633.
+- 15-seed park census running: /tmp/es-seeds.sh <wt> /tmp/es-seeds (logs <seed>.log, last line "exit N").
+- After CI: download its parks, `node /tmp/es-compare-parks.mjs /tmp/es-parks-final <ci-parks-dir>`;
+  preview from the newest "Deploy PR preview" comment; `PREVIEW=<url> node /tmp/es-qa/repros.mjs`;
+  fill /tmp/es-pr-body2.md + /tmp/es-reply-*.md placeholders; post; report via SubagentHandback.
