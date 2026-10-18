@@ -103,6 +103,9 @@ marking; guards stop her by real height, never a flag.
   - CI parks (run 39111869119, /tmp/es-parks-c) vs main (/tmp/es-parks-main2): 14 same; seed 1 one
     trestle 1 m along; seed 9 restart 0 (main 5: its bridge-standability probe at the wrong height).
     vs (b): 16/16 same (digests differ: fence, railings, copings).
+  - 1322d72a: check:exits rules (i) a crate's top she walks off is left alone, (j) a crate in a sealed
+    pit is not; both proved red (walk-off off → (i) found=false; any landing open → (j) left as given).
+    Proofs at c1ceb044 (/tmp/es-proofs7): all 11 check:solids proofs exit 1 on their clauses.
 - Previews: (a) pr-722-7defc91…/hotel; (b) https://pr-722-ff686cb-land-of-good-places.blockstack.workers.dev
   (from the PR's own comment). (c): the newest "Deploy PR preview" comment once CI deploys.
 - Next: CI green on the final head, compare CI parks (/tmp/es-compare-parks.mjs), preview check,
