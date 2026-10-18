@@ -121,6 +121,31 @@ marking; guards stop her by real height, never a flag.
   outward adds the damp lag (to 1.41). Pre-existing physics; hop policy is position-blind.
 - My dev server PID 87427 (port 5798) — stopped 02:10.
 
+## Round 2: review (changes requested) + QA (not approved), 18 Oct afternoon
+Review: /tmp/review-722/review.md (comment 6250201443). QA: /tmp/es-qa-722.md (comment 6250543626).
+Work list (tick as done, commit each):
+- [~] R1 check:solids: ROOF_KINDS + roof-kind guard + proofs (reptile-roof, every-roof, new-roof); 5 hotel
+      rooms censused; drawnTops ancestor visibility; fps note (SOLIDS_FPS). Prove each red.
+- [ ] R2 delete `ledge` (hotel 33 sites + library armchair arms/back): measured top + topHalf from the drawn
+      geometry; fix the ocean-room trap at its cause; list newly standable things. Also the other
+      toppedNarrow(0) declarations (library plinth edges, booth bumper walls) -> measured.
+- [~] R3 railway: corridor band = CLOSURE (CollisionWorld.asClosure: NavGrid + planner read it, no body
+      meets it). Census: solidReach jumps when her run stalls (crate-against-fence control). Proofs
+      guards-alone (everyTopWide) and fence-crate. End-cap middles (2.2 m invisible, train passes) remain.
+- [ ] Q1 auto-hop from on top of walls/rim: height-aware wouldAutoHopClear (feet; a step is a step);
+      census + check:solids with the REAL hop probe; clause: walk the length of every wall top/rim.
+- [ ] Q2 bridge railings jumped down-slope from the crown: railing height vs the highest her feet get
+      beside it (choose + reason); clause: sprint-jumps at every railing/fence never clear it. Fix body's
+      "1.1-1.4 m" (QA: 1.49-1.50 outward at 65 m).
+- [ ] Q3 /spawn?pos=x,z: teleport with no y stands her on the floor or a step's top, never a roof.
+- [ ] Q4 foyer log shuttle: walkingOntoStep must see the standable band anywhere along her lookahead;
+      castle bench stutter; library plinth SE (fine: lip too thin to step, jump clears it).
+- [~] Minors: yAtRadius/planetRadiusAt (done), BUILDING_STEP_UP/JUMP_CLEARANCE_GRACE imports (done),
+      Collision header + circleSeparation/wallTopReaches docs, GREAT_HALL_TABLE_HEIGHT, NPC post-cap bump,
+      PR body (jet pack, library tracks note, railway account, seed 9 cause = radial tops).
+- Local runs need .parks restamped after EVERY src edit (/tmp/es-restamp-parks-final.sh <wt>), else a
+  script triggers a 12-min seed-5 acceptance.
+
 ## Decisions made in (b) (with reasons)
 - **solidInFrame** (terrain.ts): a rigid group stood on the sphere (plots, shelter, station) puts a
   solid at the column its middle is drawn in, top = hypot(R+top, lx, lz). Plots used centre+local,
