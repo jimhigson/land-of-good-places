@@ -145,6 +145,21 @@ Work list (tick as done, commit each):
       PR body (jet pack, library tracks note, railway account, seed 9 cause = radial tops).
 - Local runs need .parks restamped after EVERY src edit (/tmp/es-restamp-parks-final.sh <wt>), else a
   script triggers a 12-min seed-5 acceptance.
+- 5d0824bc: R1 proofs red (reptile-roof, every-roof x9, new-roof); fence-crate now red (stage 4b used to
+  ask only standable tops, so never tried a fence); drawnTops shows the 4 space roots (interiorRoot,
+  hotelRoot, library.roomRoot, reptileHouse.hallRoot). core: 1 red left = suite sofa (see R2).
+- R2 findings/decisions so far:
+  - Suite sofa: plan halfX 1.1 / halfZ 1.3 is NOT the drawn sofa (sofa(3.2): 1.6 x 0.475) and its
+    collider was the swept AABB -> she stood on air at its corner (core clause 2). Fix: parts (seat 0.5,
+    back 0.92, arms 0.64) turned with the model (place.ts addBox yaw = +spin measured best? CHECK sign).
+  - Ocean-room "trap" (-606.4,1907.6) = a drop off SEAWEED (0x60c3 at local -6.0,7.2) once its fake
+    1.5 m top was standable. Measured seaweed/crystal tops are points (topHalf ~0) -> unreachable.
+  - Pans/basins: KID_HEIGHT 2.12, privacy roof at 2.42 -> on the lid (0.74) her head is through the
+    roof. Plan: the privacy roof becomes a banded solid ceiling (base 2.42, not navStamped) -> headroom
+    makes lid/cistern unreachable by physics; parts measured from Toilets.ts constants.
+  - Cart walls (filled booths) -> closures (box is the drawn cart); library plinth edges ->
+    toppedShifted inward t/2 + topHalf t/2 (END_HALF 0.2 -> band 0.1 = standable): sides become steps
+    where <= 0.62 m (visible change; QA's 'plinth SE' answer).
 
 ## Decisions made in (b) (with reasons)
 - **solidInFrame** (terrain.ts): a rigid group stood on the sphere (plots, shelter, station) puts a
