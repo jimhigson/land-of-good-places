@@ -363,10 +363,7 @@ export class SimPlayer {
     // nudged her off its top, and here alone she was thrown up from it
     // (seeds 9 and 12). The control path has not sampled the ground yet, so
     // for it this asks the frame's start, and the fall below still stands.
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
-      this.airborne = true;
-      this.verticalVelocity = 0;
-    }
+    this.fallIfOff(groundY);
 
     let autoHopWanted = false;
     if (!this.airborne && inputLength > 1e-4) {
@@ -403,10 +400,7 @@ export class SimPlayer {
     // the ground, never from the damped height lagging under it on a climb.
     if (tookOff && this.position.y < groundY) this.position.y = groundY;
 
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
-      this.airborne = true;
-      this.verticalVelocity = 0;
-    }
+    this.fallIfOff(groundY);
 
     let hopHeight = 0;
     if (this.airborne) {
@@ -424,6 +418,18 @@ export class SimPlayer {
     }
     this.hopClearance = hopHeight;
     this.groundHeight = groundY;
+  }
+
+  /**
+   * `Player.update`'s fall test, name for name: standing more than
+   * `FALL_THRESHOLD` over the ground under her, she has walked off something
+   * and starts falling. One test, asked twice a frame (see `step`).
+   */
+  private fallIfOff(groundY: number): void {
+    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+      this.airborne = true;
+      this.verticalVelocity = 0;
+    }
   }
 
   /**
