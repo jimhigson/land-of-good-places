@@ -123,6 +123,12 @@ import { STEP_SAMPLES, standingHeight, teleportHeight } from '../src/world/stand
  *   edge, and her drawn height as her feet, as each was — clause 11.
  */
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
+/** Every proof this script knows: a name it does not know would run the check unbroken, and a proof that comes back green proves nothing. */
+const PROOFS = [
+  'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
+  'reptile-roof', 'every-roof', 'new-roof', 'fence-crate', 'guards-alone', 'low-guard', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
+];
+if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
 const CENSUS_FPS = Number(process.env['SOLIDS_FPS'] ?? 60);
 /** The top of her jump as a frame clock at `fps` samples it — the sim's own integration, from the ground. */
