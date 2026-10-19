@@ -436,3 +436,12 @@ Work list (tick as done, commit each):
 - Q1 cause found: wall (-51.88,61.57)-(-47.29,61.57) half 0.34, top shifted (-0.108, +0.135) by the lean. Her
   step stretch (STEP_LOOKAHEAD 0.72 m) ends 0.1 m into the footprint, 0.035 m short of the shifted top; the
   hop probe calls it a step (0.12-0.41 m over her feet) -> neither. Rig repro: es-q1wall.mts (stops at z 60.605).
+- Done so far (19 Oct): efb3052f Q1 (stepTopAt: body not drawn top; hop judged from the contact point, steps only
+  when takeable) + wedge owner (standing.wedgeDepth, anyWidth: step-high narrow tops never wedge -> armchair holds
+  her) + crack rules (dropWedges hold, crackFloor); 8bd? (see log) squeeze lift / nearestFit / walk-into-wedge refusal,
+  census walk-offs only from the top, library lamps by crowns; cc5e539d fence raise (reachableTops BFS mirroring the
+  census: walk rings 0.3-3 m, chain gap 6, rise 1.6, headroom; lamp-post finials narrow; mid rails every metre);
+  e9defeac check:solids 4c + clause 8 tops + clause 9 face sweep + proofs fence-bush, fences-4m, drawn-step.
+- ALWAYS run scratch scripts through /tmp/es-run.sh (restamps first): a stale park hash makes the harness hang at 0% CPU.
+- Seed 5 before 4c: census park green incl. 0 wedged landings; core green after the lamp crowns (re-check).
+- Fence after raise: seed 5 136/174 posts lifted (most 0.5-1.5 m; max +2.76 by a wooden wall post), seeds 0/4/6 <= +2.84.
