@@ -35,10 +35,11 @@
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
 import { carryReference } from '../src/world/building/surfaces.ts';
-import { STEP_DOWN_ASKED, STEP_SAMPLES, crackFloor, dropWedges, liftOutOfSqueeze, riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { STEP_DOWN_ASKED, STEP_SAMPLES, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, nearestFit, riseUnder, solidStepCeiling, standingHeight, walkingOntoStep, wedgeDepth } from '../src/world/standing.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
+  BUILDING_STEP_UP,
   FALL_THRESHOLD,
   GRAVITY,
   JUMP_SPEED,
@@ -198,6 +199,8 @@ export class SimPlayer {
   groundHeight = 0;
   /** Last frame's sampled ground under her feet. */
   groundY = 0;
+  /** `Player`'s own: the highest her feet have been since she last stood on something. */
+  private flightHighest = -Infinity;
   private readonly collision: CollisionWorld;
   private readonly hopProbe: HopProbe;
   private readonly stepSamples: number;
@@ -409,13 +412,14 @@ export class SimPlayer {
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
       const before = this.position.y;
+      this.flightHighest = Math.max(this.flightHighest, before);
       this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
       // `Player`'s own: over a crack she does not fit, she comes down on what stands either side.
       if (this.verticalVelocity < 0) {
         const floor = crackFloor(this.collision, this.position.x, this.position.z, before, this.position.y, groundY);
         if (floor !== null && floor > groundY) groundY = floor;
         else {
-          const lifted = liftOutOfSqueeze(this.collision, this.position);
+          const lifted = liftOutOfSqueeze(this.collision, this.position, this.flightHighest);
           if (lifted !== null && lifted > groundY) groundY = lifted;
         }
       }
@@ -427,8 +431,12 @@ export class SimPlayer {
       }
       hopHeight = this.position.y - groundY;
     } else {
+      this.flightHighest = this.position.y;
       this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
+    // `Player`'s own: squeezed after all of that, at the nearest place she fits.
+    if (this.airborne) nearestFit(this.collision, this.position, this.position.y);
+    else if (nearestFit(this.collision, this.position, groundY, (x, z) => this.levelWith(x, z, groundY))) groundY = this.sampleGround(this.position.x, this.position.z, groundY);
     this.hopClearance = hopHeight;
     this.groundHeight = groundY;
   }
@@ -438,9 +446,27 @@ export class SimPlayer {
    * `FALL_THRESHOLD` over the ground under her, she has walked off something
    * and starts falling. One test, asked twice a frame (see `step`).
    */
+  /** `Player.levelWith`, name for name. */
+  private levelWith(x: number, z: number, groundY: number): boolean {
+    const there = this.sampleGround(x, z, groundY);
+    return there >= groundY - STEP_DOWN_ASKED && there <= groundY + BUILDING_STEP_UP;
+  }
+
+  /** `Player.walksIntoWedge`, name for name. */
+  private walksIntoWedge(groundY: number): boolean {
+    if (this.position.x === this.previousPosition.x && this.position.z === this.previousPosition.z) return false;
+    if (wedgeDepth(this.collision, this.position, groundY) <= WEDGE_DEPTH) return false;
+    return wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH;
+  }
+
   private fallIfOff(groundY: number): number {
-    // `Player`'s own: a step down into a crack she does not fit is not taken.
-    if (!this.airborne && groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) {
+    // `Player`'s own: a step down into a crack she does not fit is not taken,
+    // nor a walk that ends wedged where the frame began she was not.
+    if (
+      !this.airborne &&
+      ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
+        this.walksIntoWedge(groundY))
+    ) {
       this.position.x = this.previousPosition.x;
       this.position.z = this.previousPosition.z;
       this.velocity.x = 0;

@@ -152,13 +152,17 @@ export class LibraryProps {
     this.keepOuts = libraryKeepOuts();
   }
 
-  /** A solid disc, room-local — a lamp, a side table, a cushion. */
-  disc(what: string, x: number, z: number, radius: number, top: PropTop): void {
+  /**
+   * A solid disc, room-local — a lamp, a side table, a cushion. `topHalf`, as
+   * {@link box}'s: how much of its top she could stand on, measured off what
+   * is drawn — a lamp's crown is its finial's point, not the shade's width.
+   */
+  disc(what: string, x: number, z: number, radius: number, top: PropTop, topHalf = Number.NaN): void {
     this.checkKeepOuts(what, [{ x, z }], radius, top);
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
-    const handle = this.collision.addCircle(worldX, worldZ, radius, top, false, true);
-    this.standables.push({ what, top, footprint: { x, z, radius } });
+    const handle = this.collision.toppedNarrow(topHalf, () => this.collision.addCircle(worldX, worldZ, radius, top, false, true));
+    if (Number.isNaN(topHalf) || topHalf >= FOOT_HALF_WIDTH) this.standables.push({ what, top, footprint: { x, z, radius } });
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 

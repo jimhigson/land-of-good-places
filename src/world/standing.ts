@@ -146,15 +146,19 @@ const liftProbe = new Vector3Impl();
  * prediction did not see (a run that keeps her moving as she falls). Squeezed
  * where she is now — pushed as `resolve` pushes her and still wedged — she is
  * put on the lowest top of what squeezes her at which she fits, where the
- * push there leaves her; that height is returned, for her to land at. `null`
+ * push there leaves her; that height is returned, for her to land at — never
+ * higher than `highest`, the highest her feet have been this flight. `null`
  * when she is not squeezed, or fits nowhere over it (the wedge rescue's).
  */
-export function liftOutOfSqueeze(collision: CollisionWorld, position: Vector3): number | null {
+export function liftOutOfSqueeze(collision: CollisionWorld, position: Vector3, highest: number): number | null {
   if (wedgeDepth(collision, position, position.y) <= WEDGE_DEPTH) return null;
   liftProbe.copy(position);
   collision.resolve(liftProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, liftProbe.y);
   if (wedgeDepth(collision, liftProbe, liftProbe.y) <= WEDGE_DEPTH) return null;
   for (const top of collision.topsReached(position.x, position.z, PLAYER_RADIUS, position.y)) {
+    // Only what this flight came down past: never up onto a pylon she was
+    // never over (seed 5: a ring of bushes round the Sky Cruiser's pylon).
+    if (top > highest + JUMP_CLEARANCE_GRACE) break;
     liftProbe.set(position.x, top, position.z);
     collision.resolve(liftProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, top);
     if (wedgeDepth(collision, liftProbe, top) > WEDGE_DEPTH) continue;
@@ -201,6 +205,44 @@ export function crackFloor(collision: CollisionWorld, x: number, z: number, from
   if (wedgeDepth(collision, crackProbe, toY) <= WEDGE_DEPTH) return null;
   // Would she fit where this fall ends, pushed as the fall would push her?
   return dropWedges(collision, x, z, groundY, toY) ? top : null;
+}
+
+/** Scratch body for {@link nearestFit}. */
+const fitProbe = new Vector3Impl();
+/** The rings {@link nearestFit} searches, metres out from where she is. */
+const FIT_RINGS = [0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 1] as const;
+const FIT_BEARINGS = 16;
+
+/**
+ * **The nearest place, at her height and within a metre, where she is not
+ * wedged** — the last word on a squeeze that nothing before it settled: two
+ * lamp posts and a wall's end on seed 5, between which a hop off a bush came
+ * straight down. `resolve` pushes her out of one body at a time, and between
+ * two closer than she is wide each push is undone by the other; this asks for
+ * where she fits, all of them at once. Moves `position` there and says so;
+ * leaves her be, and says not, where she fits already or fits nowhere near
+ * (the wedge rescue's). `fits`, if given, says whether a spot is somewhere
+ * she may be put — on her own floor, not over a drop.
+ */
+export function nearestFit(
+  collision: CollisionWorld,
+  position: Vector3,
+  feetY: number,
+  fits: (x: number, z: number) => boolean = () => true,
+): boolean {
+  if (wedgeDepth(collision, position, feetY) <= WEDGE_DEPTH) return false;
+  for (const ring of FIT_RINGS) {
+    for (let b = 0; b < FIT_BEARINGS; b += 1) {
+      const a = (b / FIT_BEARINGS) * Math.PI * 2;
+      fitProbe.set(position.x + Math.cos(a) * ring, position.y, position.z + Math.sin(a) * ring);
+      if (wedgeDepth(collision, fitProbe, feetY) > WEDGE_DEPTH) continue;
+      if (!fits(fitProbe.x, fitProbe.z)) continue;
+      position.x = fitProbe.x;
+      position.z = fitProbe.z;
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

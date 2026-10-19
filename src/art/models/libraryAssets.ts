@@ -838,9 +838,10 @@ export function createLibraryFloorLamp(): LampHandle {
 }
 
 /** The floor lamp's measured figures: the widest it is about its own foot, and how tall. */
-export function libraryFloorLampSize(): { readonly radius: number; readonly height: number } {
+export function libraryFloorLampSize(): { readonly radius: number; readonly height: number; readonly topHalf: number } {
   const figures = lampFigures(FLOOR_LAMP, 'floorLamp-shade');
-  return { radius: figures.radius, height: figures.height };
+  // Its crown is its finial: as much of its top as a foot could stand on.
+  return { radius: figures.radius, height: figures.height, topHalf: kitTop(FLOOR_LAMP).topHalf };
 }
 
 /** A reading lamp for a side table or the desk, its shade glowing. */
@@ -850,9 +851,11 @@ export function createLibraryReadingLamp(): LampHandle {
 }
 
 /** The reading lamp's measured figures: the widest it reaches about its own foot (its shade leans out), and how tall. */
-export function libraryReadingLampSize(): { readonly radius: number; readonly height: number } {
+export function libraryReadingLampSize(): { readonly radius: number; readonly height: number; readonly topHalf: number } {
   const figures = lampFigures(READING_LAMP, 'readingLamp-shade');
-  return { radius: figures.radius, height: figures.height };
+  // Its crown is its finial (PR #722, round three: stood on, the disc's
+  // shade-wide top put her 0.17 m over the drawn lamp on the nook table).
+  return { radius: figures.radius, height: figures.height, topHalf: kitTop(READING_LAMP).topHalf };
 }
 
 /** A floor cushion on the story rug, in `colour`. */

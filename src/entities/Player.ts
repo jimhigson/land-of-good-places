@@ -4,6 +4,7 @@ import {
   PLAYER_ACCELERATION,
   PLAYER_BOB_CYCLES_PER_METRE,
   PLAYER_BOB_HEIGHT,
+  BUILDING_STEP_UP,
   FALL_THRESHOLD,
   GRAVITY,
   JUMP_SPEED,
@@ -23,7 +24,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
-import { STEP_DOWN_ASKED, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep, wedgeDepth } from '../world/standing';
+import { STEP_DOWN_ASKED, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, nearestFit, riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep, wedgeDepth } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
@@ -598,6 +599,8 @@ export class Player implements GameSystem {
    * for ordinary contact and banked as speed.
    */
   private escorting = false;
+  /** The highest her feet have been since she last stood on something — what a squeeze in the air may lift her back to (`liftOutOfSqueeze`). */
+  private flightHighest = -Infinity;
   /** How long she has been wedged inside something solid, seconds — see {@link WEDGE_SECONDS}. */
   private wedgedFor = 0;
   /**
@@ -1491,7 +1494,14 @@ export class Player implements GameSystem {
     // into a crack she does not fit is not taken (`dropWedges`): the edge
     // holds her on what she was standing on, as a ledge over a gap too narrow
     // to step into would.
-    if (!this.airborne && groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) {
+    // And on the level: a walk that ends wedged — pressed into a slot between
+    // a wall's end and a lamp post — is not taken either, unless she was
+    // wedged already (then any way out is hers).
+    if (
+      !this.airborne &&
+      ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
+        this.walksIntoWedge(groundY))
+    ) {
       this.position.x = this.previousPosition.x;
       this.position.z = this.previousPosition.z;
       groundY = this.groundHeight;
@@ -1606,6 +1616,7 @@ export class Player implements GameSystem {
       hopHeight = this.position.y - groundY;
     } else {
       this.wornJetpack?.setThrust(0);
+      this.flightHighest = this.position.y;
       // Damp onto the ground so walking over the gentle hills isn't jittery.
       // The half-life is a shared constant, not a literal: it sets how far
       // behind the ground this height lags on a climb, and so how steep a
@@ -1613,6 +1624,11 @@ export class Player implements GameSystem {
       // sprint-climb budget in `everyBridgeIsWalkableAndReachable`.
       this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
+    // Squeezed after all of that — between two lamp posts and a wall's end —
+    // she is at the nearest place she fits (`nearestFit`): on her feet, on
+    // her own floor's level, never over a drop or up onto a top.
+    if (this.airborne) nearestFit(this.collision, this.position, this.position.y);
+    else if (nearestFit(this.collision, this.position, groundY, (x, z) => this.levelWith(x, z, groundY))) groundY = this.groundAt(this.position.x, this.position.z, groundY);
     this.hopClearance = hopHeight;
     // Next frame's sampling reference: the surface she is on, not the damped
     // height she is drawn at. See `groundHeight`.
@@ -1836,17 +1852,31 @@ export class Player implements GameSystem {
    * crate or a garden wall is somewhere to land because it is solid; nothing
    * marks a floor on top of it.
    */
+  /** Is the floor at `(x, z)` the one she stands on at `groundY` — no drop off it, nothing more than a step up? */
+  private levelWith(x: number, z: number, groundY: number): boolean {
+    const there = this.groundAt(x, z, groundY);
+    return there >= groundY - STEP_DOWN_ASKED && there <= groundY + BUILDING_STEP_UP;
+  }
+
+  /** Has this frame's walk left her wedged, where the frame began she was not? */
+  private walksIntoWedge(groundY: number): boolean {
+    if (this.position.x === this.previousPosition.x && this.position.z === this.previousPosition.z) return false;
+    if (wedgeDepth(this.collision, this.position, groundY) <= WEDGE_DEPTH) return false;
+    return wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH;
+  }
+
   /**
    * Coming down from `before` to where she is now: over a crack she does not
    * fit, she comes down on what stands either side of it (`crackFloor`) —
    * the ground she lands on, as far as this frame is concerned.
    */
   private comeDownOn(before: number, groundY: number): number {
+    this.flightHighest = Math.max(this.flightHighest, before);
     if (this.verticalVelocity >= 0) return groundY;
     const floor = crackFloor(this.collision, this.position.x, this.position.z, before, this.position.y, groundY);
     if (floor !== null && floor > groundY) return floor;
     // …and if a crack holds her anyway, out onto what holds her.
-    const lifted = liftOutOfSqueeze(this.collision, this.position);
+    const lifted = liftOutOfSqueeze(this.collision, this.position, this.flightHighest);
     return lifted !== null && lifted > groundY ? lifted : groundY;
   }
 

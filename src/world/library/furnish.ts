@@ -633,7 +633,7 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         const lamp = createLibraryFloorLamp();
         place(piece, lamp.root, 0, lamp);
         const size = libraryFloorLampSize();
-        props.disc(piece.id, piece.at.x, piece.at.z, size.radius, size.height);
+        props.disc(piece.id, piece.at.x, piece.at.z, size.radius, size.height, size.topHalf);
         break;
       }
       case 'readingLamp': {
@@ -641,8 +641,9 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
         const base = standsOn(piece);
         place(piece, lamp.root, base, lamp);
         // Solid like everything drawn: a jump onto the desk, or over a side
-        // table, meets the lamp on it — and a jump high enough lands on it.
-        props.disc(piece.id, piece.at.x, piece.at.z, lampSize.radius, base + lampSize.height);
+        // table, meets the lamp on it. Its crown is its finial's point, so
+        // nothing lands on it (its measured top width, `topHalf`).
+        props.disc(piece.id, piece.at.x, piece.at.z, lampSize.radius, base + lampSize.height, lampSize.topHalf);
         break;
       }
       case 'sideTable': {

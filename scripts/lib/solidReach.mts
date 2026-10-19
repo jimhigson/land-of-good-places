@@ -237,6 +237,11 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'
   const x = o.x - o.nx * 0.1;
   const z = o.z - o.nz * 0.1;
   const top = source.topAt(x, z);
+  // Only from where she can stand on it: a square-ended wall's footprint
+  // reaches past its top, and an outline point there is the ground beside
+  // the wall's end — which the first cut of the wedge clause stood her on,
+  // overlapping the wall and a lamp post, and reported as a wedge.
+  if (!source.standsAt(x, z) || Math.abs(standingHeight(options.sample(x, z, top), options.collision, x, z, top) - top) > 0.05) return null;
   sim.position.set(x, top, z);
   sim.previousPosition.copy(sim.position);
   sim.groundHeight = top;
@@ -265,13 +270,6 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'
   // stranded proof's pit was left through its ring, and a rock in the reptile
   // house dropped her out of the building, 17 Oct 2026.)
   if (sim.airborne) return null;
-  if (wedgeDepth(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
-    options.onWedged?.(
-      { x: sim.position.x, z: sim.position.z, y: sim.groundHeight },
-      `walking off ${source.kind || source.owner || 'a solid'} at (${o.x.toFixed(2)}, ${o.z.toFixed(2)})`,
-    );
-    return null;
-  }
   // Measured against the top in the column she ended in, not the one she
   // set off from: out in the park a top is a height over the planet's centre,
   // and its world y falls away a fifth of a metre per metre outward at 44 m —
@@ -279,6 +277,14 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'
   const here = source.topAt(sim.position.x, sim.position.z);
   if (source.depthAt(sim.position.x, sim.position.z) >= -0.05 && Math.abs(sim.groundHeight - here) < 0.05) return null;
   if (!(sim.groundHeight < Math.min(top, here) - 0.05)) return null;
+  // Came down, and wedged where she came down: said, never dropped.
+  if (wedgeDepth(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
+    options.onWedged?.(
+      { x: sim.position.x, z: sim.position.z, y: sim.groundHeight },
+      `walking off ${source.kind || source.owner || 'a solid'} at (${o.x.toFixed(2)}, ${o.z.toFixed(2)})`,
+    );
+    return null;
+  }
   return { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
 }
 
