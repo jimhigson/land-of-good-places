@@ -389,6 +389,60 @@ export interface RideHolder {
    * her not riding; {@link Player.letGo} says so loudly if it does not.
    */
   letGo(): void;
+  /**
+   * **How her companion rides with her** — see {@link CompanionRide}. Omitted,
+   * the ride has no room beside her, and the companion goes into her backpack
+   * with the rest of her line until she gets off.
+   */
+  readonly companion?: CompanionRide;
+}
+
+/**
+ * **One of her line rides with her, and the rest hop into her backpack** — Jim,
+ * 19 Oct 2026: *"all the pets except one jump into her backpack on getting on
+ * any ride, then one rides on the seat alongside the player"*.
+ *
+ * The rule has one owner: the boarding choke point. {@link Player.beginRide}
+ * tells whoever watches her rides ({@link Player.watchRides}) — the parade —
+ * and the parade does the rest: the one at the front of her line is her
+ * companion, everyone else goes into her backpack the way a stowed toy does,
+ * and when {@link Player.endRide} puts her down they all come back out behind
+ * her. A ride says only where its seat beside her is:
+ *
+ * - **`beside`** — the parade puts her companion in this seat every frame she
+ *   rides. Answering `false` for a frame hands the companion back to the line
+ *   for that frame (the cat bus's walk in through the gate, say).
+ * - **`'carried by the ride'`** — the ride moves her companion itself: the
+ *   ginormous slide's chute, behind her (`Parade.ridePetsDownSlide`, #468).
+ * - **`'drawn by the ride'`** — the ride draws her companion in a seat of its
+ *   own, in its own pass: the ferris gondola's pet chair, whose car is painted
+ *   over the finished frame. Her whole line goes into the backpack.
+ * - **`'not a ride'`** — a chair, a nap, a view, a climb: nothing carries her
+ *   anywhere, and each of those places already looks after her companions
+ *   (their beds, their table). Her line stays out exactly as before.
+ *
+ * Nothing aboard ever blocks the ride: a companion in a seat, or in her
+ * backpack, is not standing anywhere ({@link Parade.standing}).
+ */
+export type CompanionRide =
+  | { readonly beside: (seat: CompanionSeat) => boolean }
+  | 'carried by the ride'
+  | 'drawn by the ride'
+  | 'not a ride';
+
+/**
+ * Where her companion sits beside her **this frame** — written in place by
+ * the ride's {@link CompanionRide} `beside`, every frame, world metres. Its
+ * feet go on `(x, y, z)`; `turn` is the seat's whole frame (the vehicle's own,
+ * as {@link Player.setRideFrame} takes hers), its forward the way it faces.
+ */
+export interface CompanionSeat {
+  x: number;
+  y: number;
+  z: number;
+  /** Yaw, radians, as `Player.facing` — the rest of the game's word for its heading. */
+  facing: number;
+  readonly turn: Quaternion;
 }
 
 export type { RideExit } from '../world/dismount';
@@ -644,6 +698,8 @@ export class Player implements GameSystem {
   private ridingFlag = false;
   /** Who has her while {@link ridingFlag} is up — see {@link RideHolder}. */
   private holder: RideHolder | null = null;
+  /** Whoever watches her rides — see {@link watchRides}. */
+  private readonly rideWatchers: ((holder: RideHolder | null) => void)[] = [];
   /**
    * Where the last put-down left her — `endRide`, or a `teleportTo` that left
    * her on her own feet — and how far the rule moved her from the spot asked
@@ -1040,6 +1096,7 @@ export class Player implements GameSystem {
    * able to give her back on request.
    */
   beginRide(holder: RideHolder): void {
+    const was = this.ridingFlag ? this.holder : null;
     this.ridingFlag = true;
     this.holder = holder;
     // Every ride is sat in until it says otherwise, so a ride that has never
@@ -1057,6 +1114,26 @@ export class Player implements GameSystem {
     // So a jump button still held from before boarding can't be mistaken for
     // a fresh hold-past-the-threshold the moment she's handed back.
     this.jumpHeldFor = 0;
+    // Told last, with her already held: whoever watches her rides (her
+    // parade) asks the holder how her companion rides with her.
+    if (was !== holder) for (const watcher of this.rideWatchers) watcher(holder);
+  }
+
+  /**
+   * **Tell `watcher` every time she boards something or is given back** —
+   * with the holder that now has her, or `null` once she is on her own feet.
+   * Called from inside {@link beginRide} and {@link endRide} themselves, the
+   * two choke points every ride, seat and set piece goes through, so nothing
+   * can take her anywhere without the watcher hearing of it; and **after**
+   * each has done its work — on boarding she is already held, and on getting
+   * off she already stands where the put-down rule put her.
+   *
+   * Her parade is the watcher (`Parade`'s constructor): it is what puts all
+   * but one of her line into her backpack while she rides, and brings them out
+   * again when she gets off — see {@link CompanionRide}.
+   */
+  watchRides(watcher: (holder: RideHolder | null) => void): void {
+    this.rideWatchers.push(watcher);
   }
 
   /**
@@ -1256,6 +1333,8 @@ export class Player implements GameSystem {
     // A ride hands back a fresh velocity of its own choosing; nothing about
     // the overlap she was in before it took over still applies.
     this.escorting = false;
+    // Told last, standing where she was put down — see {@link watchRides}.
+    for (const watcher of this.rideWatchers) watcher(null);
   }
 
   update(context: FrameContext): void {

@@ -146,7 +146,7 @@ const SEARCH_WINDOW_HALF = Math.ceil((SEARCH_REACH + OPEN_FLOOR_REACH) / NAV_CEL
 
 
 /** Overlap that still counts as clear: float noise, an ordinary resolve's exact contact. */
-const CLEAR_TOLERANCE = 1e-3;
+export const CLEAR_TOLERANCE = 1e-3;
 
 /**
  * **A point of a space's open area** — where the space's own design says a

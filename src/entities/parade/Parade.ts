@@ -11,7 +11,9 @@ import type { PetSlideLink, SlideSeat, SlideSeatFor } from '../../world/slide/pe
 const SLIDE_BODY_BOX = new Box3();
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
-import type { Player } from '../Player';
+import type { CompanionRide, CompanionSeat, Player, RideHolder } from '../Player';
+import { BUILDING_STEP_UP } from '../../core/constants';
+import { CLEAR_TOLERANCE } from '../../world/dismount';
 import { PlayerTrail } from './trail';
 import { ParadeMember, type BedPhase, type PetTablePlace } from './ParadeMember';
 import { BackpackPeek } from './BackpackPeek';
@@ -114,6 +116,21 @@ const HOP_RIPPLE = 0.075;
  */
 const ON_LINE_RADIUS = 0.6;
 
+/**
+ * **Where her line forms up when she gets off a ride** ({@link Parade.formUpBehind}):
+ * how far out a clear run is looked for, metres — three companions' worth of
+ * line — and in steps of a little more than a trail crumb.
+ */
+const FORM_UP_REACH = 7;
+const FORM_UP_STEP = 0.15;
+/** The bearings tried, from straight behind her round to straight ahead. */
+const FORM_UP_BEARINGS = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, (3 * Math.PI) / 4, (-3 * Math.PI) / 4, Math.PI];
+/** As tall as the tallest of them stands (`PET_RENDER_HEIGHT` and a little). */
+const FORM_UP_HEIGHT = 1.55;
+/** How far into a solid a companion's body may reach and still be clear, metres: the put-down rule's own. */
+const FORM_UP_CLEAR = CLEAR_TOLERANCE;
+const FORM_UP_PROBE = new Vector3();
+
 export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   readonly name = 'parade';
 
@@ -127,7 +144,39 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    * backpack or poofing away.
    */
   *standing(): Iterable<Readonly<Vector3>> {
-    for (const member of this.members) if (member.root.visible) yield member.root.position;
+    // A companion riding with her — in its seat, or down the chute — is
+    // aboard, not standing anywhere; the rest of her line is in her backpack.
+    for (const member of this.members) {
+      if (member.root.visible && !member.onSeat && !member.onSlide) yield member.root.position;
+    }
+  }
+
+  /**
+   * **The front of her line** — the catalogue id of the companion who rides
+   * with her when she boards something, and the uid it walks under: the one
+   * walking right behind her (newest first — see {@link sync}). `null` with
+   * nobody out. A ride that draws her companion itself (the ferris gondola,
+   * `CompanionRide`'s `'drawn by the ride'`) asks this as it builds its car,
+   * so the animal in its chair is the one that was at her heels.
+   */
+  frontOfLine(): { readonly uid: string; readonly itemId: string } | null {
+    const front = this.members[0];
+    return front ? { uid: front.uid, itemId: front.itemId } : null;
+  }
+
+  /**
+   * Who of her line is out right now, and riding with her if anyone is — the
+   * question `check:exits` asks of every ride she boards, answered by the one
+   * system that owns those bodies.
+   */
+  lineNow(): { readonly out: number; readonly seated: number; readonly sliding: number; readonly aboard: string | null } {
+    let seated = 0;
+    let sliding = 0;
+    for (const member of this.members) {
+      if (member.onSeat) seated += 1;
+      if (member.onSlide) sliding += 1;
+    }
+    return { out: this.members.length, seated, sliding, aboard: this.aboard?.holder.holding ?? null };
   }
 
   private readonly player: Player;
@@ -202,6 +251,20 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     turn: new Quaternion(),
     recline: 0,
   };
+  /**
+   * **What she is riding**, how her companion rides with it, and which of her
+   * line that is — `null` on her own feet. `stays` for a holder that is not a
+   * ride (`CompanionRide`'s `'not a ride'`): her line stays out. See
+   * {@link rideChanged}.
+   */
+  private aboard: {
+    readonly holder: RideHolder;
+    readonly ride: CompanionRide | null;
+    readonly companion: string | null;
+    readonly stays: boolean;
+  } | null = null;
+  /** The seat beside her, written by the ride every frame — scratch, like {@link slideSeat}. */
+  private readonly companionSeat: CompanionSeat = { x: 0, y: 0, z: 0, facing: 0, turn: new Quaternion() };
 
   constructor(player: Player, collision: CollisionWorld, camera: IsoCamera) {
     this.player = player;
@@ -218,6 +281,112 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
 
     this.trail.reset(player.position.x, player.position.y, player.position.z);
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
+    // **Every ride she boards, the moment she boards it** — `Player.beginRide`
+    // and `endRide` tell this, the one choke point every ride goes through.
+    // And one she is on already: the cat bus has her before `Game` builds
+    // this parade.
+    player.watchRides((holder) => this.rideChanged(holder));
+    if (player.rideHolder) this.rideChanged(player.rideHolder);
+  }
+
+  /**
+   * **She has boarded something, or been given back** — Jim, 19 Oct 2026:
+   * *"all the pets except one jump into her backpack on getting on any ride,
+   * then one rides on the seat alongside the player"*. See `CompanionRide`,
+   * whose four answers this acts on. The one who rides with her is the front
+   * of her line ({@link frontOfLine}); the rest go into her backpack exactly
+   * as a stowed toy does — {@link sync} leaves them out of the line, so they
+   * poof away and peek out of her bag ({@link BackpackPeek}) — and nothing is
+   * written to her save: a ride is not a choice to put a pet away.
+   */
+  private rideChanged(holder: RideHolder | null): void {
+    const was = this.aboard;
+    if (was && was.holder === holder) return;
+    if (was) this.disembark();
+    if (holder) this.embark(holder);
+  }
+
+  private embark(holder: RideHolder): void {
+    const ride = holder.companion ?? null;
+    if (ride === 'not a ride') {
+      // Nothing carries her anywhere, and the place looks after her line.
+      this.aboard = { holder, ride, companion: null, stays: true };
+      return;
+    }
+    // Riding beside her, or down the chute behind her: the front of her line.
+    // In her backpack with the rest: with no room beside her, or when the ride
+    // draws its own.
+    const rides = ride !== null && ride !== 'drawn by the ride';
+    this.aboard = { holder, ride, companion: rides ? (this.members[0]?.uid ?? null) : null, stays: false };
+    this.signature = '';
+    this.sync(gameStore.get());
+  }
+
+  /**
+   * She has been put down — through the put-down rule, so she stands
+   * somewhere clear and open. Her companion comes out of its seat and her line
+   * comes back out of her backpack, formed up behind her where there is room
+   * ({@link formUpBehind}): never across a solid, a drop or the railway.
+   */
+  private disembark(): void {
+    const was = this.aboard;
+    this.aboard = null;
+    if (!was || was.stays) return;
+    const rode = this.members.find((member) => member.onSeat) ?? null;
+    rode?.leaveSeat();
+    this.formUpBehind();
+    this.signature = '';
+    this.sync(gameStore.get());
+    // Her companion hops down from where it sat to its place in the line.
+    if (rode && this.members.includes(rode)) {
+      this.aimAtLine(rode);
+      rode.placeAt(rode.target.x, rode.target.y, rode.target.z, this.player.group.rotation.y);
+      rode.hop(0);
+    }
+  }
+
+  /**
+   * **Where her line forms up again when she gets off**, laid as a trail of
+   * her own steps: the longest clear run out from where she stands — behind
+   * her first, then round to her sides and ahead — that stays on her floor
+   * (within a step), off every solid her companions are as tall as and wide
+   * as, out of every closure (the railway's corridor) and inside the space's
+   * bounds. Her line samples it exactly as it samples her walking, so each
+   * companion comes back out of her backpack on clear ground behind her
+   * rather than inside her, and none on the line.
+   */
+  private formUpBehind(): void {
+    const at = this.player.position;
+    const facing = this.player.facing;
+    let bestX = 0;
+    let bestZ = 0;
+    let best = 0;
+    for (const turn of FORM_UP_BEARINGS) {
+      const ux = -Math.sin(facing + turn);
+      const uz = -Math.cos(facing + turn);
+      let reached = 0;
+      for (let d = FORM_UP_STEP; d <= FORM_UP_REACH + 1e-9; d += FORM_UP_STEP) {
+        const x = at.x + ux * d;
+        const z = at.z + uz * d;
+        const y = this.groundAt(x, z, at.y);
+        if (Math.abs(y - at.y) > BUILDING_STEP_UP) break;
+        if (this.collision.closedAt(x, z) || !this.collision.clearOfBoundary(x, z, MEMBER_RADIUS)) break;
+        FORM_UP_PROBE.set(x, y, z);
+        if (this.collision.deepestSolidOverlap(FORM_UP_PROBE, MEMBER_RADIUS, 0, undefined, FORM_UP_HEIGHT) > FORM_UP_CLEAR) break;
+        reached = d;
+      }
+      if (reached > best + 1e-9) {
+        best = reached;
+        bestX = ux;
+        bestZ = uz;
+      }
+      if (best >= FORM_UP_REACH - 1e-9) break;
+    }
+    this.trail.reset(at.x + bestX * best, this.groundAt(at.x + bestX * best, at.z + bestZ * best, at.y), at.z + bestZ * best);
+    for (let d = best - FORM_UP_STEP; d > 1e-9; d -= FORM_UP_STEP) {
+      this.trail.push(at.x + bestX * d, this.groundAt(at.x + bestX * d, at.z + bestZ * d, at.y), at.z + bestZ * d);
+    }
+    this.trail.push(at.x, at.y, at.z);
   }
 
   /** How many owned things are waiting their turn behind the visible eight. */
@@ -526,7 +695,8 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     if (airborne && !this.wasAirborne && player.verticalSpeed > 0) this.rippleHop();
     this.wasAirborne = airborne;
 
-    if (dt > 0 && this.overflow > 0) {
+    // Not while she rides: the window turning would swap her companion out of its seat.
+    if (dt > 0 && this.overflow > 0 && !this.aboard) {
       this.rotateTimer += dt;
       if (this.rotateTimer >= ROTATE_SECONDS) {
         this.rotateTimer = 0;
@@ -540,6 +710,17 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     // than on the edge, because a toy that joins the line mid-flight has to get
     // one as well, and `setFlying` is a comparison when the answer is the same.
     const flying = player.isFlying;
+
+    // Her companion, in the seat beside her that the ride answers this frame —
+    // or walking with her for a frame the ride has no seat for.
+    const ride = this.aboard?.ride;
+    if (ride !== null && typeof ride === 'object') {
+      const companion = this.members.find((member) => member.uid === this.aboard?.companion);
+      if (companion) {
+        if (ride.beside(this.companionSeat)) companion.rideSeat(this.companionSeat);
+        else companion.leaveSeat();
+      }
+    }
 
     for (const member of this.members) {
       member.setFlying(flying);
@@ -562,7 +743,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       // member ignores {@link ParadeMember.target} while it is riding, so
       // aiming would only resolve a trail sample against the collision world
       // for a body that is thirty metres up in the air.
-      if (member.onSlide) {
+      if (member.onSlide || member.onSeat) {
         // nothing to aim
       } else if (bed) this.aimAtBed(member, bed, dt);
       else if (place) member.target.set(place.x, place.y, place.z);
@@ -777,7 +958,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    */
   private catchUpAfterTeleport(): void {
     for (const member of this.members) {
-      if (member.onSlide || member.bedSpot || member.tablePlace) continue;
+      if (member.onSlide || member.onSeat || member.bedSpot || member.tablePlace) continue;
       this.routes.get(member.uid)?.clear();
       this.aimAtLine(member);
       member.placeAt(
@@ -920,7 +1101,10 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     this.overflow = Math.max(0, out.length - MAX_VISIBLE);
     if (this.overflow === 0) this.rotateTimer = 0;
 
-    const visible = window_(out, this.rotation);
+    let visible = window_(out, this.rotation);
+    // Riding: only her companion is out — the rest are in her backpack.
+    const aboard = this.aboard;
+    if (aboard && !aboard.stays) visible = visible.filter((item) => item.uid === aboard.companion);
     const signature = visible.map((item) => item.uid).join(',');
     if (signature === this.signature) {
       this.peek.setCandidates(stowedIds(state, visible));
