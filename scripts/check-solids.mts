@@ -708,6 +708,12 @@ if (SKIP_CENSUS) {
        * tunnel, where both fences stand by the abutments.
        */
       const ALONG_METRES = 12;
+      /**
+       * Under a bridge, in its tunnel: where the walk's lattice answers for the
+       * deck over her head (it is height-blind, `joinsMain`'s own note), so a
+       * point there is asked by her walk along the line, never by the lattice.
+       */
+      const underBridge = (at: Stand): boolean => world.train.bridges.some((bridge) => bridge.soffitYAt(at.x, at.z) !== null);
       const walksAlongOff = (at: Stand): boolean => {
         for (const dir of [1, -1]) {
           const sim = new SimPlayer(collision, { ...CENSUS_SIM, ground: sample, hopProbe: playerHopProbe(collision) });
@@ -729,7 +735,7 @@ if (SKIP_CENSUS) {
             if (!sim.airborne && along >= nextHop) {
               nextHop += 1.2;
               const there: Stand = { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
-              if (outside(there) || hopsOff(there)) return true;
+              if (!underBridge(there) && (outside(there) || hopsOff(there))) return true;
             }
           }
         }
@@ -749,11 +755,12 @@ if (SKIP_CENSUS) {
         if (!Number.isFinite(y)) continue;
         const at: Stand = { x: rail.x, z: rail.z, y: standingHeight(y, collision, rail.x, rail.z, y) };
         points += 1;
-        if (outside(at)) {
+        const tunnel = underBridge(at);
+        if (!tunnel && outside(at)) {
           walked += 1;
           continue;
         }
-        if (hopsOff(at)) {
+        if (!tunnel && hopsOff(at)) {
           hopped += 1;
           continue;
         }
