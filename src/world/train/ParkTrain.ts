@@ -7,14 +7,14 @@ import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import type { CollisionWorld } from '../Collision';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
-import { TrainRoute } from './route';
+import { TRACK_CLEARANCE, TrainRoute } from './route';
 import { distanceToRailCorridor, TRAIN_PLAN } from './plan';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
 import { rideFrame } from '../rail/sweptRail';
 import { computeCrossings, type LevelCrossing } from './crossings';
-import { GUARD_RAIL_WIDTH, buildRailFence, type RailFence } from './fence';
+import { buildRailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
 import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
@@ -86,6 +86,34 @@ const BRAKING = 2.4;
 
 /** Seconds spent at each station with the doors open. */
 const DWELL_SECONDS = 8;
+
+/**
+ * **How far short of anyone on the line the train's nose stands**, metres —
+ * from its buffer beam to the edge of her body. Jim, 19 Oct 2026: *"jumping
+ * onto the train tracks sounds ok so long as the train stops if there's
+ * someone on the tracks."* See {@link ParkTrain.keepClearOf}.
+ */
+export const TRAIN_STOPS_SHORT = 1.5;
+/** How far down the line the train looks for someone on it, metres: well past its stopping distance at cruise. */
+const LOOK_AHEAD = 24;
+/**
+ * The hardest it ever brakes, metres per second per second: only for someone
+ * who came onto the line closer than it could stop smoothly — still a stop
+ * short of her, never a bump.
+ */
+const HARDEST_BRAKING = 9;
+/** How far over the line's middle a body's centre counts as on it: the train's own clearance and a hand. */
+const ON_THE_LINE = TRACK_CLEARANCE + 0.15;
+/** How long the line must stay clear before the train toots for the next person on it. */
+const TOOT_REARM_SECONDS = 3;
+
+/** Something the train must not run into — her, or something following her — at its feet, with its body's radius. */
+export interface OnTheLine {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly radius: number;
+}
 
 /** Carriages, and therefore seats: two on each. */
 const CARRIAGE_COUNT = 3;
@@ -179,6 +207,13 @@ export class ParkTrain implements GameSystem, TrainService {
   /** Distance of the *locomotive's centre* along the route. */
   private distance = 0;
   private speed = 0;
+  /** Everyone the train stops for: asked every frame ({@link keepClearOf}). */
+  private readonly clearOf: (() => Iterable<OnTheLine>)[] = [];
+  /** Whether it has tooted for whoever is on the line now, and how long the line has been clear since. */
+  private tooted = false;
+  private clearFor = Infinity;
+  /** The platforms, so someone standing on one is not on the line. */
+  private readonly platformDecks: MovingPlatform[] = [];
   private dwellRemaining = 0;
   private stoppedStop: number | null = null;
   private nextStop = 0;
@@ -205,29 +240,10 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly tangent = new Vector3();
   private readonly seatWorld = new Vector3();
 
-  /**
-   * Where the carriages stand while the train waits at each station: floors
-   * she can step onto from the platform and jump from, so floors the fence
-   * beside a station must answer to (`buildRailFence`), as the platform does.
-   * Seed 8: a sprint-jump off a waiting carriage's floor, 0.13 m over the
-   * platform, cleared a station's end cap into the box.
-   */
-  readonly dwellFloors: readonly MovingPlatform[];
-
-  /** The fence, built; its heights are `raiseGuards`'s. */
-  private readonly fence: RailFence;
-
-  /**
-   * @param walkSurface The highest surface she can walk on at `(x, z)` — the
-   *   ground, a path, a building's plinth — as the world has registered it by
-   *   the time the railway is built: where a jump at the fence can leave from
-   *   (`buildRailFence`). The terrain alone when not given.
-   */
   constructor(
     collision: CollisionWorld,
     clearTreesNear?: (x: number, z: number, radius: number) => number,
     hasFellableTreeNear?: (x: number, z: number, radius: number) => boolean,
-    walkSurface?: (x: number, z: number) => number,
   ) {
     this.group.name = 'park-train';
 
@@ -269,6 +285,7 @@ export class ParkTrain implements GameSystem, TrainService {
         collision,
       );
       this.stations.push(station);
+      this.platformDecks.push(station.asPlatform());
       this.group.add(station.group);
       this.stops.push({
         index: planned.index,
@@ -299,33 +316,11 @@ export class ParkTrain implements GameSystem, TrainService {
     this.group.add(built.group);
     for (const rail of built.guardRails) {
       // A masonry parapet/spandrel wall: solid from the ground (blocks a
-      // walker beside the bridge), with an ABSOLUTE top — see `bridges.ts`'s
-      // `BridgeWall`.
-      //
-      // **Its top is the railing's** (`BridgeWall.guardTop`): the railway's
-      // guard height over the road, or as high as a jump from the deck can
-      // carry her feet over this line, whichever is higher — and nobody
-      // stands on it: a rail is an edge, not a ledge. The coping under
-      // the railing is inside the solid. The coping alone was a top she
-      // jumped onto from the road and stepped off on the far side, down onto
-      // the track between the fences (`bridges.ts`'s `buildParapetRailing`).
+      // walker beside the bridge), with an ABSOLUTE top at the drawn coping,
+      // from one end of each piece to the other (`TopSlope`) — see
+      // `bridges.ts`'s `BridgeWall`.
       collision.kinded('bridge parapet', () =>
-        collision.toppedNarrow(GUARD_RAIL_WIDTH / 2, () =>
-          collision.addWall(
-            rail.x1,
-            rail.z1,
-            rail.x2,
-            rail.z2,
-            BRIDGE_WALL_THICKNESS / 2,
-            rail.guardTop,
-            false,
-            true,
-            -Infinity,
-            false,
-            Number.NaN,
-            rail.guardTopEnd,
-          ),
-        ),
+        collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true, -Infinity, false, Number.NaN, rail.topHeightEnd),
       );
     }
 
@@ -368,27 +363,17 @@ export class ParkTrain implements GameSystem, TrainService {
       );
     }
 
-    // Each station's waiting train: its carriages' floors where they stop.
-    const dwell = this.stations.map((station) => {
-      const trainAt = this.route.wrap(station.distance + this.stopOffset);
-      const floors: MovingPlatform[] = [];
-      for (let i = 1; i < this.carOffsets.length; i += 1) floors.push(floorAtDistance(this.route, this.route.wrap(trainAt - (this.carOffsets[i] ?? 0))));
-      return floors;
-    });
-    this.dwellFloors = dwell.flat();
-
     // --- the fence (Decision 4 §6: keeping feet off the track) -------------
     // Built last of all the trackside furniture, so it can seam around every
-    // bridge and gap for every platform. Its height is `raiseGuards`'s, once
-    // the park round the line stands.
-    this.fence = buildRailFence(
-      this.route,
-      collision,
-      this.bridges,
-      this.stations.map((station, k) => ({ distance: station.distance, platform: station.asPlatform(), floors: dwell[k] ?? [] })),
-      walkSurface,
+    // bridge and gap for every platform.
+    this.group.add(
+      buildRailFence(
+        this.route,
+        collision,
+        this.bridges,
+        this.stations.map((station) => ({ distance: station.distance })),
+      ),
     );
-    this.group.add(this.fence.group);
 
     // Start standing at the first station, so the first thing a child sees is a
     // train waiting for them rather than one disappearing round a corner.
@@ -403,13 +388,73 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 
   /**
-   * **Stands the railway's fence as tall as every jump at it needs** — from the
-   * walk beside it and from every top she can reach near it (`RailFence.raise`).
-   * Asked once, by `World`, when everything solid in the park stands: the
-   * bushes and garden walls beside the line are planted after the railway.
+   * **The train stops for her** (Jim, 19 Oct 2026: *"jumping onto the train
+   * tracks sounds ok so long as the train stops if there's someone on the
+   * tracks"*). `bodies` is asked every frame for everyone who may be on the
+   * line — her, and whatever follows her, a pet in her parade — and when any
+   * of them is on the line ahead, within its stopping distance, the train
+   * brakes smoothly to stand {@link TRAIN_STOPS_SHORT} short of them, toots,
+   * waits, and moves on once the line is clear. At a station as anywhere on
+   * the loop: a train due to leave waits too. One owner — {@link wayAhead} —
+   * and nothing else in the game decides it.
    */
-  raiseGuards(): void {
-    this.fence.raise();
+  keepClearOf(bodies: () => Iterable<OnTheLine>): void {
+    this.clearOf.push(bodies);
+  }
+
+  /** Where the train's nose is along the route, metres — its buffer beam. */
+  noseDistance(): number {
+    return this.route.wrap(this.distance + LOCO_LENGTH / 2);
+  }
+
+  /** How fast it is going, metres a second. */
+  get runningSpeed(): number {
+    return this.speed;
+  }
+
+  /**
+   * **How far the nose may still run before it must stand, metres** —
+   * `Infinity` while the line ahead is clear: to {@link TRAIN_STOPS_SHORT}
+   * short of the nearest body on the line within {@link LOOK_AHEAD}, or 0 for
+   * one already alongside the train, between its nose and its tail (on the
+   * track beside a carriage, it must not be dragged past).
+   *
+   * On the line is a body whose middle is over the track's clearance, down on
+   * the track bed or hopping over it — never one standing on a platform
+   * beside it, or on a bridge's deck over it.
+   */
+  private wayAhead(): number {
+    if (this.clearOf.length === 0) return Infinity;
+    const nose = this.noseDistance();
+    const last = this.carOffsets[this.carOffsets.length - 1] ?? 0;
+    const length = LOCO_LENGTH / 2 + last + CARRIAGE_LENGTH / 2;
+    const loco = this.locomotive.root.position;
+    let way = Infinity;
+    for (const source of this.clearOf) {
+      for (const body of source()) {
+        // Nowhere near the train at all: not worth finding on the route.
+        if (Math.hypot(body.x - loco.x, body.z - loco.z) > LOOK_AHEAD + length + body.radius) continue;
+        const at = this.route.distanceNear(body.x, body.z);
+        this.route.pointAt(at, this.point);
+        if (Math.hypot(body.x - this.point.x, body.z - this.point.z) > ON_THE_LINE) continue;
+        if (body.y > this.point.y + 2 || body.y < this.point.y - 1.5) continue;
+        if (this.platformDecks.some((deck) => deck.covers(body.x, body.z) && body.y >= deck.surfaceY - 0.05)) continue;
+        const ahead = this.route.forwardGap(nose, at);
+        if (this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius) return 0;
+        if (ahead > LOOK_AHEAD + body.radius + TRAIN_STOPS_SHORT) continue;
+        way = Math.min(way, Math.max(0, ahead - body.radius - TRAIN_STOPS_SHORT));
+      }
+    }
+    return way;
+  }
+
+  /** The fastest the train may go with `way` metres left before it must stand: a smooth stop, or the hardest it brakes for one it saw late. */
+  private speedFor(way: number, dt: number): number {
+    if (way <= 0.01) return 0;
+    const smooth = Math.sqrt(2 * BRAKING * way);
+    if (this.speed <= smooth) return smooth;
+    const braking = Math.min(HARDEST_BRAKING, (this.speed * this.speed) / (2 * way));
+    return Math.max(0, this.speed - braking * dt);
   }
 
   /** Platforms, carriage floors and every bridge deck/tread, for
@@ -614,8 +659,15 @@ export class ParkTrain implements GameSystem, TrainService {
 
   // ---------------------------------------------------------------- internals
 
-  /** Speed, braking and the wait at each station. */
+  /** Speed, braking and the wait at each station — and a stop for anyone on the line ahead ({@link keepClearOf}). */
   private drive(dt: number): void {
+    const way = this.wayAhead();
+    if (Number.isFinite(way)) {
+      this.clearFor = 0;
+    } else {
+      this.clearFor += dt;
+      if (this.clearFor >= TOOT_REARM_SECONDS) this.tooted = false;
+    }
     if (this.dwellRemaining > 0) {
       this.dwellRemaining -= dt;
       if (this.dwellRemaining > 0) return;
@@ -637,7 +689,15 @@ export class ParkTrain implements GameSystem, TrainService {
     // metre out, creep in rather than crawling asymptotically towards it.
     const approach = Math.sqrt(2 * BRAKING * Math.max(0, remaining));
     const cruising = Math.min(CRUISE_SPEED, this.speed + ACCELERATION * dt);
-    this.speed = Math.max(0.35, Math.min(cruising, approach));
+    const forTheStation = Math.max(0.35, Math.min(cruising, approach));
+    // Someone on the line ahead: stand short of them, and toot.
+    const forTheLine = Number.isFinite(way) ? this.speedFor(way, dt) : Infinity;
+    if (forTheLine < forTheStation && !this.tooted) {
+      this.tooted = true;
+      playTrainWhistle();
+    }
+    this.speed = Math.min(forTheStation, forTheLine);
+    if (this.speed <= 0) return;
 
     const step = this.speed * dt;
     if (step >= remaining) {
@@ -863,13 +923,10 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 }
 
-/** Half a carriage floor's width: where she can stand on it. */
-const CARRIAGE_FLOOR_HALF_WIDTH = 0.72;
-
 /** A carriage floor, as a surface you can stand on. */
 function carriageFloor(carriage: TrainCar): MovingPlatform {
   const halfLength = CARRIAGE_LENGTH / 2;
-  const halfWidth = CARRIAGE_FLOOR_HALF_WIDTH;
+  const halfWidth = 0.72;
   return {
     get surfaceY(): number {
       return carriage.root.position.y + CAR_FLOOR_Y;
@@ -883,28 +940,6 @@ function carriageFloor(carriage: TrainCar): MovingPlatform {
       const along = dx * sin + dz * cos;
       const across = dx * cos - dz * sin;
       return Math.abs(along) <= halfLength && Math.abs(across) <= halfWidth;
-    },
-  };
-}
-
-/**
- * A carriage's floor as it stands with the carriage at route distance `at` —
- * `carriageFloor`'s own surface (`placeCars` stands a car on `pointAt` and
- * turns it along `tangentAt`), without moving a carriage there.
- */
-function floorAtDistance(route: TrainRoute, at: number): MovingPlatform {
-  const point = route.pointAt(at, new Vector3());
-  const tangent = route.tangentAt(at, new Vector3());
-  const yaw = Math.atan2(tangent.x, tangent.z);
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
-  const surfaceY = point.y + CAR_FLOOR_Y;
-  return {
-    surfaceY,
-    covers(x: number, z: number): boolean {
-      const dx = x - point.x;
-      const dz = z - point.z;
-      return Math.abs(dx * sin + dz * cos) <= CARRIAGE_LENGTH / 2 && Math.abs(dx * cos - dz * sin) <= CARRIAGE_FLOOR_HALF_WIDTH;
     },
   };
 }

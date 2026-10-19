@@ -120,6 +120,16 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   /** Add this to the scene once. Members live in world space inside it. */
   readonly group = new Group();
 
+  /**
+   * **Where each of the line stands**, for anything that must keep clear of
+   * them: the train stops for a pet on the line as it does for her
+   * (`ParkTrain.keepClearOf`). Only those out in the world, not in the
+   * backpack or poofing away.
+   */
+  *standing(): Iterable<Readonly<Vector3>> {
+    for (const member of this.members) if (member.root.visible) yield member.root.position;
+  }
+
   private readonly player: Player;
   private readonly collision: CollisionWorld;
   private readonly camera: IsoCamera;

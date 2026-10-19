@@ -370,7 +370,7 @@ export const PLAYER_ACCELERATION = 46;
 /**
  * Her jump: the upward speed it gives her, metres/second, and the gravity
  * that brings her down, metres/second² — `Player`'s, and so every measure of
- * how high and how far she can jump (`world/jumpReach.ts`, `playerSim`). Out
+ * how high and how far she can jump (`playerSim`, `check:solids`). Out
  * here so nothing has to restate them (`playerSim` once did, beside a note
  * that `Player.ts` could not be imported).
  */

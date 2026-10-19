@@ -7,6 +7,7 @@ import { isTouchDevice } from './core/device';
 import {
   CAMERA_ZOOM_STEP,
   PLAYER_LONGEST_STEP,
+  PARADE_MEMBER_RADIUS,
   PLAYER_RADIUS,
   VIEWMODEL_LAYER,
 } from './core/constants';
@@ -369,6 +370,17 @@ export class Game {
     // the places are, the parade walks the animals to them and owns their
     // bodies the whole way, and nothing comes back the other direction.
     this.world.building.petParade = this.parade;
+    // The train stops for her, and for whatever follows her (Jim, 19 Oct
+    // 2026): the one place that holds the player, her parade and the train
+    // tells the train who to look out for — it decides the rest
+    // (`ParkTrain.keepClearOf`). Not while she rides anything: aboard, the
+    // train carries her, and on another ride she is not on the line.
+    const player = this.player;
+    const parade = this.parade;
+    this.world.train.keepClearOf(function* () {
+      if (!player.riding) yield { x: player.position.x, y: player.position.y, z: player.position.z, radius: PLAYER_RADIUS };
+      for (const at of parade.standing()) yield { x: at.x, y: at.y, z: at.z, radius: PARADE_MEMBER_RADIUS };
+    });
 
     // Every balloon the player owns and has not stowed, held above them on a
     // bending string — see `entities/HeldBalloon.ts`'s doc comment for why

@@ -232,14 +232,10 @@ export class World implements GameSystem {
     // No tree exists yet when the railway builds — the world phase plants
     // them afterwards, against the bridges' footprints — so there is nothing
     // to fell and nothing fellable.
-    // Everything she walks on is registered by now — the ground, the paths,
-    // every building's plinth and steps — and the fence's height answers to
-    // a jump from any of it (`buildRailFence`).
     this.train = new ParkTrain(
       this.collision,
       () => 0,
       () => false,
-      (x, z) => this.building.surfaces.sample(x, z, 1e3),
     );
     // The path goes up and over each bridge, rather than a bridge growing its
     // own separate floor (Jim, 2026-08-24) — and rather than the ground ribbon
@@ -416,10 +412,6 @@ export class World implements GameSystem {
     this.fairyLights = new FairyLights(this.collision, phase.fairyPoles);
     this.lampPosts = new LampPosts(this.collision, phase.lamps);
     this.railRace = phase.railRace;
-    // Everything solid beside the railway stands now — the bushes and garden
-    // walls a jump at its fence can leave from — so the fence can be stood as
-    // tall as every one of those jumps needs (PR #722's review, round two).
-    this.train.raiseGuards();
     // Living, pickable flowers — no collision, and they re-seat themselves
     // against the finished park below, so they come after everything solid.
     this.flowers = new Flowers(this.collision);
