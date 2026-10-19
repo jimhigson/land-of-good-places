@@ -445,3 +445,14 @@ Work list (tick as done, commit each):
 - ALWAYS run scratch scripts through /tmp/es-run.sh (restamps first): a stale park hash makes the harness hang at 0% CPU.
 - Seed 5 before 4c: census park green incl. 0 wedged landings; core green after the lamp crowns (re-check).
 - Fence after raise: seed 5 136/174 posts lifted (most 0.5-1.5 m; max +2.76 by a wooden wall post), seeds 0/4/6 <= +2.84.
+- 726201ae (19 Oct ~05:10): step/hop line with STEP_MARGIN 0.03 (stepReach.ts) in walkingOntoStep AND hopsOver (no
+  callback, no headroom check in the hop: a wooden wall post at an L's corner is banded from the boards up and read as a
+  ceiling); leanFall/riseOverTakeoff (jumpReach.ts): the drawn height lags over ANY surface running outward (world-y
+  damping), added to guard sizing (fence + clause 8) for walk and tops — NOT to the takeoff search (it ladders up lamp
+  heads); reachableTops at the census's 60 fps arc (-5.45 cm) and without building owners (castle/hotel/library/
+  reptile house): seed 10's reptile coils were a ladder to 5 m.
+- 16-seed batch at 0f9c6b78 (/tmp/es-r14): proofs as intended (fence-crate red 128, fence-bush red 62, fences-4m GREEN
+  0, drawn-step red, no-crack-rules red 27, narrow-wedges red); seeds 1, 5 green; others had faces at the step limit,
+  bush-top lean jumps into boxes (seeds 2, 8, 10, 12, 14, 15), wedged jumps among bush clusters, along-walk hops at
+  L corners. Rerun at 726201ae: /tmp/es-r15 (jobs.txt, job.sh).
+- Local at 0f9c6b78: check:library, check:exits, check:hotel, check:wall-tunnelling, check:hop-clearance exit 0.
