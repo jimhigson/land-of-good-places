@@ -86,8 +86,8 @@ const RAIL_WIDTH = GUARD_RAIL_WIDTH;
  */
 const MID_RAIL_GAP = TOP_RAIL_CENTRE - RAIL_CENTRE;
 const MID_RAIL_CLEAR = 0.25;
-/** How many pieces a bay is cut into for the tops' need along it (`liftBay`). */
-const BAY_SAMPLES = 8;
+/** How many pieces a bay or a cap is cut into for the tops' need along it (`topsLiftAlong`). */
+const BAY_SAMPLES = 16;
 /** The most rails between a bay's top rail and its lower bar's: a fence stood over four metres taller. */
 const MAX_MID_RAILS = 5;
 /** A post's drawn top radius: what of it she could put a foot on — not enough (`FOOT_HALF_WIDTH`). */
@@ -619,7 +619,38 @@ export function buildRailFence(
       const t = k / 4;
       lift = Math.max(lift, liftAt(left.x + (right.x - left.x) * t, left.z + (right.z - left.z) * t));
     }
-    return lift;
+    // A cap is level from post to post: the tops' need anywhere along it.
+    return Math.max(lift, topsLiftAlong(left, right, () => 0));
+  };
+  /**
+   * **The most the tops she can reach beside a run from `a` to `b` need it to
+   * stand over `under(t)`** — asked at `BAY_SAMPLES` points along it and at
+   * the point of it nearest each top, where that top's need peaks (seed 0: a
+   * bush 7 m off a bay, its need steep with distance there, peaked between
+   * the eighths and left the bay 3 cm short).
+   */
+  const topsLiftAlong = (a: Post, b: Post, under: (t: number) => number): number => {
+    let short = -Infinity;
+    const at = (t: number): void => {
+      const x = a.x + (b.x - a.x) * t;
+      const z = a.z + (b.z - a.z) * t;
+      short = Math.max(short, topsNeedAt(x, z) - planetRadiusAt(x, terrainHeight(x, z), z) - RAIL_TOP - under(t));
+    };
+    for (let k = 0; k <= BAY_SAMPLES; k += 1) at(k / BAY_SAMPLES);
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const lengthSquared = dx * dx + dz * dz;
+    if (lengthSquared > 1e-9) {
+      const span = JUMP_PLAN_REACH + 4;
+      const midX = (a.x + b.x) / 2;
+      const midZ = (a.z + b.z) / 2;
+      for (let i = Math.floor((midX - span) / TOP_BUCKET); i <= Math.floor((midX + span) / TOP_BUCKET); i += 1) {
+        for (let j = Math.floor((midZ - span) / TOP_BUCKET); j <= Math.floor((midZ + span) / TOP_BUCKET); j += 1) {
+          for (const top of topBuckets.get(keyOf(i, j)) ?? []) at(Math.max(0, Math.min(1, ((top.solid.centreX - a.x) * dx + (top.solid.centreZ - a.z) * dz) / lengthSquared)));
+        }
+      }
+    }
+    return short;
   };
   /**
    * A bay's rail runs straight from post to post, so where every jump at the
@@ -630,14 +661,10 @@ export function buildRailFence(
    * its posts).
    */
   const liftBay = (a: Post, b: Post): void => {
-    let short = liftAt((a.x + b.x) / 2, (a.z + b.z) / 2) - (a.lift + b.lift) / 2;
-    for (let k = 1; k < BAY_SAMPLES; k += 1) {
-      const t = k / BAY_SAMPLES;
-      const x = a.x + (b.x - a.x) * t;
-      const z = a.z + (b.z - a.z) * t;
-      const lift = topsNeedAt(x, z) - planetRadiusAt(x, terrainHeight(x, z), z) - RAIL_TOP;
-      short = Math.max(short, lift - (a.lift * (1 - t) + b.lift * t));
-    }
+    const short = Math.max(
+      liftAt((a.x + b.x) / 2, (a.z + b.z) / 2) - (a.lift + b.lift) / 2,
+      topsLiftAlong(a, b, (t) => a.lift * (1 - t) + b.lift * t),
+    );
     if (short <= 0) return;
     a.lift += short;
     b.lift += short;

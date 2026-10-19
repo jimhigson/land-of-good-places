@@ -81,7 +81,7 @@ import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
 import { altitudeAt, planetRadiusAt, terrainHeight } from '../src/world/terrain.ts';
 import { carryReference, riseBetween } from '../src/world/building/stepReach.ts';
-import { STEP_SAMPLES, standingHeight, teleportHeight } from '../src/world/standing.ts';
+import { STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHeight } from '../src/world/standing.ts';
 
 /**
  * **The red proofs.** Each breaks one thing and must turn its clause red, in
@@ -126,6 +126,15 @@ import { STEP_SAMPLES, standingHeight, teleportHeight } from '../src/world/stand
  *   no fence anyone can clear, its run-and-jumps find no box to land in, so a
  *   box landing it reports is one over a fence, never one it made up.
  * - `blind-hop` (park): the auto-hop judged from nothing, as it was — clause 9.
+ * - `no-crack-rules` (park): her census's girl with nothing to keep her out
+ *   of a crack she does not fit — no step-down hold, no walk into a wedge
+ *   refused, no crack floor, squeeze lift or nearest fit, as before seed 5's
+ *   wall and bush blinked her back where she started — clause 4's wedged
+ *   landings must find her wedged.
+ * - `narrow-wedges` (core): a landing judged wedged by the rescue's old
+ *   measure, which counted a top within a step of her feet when it was too
+ *   narrow to stand on — clause 4's wedged landings must find her in the
+ *   library's armchairs, between their rolled arms.
  * - `drawn-step` (park): the step-up asks where a top is drawn, as it did,
  *   not the body she walks into — clause 9 must find her stopped dead at seed
  *   5's knee-high stone wall at (-49.6, 61.6).
@@ -138,11 +147,17 @@ const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 const PROOFS = [
   'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
   'reptile-roof', 'every-roof', 'new-roof', 'fence-crate', 'guards-alone', 'low-guard', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
-  'fence-bush', 'fences-4m', 'drawn-step',
+  'fence-bush', 'fences-4m', 'drawn-step', 'no-crack-rules', 'narrow-wedges',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
 const CENSUS_FPS = Number(process.env['SOLIDS_FPS'] ?? 60);
+/** The census's girl and its verdict on a wedge: `Player`'s own, unless a proof breaks one. */
+const CENSUS_SIM = PROVE === 'no-crack-rules' ? { crackRules: false } : {};
+const CENSUS_WEDGED_BY =
+  PROVE === 'narrow-wedges'
+    ? { wedgedBy: (world: CollisionWorld, position: Vector3, feetY: number): number => world.deepestSolidOverlap(position, PLAYER_RADIUS, 0, (x, z) => solidStepCeiling(world, x, z, feetY), KID_HEIGHT) }
+    : {};
 /** The top of her jump as a frame clock at `fps` samples it — the sim's own integration, from the ground. */
 function sampledApex(fps: number): number {
   const dt = 1 / fps;
@@ -626,6 +641,8 @@ if (SKIP_CENSUS) {
       inSpace: (x, z) => spaceAt(x, z) === id,
       fps: CENSUS_FPS,
       onWedged,
+      sim: CENSUS_SIM,
+      ...CENSUS_WEDGED_BY,
     });
     const main = result.regions[0]!.has;
     for (const top of result.tops) allReached.push({ space: run.name, top });
@@ -731,7 +748,7 @@ if (SKIP_CENSUS) {
             const jumpAt = d + 1.5 - runUp;
             if (jumpAt < 0.5) continue;
             sims += 1;
-            const landed = runAndJump({ collision, sample, onWedged }, from, aimX, aimZ, jumpAt, CENSUS_FPS);
+            const landed = runAndJump({ collision, sample, onWedged, sim: CENSUS_SIM, ...CENSUS_WEDGED_BY }, from, aimX, aimZ, jumpAt, CENSUS_FPS);
             if (!landed) continue;
             const rail = route.pointAt(route.distanceNear(landed.x, landed.z), railScratch);
             const off = Math.hypot(landed.x - rail.x, landed.z - rail.z);
@@ -795,6 +812,8 @@ if (SKIP_CENSUS) {
           fps: CENSUS_FPS,
           until: outside,
           onWedged,
+          sim: CENSUS_SIM,
+          ...CENSUS_WEDGED_BY,
         }).stopped;
       } catch {
         out = joinsMain({ collision, sample }, main, region.entry, 60, 14);
@@ -820,6 +839,8 @@ if (SKIP_CENSUS) {
           fps: CENSUS_FPS,
           until: outside,
           onWedged,
+          sim: CENSUS_SIM,
+          ...CENSUS_WEDGED_BY,
         }).stopped;
       } catch {
         out = joinsMain({ collision, sample }, main, top.at, 60, 14);

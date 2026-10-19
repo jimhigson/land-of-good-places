@@ -24,7 +24,7 @@ import { Vector3 } from 'three';
 import { JUMP_CLEARANCE_GRACE, type CollisionWorld, type SolidView } from '../../src/world/Collision.ts';
 import type { NavGrid } from '../../src/world/NavGrid.ts';
 import { PLAYER_RADIUS, BUILDING_STEP_UP } from '../../src/core/constants.ts';
-import { SimPlayer, playerHopProbe } from '../playerSim.mts';
+import { SimPlayer, playerHopProbe, type SimOptions } from '../playerSim.mts';
 import { stepCeilingAt } from '../../src/world/building/stepReach.ts';
 import { WEDGE_DEPTH, solidStepCeiling, standingHeight, wedgeDepth } from '../../src/world/standing.ts';
 
@@ -79,6 +79,14 @@ export interface ReachOptions {
    * out, nor a wall and a bush blink her back to where she started).
    */
   readonly onWedged?: (at: Stand, how: string) => void;
+  /**
+   * What counts her as wedged where a landing leaves her: the game's own
+   * rescue's measure (`standing.ts`'s `wedgeDepth`) unless a proof asks for
+   * another (`check:solids`' `narrow-wedges`).
+   */
+  readonly wedgedBy?: (collision: CollisionWorld, position: Vector3, feetY: number) => number;
+  /** Her movement's options for every simulation the search runs — a proof's girl (`crackRules: false`), or `Player`'s own. */
+  readonly sim?: Pick<SimOptions, 'crackRules'>;
 }
 
 export interface ReachResult {
@@ -153,7 +161,7 @@ function outline(solid: SolidView, spacing: number): { x: number; z: number; nx:
  * only where she came down.
  */
 export function runAndJump(
-  options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'>,
+  options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged' | 'wedgedBy' | 'sim'>,
   from: Stand,
   aimX: number,
   aimZ: number,
@@ -168,6 +176,7 @@ export function runAndJump(
   // hops it as she would, and a run along a wall's top does not.
   const autoHop = playerHopProbe(options.collision);
   const sim = new SimPlayer(options.collision, {
+    ...options.sim,
     ground: options.sample,
     hopProbe: (probe, feet, feetAt) => {
       if (!fire) return autoHop(probe, feet, feetAt);
@@ -215,7 +224,7 @@ export function runAndJump(
   if (!jumped || landedAt < 0 || sim.airborne) return null;
   // Where she can be, not where a landing wedged her — and said, never
   // dropped (`onWedged`).
-  if (wedgeDepth(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
+  if ((options.wedgedBy ?? wedgeDepth)(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
     options.onWedged?.(
       { x: sim.position.x, z: sim.position.z, y: sim.groundHeight },
       `a run-and-jump from (${from.x.toFixed(2)}, ${from.y.toFixed(2)}, ${from.z.toFixed(2)}) at (${aimX.toFixed(2)}, ${aimZ.toFixed(2)}), jumping ${jumpAt.toFixed(2)} m out`,
@@ -231,9 +240,9 @@ export function runAndJump(
  * edge stops her as it would. Returns where she settled if she left the top
  * and came to rest on something lower, or null.
  */
-function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'>, source: SolidView, o: { x: number; z: number; nx: number; nz: number }, fps: number): Stand | null {
+function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged' | 'wedgedBy' | 'sim'>, source: SolidView, o: { x: number; z: number; nx: number; nz: number }, fps: number): Stand | null {
   const dt = 1 / fps;
-  const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: playerHopProbe(options.collision) });
+  const sim = new SimPlayer(options.collision, { ...options.sim, ground: options.sample, hopProbe: playerHopProbe(options.collision) });
   const x = o.x - o.nx * 0.1;
   const z = o.z - o.nz * 0.1;
   const top = source.topAt(x, z);
@@ -278,7 +287,7 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'
   if (source.depthAt(sim.position.x, sim.position.z) >= -0.05 && Math.abs(sim.groundHeight - here) < 0.05) return null;
   if (!(sim.groundHeight < Math.min(top, here) - 0.05)) return null;
   // Came down, and wedged where she came down: said, never dropped.
-  if (wedgeDepth(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
+  if ((options.wedgedBy ?? wedgeDepth)(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
     options.onWedged?.(
       { x: sim.position.x, z: sim.position.z, y: sim.groundHeight },
       `walking off ${source.kind || source.owner || 'a solid'} at (${o.x.toFixed(2)}, ${o.z.toFixed(2)})`,

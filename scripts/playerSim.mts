@@ -128,6 +128,14 @@ export interface SimOptions {
    */
   drawnStep?: boolean;
   /**
+   * `false` turns off everything that keeps her out of a crack she does not
+   * fit — the step-down hold, a walk that ends wedged refused, the crack
+   * floor, the squeeze lift and the nearest fit — as it was before seed 5's
+   * wall and bush blinked her back to where she started (`check:solids`'
+   * `no-crack-rules` proof).
+   */
+  crackRules?: boolean;
+  /**
    * Uneven ground. Omitted, everything stands on y = 0 and the vertical loop
    * is the flat-world one the wall harnesses have always used.
    */
@@ -212,6 +220,7 @@ export class SimPlayer {
   private readonly stepSamples: number;
   private readonly feetOnGround: boolean;
   private readonly stepTop: ((x: number, z: number, ceiling: number) => number) | undefined;
+  private readonly crackRules: boolean;
   readonly radius: number;
   private readonly substepping: boolean;
   private readonly ground: GroundSampler | null;
@@ -237,6 +246,7 @@ export class SimPlayer {
     this.stepSamples = options.stepSamples ?? STEP_SAMPLES;
     this.feetOnGround = options.feetOnGround ?? true;
     this.stepTop = options.drawnStep ? (x, z, ceiling) => collision.highestTopAt(x, z, ceiling) : undefined;
+    this.crackRules = options.crackRules ?? true;
   }
 
   /**
@@ -423,7 +433,7 @@ export class SimPlayer {
       this.flightHighest = Math.max(this.flightHighest, before);
       this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
       // `Player`'s own: over a crack she does not fit, she comes down on what stands either side.
-      if (this.verticalVelocity < 0) {
+      if (this.verticalVelocity < 0 && this.crackRules) {
         const floor = crackFloor(this.collision, this.position.x, this.position.z, before, this.position.y, groundY);
         if (floor !== null && floor > groundY) groundY = floor;
         else {
@@ -443,7 +453,9 @@ export class SimPlayer {
       this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
     // `Player`'s own: squeezed after all of that, at the nearest place she fits.
-    if (this.airborne) nearestFit(this.collision, this.position, this.position.y);
+    if (!this.crackRules) {
+      // (the proof's girl: nothing keeps her out of a crack)
+    } else if (this.airborne) nearestFit(this.collision, this.position, this.position.y);
     else if (nearestFit(this.collision, this.position, groundY, (x, z) => this.levelWith(x, z, groundY))) groundY = this.sampleGround(this.position.x, this.position.z, groundY);
     this.hopClearance = hopHeight;
     this.groundHeight = groundY;
@@ -472,6 +484,7 @@ export class SimPlayer {
     // nor a walk that ends wedged where the frame began she was not.
     if (
       !this.airborne &&
+      this.crackRules &&
       ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
         this.walksIntoWedge(groundY))
     ) {
