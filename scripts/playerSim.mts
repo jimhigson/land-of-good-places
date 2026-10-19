@@ -501,10 +501,13 @@ export class SimPlayer {
       ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
         this.walksIntoWedge(groundY))
     ) {
-      this.position.x = this.previousPosition.x;
-      this.position.z = this.previousPosition.z;
-      this.velocity.x = 0;
-      this.velocity.z = 0;
+      // …held where the frame began, unless she was wedged there already.
+      if (wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH) {
+        this.position.x = this.previousPosition.x;
+        this.position.z = this.previousPosition.z;
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+      }
       return this.groundHeight;
     }
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {

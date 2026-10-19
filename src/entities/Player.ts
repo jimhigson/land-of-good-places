@@ -1507,16 +1507,24 @@ export class Player implements GameSystem {
     // And on the level: a walk that ends wedged — pressed into a slot between
     // a wall's end and a lamp post — is not taken either, unless she was
     // wedged already (then any way out is hers).
+    //
+    // Held where the frame began — unless she was wedged there already: a
+    // hold that puts her back into a wedge is no hold, and the push out of it
+    // `resolve` gave her is hers, at the height she stands (seed 6: come down
+    // on a bush's edge against a sky cruiser pylon, the hold put her back
+    // into the pylon every frame the push took her out of it).
     if (
       !this.airborne &&
       ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
         this.walksIntoWedge(groundY))
     ) {
-      this.position.x = this.previousPosition.x;
-      this.position.z = this.previousPosition.z;
+      if (wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH) {
+        this.position.x = this.previousPosition.x;
+        this.position.z = this.previousPosition.z;
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+      }
       groundY = this.groundHeight;
-      this.velocity.x = 0;
-      this.velocity.z = 0;
     }
     // Walk off the edge of a deck — or over one of the shafts inside the big
     // building — and the surface under your feet drops away. Start falling.

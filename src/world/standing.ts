@@ -105,6 +105,28 @@ export function wedgeDepth(collision: CollisionWorld, position: Vector3, feetY: 
   return collision.deepestSolidOverlap(position, PLAYER_RADIUS, 0, (x, z) => solidStepCeiling(collision, x, z, feetY), KID_HEIGHT, position.y, true);
 }
 
+/** Frames of pushes {@link settlesWedged} asks for: half a second at 60 fps. */
+const SETTLE_FRAMES = 30;
+
+/**
+ * **Still wedged once the pushes of the frames to come have had their way?**
+ * — `resolve` at an everyday frame clock, frame after frame, as she would be
+ * pushed standing there, until she is clear or half a second has passed;
+ * `probe` is left where the pushes leave her. Not one push with a whole
+ * second's escort: between bodies closer than she is wide, each push of a
+ * frame undoes the last and she does not move at all — seed 8's three bushes
+ * held her 0.66 m deep through sixty frames, where one second-long push put
+ * her 0.74 m out — so a squeeze judged by that push was no squeeze, and
+ * nothing got her out of it.
+ */
+function settlesWedged(collision: CollisionWorld, probe: Vector3, feetY: number): boolean {
+  for (let k = 0; k < SETTLE_FRAMES; k += 1) {
+    if (wedgeDepth(collision, probe, feetY) <= WEDGE_DEPTH) return false;
+    collision.resolve(probe, PLAYER_RADIUS, 0, 1 / 60, undefined, KID_HEIGHT, feetY);
+  }
+  return wedgeDepth(collision, probe, feetY) > WEDGE_DEPTH;
+}
+
 /** Scratch body for {@link dropWedges}. */
 const dropProbe = new Vector3Impl();
 
@@ -126,14 +148,13 @@ export function dropWedges(collision: CollisionWorld, x: number, z: number, grou
   // quarter-metre at a time, pushed at each height by what holds her there —
   // as the drop itself pushes her: a bush she comes down beside shoves her
   // clear of itself, into whatever is next to it. Squeezed at any height on
-  // the way down is a crack. A whole second's escort at each height: where
-  // pushing ends, not how fast.
+  // the way down is a crack: where the pushes end, frame after frame
+  // (`settlesWedged`).
   const start = Math.max(groundY, fromY - JUMP_CLEARANCE_GRACE - 0.02);
   dropProbe.set(x, start, z);
   for (let y = start; ; y = Math.max(groundY, y - DROP_STAGE)) {
     dropProbe.y = y;
-    collision.resolve(dropProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, y);
-    if (wedgeDepth(collision, dropProbe, y) > WEDGE_DEPTH) return true;
+    if (settlesWedged(collision, dropProbe, y)) return true;
     if (y <= groundY) return false;
   }
 }
@@ -154,15 +175,13 @@ const liftProbe = new Vector3Impl();
 export function liftOutOfSqueeze(collision: CollisionWorld, position: Vector3, highest: number): number | null {
   if (wedgeDepth(collision, position, position.y) <= WEDGE_DEPTH) return null;
   liftProbe.copy(position);
-  collision.resolve(liftProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, liftProbe.y);
-  if (wedgeDepth(collision, liftProbe, liftProbe.y) <= WEDGE_DEPTH) return null;
+  if (!settlesWedged(collision, liftProbe, liftProbe.y)) return null;
   for (const top of collision.topsReached(position.x, position.z, PLAYER_RADIUS, position.y)) {
     // Only what this flight came down past: never up onto a pylon she was
     // never over (seed 5: a ring of bushes round the Sky Cruiser's pylon).
     if (top > highest + JUMP_CLEARANCE_GRACE) break;
     liftProbe.set(position.x, top, position.z);
-    collision.resolve(liftProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, top);
-    if (wedgeDepth(collision, liftProbe, top) > WEDGE_DEPTH) continue;
+    if (settlesWedged(collision, liftProbe, top)) continue;
     position.set(liftProbe.x, top, liftProbe.z);
     return top;
   }
@@ -236,8 +255,7 @@ export function nearestFit(
   // frame, the way it always was — a wall she hops comes down solid round
   // her, and is left to push her off itself as it always has.
   fitProbe.copy(position);
-  collision.resolve(fitProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, feetY);
-  if (wedgeDepth(collision, fitProbe, feetY) <= WEDGE_DEPTH) return false;
+  if (!settlesWedged(collision, fitProbe, feetY)) return false;
   for (const ring of FIT_RINGS) {
     for (let b = 0; b < FIT_BEARINGS; b += 1) {
       const a = (b / FIT_BEARINGS) * Math.PI * 2;
