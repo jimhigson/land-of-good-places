@@ -33,7 +33,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type CompanionRide, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
 import type { OpenAreaPoint } from '../dismount';
 
 import { BallPit } from './BallPit';
@@ -1245,7 +1245,12 @@ export class Building implements GameSystem {
   }
 
   /** Whoever sits at the banquet is held by this, and let go by leaving it. */
-  private readonly feastHolder: RideHolder = { holding: 'a seat at the banquet', letGo: () => this.leaveFeast() };
+  private readonly feastHolder: RideHolder = {
+    holding: 'a seat at the banquet',
+    letGo: () => this.leaveFeast(),
+    // A seat, not a ride — and her companions have their own table (#449).
+    companion: 'not a ride',
+  };
 
   /**
    * Up from the table: she stands, and the pets come back to the line from
@@ -1857,14 +1862,24 @@ export class Building implements GameSystem {
    * now: {@link finishRide}, the same landing every descent ends on, with its
    * splash, its companions and its camera, just sooner.
    */
-  private readonly slideHolder: RideHolder = {
-    holding: 'a slide',
-    letGo: () => {
-      const ride = this.ride;
-      const player = this.player;
-      if (ride && player) this.finishRide(ride, player);
-    },
-  };
+  private readonly slideHolder: RideHolder = (() => {
+    const building = this;
+    return {
+      holding: 'a slide',
+      letGo: () => {
+        const ride = this.ride;
+        const player = this.player;
+        if (ride && player) this.finishRide(ride, player);
+      },
+      // Down the ginormous slide her companion rides the chute behind her,
+      // carried by the ride itself (`ridePetsDownSlide`, #468); a little
+      // slide has room for nobody but her, and it rides in her backpack.
+      // Asked as she boards, once `startRide` has said which slide it is.
+      get companion(): CompanionRide {
+        return building.ride?.giant === true ? 'carried by the ride' : 'in her backpack';
+      },
+    };
+  })();
 
   private advanceRide(dt: number, player: Player): void {
     const ride = this.ride;

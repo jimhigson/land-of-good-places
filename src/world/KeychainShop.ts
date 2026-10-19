@@ -1002,7 +1002,12 @@ export class KeychainShop implements GameSystem {
   }
 
   /** She stands at the rack held by this while it is zoomed — let go by closing it. */
-  private readonly viewHolder: RideHolder = { holding: 'the keychain rack', letGo: () => this.closeView() };
+  private readonly viewHolder: RideHolder = {
+    holding: 'the keychain rack',
+    letGo: () => this.closeView(),
+    // A look at the rack, not a ride: her line stays at her heels.
+    companion: 'not a ride',
+  };
 
   /**
    * Eases {@link viewFacing} towards {@link viewFacingTarget} and writes it

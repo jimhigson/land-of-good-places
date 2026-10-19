@@ -152,6 +152,16 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   }
 
   /**
+   * **Ground her line must never form up on** when it comes back out of her
+   * backpack — the railway, by the train's own answer (`ParkTrain.onTheLine`),
+   * given by `World.attachParade`: a companion put down on the line would be a
+   * body the train waits for. Asked of every point {@link formUpBehind} tries.
+   */
+  keepOff(test: (x: number, y: number, z: number, radius: number) => boolean): void {
+    this.offLimits = test;
+  }
+
+  /**
    * **The front of her line** — the catalogue id of the companion who rides
    * with her when she boards something, and the uid it walks under: the one
    * walking right behind her (newest first — see {@link sync}). `null` with
@@ -265,6 +275,8 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   } | null = null;
   /** The seat beside her, written by the ride every frame — scratch, like {@link slideSeat}. */
   private readonly companionSeat: CompanionSeat = { x: 0, y: 0, z: 0, facing: 0, turn: new Quaternion() };
+  /** Ground her line must not form up on — see {@link keepOff}. */
+  private offLimits: ((x: number, y: number, z: number, radius: number) => boolean) | null = null;
 
   constructor(player: Player, collision: CollisionWorld, camera: IsoCamera) {
     this.player = player;
@@ -316,7 +328,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     // Riding beside her, or down the chute behind her: the front of her line.
     // In her backpack with the rest: with no room beside her, or when the ride
     // draws its own.
-    const rides = ride !== null && ride !== 'drawn by the ride';
+    const rides = ride !== null && ride !== 'drawn by the ride' && ride !== 'in her backpack';
     this.aboard = { holder, ride, companion: rides ? (this.members[0]?.uid ?? null) : null, stays: false };
     this.signature = '';
     this.sync(gameStore.get());
@@ -371,6 +383,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
         const y = this.groundAt(x, z, at.y);
         if (Math.abs(y - at.y) > BUILDING_STEP_UP) break;
         if (this.collision.closedAt(x, z) || !this.collision.clearOfBoundary(x, z, MEMBER_RADIUS)) break;
+        if (this.offLimits?.(x, y, z, MEMBER_RADIUS)) break;
         FORM_UP_PROBE.set(x, y, z);
         if (this.collision.deepestSolidOverlap(FORM_UP_PROBE, MEMBER_RADIUS, 0, undefined, FORM_UP_HEIGHT) > FORM_UP_CLEAR) break;
         reached = d;

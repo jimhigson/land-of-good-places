@@ -7,7 +7,6 @@ import { isTouchDevice } from './core/device';
 import {
   CAMERA_ZOOM_STEP,
   PLAYER_LONGEST_STEP,
-  PARADE_MEMBER_RADIUS,
   PLAYER_RADIUS,
   VIEWMODEL_LAYER,
 } from './core/constants';
@@ -355,32 +354,11 @@ export class Game {
     this.parade = new Parade(this.player, this.world.collision, this.camera);
     this.engine.scene.add(this.parade.group);
     this.addSystem(this.parade);
-    // The seam a nap uses to send a pet to its own bed — see
-    // `Hotel.PetParadeLink` and `Hotel.sendPetsToBed`, its one caller.
-    // `Parade` satisfies the interface structurally; this is the one place
-    // that holds both a `Parade` and a `Hotel` to introduce them.
-    //
-    // **It is the whole of the wiring, and deliberately one-way.** The parade
-    // owns a pet's body from the line all the way onto the cushion and back;
-    // nothing here hides a pet, moves one, or holds a second copy of one.
-    this.world.hotel.petParade = this.parade;
-    // And the same seam again for the great hall's banquet (#449): she sits
-    // down at the feast, and her companions go and eat at their own little
-    // table. Identical shape, identical reasoning — the building says where
-    // the places are, the parade walks the animals to them and owns their
-    // bodies the whole way, and nothing comes back the other direction.
-    this.world.building.petParade = this.parade;
-    // The train stops for her, and for whatever follows her (Jim, 19 Oct
-    // 2026): the one place that holds the player, her parade and the train
-    // tells the train who to look out for — it decides the rest
-    // (`ParkTrain.keepClearOf`). Not while she rides anything: aboard, the
-    // train carries her, and on another ride she is not on the line.
-    const player = this.player;
-    const parade = this.parade;
-    this.world.train.keepClearOf(function* () {
-      if (!player.riding) yield { x: player.position.x, y: player.position.y, z: player.position.z, radius: PLAYER_RADIUS };
-      for (const at of parade.standing()) yield { x: at.x, y: at.y, z: at.z, radius: PARADE_MEMBER_RADIUS };
-    });
+    // Introduced to the park in one call: the hotel's beds, the castle's
+    // banquet and slide, the train that stops for her line and the ferris
+    // gondola that seats her companion — see `World.attachParade`. One-way,
+    // every one of them: the parade owns its animals' bodies the whole way.
+    this.world.attachParade(this.parade);
 
     // Every balloon the player owns and has not stowed, held above them on a
     // bending string — see `entities/HeldBalloon.ts`'s doc comment for why

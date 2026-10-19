@@ -280,7 +280,15 @@ export class Coaster implements GameSystem {
   }
 
   /** Whoever rides the coaster is held by this — and let go by arriving back now. */
-  private readonly holder: RideHolder = { holding: 'the coaster', letGo: () => this.arrive() };
+  private readonly holder: RideHolder = {
+    holding: 'the coaster',
+    letGo: () => this.arrive(),
+    // No room beside her: she fills the tub, which is no wider than she is
+    // (`CART_BODY_WIDTH`), and nothing may ride outside the swept envelope the
+    // track's clearances are proved against (`CART_ENVELOPE`). Her companion
+    // rides in her backpack with the rest.
+    companion: 'in her backpack',
+  };
 
   /** The stall's interact press lands here instead of opening the 2D game. */
   requestBoard(): boolean {

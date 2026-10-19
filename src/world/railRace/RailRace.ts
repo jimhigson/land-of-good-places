@@ -3,7 +3,7 @@ import { PALETTE } from '../../core/palette';
 import { Rng, damp } from '../../core/mathUtils';
 import type { InputSystem } from '../../core/input';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player, RideHolder } from '../../entities/Player';
+import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import { createConfetti, type Confetti } from '../../minigames/railRacer/confetti';
 import { gameStore } from '../../state';
@@ -32,7 +32,7 @@ import {
 } from './track';
 import type { Claim, GroundClaims } from '../../boot/groundClaims';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
-import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
+import { createCart, petPerchTop, SEAT_HEIGHT, type CartHandle } from './cart';
 import { placeRaceCart, seatRaceRider } from './seat';
 import { createSparks, type Sparks } from './sparks';
 import type { RaceLevel } from './hazards';
@@ -597,7 +597,30 @@ export class RailRace implements GameSystem {
   }
 
   /** Whoever races is held by this — and let go by arriving back at the booth now. */
-  private readonly holder: RideHolder = { holding: 'the Rail Race', letGo: () => this.arrive() };
+  private readonly holder: RideHolder = {
+    holding: 'the Rail Race',
+    letGo: () => this.arrive(),
+    // Her companion rides on the cart's own pet perch, beside her seat — the
+    // place the cart was built with for one (`cart.ts`, `petPerchTop`).
+    companion: { beside: (seat) => this.companionSeat(seat) },
+  };
+
+  /** Scratch for {@link companionSeat}. */
+  private readonly perch = new Vector3();
+
+  /** The perch beside her in her own cart, this frame: on it, leant and turned as the cart is. */
+  private companionSeat(seat: CompanionSeat): boolean {
+    if (!this.riding) return false;
+    const cart = this.me.group;
+    cart.updateMatrixWorld();
+    cart.localToWorld(petPerchTop(this.perch));
+    seat.x = this.perch.x;
+    seat.y = this.perch.y;
+    seat.z = this.perch.z;
+    seat.facing = this.me.yaw;
+    seat.turn.copy(cart.quaternion);
+    return true;
+  }
 
   /** The stall's interact press lands here. */
   requestBoard(): boolean {

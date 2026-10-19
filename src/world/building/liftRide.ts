@@ -1,4 +1,5 @@
-import type { Player, RideExit, RideHolder } from '../../entities/Player';
+import { companionBehind, type Player, type RideExit, type RideHolder } from '../../entities/Player';
+import { LIFT_COMPANION_BACK } from '../liftCompanion';
 import {
   liftDoorOpenness,
   LIFT_COMING_SECONDS,
@@ -164,7 +165,14 @@ export class LiftRide implements LiftPanelSource {
   private travelled = false;
 
   /** Who has her while she is in the car — see `RideHolder`. */
-  private readonly holder: RideHolder = { holding: 'the castle lift', letGo: () => this.letGo() };
+  private readonly holder: RideHolder = {
+    holding: 'the castle lift',
+    letGo: () => this.letGo(),
+    // Her companion stands in the car behind her — she rides in its mouth,
+    // facing the doors ({@link LIFT_RIDER_DEPTH}), and the car is deep enough
+    // behind her for one of them. Through the door, it goes first.
+    companion: { beside: (seat) => { const player = this.deps.player(); return player !== null && companionBehind(player, LIFT_COMPANION_BACK, seat); } },
+  };
 
   constructor(deps: LiftRideDeps) {
     this.deps = deps;

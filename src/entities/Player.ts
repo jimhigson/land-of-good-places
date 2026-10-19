@@ -391,8 +391,8 @@ export interface RideHolder {
   letGo(): void;
   /**
    * **How her companion rides with her** — see {@link CompanionRide}. Omitted,
-   * the ride has no room beside her, and the companion goes into her backpack
-   * with the rest of her line until she gets off.
+   * it is `'in her backpack'`: a ride that has not said where its seat beside
+   * her is has none.
    */
   readonly companion?: CompanionRide;
 }
@@ -417,6 +417,8 @@ export interface RideHolder {
  * - **`'drawn by the ride'`** — the ride draws her companion in a seat of its
  *   own, in its own pass: the ferris gondola's pet chair, whose car is painted
  *   over the finished frame. Her whole line goes into the backpack.
+ * - **`'in her backpack'`** — no room beside her: she fills the tub, or every
+ *   seat is somebody's. Her companion rides in her backpack with the rest.
  * - **`'not a ride'`** — a chair, a nap, a view, a climb: nothing carries her
  *   anywhere, and each of those places already looks after her companions
  *   (their beds, their table). Her line stays out exactly as before.
@@ -428,6 +430,7 @@ export type CompanionRide =
   | { readonly beside: (seat: CompanionSeat) => boolean }
   | 'carried by the ride'
   | 'drawn by the ride'
+  | 'in her backpack'
   | 'not a ride';
 
 /**
@@ -444,6 +447,23 @@ export interface CompanionSeat {
   facing: number;
   readonly turn: Quaternion;
 }
+
+/**
+ * **A companion's place `back` metres behind her, standing as she stands** —
+ * for a ride whose room is behind her rather than beside her (a lift car she
+ * stands in the mouth of, facing out): her own feet, moved back along her own
+ * frame, facing the way she faces. Fills `seat` and answers `true`.
+ */
+export function companionBehind(player: Player, back: number, seat: CompanionSeat): boolean {
+  _behind.set(0, 0, -back).applyQuaternion(player.group.quaternion);
+  seat.x = player.position.x + _behind.x;
+  seat.y = player.position.y + _behind.y;
+  seat.z = player.position.z + _behind.z;
+  seat.facing = player.facing;
+  seat.turn.copy(player.group.quaternion);
+  return true;
+}
+const _behind = /* @__PURE__ */ new Vector3();
 
 export type { RideExit } from '../world/dismount';
 

@@ -140,6 +140,22 @@ export const WHEEL_RADIUS = 0.384;
 export const SEAT_HEIGHT = 0.958;
 
 /**
+ * **Where a companion's feet go on the pet perch beside her**, in the cart's
+ * own frame (before the ring's scale): the middle of the perch's top, read off
+ * the authored `pet-seat` part itself — its node's transform applied to its own
+ * geometry's bound — so moving the perch in Blender moves the companion with
+ * it. Her companion rides here (`CompanionRide`'s `beside`, `RailRace`).
+ */
+export function petPerchTop(out: Vector3): Vector3 {
+  const part = cartAssetPart('pet-seat');
+  const geometry = part.geometry;
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const box = geometry.boundingBox!;
+  out.set((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2); // flat-ok: the part's own geometry bound, in the cart's unleant local frame
+  return out.multiply(part.scale).applyQuaternion(part.quaternion).add(part.position);
+}
+
+/**
  * Where a pet mark sits, relative to the asset's own `pet-seat` node —
  * derived from that node's authored position rather than a second, absolute
  * hand-picked coordinate that could quietly stop matching it if the perch

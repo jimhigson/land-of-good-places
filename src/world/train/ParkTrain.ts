@@ -1,8 +1,9 @@
-import { Group, type Object3D, PointLight, Vector3 } from 'three';
+import { Group, type Object3D, PointLight, Quaternion, Vector3 } from 'three';
+import { PARADE_MEMBER_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import { clamp01 } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player, RideHolder } from '../../entities/Player';
+import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import type { CollisionWorld } from '../Collision';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
@@ -30,6 +31,7 @@ import {
   type Locomotive,
   type TrainCar,
 } from './trainModel';
+import { CARRIAGE_BODY_HALF_WIDTH } from './trainDimensions';
 import { playChuff, playStationBell, playTrainWhistle, setTrainAudioCarry } from './trainSounds';
 import { setTrainService, type TrainPassenger, type TrainService, type TrainStop } from './service';
 
@@ -102,10 +104,24 @@ const LOOK_AHEAD = 24;
  * short of her, never a bump.
  */
 const HARDEST_BRAKING = 9;
-/** How far over the line's middle a body's centre counts as on it: the train's own clearance and a hand. */
-const ON_THE_LINE = TRACK_CLEARANCE + 0.15;
+/**
+ * **How close to the line's middle a body may come before it is on the line**,
+ * metres, beyond its own radius: the train's swept clearance
+ * (`TRACK_CLEARANCE`, which every prop beside the railway keeps), so the train
+ * stops for anybody it could touch — and touches nobody, so it can never push
+ * her into a fence, a wall or a trap. Beside a platform the line runs straight
+ * and the train sweeps no wider than its body, so there a body is on the line
+ * once it is within a hand of where the carriages' sides pass
+ * ({@link PLATFORM_SIDE}): she may stand on the platform to wait, but not with
+ * her toes over the edge.
+ */
+const ON_THE_LINE = TRACK_CLEARANCE;
+/** The same beside a platform: the carriages' own half-width and a hand. */
+const PLATFORM_SIDE = CARRIAGE_BODY_HALF_WIDTH + 0.1;
 /** How long the line must stay clear before the train toots for the next person on it. */
 const TOOT_REARM_SECONDS = 3;
+/** How often the driver toots again while somebody stays on the line: he keeps asking, and waits. */
+const TOOT_AGAIN_SECONDS = 4;
 
 /** Something the train must not run into — her, or something following her — at its feet, with its body's radius. */
 export interface OnTheLine {
@@ -120,6 +136,19 @@ const CARRIAGE_COUNT = 3;
 
 /** Seat 0 is always kept for the player; children take the rest. */
 const PLAYER_SEAT = 0;
+/**
+ * **Her companion's seat** — the bench right behind hers, in the next
+ * carriage, facing her back (Jim, 19 Oct 2026: *"one rides on the seat
+ * alongside the player"*). Not the bench facing her in her own carriage: she
+ * rides in first person, and a pet as tall as she is sitting there would fill
+ * her whole view of the line ahead — the family's own rule for the ferris
+ * gondola, *"the pet should sit on a chair that is lower than the player's so
+ * it is easier to see above their head"*. Her own bench has no room beside her:
+ * she fills it. Kept for her companion like {@link PLAYER_SEAT} is for her, and
+ * it costs the children nothing — four of them still ride
+ * ({@link MAX_NPC_RIDERS}).
+ */
+const COMPANION_SEAT = 2;
 const MAX_NPC_RIDERS = 4;
 
 /** How long after boarding before a movement key means "let me off". */
@@ -142,6 +171,9 @@ interface Seat {
 }
 
 const _planForward = /* @__PURE__ */ new Vector3();
+/** A half turn about the carriage's own up: a bench facing back down it. */
+// flat-ok: the carriage's own up — a local axis, composed onto its leant frame
+const HALF_TURN = /* @__PURE__ */ new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI);
 const _funnel = /* @__PURE__ */ new Vector3();
 
 /**
@@ -209,8 +241,11 @@ export class ParkTrain implements GameSystem, TrainService {
   private speed = 0;
   /** Everyone the train stops for: asked every frame ({@link keepClearOf}). */
   private readonly clearOf: (() => Iterable<OnTheLine>)[] = [];
-  /** Whether it has tooted for whoever is on the line now, and how long the line has been clear since. */
+  /** Her line — see {@link attachParade}. */
+  private parade: { standing(): Iterable<Readonly<Vector3>> } | null = null;
+  /** Whether it has tooted for whoever is on the line now, how long since, and how long the line has been clear. */
   private tooted = false;
+  private sinceToot = 0;
   private clearFor = Infinity;
   /** The platforms, so someone standing on one is not on the line. */
   private readonly platformDecks: MovingPlatform[] = [];
@@ -410,6 +445,58 @@ export class ParkTrain implements GameSystem, TrainService {
     this.clearOf.push(bodies);
   }
 
+  /**
+   * **Her line, for the train to look out for** — given by `World.attachParade`,
+   * the one place her parade is introduced to the park. She herself comes with
+   * {@link attachPlayer}. Each stands where it stands; one riding with her —
+   * she in her seat, her companion in its — is aboard, and the train never
+   * waits for anybody aboard it.
+   */
+  attachParade(parade: { standing(): Iterable<Readonly<Vector3>> }): void {
+    this.parade = parade;
+  }
+
+  /**
+   * **Is a body standing here on the line?** — the train's own answer, the
+   * one {@link wayAhead} asks of everybody it looks out for: within reach of
+   * the line's middle (its swept clearance, or a hand off the carriages' sides
+   * on a platform — see {@link ON_THE_LINE}), down on the track bed or up on
+   * the train, never on a bridge's deck over it. Asked from outside too: her
+   * line, coming back out of her backpack, forms up off it (`Parade`).
+   */
+  onTheLine(x: number, y: number, z: number, radius: number): boolean {
+    return this.lineAt(x, y, z, radius) !== null;
+  }
+
+  /** Where along the route a body on the line is, metres — `null` for one that is not on it. */
+  private lineAt(x: number, y: number, z: number, radius: number): number | null {
+    // Where along the line she is, to the centimetre: the route's nearest
+    // sample, then onto the line itself along its tangent there — the samples
+    // alone put a pet 0.13 m nearer than it stood.
+    let at = this.route.distanceNear(x, z);
+    for (let k = 0; k < 2; k += 1) {
+      this.route.pointAt(at, this.point);
+      this.route.tangentAt(at, this.tangent);
+      at = this.route.wrap(at + (x - this.point.x) * this.tangent.x + (z - this.point.z) * this.tangent.z);
+    }
+    this.route.pointAt(at, this.point);
+    // On a platform she may wait, a hand back from where the carriages pass;
+    // anywhere else, clear of all the train sweeps.
+    const onPlatform = this.platformDecks.some((deck) => deck.covers(x, z) && y >= deck.surfaceY - 0.05);
+    const reach = (onPlatform ? PLATFORM_SIDE : ON_THE_LINE) + radius;
+    if (Math.hypot(x - this.point.x, z - this.point.z) > reach) return null;
+    if (y > this.point.y + 2 || y < this.point.y - 1.5) return null;
+    return at;
+  }
+
+  /** Everybody the train looks out for: her, her line, and whoever else {@link keepClearOf} was given. */
+  private *lookout(): Iterable<OnTheLine> {
+    const player = this.player;
+    if (player && !player.riding) yield { x: player.position.x, y: player.position.y, z: player.position.z, radius: PLAYER_RADIUS };
+    if (this.parade) for (const at of this.parade.standing()) yield { x: at.x, y: at.y, z: at.z, radius: PARADE_MEMBER_RADIUS };
+    for (const source of this.clearOf) yield* source();
+  }
+
   /** Where the train's nose is along the route, metres — its buffer beam. */
   noseDistance(): number {
     return this.route.wrap(this.distance + LOCO_LENGTH / 2);
@@ -424,42 +511,29 @@ export class ParkTrain implements GameSystem, TrainService {
    * **How far the nose may still run before it must stand, metres** —
    * `Infinity` while the line ahead is clear: to {@link TRAIN_STOPS_SHORT}
    * short of the nearest body on the line within {@link LOOK_AHEAD}, or 0 for
-   * one already alongside the train, between its nose and its tail (on the
-   * track beside a carriage, it must not be dragged past).
+   * one already alongside the train, between its nose and its tail — on the
+   * track beside a carriage, pressed against its side, or standing up on it.
+   * Then it does not move at all: it never pushes anybody anywhere.
    *
-   * On the line is a body whose middle is over the track's clearance, down on
-   * the track bed or hopping over it — never one standing on a platform
-   * beside it, or on a bridge's deck over it.
+   * On the line is {@link onTheLine}'s answer. Anybody riding is aboard, not
+   * on it — she in her seat, her companion in its own, the children in theirs
+   * — and is never in {@link lookout} at all.
    */
   private wayAhead(): number {
-    if (this.clearOf.length === 0) return Infinity;
     const nose = this.noseDistance();
     const last = this.carOffsets[this.carOffsets.length - 1] ?? 0;
     const length = LOCO_LENGTH / 2 + last + CARRIAGE_LENGTH / 2;
     const loco = this.locomotive.root.position;
     let way = Infinity;
-    for (const source of this.clearOf) {
-      for (const body of source()) {
-        // Nowhere near the train at all: not worth finding on the route.
-        if (Math.hypot(body.x - loco.x, body.z - loco.z) > LOOK_AHEAD + length + body.radius) continue;
-        // Where along the line she is, to the centimetre: the route's nearest
-        // sample, then onto the line itself along its tangent there — the
-        // samples alone put a pet 0.13 m nearer than it stood.
-        let at = this.route.distanceNear(body.x, body.z);
-        for (let k = 0; k < 2; k += 1) {
-          this.route.pointAt(at, this.point);
-          this.route.tangentAt(at, this.tangent);
-          at = this.route.wrap(at + (body.x - this.point.x) * this.tangent.x + (body.z - this.point.z) * this.tangent.z);
-        }
-        this.route.pointAt(at, this.point);
-        if (Math.hypot(body.x - this.point.x, body.z - this.point.z) > ON_THE_LINE) continue;
-        if (body.y > this.point.y + 2 || body.y < this.point.y - 1.5) continue;
-        if (this.platformDecks.some((deck) => deck.covers(body.x, body.z) && body.y >= deck.surfaceY - 0.05)) continue;
-        const ahead = this.route.forwardGap(nose, at);
-        if (this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius) return 0;
-        if (ahead > LOOK_AHEAD + body.radius + TRAIN_STOPS_SHORT) continue;
-        way = Math.min(way, Math.max(0, ahead - body.radius - TRAIN_STOPS_SHORT));
-      }
+    for (const body of this.lookout()) {
+      // Nowhere near the train at all: not worth finding on the route.
+      if (Math.hypot(body.x - loco.x, body.z - loco.z) > LOOK_AHEAD + length + body.radius) continue;
+      const at = this.lineAt(body.x, body.y, body.z, body.radius);
+      if (at === null) continue;
+      const ahead = this.route.forwardGap(nose, at);
+      if (this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius) return 0;
+      if (ahead > LOOK_AHEAD + body.radius + TRAIN_STOPS_SHORT) continue;
+      way = Math.min(way, Math.max(0, ahead - body.radius - TRAIN_STOPS_SHORT));
     }
     return way;
   }
@@ -568,7 +642,34 @@ export class ParkTrain implements GameSystem, TrainService {
       const player = this.player;
       if (player && this.playerRiding) this.alight(player);
     },
+    // Her companion, on the bench behind hers ({@link COMPANION_SEAT}).
+    companion: { beside: (seat) => this.companionSeatPose(seat) },
   };
+
+  /**
+   * Where her companion sits this frame: its feet on the bench top of
+   * {@link COMPANION_SEAT}, facing the way that bench faces, in the carriage's
+   * own frame — so it leans with the railway as the carriage does.
+   */
+  private companionSeatPose(seat: CompanionSeat): boolean {
+    const entry = this.seats[COMPANION_SEAT];
+    const car = entry ? this.carriages[entry.car] : undefined;
+    const local = car && entry ? car.seats[entry.index] : undefined;
+    if (!car || !local) return false;
+    car.root.updateMatrixWorld();
+    this.seatWorld.set(local.x, SEAT_Y, local.z);
+    car.root.localToWorld(this.seatWorld);
+    seat.x = this.seatWorld.x;
+    seat.y = this.seatWorld.y;
+    seat.z = this.seatWorld.z;
+    // The bench's riders face away from its backrest — towards the carriage's
+    // middle — which for this one is the way the train goes.
+    const backwards = local.z > 0;
+    seat.facing = planYawOf(car.root) + (backwards ? Math.PI : 0);
+    seat.turn.copy(car.root.quaternion);
+    if (backwards) seat.turn.multiply(HALF_TURN);
+    return true;
+  }
 
   /** "Get off, please." Ignored while the train is moving — there is nowhere to step. */
   requestAlight(): void {
@@ -650,7 +751,7 @@ export class ParkTrain implements GameSystem, TrainService {
     if (riders >= MAX_NPC_RIDERS) return null;
 
     for (let i = 0; i < this.seats.length; i += 1) {
-      if (i === PLAYER_SEAT) continue;
+      if (i === PLAYER_SEAT || i === COMPANION_SEAT) continue;
       const seat = this.seats[i];
       if (seat && seat.taken === null) {
         seat.taken = 'npc';
@@ -684,15 +785,13 @@ export class ParkTrain implements GameSystem, TrainService {
       this.clearFor += dt;
       if (this.clearFor >= TOOT_REARM_SECONDS) this.tooted = false;
     }
+    this.sinceToot += dt;
     if (this.dwellRemaining > 0) {
       this.dwellRemaining -= dt;
       if (this.dwellRemaining > 0) return;
-
-      // Off we go.
-      this.stoppedStop = null;
-      this.boardingLocked = false;
-      playTrainWhistle();
-      return;
+      // Doors closing: off it goes, as soon as the line ahead lets it — and
+      // until it actually moves it is still standing at this platform, where
+      // she may get on and off ({@link stoppedStop}, cleared below).
     }
 
     const target = this.stations[this.nextStop];
@@ -706,14 +805,26 @@ export class ParkTrain implements GameSystem, TrainService {
     const approach = Math.sqrt(2 * BRAKING * Math.max(0, remaining));
     const cruising = Math.min(CRUISE_SPEED, this.speed + ACCELERATION * dt);
     const forTheStation = Math.max(0.35, Math.min(cruising, approach));
-    // Someone on the line ahead: stand short of them, and toot.
+    // Someone on the line ahead: stand short of them, and toot — and toot
+    // again every few seconds for as long as they stay: the driver keeps
+    // asking, and waits.
     const forTheLine = Number.isFinite(way) ? this.speedFor(way, dt) : Infinity;
-    if (forTheLine < forTheStation && !this.tooted) {
+    if (forTheLine < forTheStation && (!this.tooted || this.sinceToot >= TOOT_AGAIN_SECONDS)) {
       this.tooted = true;
+      this.sinceToot = 0;
       playTrainWhistle();
     }
     this.speed = Math.min(forTheStation, forTheLine);
+    // Standing still — at a platform, still standing at it: "Get on" and
+    // "Get off" stay on offer however long it waits there.
     if (this.speed <= 0) return;
+
+    // Moving: if it was standing at a platform, it has left it now.
+    if (this.stoppedStop !== null) {
+      this.stoppedStop = null;
+      this.boardingLocked = false;
+      playTrainWhistle();
+    }
 
     const step = this.speed * dt;
     if (step >= remaining) {

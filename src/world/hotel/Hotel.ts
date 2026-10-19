@@ -2938,10 +2938,15 @@ export class Hotel implements GameSystem {
       if (this.moment === 'food') this.cine.cancel();
       this.standUp();
     },
+    // A chair, not a ride: her line stays out, as at every meal.
+    companion: 'not a ride',
   };
 
-  /** A nap is let go by waking up — the same wake a tap or a hop gives. */
-  private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap() };
+  /**
+   * A nap is let go by waking up — the same wake a tap or a hop gives. Not a
+   * ride: her pets go to their own beds (`sendPetsToBed`).
+   */
+  private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap(), companion: 'not a ride' };
 
   private standUp(): void {
     const player = this.player;
@@ -6411,7 +6416,7 @@ export class Hotel implements GameSystem {
     this.controls.cancelWalk();
     // A picture is let go by cutting the shot short: `cancel` runs the undo
     // below, which is where she gets off.
-    player.beginRide({ holding: 'a painting', letGo: () => this.cine.cancel() });
+    player.beginRide({ holding: 'a painting', letGo: () => this.cine.cancel(), companion: 'not a ride' });
     const stand: RideExit = {
       x: art.x + art.normalX * 1.9,
       y: 0,
@@ -6475,6 +6480,8 @@ export class Hotel implements GameSystem {
     };
     const holder: RideHolder = {
       holding: 'a window view',
+      // A look out of the window, not a ride.
+      companion: 'not a ride',
       letGo: () => {
         // Mid-shot, `cancel` runs the undo below. Before the iris has reached
         // its middle there is no shot yet: get her off now, and the midpoint

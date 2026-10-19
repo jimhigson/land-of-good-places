@@ -1,7 +1,7 @@
-import { Box3, CatmullRomCurve3, Group, Vector3 } from 'three';
+import { Box3, CatmullRomCurve3, Group, Raycaster, Vector3 } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
-import type { Player, RideHolder } from '../../entities/Player';
+import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
 import { pressZone, type InteractZone } from '../interact';
 import { highlightObject } from '../highlight';
 import { createTortoise, type TortoiseHandle } from '../../art/models/reptiles';
@@ -100,6 +100,14 @@ const HOP_OFF_SIDE = 1.2;
 const HOP_OFF_UP = 3;
 /** Where she lands, beside the tortoise's flank, before the put-down rule has its say. */
 const DISMOUNT_BESIDE = 1.7;
+/**
+ * **How far behind her seat her companion sits on the shell**, metres: past her
+ * back (she reaches 0.44 m behind her seat, measured on the seated rig) and on
+ * the dome's back slope, where its feet are put on the drawn shell itself
+ * (`companionSpot`, ray-cast once). There is no room beside her: the shell is
+ * 2.06 m across and she is 1.75 m, holding on.
+ */
+const COMPANION_BACK = 0.75;
 
 export class TortoiseRide {
   readonly tortoise: TortoiseHandle;
@@ -110,6 +118,8 @@ export class TortoiseRide {
   private readonly loop: CatmullRomCurve3;
   private readonly length: number;
   private readonly seat = new Group();
+  /** Her companion's place on the shell behind her — see {@link COMPANION_BACK}. */
+  private readonly companionSpot = new Group();
   private readonly at = new Vector3();
   private readonly ahead = new Vector3();
   private readonly seatWorld = new Vector3();
@@ -140,6 +150,14 @@ export class TortoiseRide {
     const shell = new Box3().setFromObject(this.tortoise.shell);
     this.seat.position.set(0, shell.max.y - 0.08, -0.15); // flat-ok: the tortoise's box taken under its root before any lean; the hall is flat (floor y 0, off the sphere)
     this.tortoise.root.add(this.seat);
+    // Her companion's feet on the drawn shell behind her: straight down onto
+    // the shell's own mesh, in the same unposed frame the seat was set in.
+    const behind = this.seat.position.z - COMPANION_BACK;
+    this.tortoise.root.updateMatrixWorld(true);
+    const ray = new Raycaster(new Vector3(0, shell.max.y + 1, behind), new Vector3(0, -1, 0)); // flat-ok: down the tortoise's own up, before any lean, in the flat hall
+    const onShell = ray.intersectObject(this.tortoise.shell, true)[0]?.point.y ?? this.seat.position.y;
+    this.companionSpot.position.set(0, onShell, behind);
+    this.tortoise.root.add(this.companionSpot);
 
     this.loop = new CatmullRomCurve3(
       TORTOISE_RIDE_LOOP.map((point) => new Vector3(point.x, 0, point.z)),
@@ -191,7 +209,25 @@ export class TortoiseRide {
   }
 
   /** Whoever rides the shell is held by this — and let go by hopping off it. */
-  private readonly holder: RideHolder = { holding: 'the tortoise', letGo: () => this.dismount() };
+  private readonly holder: RideHolder = {
+    holding: 'the tortoise',
+    letGo: () => this.dismount(),
+    // Her companion rides on the shell behind her ({@link COMPANION_BACK}).
+    companion: { beside: (seat) => this.companionSeat(seat) },
+  };
+
+  /** Her companion's place on the shell this frame, turned as the tortoise is. */
+  private companionSeat(seat: CompanionSeat): boolean {
+    if (!this.riding) return false;
+    this.root.updateMatrixWorld();
+    this.companionSpot.getWorldPosition(this.seatWorld);
+    seat.x = this.seatWorld.x;
+    seat.y = this.seatWorld.y;
+    seat.z = this.seatWorld.z;
+    seat.facing = this.yaw;
+    this.tortoise.root.getWorldQuaternion(seat.turn);
+    return true;
+  }
 
   zones(): InteractZone[] {
     if (this.riding) return [];

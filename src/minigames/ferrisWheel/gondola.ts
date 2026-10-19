@@ -45,10 +45,15 @@ import { PET_KINDS, createPet } from '../../art/models/pets';
  * with the hanger, the rim and the spokes sweeping past above it. That one
  * detail is what tells a child what they are riding.
  *
- * **Your parade rides with you.** Up to three cute things you own and have not
- * stowed are read straight out of the store and sat in the little chairs
- * facing the window. Nothing is written back — the ride never touches saved
- * state, so leaving it, however you leave it, cannot lose anything.
+ * **Your companion rides with you.** Jim, 19 Oct 2026: *"all the pets except
+ * one jump into her backpack on getting on any ride, then one rides on the seat
+ * alongside the player"*. The one is the front of her line
+ * (`Parade.frontOfLine`), handed in as `createGondola` builds the car, and it
+ * sits in the middle chair as your co-pilot; the rest ride in her backpack
+ * (`CompanionRide`'s `'drawn by the ride'` — this car is painted over the
+ * finished frame, so it draws its passenger itself). Nothing is written back —
+ * the ride never touches saved state, so leaving it, however you leave it,
+ * cannot lose anything. The other two chairs stay, empty today.
  *
  * **Two heights of seat (27 July 2026).** The family's note: *"the pet should
  * sit on a chair that is lower than the player's so it is easier to see above
@@ -62,8 +67,8 @@ import { PET_KINDS, createPet } from '../../art/models/pets';
  * fondly rather than around.
  */
 
-/** How many of your cute things come along. One chair each. */
-const SEATS = 3;
+/** How many of your cute things come along: your companion, in the middle chair. */
+const SEATS = 1;
 
 /**
  * The floor between the pet chairs (facing the window, at `z ≈ -0.64`) and the
@@ -267,7 +272,7 @@ export interface Gondola {
   dispose(): void;
 }
 
-export function createGondola(): Gondola {
+export function createGondola(companionUid: string | null = null): Gondola {
   const root = new Group();
   root.name = 'ferris:gondola';
 
@@ -594,7 +599,7 @@ export function createGondola(): Gondola {
 
   const owned = gameStore
     .get()
-    .inventory.filter((item) => item.paradeable && !item.stowed)
+    .inventory.filter((item) => item.uid === companionUid && item.paradeable && !item.stowed)
     .slice(0, SEATS);
 
   // Tallest to the outside, shortest into the middle of the window. Read off

@@ -1643,7 +1643,14 @@ export class ArrivalSequence {
    * She rides the bus in held by this — and is let go by the arrival finishing
    * now: {@link finish}, the same hand-over at the gate the ninth second gives.
    */
-  private readonly holder: RideHolder = { holding: 'the cat bus', letGo: () => this.finish() };
+  private readonly holder: RideHolder = {
+    holding: 'the cat bus',
+    letGo: () => this.finish(),
+    // No room beside her: every other seat on the bus is one of the children
+    // coming in with her (`ARRIVAL_KID_COUNT`). Her companion rides in her
+    // backpack, and hops out when she is handed over at the gate.
+    companion: 'in her backpack',
+  };
 
   /**
    * **The walk in is planned round what is built, because it cannot collide

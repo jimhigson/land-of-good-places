@@ -1,4 +1,5 @@
-import type { Player, RideExit, RideHolder } from '../../entities/Player';
+import { companionBehind, type Player, type RideExit, type RideHolder } from '../../entities/Player';
+import { LIFT_COMPANION_BACK } from '../liftCompanion';
 import type {
   FloorInfo,
   LiftPanelSource,
@@ -55,7 +56,12 @@ export class HotelLift implements LiftPanelSource {
   private readonly deps: HotelLiftDeps;
 
   /** Who has her while she is in the car — see `RideHolder`. */
-  private readonly holder: RideHolder = { holding: 'the hotel lift', letGo: () => this.letGo() };
+  private readonly holder: RideHolder = {
+    holding: 'the hotel lift',
+    letGo: () => this.letGo(),
+    // Her companion stands in the car behind her, as in the castle's lift.
+    companion: { beside: (seat) => { const player = this.deps.player(); return player !== null && companionBehind(player, LIFT_COMPANION_BACK, seat); } },
+  };
 
   constructor(deps: HotelLiftDeps) {
     this.deps = deps;
