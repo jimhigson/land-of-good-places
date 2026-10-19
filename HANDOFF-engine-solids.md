@@ -493,3 +493,9 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
   screenshots). Local dev run: train stopped 1.53 m short, resumed after she hopped off; 0 page errors.
 - Drafts: PR body /tmp/es-pr-body4.md (placeholders @@PREVIEW@@ @@PROOFS@@ @@CENSUS@@ @@IDENTITY@@), comment
   /tmp/es-pr-comment4.md (@@HEAD@@ @@CI@@ @@SEEDS@@ @@PREVIEW_ROOT@@ @@PLAYS@@).
+- DONE (19 Oct, ~11:00 UTC): PR head 8adc1ea3, CI run 39231055387 success (88 jobs); parks identical to round two's
+  (restart/features/planOrder/measures, 16/16; artifact parks-17418cb6…, /tmp/es-parks-r3b). Preview
+  https://pr-722-8adc1ea-land-of-good-places.blockstack.workers.dev — repros played (train stopped short and went on;
+  knee wall z 59.6->67.6; armchair moved 0; wall-and-bush 0 blinks; 0 page errors); frames on qa-screenshots/pr722-r3b/
+  (commit 9b3a0b2f). PR body updated (/tmp/es-pr-body4.md); comment issuecomment-6265606013.
+- Sixteen parks at 8adc1ea3: 12 green; red 6 (awning), 9 (walk-off squeeze), 11 (awning + walk-off squeeze), 15 (bench).
