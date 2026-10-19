@@ -1502,7 +1502,7 @@ export class CollisionWorld {
   }
 
   /**
-   * **The highest top of anything a body of `radius` at `(x, z)` reaches into,
+   * **The highest top she could stand on, of anything a body of `radius` at `(x, z)` reaches into,
    * over `above` and no higher than `ceiling`** — world `y`, or `-Infinity`.
    * Not where a top is under her middle ({@link highestTopAt}): what is under
    * any of her, for a descent into a crack she does not fit, which stops on
@@ -1512,7 +1512,10 @@ export class CollisionWorld {
     let best = -Infinity;
     const gathered = this.gatherNear(x, z, radius);
     const consider = (solid: Readonly<SolidHeights>): void => {
-      if (!solid.topIsAbsolute || solid.closure) return;
+      // Only a top she could stand on: a crystal that comes to a point, a
+      // rail, a post's cap holds nobody up (the hotel suite: held at a
+      // crystal's tip in a corner she could then not walk out of).
+      if (!solid.topIsAbsolute || !standableTop(solid)) return;
       const top = solidTopAt(solid, x, z);
       if (!Number.isFinite(top) || top <= above || top > ceiling || top <= best) return;
       best = top;
@@ -1530,7 +1533,7 @@ export class CollisionWorld {
   }
 
   /**
-   * **Every top of anything a body of `radius` at `(x, z)` reaches into, over
+   * **Every top she could stand on, of anything a body of `radius` at `(x, z)` reaches into, over
    * `above`** — world `y`, lowest first, each once: the heights a squeeze can
    * be climbed out to (`standing.ts`'s `liftOutOfSqueeze`).
    */
@@ -1538,7 +1541,8 @@ export class CollisionWorld {
     const tops: number[] = [];
     const gathered = this.gatherNear(x, z, radius);
     const consider = (solid: Readonly<SolidHeights>): void => {
-      if (!solid.topIsAbsolute || solid.closure) return;
+      // Only a top she could stand on (`highestTopReached`).
+      if (!solid.topIsAbsolute || !standableTop(solid)) return;
       const top = solidTopAt(solid, x, z);
       if (!Number.isFinite(top) || top <= above) return;
       if (!tops.some((t) => Math.abs(t - top) < 1e-3)) tops.push(top);
