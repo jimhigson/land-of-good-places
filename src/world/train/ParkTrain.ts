@@ -434,7 +434,15 @@ export class ParkTrain implements GameSystem, TrainService {
       for (const body of source()) {
         // Nowhere near the train at all: not worth finding on the route.
         if (Math.hypot(body.x - loco.x, body.z - loco.z) > LOOK_AHEAD + length + body.radius) continue;
-        const at = this.route.distanceNear(body.x, body.z);
+        // Where along the line she is, to the centimetre: the route's nearest
+        // sample, then onto the line itself along its tangent there — the
+        // samples alone put a pet 0.13 m nearer than it stood.
+        let at = this.route.distanceNear(body.x, body.z);
+        for (let k = 0; k < 2; k += 1) {
+          this.route.pointAt(at, this.point);
+          this.route.tangentAt(at, this.tangent);
+          at = this.route.wrap(at + (body.x - this.point.x) * this.tangent.x + (body.z - this.point.z) * this.tangent.z);
+        }
         this.route.pointAt(at, this.point);
         if (Math.hypot(body.x - this.point.x, body.z - this.point.z) > ON_THE_LINE) continue;
         if (body.y > this.point.y + 2 || body.y < this.point.y - 1.5) continue;

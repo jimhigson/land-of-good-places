@@ -64,6 +64,19 @@ import {
  * the crown of the dome, within 0.15 m of its crest (`check:solids`).
  */
 const TORTOISE_DOME_HALF = 0.35;
+/**
+ * …and how far along it from the crest: the dome falls away faster along her
+ * length than across her back (0.12 m down 0.2 m along, 0.21 m down 0.4 m),
+ * so her shell's top stops this far either side of its middle. Stood on out to
+ * the parked capsule's ends, she stood 0.27 m over the drawn shell near its
+ * tail (`check:solids`' drawn tops, the reptile house).
+ */
+const TORTOISE_CROWN_ALONG = 0.25;
+
+/** How far past each end of the parked capsule's line its top runs — negative: short of them, to the crown alone. */
+function crownBeyond(front: LocalPoint, back: LocalPoint): number {
+  return TORTOISE_CROWN_ALONG - Math.hypot(back.x - front.x, back.z - front.z) / 2;
+}
 
 /** The parked capsule's two ends, hall-local: along the parking spot's facing, head end first. */
 function parkedCapsule(): [LocalPoint, LocalPoint] {
@@ -139,7 +152,9 @@ export class TortoiseRide {
     // To the top of her shell — the drawn tortoise, a real height — and stood
     // on only on the crown of its dome (`TORTOISE_DOME_HALF`), not out over her head and tail.
     this.shellTop = shell.max.y; // flat-ok: the same box the seat above is set from; the hall is flat (floor y 0, off the sphere)
-    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, this.shellTop, TORTOISE_DOME_HALF);
+    collision.toppedSquare(crownBeyond(front, back), () =>
+      this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, this.shellTop, TORTOISE_DOME_HALF),
+    );
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
     this.bay = this.parkedSolid.handle as WallCollider;
     this.park();
@@ -274,7 +289,7 @@ export class TortoiseRide {
     // dome. (Re-added with no top at all, she came back from her first lap
     // an infinitely tall pillar.)
     this.bay = this.collision.kinded('the tortoise ride, parked', () =>
-      this.collision.toppedNarrow(TORTOISE_DOME_HALF, () =>
+      this.collision.toppedSquare(crownBeyond(front, back), () => this.collision.toppedNarrow(TORTOISE_DOME_HALF, () =>
         this.collision.addWall(
           REPTILE_HOUSE_ORIGIN_X + front.x,
           REPTILE_HOUSE_ORIGIN_Z + front.z,
@@ -285,7 +300,7 @@ export class TortoiseRide {
           false,
           true,
         ),
-      ),
+      )),
     );
     this.parkedSolid.handle = this.bay;
     const player = this.player;
