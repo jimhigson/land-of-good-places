@@ -138,6 +138,12 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  * - `drawn-step` (park): the step-up asks where a top is drawn, as it did,
  *   not the body she walks into — clause 9 must find her stopped dead at seed
  *   5's knee-high stone wall at (-49.6, 61.6).
+ * - `feet-judged` (park): the step-up and the auto-hop judge a face from her
+ *   feet wherever she is when they ask, with no point where her body meets
+ *   it, as before round three — clause 9 must find a face that gets a hop on
+ *   one frame clock and a step on another, and a step-high face hopped. Seed 5
+ *   has no face near the line on a slope, so it is green there: run it on seed
+ *   6 (`LGP_SEED=6`), whose stone wall at (22.9, 0.5) it must find.
  * - `spawn-highest` (park): a spawn asked from `Infinity`, as it was — clause 10.
  * - `single-step`, `drawn-feet` (core): the step-up's one point past her front
  *   edge, and her drawn height as her feet, as each was — clause 11.
@@ -147,7 +153,7 @@ const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 const PROOFS = [
   'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
   'reptile-roof', 'every-roof', 'new-roof', 'fence-crate', 'guards-alone', 'low-guard', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
-  'fence-bush', 'fences-4m', 'drawn-step', 'no-crack-rules', 'narrow-wedges',
+  'fence-bush', 'fences-4m', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -1377,6 +1383,8 @@ if (spacesInPart.length) {
   const hoppedInstead: string[] = [];
   const unsteady: string[] = [];
   let hopsAtTaller = 0;
+  let noRoom = 0;
+  let noRoomAt = '';
   const hoppable: SolidView[] = [];
   collision.forEachSolid((solid) => {
     if (!solid.autoHoppable || !solid.topIsAbsolute) return;
@@ -1396,6 +1404,7 @@ if (spacesInPart.length) {
         return hop;
       },
       drawnStep: PROVE === 'drawn-step',
+      faceFromFeet: PROVE === 'feet-judged',
     });
     sim.placeOnGround(sx, sz);
     const sideOf = (x: number, z: number): number => (x - solid.centreX) * nx + (z - solid.centreZ) * nz;
@@ -1456,6 +1465,20 @@ if (spacesInPart.length) {
         // a step, or — within the auto-hop's height — a hop.
         const want = rise <= BUILDING_STEP_UP - STEP_MARGIN ? 'step' : rise <= MAX_AUTO_HOP_HEIGHT ? 'hop' : null;
         if (!want) continue;
+        // Only a step there is room to take: stood on its top just inside the
+        // face, her body clear of anything taller than a step over it. A bush
+        // hard behind a wall a step high leaves her no room on its top, and
+        // there the face is a wall to her (seed 15's wooden wall at (31.4,
+        // 58.6): a bush 0.07 m past its far face, 0.65 m over its top).
+        if (want === 'step') {
+          const ix = ex + nx * side * (solid.halfWidth - 0.02);
+          const iz = ez + nz * side * (solid.halfWidth - 0.02);
+          if (collision.deepestSolidOverlap(scratchBody.set(ix, solid.topAt(ix, iz), iz), PLAYER_RADIUS - 0.05, 0, undefined, KID_HEIGHT) > 0.02) {
+            noRoom += 1;
+            if (!noRoomAt) noRoomAt = `${solid.kind || solid.owner} at (${ex.toFixed(1)}, ${ez.toFixed(1)}), from /spawn?pos=${sx.toFixed(1)},${sz.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
+            continue;
+          }
+        }
         faces += 1;
         if (want === 'step') stepFaces += 1;
         else hopFaces += 1;
@@ -1501,6 +1524,7 @@ if (spacesInPart.length) {
     say(hoppedInstead.length === 0, `of those a step high, ${hoppedInstead.length} hopped her over instead of stepping up${hoppedInstead.length ? ` — ${hoppedInstead.join('; ')}` : ''}`);
     say(unsteady.length === 0, `every face got one answer on every frame clock: ${unsteady.length} did not${unsteady.length ? ` — ${unsteady.slice(0, 6).join('; ')}` : ''}`);
     note(`clause 9: of the walks into a face a step high, ${hopsAtTaller} hopped where something more than a step over her feet stood at her probe (an L's other arm, taller where they meet) — the hop doing its job, so not counted against the face`);
+    note(`clause 9: ${noRoom} face(s) a step high left out, where something taller than a step over the top leaves her no room to stand on it just inside the face — a wall to her there, so neither a step nor a hop is asked of it${noRoomAt ? ` (e.g. ${noRoomAt})` : ''}`);
   }
 }
 

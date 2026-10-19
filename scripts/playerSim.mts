@@ -136,6 +136,12 @@ export interface SimOptions {
    */
   crackRules?: boolean;
   /**
+   * Both halves judge a face from her feet wherever she is when they ask, with
+   * no point where her body meets it, as before PR #722's round three — only
+   * `check:solids`' `feet-judged` proof asks for it.
+   */
+  faceFromFeet?: boolean;
+  /**
    * Uneven ground. Omitted, everything stands on y = 0 and the vertical loop
    * is the flat-world one the wall harnesses have always used.
    */
@@ -221,6 +227,7 @@ export class SimPlayer {
   private readonly feetOnGround: boolean;
   private readonly stepTop: ((x: number, z: number, ceiling: number) => number) | undefined;
   private readonly crackRules: boolean;
+  private readonly faceFromFeet: boolean;
   readonly radius: number;
   private readonly substepping: boolean;
   private readonly ground: GroundSampler | null;
@@ -251,6 +258,7 @@ export class SimPlayer {
     this.feetOnGround = options.feetOnGround ?? true;
     this.stepTop = options.drawnStep ? (x, z, ceiling) => collision.highestTopAt(x, z, ceiling) : undefined;
     this.crackRules = options.crackRules ?? true;
+    this.faceFromFeet = options.faceFromFeet ?? false;
   }
 
   /**
@@ -328,7 +336,7 @@ export class SimPlayer {
     const stepping =
       following &&
       inputLength > 1e-4 &&
-      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples, this.stepTop, this.feetFromStep);
+      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples, this.stepTop, this.faceFromFeet ? undefined : this.feetFromStep);
     const stepCeiling = stepping
       ? (x: number, z: number): number => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z))
       : undefined;
@@ -403,7 +411,7 @@ export class SimPlayer {
       // Her feet, as `Player` hands them to the probe: the auto-hop judges a
       // wall's height from where she stands (`CollisionWorld.hopsOver`).
       this.feet.set(this.position.x, groundY, this.position.z);
-      autoHopWanted = this.hopProbe(this.probe, this.feet, this.feetFromHop);
+      autoHopWanted = this.hopProbe(this.probe, this.feet, this.faceFromFeet ? undefined : this.feetFromHop);
     }
     let tookOff = false;
     if (autoHopWanted && !this.airborne) {
