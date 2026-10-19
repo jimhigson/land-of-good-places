@@ -1383,7 +1383,8 @@ if (spacesInPart.length) {
   const hoppedInstead: string[] = [];
   const unsteady: string[] = [];
   let hopsAtTaller = 0;
-  let noRoom = 0;
+  const noRoomFaces = new Set<string>();
+  let obstructed = 0;
   let noRoomAt = '';
   const hoppable: SolidView[] = [];
   collision.forEachSolid((solid) => {
@@ -1391,7 +1392,7 @@ if (spacesInPart.length) {
     if (!spacesInPart.some((run) => spaceAt(solid.centreX, solid.centreZ) === spaceAt(run.start.x, run.start.z))) return;
     hoppable.push(solid);
   });
-  type Outcome = 'on' | 'over' | 'hop' | 'stopped' | 'other';
+  type Outcome = 'on' | 'over' | 'hop' | 'stopped' | 'no room' | 'other';
   /** One walk in at a face: from `(sx, sz)` along `(dx, dz)` until she stands on the wall, crosses it, hops, or 2 s pass. */
   const walkIn = (solid: SolidView, sx: number, sz: number, dx: number, dz: number, clock: (f: number) => number, sprint: boolean, nx: number, nz: number): { outcome: Outcome; asked: { px: number; pz: number; fx: number; fy: number; fz: number } | null } => {
     const probe = hopProbeFor(collision);
@@ -1420,7 +1421,17 @@ if (spacesInPart.length) {
       if (!sim.airborne && sideOf(sim.position.x, sim.position.z) * startSide < 0 && solid.depthAt(sim.position.x, sim.position.z) < -0.05) return { outcome: 'over', asked };
     }
     const gap = -solid.depthAt(sim.position.x, sim.position.z);
-    return { outcome: gap <= PLAYER_RADIUS + 0.05 ? 'stopped' : 'other', asked };
+    if (gap > PLAYER_RADIUS + 0.05) return { outcome: 'other', asked };
+    // Stopped at its face — unless there is no room for her on its top there:
+    // stood on it just inside the face, straight ahead of where she stopped,
+    // something taller than a step over the top would be inside her. A bush
+    // hard behind a wall a step high is a wall to her there, not a step (seed
+    // 15's wooden wall at (31.4, 58.6): a bush 0.07 m past its far face, 0.65 m
+    // over its top).
+    const inX = sim.position.x + dx * (gap + 0.02);
+    const inZ = sim.position.z + dz * (gap + 0.02);
+    const roomless = solid.depthAt(inX, inZ) >= 0 && collision.deepestSolidOverlap(scratchBody.set(inX, solid.topAt(inX, inZ), inZ), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02;
+    return { outcome: roomless ? 'no room' : 'stopped', asked };
   };
   let jitterSeed = 1;
   const jitter = (): number => {
@@ -1465,19 +1476,20 @@ if (spacesInPart.length) {
         // a step, or — within the auto-hop's height — a hop.
         const want = rise <= BUILDING_STEP_UP - STEP_MARGIN ? 'step' : rise <= MAX_AUTO_HOP_HEIGHT ? 'hop' : null;
         if (!want) continue;
-        // Only a step there is room to take: stood on its top just inside the
-        // face, her body clear of anything taller than a step over it. A bush
-        // hard behind a wall a step high leaves her no room on its top, and
-        // there the face is a wall to her (seed 15's wooden wall at (31.4,
-        // 58.6): a bush 0.07 m past its far face, 0.65 m over its top).
-        if (want === 'step') {
-          const ix = ex + nx * side * (solid.halfWidth - 0.02);
-          const iz = ez + nz * side * (solid.halfWidth - 0.02);
-          if (collision.deepestSolidOverlap(scratchBody.set(ix, solid.topAt(ix, iz), iz), PLAYER_RADIUS - 0.05, 0, undefined, KID_HEIGHT) > 0.02) {
-            noRoom += 1;
-            if (!noRoomAt) noRoomAt = `${solid.kind || solid.owner} at (${ex.toFixed(1)}, ${ez.toFixed(1)}), from /spawn?pos=${sx.toFixed(1)},${sz.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
-            continue;
-          }
+        // …and nothing on the way: brushed aside by a pole beside her path,
+        // she meets the face somewhere else, where it is another height (seed
+        // 8's wooden wall at (-23.9, 22.1): a fairy-light pole put her 0.2 m
+        // along it, where it stands 0.592 m, a hop).
+        let clear = true;
+        for (let k = 1; k < 12 && clear; k += 1) {
+          const wx = sx + ((cx - sx) * k) / 12;
+          const wz = sz + ((cz - sz) * k) / 12;
+          const wy = sample(wx, wz, top + 0.5);
+          if (Number.isFinite(wy) && collision.deepestSolidOverlap(scratchBody.set(wx, wy, wz), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02) clear = false;
+        }
+        if (!clear) {
+          obstructed += 1;
+          continue;
         }
         faces += 1;
         if (want === 'step') stepFaces += 1;
@@ -1487,6 +1499,14 @@ if (spacesInPart.length) {
         for (const { name, clock, phase } of CLOCKS) {
           for (const sprint of [false, true]) {
             const { outcome, asked } = walkIn(solid, sx - nx * side * phase, sz - nz * side * phase, -nx * side, -nz * side, clock(), sprint, nx, nz);
+            if (outcome === 'no room') {
+              if (!noRoomFaces.has(where)) {
+                noRoomFaces.add(where);
+                if (!noRoomAt) noRoomAt = where;
+              }
+              classes.add('no room');
+              continue;
+            }
             if (outcome === 'stopped') {
               if (stoppedAt.length < 6 && !stoppedAt.some((w) => w.startsWith(where))) stoppedAt.push(`${where} (${want}, ${name}${sprint ? ', a sprint' : ''})`);
               classes.add('stopped');
@@ -1524,7 +1544,8 @@ if (spacesInPart.length) {
     say(hoppedInstead.length === 0, `of those a step high, ${hoppedInstead.length} hopped her over instead of stepping up${hoppedInstead.length ? ` — ${hoppedInstead.join('; ')}` : ''}`);
     say(unsteady.length === 0, `every face got one answer on every frame clock: ${unsteady.length} did not${unsteady.length ? ` — ${unsteady.slice(0, 6).join('; ')}` : ''}`);
     note(`clause 9: of the walks into a face a step high, ${hopsAtTaller} hopped where something more than a step over her feet stood at her probe (an L's other arm, taller where they meet) — the hop doing its job, so not counted against the face`);
-    note(`clause 9: ${noRoom} face(s) a step high left out, where something taller than a step over the top leaves her no room to stand on it just inside the face — a wall to her there, so neither a step nor a hop is asked of it${noRoomAt ? ` (e.g. ${noRoomAt})` : ''}`);
+    note(`clause 9: ${obstructed} face point(s) left out where something stands beside the straight walk up to it (a pole she brushes, a post) — she meets the face elsewhere, and is asked there`);
+    note(`clause 9: ${noRoomFaces.size} face(s) held her where something taller than a step over its top, straight ahead of where she stopped, leaves her no room to stand on it — a wall to her there, not counted as stopped dead${noRoomAt ? ` (e.g. ${noRoomAt})` : ''}`);
   }
 }
 
