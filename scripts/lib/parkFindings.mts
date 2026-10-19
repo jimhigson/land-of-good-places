@@ -8,7 +8,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { quietly, type HeadlessPark } from '../park-harness.mts';
 import { NavGrid, MAX_ROUTE_WAYPOINTS, TOP_REFERENCE } from '../../src/world/NavGrid.ts';
-import { PLAYER_LONGEST_STEP, PLAYER_RADIUS, WALKABLE_GAP } from '../../src/core/constants.ts';
+import { BUILDING_STEP_UP, PLAYER_LONGEST_STEP, PLAYER_RADIUS, WALKABLE_GAP } from '../../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../../src/world/anchors.ts';
 import { NUDGE_REACH, PoiGraph, SEEDS } from '../../src/entities/npc/poiGraph.ts';
@@ -257,6 +257,13 @@ export function measureParkFindings(park: HeadlessPark, ratchetEnforced: boolean
     if (count === 0) return false;
     const endX = reachScratch[(count - 1) * 2] ?? Infinity;
     const endZ = reachScratch[(count - 1) * 2 + 1] ?? Infinity;
+    // **On the level she would stand on there**, not merely over it. The
+    // route's end is a point on a level (`lastRouteEndY`), and a route that
+    // ends on a railway bridge's deck a metre short of the track it crosses
+    // has not walked anybody onto the track four metres below: since the
+    // tunnel was modelled (PR #722) the line under each deck's edge is open
+    // ground, and an end over it on the deck read as the track reached.
+    if (Math.abs(navGrid.lastRouteEndY - park.sample(x, z, 0)) > BUILDING_STEP_UP) return false;
     return Math.hypot(endX - x, endZ - z) < 1.5;
   }
 
