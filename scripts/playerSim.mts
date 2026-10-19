@@ -35,7 +35,7 @@
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
 import { carryReference } from '../src/world/building/surfaces.ts';
-import { STEP_SAMPLES, riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
+import { STEP_DOWN_ASKED, STEP_SAMPLES, crackFloor, dropWedges, liftOutOfSqueeze, riseUnder, solidStepCeiling, standingHeight, walkingOntoStep } from '../src/world/standing.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
@@ -85,7 +85,7 @@ function approach(current: Vector3, target: Vector3, maxDelta: number): void {
  * that policy is the very thing it exists to measure and asking it would only
  * confirm it back to us.
  */
-export type HopProbe = (probe: Vector3, feet: Vector3) => boolean;
+export type HopProbe = (probe: Vector3, feet: Vector3, feetAt?: (x: number, z: number) => number) => boolean;
 
 /**
  * **The auto-hop `Player` has** — `CollisionWorld.wouldAutoHopClear`, judged
@@ -94,7 +94,7 @@ export type HopProbe = (probe: Vector3, feet: Vector3) => boolean;
  * wall's top throw her off it (PR #722's QA).
  */
 export function playerHopProbe(collision: CollisionWorld): HopProbe {
-  return (probe, feet) => collision.wouldAutoHopClear(probe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, feet);
+  return (probe, feet, feetAt) => collision.wouldAutoHopClear(probe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, feet, feetAt);
 }
 
 /**
@@ -212,6 +212,9 @@ export class SimPlayer {
   private readonly desired = new Vector3();
   private readonly probe = new Vector3();
   private readonly feet = new Vector3();
+  /** `Player`'s own: her feet at a plan point, reached on foot from {@link feet} — where the auto-hop judges a face from. */
+  private readonly feetFromHop = (x: number, z: number): number =>
+    this.sampleGround(x, z, carryReference(this.feet.x, this.feet.z, this.feet.y, x, z));
 
   constructor(collision: CollisionWorld, options: SimOptions = {}) {
     this.collision = collision;
@@ -363,7 +366,7 @@ export class SimPlayer {
     // nudged her off its top, and here alone she was thrown up from it
     // (seeds 9 and 12). The control path has not sampled the ground yet, so
     // for it this asks the frame's start, and the fall below still stands.
-    this.fallIfOff(groundY);
+    groundY = this.fallIfOff(groundY);
 
     let autoHopWanted = false;
     if (!this.airborne && inputLength > 1e-4) {
@@ -374,7 +377,7 @@ export class SimPlayer {
       // Her feet, as `Player` hands them to the probe: the auto-hop judges a
       // wall's height from where she stands (`CollisionWorld.hopsOver`).
       this.feet.set(this.position.x, groundY, this.position.z);
-      autoHopWanted = this.hopProbe(this.probe, this.feet);
+      autoHopWanted = this.hopProbe(this.probe, this.feet, this.feetFromHop);
     }
     let tookOff = false;
     if (autoHopWanted && !this.airborne) {
@@ -400,12 +403,22 @@ export class SimPlayer {
     // the ground, never from the damped height lagging under it on a climb.
     if (tookOff && this.position.y < groundY) this.position.y = groundY;
 
-    this.fallIfOff(groundY);
+    groundY = this.fallIfOff(groundY);
 
     let hopHeight = 0;
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
+      const before = this.position.y;
       this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
+      // `Player`'s own: over a crack she does not fit, she comes down on what stands either side.
+      if (this.verticalVelocity < 0) {
+        const floor = crackFloor(this.collision, this.position.x, this.position.z, before, this.position.y, groundY);
+        if (floor !== null && floor > groundY) groundY = floor;
+        else {
+          const lifted = liftOutOfSqueeze(this.collision, this.position);
+          if (lifted !== null && lifted > groundY) groundY = lifted;
+        }
+      }
       // The landing. Its absence is what made the earlier rig over-count.
       if (this.position.y <= groundY) {
         this.position.y = groundY;
@@ -425,11 +438,20 @@ export class SimPlayer {
    * `FALL_THRESHOLD` over the ground under her, she has walked off something
    * and starts falling. One test, asked twice a frame (see `step`).
    */
-  private fallIfOff(groundY: number): void {
+  private fallIfOff(groundY: number): number {
+    // `Player`'s own: a step down into a crack she does not fit is not taken.
+    if (!this.airborne && groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) {
+      this.position.x = this.previousPosition.x;
+      this.position.z = this.previousPosition.z;
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+      return this.groundHeight;
+    }
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
+    return groundY;
   }
 
   /**

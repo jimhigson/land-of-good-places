@@ -570,6 +570,12 @@ if (SKIP_CENSUS) {
     collision.setPlayBounds(run.bounds);
     const id = spaceAt(run.start.x, run.start.z);
     const t0 = performance.now();
+    // Every landing that left her wedged, in this space's searches — each a
+    // failure (QA on PR #722: the census used to drop them unseen).
+    const wedgedLandings: { at: Stand; how: string }[] = [];
+    const onWedged = (at: Stand, how: string): void => {
+      if (!wedgedLandings.some((w) => Math.hypot(w.at.x - at.x, w.at.z - at.z) < 0.3)) wedgedLandings.push({ at, how });
+    };
     const result = reachWithJumps({
       collision,
       sample,
@@ -577,6 +583,7 @@ if (SKIP_CENSUS) {
       start: run.start,
       inSpace: (x, z) => spaceAt(x, z) === id,
       fps: CENSUS_FPS,
+      onWedged,
     });
     const main = result.regions[0]!.has;
     for (const top of result.tops) allReached.push({ space: run.name, top });
@@ -643,6 +650,7 @@ if (SKIP_CENSUS) {
           inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - region.entry.x, z - region.entry.z) < 14,
           fps: CENSUS_FPS,
           until: outside,
+          onWedged,
         }).stopped;
       } catch {
         out = joinsMain({ collision, sample }, main, region.entry, 60, 14);
@@ -667,6 +675,7 @@ if (SKIP_CENSUS) {
           inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - top.at.x, z - top.at.z) < 14,
           fps: CENSUS_FPS,
           until: outside,
+          onWedged,
         }).stopped;
       } catch {
         out = joinsMain({ collision, sample }, main, top.at, 60, 14);
@@ -674,6 +683,13 @@ if (SKIP_CENSUS) {
       if (!out) strandedOn.push(`${top.solid.kind || top.solid.owner || 'a solid'} → ${run.link(top.at)}`);
     }
     say(strandedOn.length === 0, `${run.name}: every one of ${result.tops.length} top(s) she reaches, she can get down from again (${result.hemmedIn.length} with no edge to walk off, each searched)${strandedOn.length ? ` — stranded on: ${strandedOn.join('; ')}` : ''}`);
+    // Never wedged: a jump or a walk-off that leaves her inside something
+    // that holds her is a place the game's own rescue would have to lift her
+    // out of (`standing.ts`'s `wedgeDepth`).
+    say(
+      wedgedLandings.length === 0,
+      `${run.name}: no jump or walk-off of ${result.jumps} leaves her wedged${wedgedLandings.length ? ` — ${wedgedLandings.length}: ${wedgedLandings.slice(0, 6).map((w) => `${w.how}, came down at ${run.link(w.at)}`).join('; ')}` : ''}`,
+    );
   }
   collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   note(

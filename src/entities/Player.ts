@@ -23,7 +23,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
-import { riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep } from '../world/standing';
+import { STEP_DOWN_ASKED, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep, wedgeDepth } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
@@ -174,7 +174,6 @@ const AUTO_HOP_LOOKAHEAD = 0.5;
  * the depth she starts at. Then the rescue cuts the escort short and puts her
  * down clear at once, which is where the escort was taking her anyway.
  */
-const WEDGE_DEPTH = 0.05;
 const WEDGE_SECONDS = 0.5;
 /**
  * **The longest a wedge waits before it tries again, seconds.** When the rule
@@ -522,6 +521,9 @@ export class Player implements GameSystem {
   private readonly hopProbe = new Vector3();
   /** Her feet, where the auto-hop judges a wall's height from. */
   private readonly hopFeet = new Vector3();
+  /** Her feet at a plan point, reached on foot from {@link hopFeet}: where the auto-hop judges a face from. */
+  private readonly feetFromHop = (x: number, z: number): number =>
+    this.groundAt(x, z, carryReference(this.hopFeet.x, this.hopFeet.z, this.hopFeet.y, x, z));
 
   /** Start facing the camera, so the first thing you see is her face. */
   private facingAngle = CAMERA_YAW_DEGREES * DEG;
@@ -1485,6 +1487,17 @@ export class Player implements GameSystem {
       }
     }
 
+    // A step down off anything — a wall's top, a bush, the edge of a deck —
+    // into a crack she does not fit is not taken (`dropWedges`): the edge
+    // holds her on what she was standing on, as a ledge over a gap too narrow
+    // to step into would.
+    if (!this.airborne && groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) {
+      this.position.x = this.previousPosition.x;
+      this.position.z = this.previousPosition.z;
+      groundY = this.groundHeight;
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+    }
     // Walk off the edge of a deck — or over one of the shafts inside the big
     // building — and the surface under your feet drops away. Start falling.
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
@@ -1511,7 +1524,9 @@ export class Player implements GameSystem {
       // Judged from her feet: a top within a step of them is a step, and the
       // wall she stands on is no height at all (`CollisionWorld.hopsOver`).
       this.hopFeet.set(this.position.x, groundY, this.position.z);
-      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, this.hopFeet);
+      // …and from where she will meet the face, on the level she walks:
+      // the decision a face gets must not move with the frame clock.
+      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, this.hopFeet, this.feetFromHop);
     }
 
     // --- hop, and — held past a beat — the jet pack --------------------------
@@ -1564,7 +1579,9 @@ export class Player implements GameSystem {
       } else {
         this.verticalVelocity -= GRAVITY * dt;
       }
+      const before = this.position.y;
       this.rise(dt);
+      groundY = this.comeDownOn(before, groundY);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1578,7 +1595,9 @@ export class Player implements GameSystem {
     } else if (this.airborne) {
       this.wornJetpack?.setThrust(0);
       this.verticalVelocity -= GRAVITY * dt;
+      const before = this.position.y;
       this.rise(dt);
+      groundY = this.comeDownOn(before, groundY);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1624,16 +1643,9 @@ export class Player implements GameSystem {
     // she walks up onto (`resolve`'s 'stepped'), not a gap she is caught in —
     // pressed into the corner between the suite's wall and a pet bed (0.41 m),
     // the two pushes leave her 0.11 m into the bed, and she walks out of it.
-    const wedgeDepth = this.airborne
-      ? 0
-      : this.collision.deepestSolidOverlap(
-          this.position,
-          PLAYER_RADIUS,
-          0,
-          (x, z) => solidStepCeiling(this.collision, x, z, groundY),
-          KID_HEIGHT,
-        );
-    if (wedgeDepth > WEDGE_DEPTH) {
+    // (`standing.ts`'s `wedgeDepth`: the one owner, which the census asks too.)
+    const wedged = this.airborne ? 0 : wedgeDepth(this.collision, this.position, groundY);
+    if (wedged > WEDGE_DEPTH) {
       if (this.wedgedFor === 0) this.wedgeTookHold = this.sinceLanding;
       this.wedgedFor += dt;
       if (this.wedgedFor >= this.wedgeWait) {
@@ -1643,7 +1655,7 @@ export class Player implements GameSystem {
           x: this.position.x,
           y: this.position.y,
           z: this.position.z,
-          depth: wedgeDepth,
+          depth: wedged,
           afterLanding: this.wedgeTookHold,
         };
         this.teleportTo(this.position.x, groundY, this.position.z);
@@ -1824,6 +1836,20 @@ export class Player implements GameSystem {
    * crate or a garden wall is somewhere to land because it is solid; nothing
    * marks a floor on top of it.
    */
+  /**
+   * Coming down from `before` to where she is now: over a crack she does not
+   * fit, she comes down on what stands either side of it (`crackFloor`) —
+   * the ground she lands on, as far as this frame is concerned.
+   */
+  private comeDownOn(before: number, groundY: number): number {
+    if (this.verticalVelocity >= 0) return groundY;
+    const floor = crackFloor(this.collision, this.position.x, this.position.z, before, this.position.y, groundY);
+    if (floor !== null && floor > groundY) return floor;
+    // …and if a crack holds her anyway, out onto what holds her.
+    const lifted = liftOutOfSqueeze(this.collision, this.position);
+    return lifted !== null && lifted > groundY ? lifted : groundY;
+  }
+
   private groundAt(x: number, z: number, y: number): number {
     return standingHeight(this.walkSurfaceAt(x, z, y), this.collision, x, z, y);
   }

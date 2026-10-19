@@ -26,7 +26,7 @@ import type { NavGrid } from '../../src/world/NavGrid.ts';
 import { PLAYER_RADIUS, BUILDING_STEP_UP } from '../../src/core/constants.ts';
 import { SimPlayer, playerHopProbe } from '../playerSim.mts';
 import { stepCeilingAt } from '../../src/world/building/stepReach.ts';
-import { solidStepCeiling, standingHeight } from '../../src/world/standing.ts';
+import { WEDGE_DEPTH, solidStepCeiling, standingHeight, wedgeDepth } from '../../src/world/standing.ts';
 
 export type Sampler = (x: number, z: number, y: number) => number;
 
@@ -69,6 +69,16 @@ export interface ReachOptions {
    * out is the whole answer and the rest of the search is wasted.
    */
   readonly until?: (stand: Stand) => boolean;
+  /**
+   * **Told of every landing that leaves her wedged** (`standing.ts`'s
+   * `wedgeDepth`, the game's own rescue's measure): where, and the jump or
+   * walk-off that put her there. A wedged landing is never a place she
+   * reached — the search goes on without it — and it is never thrown away
+   * either: `check:solids` fails on every one (QA on PR #722: the census
+   * discarded them, and so could not see the library's armchairs pop her
+   * out, nor a wall and a bush blink her back to where she started).
+   */
+  readonly onWedged?: (at: Stand, how: string) => void;
 }
 
 export interface ReachResult {
@@ -143,7 +153,7 @@ function outline(solid: SolidView, spacing: number): { x: number; z: number; nx:
  * only where she came down.
  */
 export function runAndJump(
-  options: Pick<ReachOptions, 'collision' | 'sample'>,
+  options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'>,
   from: Stand,
   aimX: number,
   aimZ: number,
@@ -159,8 +169,8 @@ export function runAndJump(
   const autoHop = playerHopProbe(options.collision);
   const sim = new SimPlayer(options.collision, {
     ground: options.sample,
-    hopProbe: (probe, feet) => {
-      if (!fire) return autoHop(probe, feet);
+    hopProbe: (probe, feet, feetAt) => {
+      if (!fire) return autoHop(probe, feet, feetAt);
       fire = false;
       return true;
     },
@@ -203,8 +213,15 @@ export function runAndJump(
     if (landedAt >= 0 && frame >= landedAt + Math.ceil(0.6 / dt)) break;
   }
   if (!jumped || landedAt < 0 || sim.airborne) return null;
-  // Where she can be, not where a landing wedged her (see `walkOff`).
-  if (options.collision.deepestSolidOverlap(wedged.set(sim.position.x, sim.position.y, sim.position.z), PLAYER_RADIUS) > 0.02) return null;
+  // Where she can be, not where a landing wedged her — and said, never
+  // dropped (`onWedged`).
+  if (wedgeDepth(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
+    options.onWedged?.(
+      { x: sim.position.x, z: sim.position.z, y: sim.groundHeight },
+      `a run-and-jump from (${from.x.toFixed(2)}, ${from.y.toFixed(2)}, ${from.z.toFixed(2)}) at (${aimX.toFixed(2)}, ${aimZ.toFixed(2)}), jumping ${jumpAt.toFixed(2)} m out`,
+    );
+    return null;
+  }
   return { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
 }
 
@@ -214,7 +231,7 @@ export function runAndJump(
  * edge stops her as it would. Returns where she settled if she left the top
  * and came to rest on something lower, or null.
  */
-function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: SolidView, o: { x: number; z: number; nx: number; nz: number }, fps: number): Stand | null {
+function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'>, source: SolidView, o: { x: number; z: number; nx: number; nz: number }, fps: number): Stand | null {
   const dt = 1 / fps;
   const sim = new SimPlayer(options.collision, { ground: options.sample, hopProbe: playerHopProbe(options.collision) });
   const x = o.x - o.nx * 0.1;
@@ -248,7 +265,13 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample'>, source: So
   // stranded proof's pit was left through its ring, and a rock in the reptile
   // house dropped her out of the building, 17 Oct 2026.)
   if (sim.airborne) return null;
-  if (options.collision.deepestSolidOverlap(wedged.set(sim.position.x, sim.position.y, sim.position.z), PLAYER_RADIUS) > 0.02) return null;
+  if (wedgeDepth(options.collision, wedged.set(sim.position.x, sim.position.y, sim.position.z), sim.groundHeight) > WEDGE_DEPTH) {
+    options.onWedged?.(
+      { x: sim.position.x, z: sim.position.z, y: sim.groundHeight },
+      `walking off ${source.kind || source.owner || 'a solid'} at (${o.x.toFixed(2)}, ${o.z.toFixed(2)})`,
+    );
+    return null;
+  }
   // Measured against the top in the column she ended in, not the one she
   // set off from: out in the park a top is a height over the planet's centre,
   // and its world y falls away a fifth of a metre per metre outward at 44 m —

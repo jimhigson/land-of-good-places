@@ -5,6 +5,7 @@ import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../core/constants';
 import { planetRadiusAt, yAtRadius } from './terrain';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 import { FOOT_HALF_WIDTH } from './measuredTop';
+import { KID_HEIGHT } from '../art/models/kidHeight';
 
 /**
  * Deliberately simple solid-object handling.
@@ -301,6 +302,63 @@ function wallTopCovers(wall: Readonly<WallCollider>, x: number, z: number): bool
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   const d = Math.hypot(px - (wall.x1 + ax * t), pz - (wall.z1 + az * t));
   return d <= wall.halfThickness && standsWithin(wall, d) && wallTopReaches(wall, px, pz);
+}
+
+/** How deep `(x, z)` stands inside a wall's footprint — negative outside it, by how far. */
+function wallFootprintDepth(wall: Readonly<WallCollider>, x: number, z: number): number {
+  const ax = wall.x2 - wall.x1;
+  const az = wall.z2 - wall.z1;
+  const lengthSquared = ax * ax + az * az;
+  let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return wall.halfThickness - Math.hypot(x - (wall.x1 + ax * t), z - (wall.z1 + az * t));
+}
+
+/** How far over a level top her feet's own height still counts as level: float noise and the grace's flat edge (`standing.ts`'s step). */
+const HOP_STEP_ABOVE = 0.02;
+
+/**
+ * **Where a body of `radius` walking from `(fromX, fromZ)` towards `(toX, toZ)`
+ * first touches a footprint** (`depthAt`: positive inside it) — and the way
+ * into it there, a body's radius and a little, for a question about the top
+ * just inside its face. Where she starts, if she touches it already; `null`
+ * if she does not touch it on the way (she is passing it, not meeting it).
+ */
+function contactAlong(
+  fromX: number,
+  fromZ: number,
+  toX: number,
+  toZ: number,
+  radius: number,
+  depthAt: (x: number, z: number) => number,
+): { x: number; z: number; inX: number; inZ: number } | null {
+  const dx = toX - fromX;
+  const dz = toZ - fromZ;
+  const length = Math.hypot(dx, dz);
+  if (length < 1e-9) return null;
+  const ux = dx / length;
+  const uz = dz / length;
+  const touches = (t: number): boolean => depthAt(fromX + ux * t, fromZ + uz * t) >= -radius;
+  const into = { inX: ux * (radius + 0.05), inZ: uz * (radius + 0.05) };
+  if (touches(0)) return { x: fromX, z: fromZ, ...into };
+  const STEPS = 12;
+  let before = 0;
+  let after = -1;
+  for (let k = 1; k <= STEPS; k += 1) {
+    const t = (length * k) / STEPS;
+    if (touches(t)) {
+      after = t;
+      break;
+    }
+    before = t;
+  }
+  if (after < 0) return null;
+  for (let k = 0; k < 6; k += 1) {
+    const mid = (before + after) / 2;
+    if (touches(mid)) after = mid;
+    else before = mid;
+  }
+  return { x: fromX + ux * after, z: fromZ + uz * after, ...into };
 }
 
 /** A wall whose top stands straight over its footprint. */
@@ -697,6 +755,7 @@ function contactWith(
   stepCeiling = -Infinity,
   moverHeight = 0,
   feetY = position.y,
+  anyWidth = false,
 ): 'absent' | 'cleared' | 'stepped' | 'solid' {
   // A closure of the route lattice is no body: nothing meets it.
   if (collider.closure) return 'absent';
@@ -708,8 +767,10 @@ function contactWith(
   const top = solidTopAt(collider, position.x, position.z);
   if (feetY + JUMP_CLEARANCE_GRACE >= top) return 'cleared';
   // A top too narrow for her feet is never stepped onto: she would pass into
-  // its fattened footprint with nothing to stand on.
-  if (top <= stepCeiling && standableTop(collider)) return 'stepped';
+  // its fattened footprint with nothing to stand on. Asked whether it holds
+  // her (`anyWidth`, the wedge's question), a top within a step is a step
+  // whatever its width: what she can hop clear of holds nobody.
+  if (top <= stepCeiling && (anyWidth || standableTop(collider))) return 'stepped';
   return 'solid';
 }
 
@@ -1273,6 +1334,117 @@ export class CollisionWorld {
       }
     }
     return best;
+  }
+
+  /**
+   * **The highest top she could step up onto by walking into `(x, z)`** — the
+   * top of the highest solid whose *footprint* covers the point, wide enough
+   * anywhere to stand on, no higher than `ceiling`. {@link highestTopAt} asks
+   * where a top is drawn, which is where she stands; this asks what she is
+   * walking into, which is the body she meets.
+   *
+   * They differ only where a top is not over the whole of its footprint: a
+   * garden wall's top drawn out along the planet's lean (`toppedShifted`), or
+   * a top narrower than the body under it (`topHalf`). Asked where the top is,
+   * a step-high wall was no step until her front edge was over its drawn top —
+   * and pressed against its face, it never was: 0.035 m short on seed 5's
+   * stone wall at (−49.6, 61.6), whose top the lean draws 0.135 m outward,
+   * and the auto-hop rightly called it a step, so she stood there (QA on PR
+   * #722, round two).
+   */
+  stepTopAt(x: number, z: number, ceiling: number): number {
+    let best = -Infinity;
+    if (!this.anyTopToStandOn()) return best;
+    for (const bucket of this.bucketsAt(x, z)) {
+      for (const circle of bucket.circles) {
+        if (!circle.topIsAbsolute || !standableTop(circle)) continue;
+        const dx = x - circle.x;
+        const dz = z - circle.z;
+        if (dx * dx + dz * dz > circle.radius * circle.radius) continue;
+        const top = solidTopAt(circle, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
+      for (const wall of bucket.walls) {
+        if (!wall.topIsAbsolute || !standableTop(wall)) continue;
+        const ax = wall.x2 - wall.x1;
+        const az = wall.z2 - wall.z1;
+        const lengthSquared = ax * ax + az * az;
+        let t = lengthSquared < 1e-8 ? 0 : ((x - wall.x1) * ax + (z - wall.z1) * az) / lengthSquared;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = x - (wall.x1 + ax * t);
+        const dz = z - (wall.z1 + az * t);
+        if (dx * dx + dz * dz > wall.halfThickness * wall.halfThickness) continue;
+        const top = solidTopAt(wall, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
+      for (const box of bucket.boxes) {
+        if (!box.topIsAbsolute || !standableTop(box)) continue;
+        if (boxDepth(box, x, z, 0) < 0) continue;
+        const top = solidTopAt(box, x, z);
+        if (!Number.isFinite(top) || top > ceiling || top <= best) continue;
+        best = top;
+      }
+    }
+    // Where a top is drawn is a place to step too, footprint or not: a top
+    // overhanging her side of a wall is met before the wall is.
+    const drawn = this.highestTopAt(x, z, ceiling);
+    return drawn > best ? drawn : best;
+  }
+
+  /**
+   * **The highest top of anything a body of `radius` at `(x, z)` reaches into,
+   * over `above` and no higher than `ceiling`** — world `y`, or `-Infinity`.
+   * Not where a top is under her middle ({@link highestTopAt}): what is under
+   * any of her, for a descent into a crack she does not fit, which stops on
+   * whatever stands either side of it (`standing.ts`'s `crackFloor`).
+   */
+  highestTopReached(x: number, z: number, radius: number, above: number, ceiling: number): number {
+    let best = -Infinity;
+    const gathered = this.gatherNear(x, z, radius);
+    const consider = (solid: Readonly<SolidHeights>): void => {
+      if (!solid.topIsAbsolute || solid.closure) return;
+      const top = solidTopAt(solid, x, z);
+      if (!Number.isFinite(top) || top <= above || top > ceiling || top <= best) return;
+      best = top;
+    };
+    for (const circle of gathered ? this.nearCircles : this.circles) {
+      if (Math.hypot(x - circle.x, z - circle.z) < circle.radius + radius) consider(circle);
+    }
+    for (const wall of gathered ? this.nearWalls : this.walls) {
+      if (wallFootprintDepth(wall, x, z) > -radius) consider(wall);
+    }
+    for (const box of gathered ? this.nearBoxes : this.boxes) {
+      if (boxDepth(box, x, z, radius) > 0) consider(box);
+    }
+    return best;
+  }
+
+  /**
+   * **Every top of anything a body of `radius` at `(x, z)` reaches into, over
+   * `above`** — world `y`, lowest first, each once: the heights a squeeze can
+   * be climbed out to (`standing.ts`'s `liftOutOfSqueeze`).
+   */
+  topsReached(x: number, z: number, radius: number, above: number): number[] {
+    const tops: number[] = [];
+    const gathered = this.gatherNear(x, z, radius);
+    const consider = (solid: Readonly<SolidHeights>): void => {
+      if (!solid.topIsAbsolute || solid.closure) return;
+      const top = solidTopAt(solid, x, z);
+      if (!Number.isFinite(top) || top <= above) return;
+      if (!tops.some((t) => Math.abs(t - top) < 1e-3)) tops.push(top);
+    };
+    for (const circle of gathered ? this.nearCircles : this.circles) {
+      if (Math.hypot(x - circle.x, z - circle.z) < circle.radius + radius) consider(circle);
+    }
+    for (const wall of gathered ? this.nearWalls : this.walls) {
+      if (wallFootprintDepth(wall, x, z) > -radius) consider(wall);
+    }
+    for (const box of gathered ? this.nearBoxes : this.boxes) {
+      if (boxDepth(box, x, z, radius) > 0) consider(box);
+    }
+    return tops.sort((a, b) => a - b);
   }
 
   /**
@@ -2256,7 +2428,7 @@ export class CollisionWorld {
    * ({@link contactWith}); the soft park boundary is not stone and is not
    * counted. Read-only — the measuring half of `resolveMovement`'s pinch guard.
    */
-  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling, moverHeight = 0, feetY = position.y): number {
+  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0, stepCeiling?: StepCeiling, moverHeight = 0, feetY = position.y, anyWidth = false): number {
     let deepest = 0;
     const stepHere = stepCeiling ? stepCeiling(position.x, position.z) : -Infinity;
     // Only what reaches within her radius can overlap her: the gathered few,
@@ -2269,7 +2441,7 @@ export class CollisionWorld {
       const minimum = circle.radius + radius;
       const depth = minimum - Math.hypot(position.x - circle.x, position.z - circle.z);
       if (depth <= deepest) continue;
-      if (contactWith(circle, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
+      if (contactWith(circle, position, clearance, stepHere, moverHeight, feetY, anyWidth) !== 'solid') continue;
       deepest = depth;
     }
     for (const wall of walls) {
@@ -2283,13 +2455,13 @@ export class CollisionWorld {
         wall.halfThickness + radius -
         Math.hypot(position.x - (wall.x1 + ax * t), position.z - (wall.z1 + az * t));
       if (depth <= deepest) continue;
-      if (contactWith(wall, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
+      if (contactWith(wall, position, clearance, stepHere, moverHeight, feetY, anyWidth) !== 'solid') continue;
       deepest = depth;
     }
     for (const box of boxes) {
       const depth = boxDepth(box, position.x, position.z, radius);
       if (depth <= deepest) continue;
-      if (contactWith(box, position, clearance, stepHere, moverHeight, feetY) !== 'solid') continue;
+      if (contactWith(box, position, clearance, stepHere, moverHeight, feetY, anyWidth) !== 'solid') continue;
       deepest = depth;
     }
     return deepest;
@@ -2591,6 +2763,7 @@ export class CollisionWorld {
     radius: number,
     apexClearance: number,
     feet?: Readonly<{ x: number; y: number; z: number }>,
+    feetAt?: (x: number, z: number) => number,
   ): boolean {
     const gathered = this.gatherNear(position.x, position.z, radius);
     for (const circle of gathered ? this.nearCircles : this.circles) {
@@ -2598,7 +2771,7 @@ export class CollisionWorld {
       const dx = position.x - circle.x;
       const dz = position.z - circle.z;
       const minimum = circle.radius + radius;
-      if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(circle, position, apexClearance, feet)) return true;
+      if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(circle, position, radius, apexClearance, feet, feetAt, (x, z) => circle.radius - Math.hypot(x - circle.x, z - circle.z))) return true;
     }
 
     for (const wall of gathered ? this.nearWalls : this.walls) {
@@ -2612,12 +2785,12 @@ export class CollisionWorld {
       const dx = position.x - (wall.x1 + ax * t);
       const dz = position.z - (wall.z1 + az * t);
       const minimum = wall.halfThickness + radius;
-      if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(wall, position, apexClearance, feet)) return true;
+      if (dx * dx + dz * dz < minimum * minimum && this.hopsOver(wall, position, radius, apexClearance, feet, feetAt, (x, z) => wallFootprintDepth(wall, x, z))) return true;
     }
 
     for (const box of gathered ? this.nearBoxes : this.boxes) {
       if (!box.autoHoppable) continue;
-      if (boxDepth(box, position.x, position.z, radius) > 0 && this.hopsOver(box, position, apexClearance, feet)) return true;
+      if (boxDepth(box, position.x, position.z, radius) > 0 && this.hopsOver(box, position, radius, apexClearance, feet, feetAt, (x, z) => boxDepth(box, x, z, 0))) return true;
     }
 
     return false;
@@ -2636,15 +2809,56 @@ export class CollisionWorld {
   private hopsOver(
     solid: Readonly<SolidHeights>,
     position: Vector3,
+    radius: number,
     apexClearance: number,
     feet: Readonly<{ x: number; y: number; z: number }> | undefined,
+    feetAt: ((x: number, z: number) => number) | undefined,
+    depthAt: (x: number, z: number) => number,
   ): boolean {
     if (!feet || !solid.topIsAbsolute) return autoHopClears(solid.hopHeight, apexClearance);
     const top = solidTopAt(solid, position.x, position.z);
     if (!Number.isFinite(top)) return autoHopClears(solid.hopHeight, apexClearance);
-    const over = riseBetween(feet.x, feet.y, feet.z, position.x, top, position.z);
-    if (over <= BUILDING_STEP_UP) return false;
+    // **Judged from where she will meet its face, not from wherever she is
+    // when the lookahead first touches it** (QA on PR #722, round two). The
+    // lookahead reaches a body's width and half a metre ahead of her; asked
+    // from her feet there, a face on a slope was a hop or a step depending on
+    // which frame first saw it — 15 of 49 step-high faces hopped on one sweep
+    // and 12 on the next. Where her body first touches the face along the way
+    // she is walking is the one place the question has an answer that does not
+    // move with the frame clock, and it is where she stands to step up.
+    //
+    // Only where she walks there on the level she is on: across a drop (off
+    // the end of the wall she walks along) she meets the face from wherever
+    // she lands, and that is judged when she has landed.
+    let meet = feetAt ? contactAlong(feet.x, feet.z, position.x, position.z, radius, depthAt) : null;
+    let fromY = feet.y;
+    if (meet && feetAt) {
+      const there = feetAt(meet.x, meet.z);
+      if (Math.abs(riseBetween(feet.x, feet.y, feet.z, meet.x, there, meet.z)) <= BUILDING_STEP_UP) fromY = there;
+      else meet = null;
+    }
+    const fromX = meet ? meet.x : feet.x;
+    const fromZ = meet ? meet.z : feet.z;
+    const over = riseBetween(fromX, fromY, fromZ, position.x, top, position.z);
+    // The top she is on, or one level with her: no height at all.
+    if (over <= HOP_STEP_ABOVE) return false;
+    // **A step only if it is a step she takes** — wide enough to stand on, with
+    // room for her over it (the step-up's own rules, `walkingOntoStep`). Any
+    // other top within a step is hopped: a face she can neither climb nor hop
+    // is a face she stands pressed against for ever.
+    if (over <= BUILDING_STEP_UP && standableTop(solid) && (!meet || this.headroomOver(solid, meet, fromY))) return false;
     return autoHopClears(over, apexClearance);
+  }
+
+  /**
+   * Is there room for all of her over `solid`'s top, just inside its face
+   * where she meets it? (`standing.ts`'s `solidStepCeiling`, asked of one
+   * solid: the underside over the point, less her height.)
+   */
+  private headroomOver(solid: Readonly<SolidHeights>, meet: { x: number; z: number; inX: number; inZ: number }, fromY: number): boolean {
+    const x = meet.x + meet.inX;
+    const z = meet.z + meet.inZ;
+    return solidTopAt(solid, x, z) <= this.ceilingAt(x, z, fromY) - KID_HEIGHT;
   }
 
 
