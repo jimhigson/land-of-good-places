@@ -477,3 +477,19 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
 - Seed 5 park at c3a1a97a: all green (census 42 s; the line 89 points, 21 walk + 68 hop; train 1.53/1.49 m short).
 - Known, NOT fixed (no new blockers without Jim): under each bridge the parapet walls stand from the ground across
   the arch (main's collider), so walking along the line she is stopped at the bridge's sides and hops out instead.
+- Later (19 Oct): 71360688 train places bodies to the cm + tortoise top = crown only (clause 2 reptile house);
+  0bd8c921 parapet pieces cut at the drawn parapetLine rings, coping per stretch (clause 2 seeds 0/1/7), the line
+  counts as out once leavable (strip beyond the far fence, seeds 1/3/4/7/10), census settles 1.2 s after the LAST
+  landing (seed 9's slow escort); 8adc1ea3 crack floor / squeeze lift only onto STANDABLE tops (hotel suite crystal
+  tip held her over a pocket: check:hotel probe 33).
+- PR head moved to 8adc1ea3 (CI restarted: parks re-solve on the new source hash). Local at 8adc1ea3: seed 5 park+core
+  green; check:library/exits/hotel/hop-clearance/wall-tunnelling exit 0 (wall-tunnelling+hop-clearance at 0bd8c921);
+  tsc, typecheck:test, flat-primitives, chain-coverage exit 0. Proofs red: sealed-line, train-ignores-her/-pets/-npcs,
+  drawn-step, feet-judged (seed 6), no-crack-rules, narrow-wedges.
+- Known, not fixed (report): seeds 6 and 11 stall awnings (Jim's call; seed 11 from a bridge parapet coping); seeds 9
+  and 11 one walk-off each into a slot between a wall and taller bushes (0.1 m squeeze; the hold asks her column, not
+  her walk on); seed 15 bench lean (since round one); the parapet-under-the-arch blocker (main's).
+- Preview repro script: /tmp/es-qa/repros4.mjs (window.game only on a dev build: on a preview it waits a lap and
+  screenshots). Local dev run: train stopped 1.53 m short, resumed after she hopped off; 0 page errors.
+- Drafts: PR body /tmp/es-pr-body4.md (placeholders @@PREVIEW@@ @@PROOFS@@ @@CENSUS@@ @@IDENTITY@@), comment
+  /tmp/es-pr-comment4.md (@@HEAD@@ @@CI@@ @@SEEDS@@ @@PREVIEW_ROOT@@ @@PLAYS@@).
