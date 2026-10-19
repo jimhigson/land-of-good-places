@@ -499,3 +499,31 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
   knee wall z 59.6->67.6; armchair moved 0; wall-and-bush 0 blinks; 0 page errors); frames on qa-screenshots/pr722-r3b/
   (commit 9b3a0b2f). PR body updated (/tmp/es-pr-body4.md); comment issuecomment-6265606013.
 - Sixteen parks at 8adc1ea3: 12 green; red 6 (awning), 9 (walk-off squeeze), 11 (awning + walk-off squeeze), 15 (bench).
+
+## Round four (19 Oct, afternoon): pets on rides + solid trains (coordinator BLOCKER + Jim's rulings)
+- Jim: "all the pets except one jump into her backpack on getting on any ride, then one rides on the seat
+  alongside the player"; "also solid trains". Longer trains DROPPED (next PR, not ours).
+- Owner: Player.beginRide/endRide -> Player.watchRides listeners -> Parade.rideChanged (embark/disembark).
+  RideHolder.companion: CompanionRide = {beside(seat)} | 'carried by the ride' | 'drawn by the ride' |
+  'in her backpack' | 'not a ride'. Front of her line (members[0]) = companion. Rest leave the line via sync()
+  filter (poof = existing stow animation, peek from backpack), never written to the save. Disembark: formUpBehind
+  seeds the trail on the longest clear run (8 bearings, 7 m, off solids/closures/bounds/the line via
+  parade.keepOff = train.onTheLine).
+- Seats: train = COMPANION_SEAT 2 (carriage 1 rear bench, behind her; children never take it; still 4 kids);
+  Rail Race = cart pet perch (cart.ts petPerchTop); tortoise = shell 0.75 m behind her (raycast); lifts = 0.8 m
+  behind her in the car (liftCompanion.ts); ferris = gondola middle chair (createGondola(frontOfLine uid));
+  giant slide = chute behind her (unchanged ridePetsDownSlide); Sky Cruiser, cat bus, little slides = backpack;
+  chairs/bed/banquet/views/tree/keychain rack = 'not a ride'.
+- Train: lookout in ParkTrain (player via attachPlayer, parade via attachParade; World.attachParade wires hotel,
+  building, train, ferris, keepOff). Game's keepClearOf block REMOVED. On the line = within TRACK_CLEARANCE+r
+  of the line (platform: CARRIAGE_BODY_HALF_WIDTH+0.1+r); stoppedStop held until the train actually moves
+  (Get off always offered while it stands); toots again every 4 s while held.
+- Solid train (f9d17f4e): CollisionWorld.addMovingBox/moveBox (banded, wide bucket, no revision bump). Pieces in
+  ParkTrain ENGINE_PIECES/CARRIAGE_PIECES (carriage = lid at rim 1.06 + 2 backrests; separate rims left a 4 cm
+  landing target). NPC riders set down on the platform beside their seat (carryPassengers aboard map); a rider
+  is furniture to her in NpcSystem.separateFromPlayer.
+- Scratch: es-ride.mts (3 pets, lap, off: OK seed 5), es-solid.mts (walk into stopped 1.423 m; holds pressed;
+  on top holds; leaves after), es-slot.mts (slot drops freed). Station canopy caps her jump under it (correct).
+- TODO: census excludes moving bodies; check:exits every holder with 3 pets (one beside, rest stowed, ride runs,
+  off, all back free); check:solids clause 8 via real wiring + solid-train clauses; proofs red; fix
+  check:pet-slide (one pet now); run check/test:procgen/build; PR; preview plays.
