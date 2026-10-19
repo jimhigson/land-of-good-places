@@ -316,12 +316,20 @@ export class ParkTrain implements GameSystem, TrainService {
     this.group.add(built.group);
     for (const rail of built.guardRails) {
       // A masonry parapet/spandrel wall: solid from the ground (blocks a
-      // walker beside the bridge), with an ABSOLUTE top at the drawn coping,
-      // from one end of each piece to the other (`TopSlope`) — see
-      // `bridges.ts`'s `BridgeWall`.
+      // walker beside the bridge) — or, over the tunnel's opening, from the
+      // arch's face — with an ABSOLUTE top at the drawn coping, from one end
+      // of each piece to the other (`TopSlope`) — see `bridges.ts`'s
+      // `BridgeWall`.
       collision.kinded('bridge parapet', () =>
-        collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true, -Infinity, false, Number.NaN, rail.topHeightEnd),
+        collision.addWall(rail.x1, rail.z1, rail.x2, rail.z2, BRIDGE_WALL_THICKNESS / 2, rail.topHeight, false, true, rail.base, false, Number.NaN, rail.topHeightEnd),
       );
+    }
+    // The tunnel's masonry: the vault over the opening, from the soffit up,
+    // and each abutment's inner face, from the ground (`bridges.ts`'s
+    // `BridgeVault`). The line runs on under the bridge, for her as for the
+    // train.
+    for (const vault of built.vaults) {
+      collision.kinded(vault.kind, () => collision.addBox(vault.cx, vault.cz, vault.halfX, vault.halfZ, vault.yaw, 0, vault.top, false, true, vault.base));
     }
 
     // --- the train itself ----------------------------------------------------

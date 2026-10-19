@@ -189,20 +189,30 @@ export const BRIDGE_GROUP_NAME_RE = /\/bridge-\d+(?:\.\d+)?\//g;
  * takes its single level from the sampler, which now reads the smooth
  * height.
  *
- * ## The fence seam
+ * ## The fence runs on through the tunnel
  *
- * Unchanged in mechanism (see `fence.ts`): the rail fence runs on beneath
- * the bridge, `topIsAbsolute`-pinned just under the *local* road surface
- * (not one flat deck height — the hump's surface at the fence line is what
- * a walker's feet are actually at there).
+ * The rail fence (`fence.ts`) runs on beneath every bridge at its own knee
+ * height, solid as it is drawn, and the closure the router keeps off the
+ * track keeps its seam just under the *local* road surface (not one flat
+ * deck height — the hump's surface at the fence line is what a walker's
+ * feet are actually at there).
  *
- * ## Parapets are walls, and walls are solid
+ * ## Parapets are walls, the tunnel is a tunnel, and both are solid as drawn
  *
  * Each side wall (spandrel + parapet, one visual piece) gets real collision
- * for its whole length: full-height walls with an absolute top at the local
- * road surface plus the parapet, so nobody walks through the masonry from
- * the lawn and nobody steps off the hump into the air over the train —
- * CLAUDE.md's "anything that looks solid must be solid".
+ * for its whole length, its top the drawn coping — so nobody walks through
+ * the masonry from the lawn and nobody steps off the hump into the air over
+ * the train, CLAUDE.md's "anything that looks solid must be solid". Beside
+ * the bridge it stands from the ground; **over the tunnel's opening it is the
+ * arch's face and stands on the soffit**, so the opening is open (Jim, 19 Oct
+ * 2026: *"they should have a modelled tunnel"*). The line is hers to walk
+ * since that day — she may hop its fence, and the train stops for her — so
+ * the tunnel is modelled as drawn: the vault over the opening is solid from
+ * the soffit up to the road bed, slice by slice along the arch's curve, and
+ * each abutment is solid at its inner face (`ARCH_SPAN_HALF`). She walks the
+ * line under the bridge as the train runs it; where the haunch comes lower
+ * than her head it bumps her, and nothing lets her into the masonry
+ * (`check:solids` clause 12 walks every tunnel both ways).
  */
 
 /** How high the parapet stands above the local road surface. Low enough
@@ -306,9 +316,12 @@ export const PARAPET_CROWN_LIFT = 0.45;
 export const ARCH_CLEAR_HALF = TRACK_CLEARANCE + 0.5;
 
 /** Half-span (along the path) of the whole arch opening — abutment inner
- * faces stand here. `DECK_HALF_LENGTH` clears both fence lines with margin
- * (its own doc), so the tunnel swallows the entire fenced corridor and the
- * masonry only ever stands on ground the fence already forbids to feet. */
+ * faces stand here, solid from the ground (`BridgeVault`). `DECK_HALF_LENGTH`
+ * clears both fence lines with margin (its own doc), so the whole fenced
+ * corridor runs through the tunnel, and the opening between a fence and its
+ * abutment, 1.2 m less the fence's half-thickness, is too narrow for her to
+ * stand in: the haunch over it bumps her head, and the abutment's face keeps
+ * her out of the masonry. */
 export const ARCH_SPAN_HALF = DECK_HALF_LENGTH;
 
 /**
@@ -434,6 +447,10 @@ function snapToWallTop(level: number, topY: number): number {
 
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
+/** How finely the tunnel's masonry follows the arch: the vault's slices, and the side walls' pieces over the opening, metres. */
+const TUNNEL_CUT = 0.2;
+/** How deep an abutment's inner face is modelled into the masonry behind it, metres. */
+const ABUTMENT_FACE = 0.3;
 
 /**
  * Built on first use, never at module load: `pinkStoneTexture` paints a
@@ -480,6 +497,34 @@ export interface BridgeWall {
    */
   readonly topHeight: number;
   readonly topHeightEnd: number;
+  /**
+   * World height of the wall's foot: `-Infinity`, standing on the ground —
+   * except over the tunnel's opening, where it is the arch's own face and
+   * stands on the soffit (the lowest of it over the piece), so the line runs
+   * on under the bridge as the train does (Jim, 19 Oct 2026: *"they should
+   * have a modelled tunnel"*).
+   */
+  readonly base: number;
+}
+
+/**
+ * **A filled box of the bridge's masonry, round the tunnel** — a slice of the
+ * vault over the opening, from the soffit up to the road bed, or an
+ * abutment's inner face, from the ground up — ready for `collision.addBox`.
+ */
+export interface BridgeVault {
+  /** What it is, for the solid's kind: the vault over the opening, or an abutment's face. */
+  readonly kind: 'bridge arch' | 'bridge abutment';
+  readonly cx: number;
+  readonly cz: number;
+  /** Half its extent across the bridge (along the line through the tunnel), and along it. */
+  readonly halfX: number;
+  readonly halfZ: number;
+  /** The yaw that turns its local X onto the across direction. */
+  readonly yaw: number;
+  /** World heights of its top (the road bed) and its foot (the soffit, or `-Infinity`: the ground). */
+  readonly top: number;
+  readonly base: number;
 }
 
 export interface Bridge {
@@ -563,6 +608,8 @@ export interface BuiltBridges {
   readonly platforms: readonly MovingPlatform[];
   /** Every parapet/spandrel wall, ready for `collision.addWall`. */
   readonly guardRails: readonly BridgeWall[];
+  /** Every bridge's tunnel masonry — its vault and its abutments' faces — ready for `collision.addBox`. */
+  readonly vaults: readonly BridgeVault[];
 }
 
 function clamp01(value: number): number {
@@ -652,6 +699,7 @@ export function buildBridges(
   const bridges: Bridge[] = [];
   const platforms: MovingPlatform[] = [];
   const guardRails: BridgeWall[] = [];
+  const vaults: BridgeVault[] = [];
 
   // One footprint per crossing, same order — the single owner of every
   // ground-plane number below, shared with whatever keeps scenery off the
@@ -678,16 +726,18 @@ export function buildBridges(
     bridges.push(built.bridge);
     platforms.push(built.platform);
     guardRails.push(...built.walls);
+    vaults.push(...built.vaults);
     group.add(built.group);
   }
 
-  return { group, bridges, platforms, guardRails };
+  return { group, bridges, platforms, guardRails, vaults };
 }
 
 interface OneBridge {
   readonly bridge: Bridge;
   readonly platform: MovingPlatform;
   readonly walls: BridgeWall[];
+  readonly vaults: BridgeVault[];
   readonly group: Group;
 }
 
@@ -1098,13 +1148,21 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           }
           return Math.max(0, lo);
         };
+        // Over the tunnel's opening, cut finer still, at the opening's own
+        // edges and every `TUNNEL_CUT` between: there the wall is the arch's
+        // face and stands on the soffit, which curves.
         const cuts = [previousAlong];
         for (const ring of line) if (ring.along > previousAlong + 1e-6 && ring.along < clamped - 1e-6) cuts.push(ring.along);
+        for (let u = -ARCH_SPAN_HALF; u <= ARCH_SPAN_HALF + 1e-9; u += TUNNEL_CUT) {
+          if (u > previousAlong + 1e-6 && u < clamped - 1e-6) cuts.push(u);
+        }
         cuts.push(clamped);
+        cuts.sort((p, q) => p - q);
         const span = clamped - previousAlong;
         for (let k = 0; k + 1 < cuts.length; k += 1) {
           const u0 = cuts[k] as number;
           const u1 = cuts[k + 1] as number;
+          if (u1 - u0 < 1e-6) continue;
           const i = stretchAt((u0 + u1) / 2);
           const a = line[i] as (typeof line)[number];
           const b = (line[i + 1] ?? a) as (typeof line)[number];
@@ -1116,20 +1174,82 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
           };
           const t0 = span > 1e-9 ? (u0 - previousAlong) / span : 0;
           const t1 = span > 1e-9 ? (u1 - previousAlong) / span : 1;
-          walls.push({
-            x1: previous.x + (point.x - previous.x) * t0,
-            z1: previous.z + (point.z - previous.z) * t0,
-            x2: previous.x + (point.x - previous.x) * t1,
-            z2: previous.z + (point.z - previous.z) * t1,
-            topHeight: wallTop(u0) + lift,
-            topHeightEnd: wallTop(u1) + lift,
-          });
+          const x1 = previous.x + (point.x - previous.x) * t0;
+          const z1 = previous.z + (point.z - previous.z) * t0;
+          const x2 = previous.x + (point.x - previous.x) * t1;
+          const z2 = previous.z + (point.z - previous.z) * t1;
+          // Over the opening, the arch's face: standing on the soffit — the
+          // lowest of it over the piece, so no drawn stone is left open below
+          // it — and not on the ground across the line.
+          let base = -Infinity;
+          if (u0 >= -ARCH_SPAN_HALF - 1e-6 && u1 <= ARCH_SPAN_HALF + 1e-6) {
+            base = Infinity;
+            for (const f of [0, 0.5, 1]) {
+              const u = u0 + (u1 - u0) * f;
+              base = Math.min(base, tangentY(x1 + (x2 - x1) * f, z1 + (z2 - z1) * f, soffitRiseAt(Math.abs(u))));
+            }
+          }
+          walls.push({ x1, z1, x2, z2, topHeight: wallTop(u0) + lift, topHeightEnd: wallTop(u1) + lift, base });
         }
       }
       previous = point;
       previousAlong = clamped;
       if (clamped >= lengthPos) break;
     }
+  }
+
+  // --- collision: the tunnel ----------------------------------------------
+  // **A modelled tunnel** (Jim, 19 Oct 2026: *"they should have a modelled
+  // tunnel"*). The line is open to her (she may hop its fence, and the train
+  // stops for her), so the masonry round the opening is solid as it is drawn
+  // and the opening itself is clear: she walks the line under the bridge as
+  // the train runs it. The side walls stand on the arch's face over the
+  // opening (above); the vault over it, here, is solid from the soffit up to
+  // the road bed, in slices along the span that follow the arch's curve, the
+  // lowest of the soffit over each slice its foot — so where the haunch comes
+  // lower than her head it bumps her, as stone does, and she never rises
+  // into it; and each abutment is solid at its inner face, from the ground
+  // up, so nothing gets into the masonry from the tunnel.
+  const vaults: BridgeVault[] = [];
+  const acrossAt = (along: number): { cx: number; cz: number; yaw: number } => {
+    const c = frame.worldAt(along, 0, shift);
+    const a = frame.worldAt(along, 1, shift);
+    return { cx: c.x, cz: c.z, yaw: Math.atan2(a.z - c.z, a.x - c.x) };
+  };
+  /** The lowest of `height` over a slice's footprint: its two ends and middle, at the axis and both faces. */
+  const lowestOver = (a0: number, a1: number, height: (x: number, z: number, along: number) => number): number => {
+    let low = Infinity;
+    for (const u of [a0, (a0 + a1) / 2, a1]) {
+      for (const across of [-halfAcross, 0, halfAcross]) {
+        const p = frame.worldAt(u, across, shift);
+        low = Math.min(low, height(p.x, p.z, u));
+      }
+    }
+    return low;
+  };
+  const roadBed = (x: number, z: number, along: number): number => surfaceProfile(x, z, along) - BRIDGE_ROAD_BED_DROP;
+  for (let a0 = -ARCH_SPAN_HALF; a0 < ARCH_SPAN_HALF - 1e-6; a0 += TUNNEL_CUT) {
+    const a1 = Math.min(ARCH_SPAN_HALF, a0 + TUNNEL_CUT);
+    const at = acrossAt((a0 + a1) / 2);
+    const base = lowestOver(a0, a1, (x, z, u) => tangentY(x, z, soffitRiseAt(Math.abs(u))));
+    const top = lowestOver(a0, a1, roadBed);
+    if (!(top > base)) continue;
+    vaults.push({ kind: 'bridge arch', cx: at.cx, cz: at.cz, halfX: halfAcross, halfZ: (a1 - a0) / 2, yaw: at.yaw, top, base });
+  }
+  for (const side of [1, -1] as const) {
+    const a0 = side * ARCH_SPAN_HALF;
+    const a1 = side * (ARCH_SPAN_HALF + ABUTMENT_FACE);
+    const at = acrossAt((a0 + a1) / 2);
+    vaults.push({
+      kind: 'bridge abutment',
+      cx: at.cx,
+      cz: at.cz,
+      halfX: halfAcross,
+      halfZ: ABUTMENT_FACE / 2,
+      yaw: at.yaw,
+      top: lowestOver(Math.min(a0, a1), Math.max(a0, a1), roadBed),
+      base: -Infinity,
+    });
   }
 
   // --- the walkable surface -------------------------------------------------
@@ -1220,7 +1340,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     },
   };
 
-  return { bridge, platform, walls, group: bridgeGroup };
+  return { bridge, platform, walls, vaults, group: bridgeGroup };
 }
 
 interface ShellGeometry {

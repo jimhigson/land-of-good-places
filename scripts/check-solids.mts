@@ -26,7 +26,8 @@
  * 4. **The census.** Every top she can reach, jumps and chains of jumps
  *    included (`lib/solidReach.mts`), in the park and inside every building,
  *    grouped by kind with a deep link to one of each. No escape is reached —
- *    a roof, an enclosure, the edge of a space — and every region she can
+ *    a building's roof (an open-air canopy is an ordinary top), an
+ *    enclosure, the edge of a space — and every region she can
  *    drop into, she can leave. **The line is open** (Jim, 19 Oct 2026): she
  *    may hop its fence onto the track and back, so from every point along it
  *    she gets off it again, walking or hopping its fence; how many places on
@@ -46,6 +47,8 @@
  *    wall where it stands a step high instead of hopping it.
  * 10. **Spawns.** A teleport with no height (`/spawn?pos=x,z`) never stands
  *    her on a roof.
+ * 12. **Tunnels.** She walks the line under every bridge, both ways: through
+ *    the tunnel, never wedged, her head never through its soffit.
  * 11. **Steps.** Pushing into a top she steps up onto steps her up or holds
  *    her at its face — never shuttles her in and out.
  *
@@ -81,7 +84,7 @@ import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
 import { altitudeAt, terrainHeight } from '../src/world/terrain.ts';
 import { carryReference, riseBetween } from '../src/world/building/stepReach.ts';
-import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHeight } from '../src/world/standing.ts';
+import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeight, teleportHeight, wedgeDepth } from '../src/world/standing.ts';
 
 /**
  * **The red proofs.** Each breaks one thing and must turn its clause red, in
@@ -93,8 +96,8 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  * - `too-tall` (core): the precedent bench made 1 m taller — clause 3 cannot
  *   land.
  * - `low-roof`, `low-exhibit` (park): a step by the gate carrying the kind of
- *   a stall's roof, an exhibit — each of clause 4's escapes must find her on
- *   it.
+ *   the castle's roof (an open-air canopy is an ordinary top now), an exhibit
+ *   — each of clause 4's escapes must find her on it.
  * - `trap` (core): a ring of tall walls round a castle crate, so dropping off
  *   the crate leaves her nowhere to go — clause 4's trap clause.
  * - `ghost` (core): a bench drawn and never registered — clause 5's march
@@ -132,6 +135,9 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  *   one frame clock and a step on another, and a step-high face hopped. Seed 5
  *   has no face near the line on a slope, so it is green there: run it on seed
  *   6 (`LGP_SEED=6`), whose stone wall at (22.9, 0.5) it must find.
+ * - `parapets-to-ground` (park): every bridge parapet piece twinned from the
+ *   ground up, straight across the open arch, as before the tunnel was
+ *   modelled — clause 12 must find her stopped under a bridge.
  * - `train-ignores-her`, `train-ignores-pets`, `train-ignores-npcs` (park): the
  *   train told of her, of a pet, or of the crowd no longer — clause 8 must
  *   find it run into each.
@@ -142,9 +148,9 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
 const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 /** Every proof this script knows: a name it does not know would run the check unbroken, and a proof that comes back green proves nothing. */
 const PROOFS = [
-  'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
+  'infinite', 'tall-top', 'too-tall', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
-  'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
+  'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -234,16 +240,27 @@ const sample = park.sample;
  * - Out of the park: clause 7, at every height.
  */
 const ROOF_KINDS: Readonly<Record<string, string>> = {
-  'stall awning': "a stall's roof",
-  'stall parasol': "the keychain cart's parasol",
-  'station canopy': "a station's roof",
-  'bus shelter canopy': "the bus shelter's roof",
   'castle roof deck': "the castle's roof",
   'library roof': "the library's roof",
   'reptile house roof': "the reptile house's roof",
   'roof pavilion': "the roof garden pavilion's roof",
   'roof turret': "a roof garden turret's top",
   'toilet privacy roof': "a hotel bathroom nook's roof",
+};
+/**
+ * **Open-air canopies are ordinary tops** (Jim, 19 Oct 2026, of a stall's
+ * awning reached by a jump from a tall garden wall and from a bridge's
+ * parapet: *"yes this is fine"*). A canopy over a stall, a cart, a platform or
+ * a bus stop stands in the open where the camera follows her, and she walks
+ * off its edge to the ground; it is not a building's roof, where it cannot.
+ * Reaching one is reported on stderr, never failed. A teleport with no height
+ * still never stands her on one (clause 10): she arrives on the floor.
+ */
+const CANOPY_KINDS: Readonly<Record<string, string>> = {
+  'stall awning': "a stall's awning",
+  'stall parasol': "the keychain cart's parasol",
+  'station canopy': "a station's canopy",
+  'bus shelter canopy': "the bus shelter's canopy",
 };
 // The proofs that add a solid add it here, before anything is measured. None
 // edits a solid in place: a clause must go red because the park it measures is
@@ -324,7 +341,20 @@ const ROOF_KINDS: Readonly<Record<string, string>> = {
       collision.kinded('railway fence', () => collision.addWall(outer.x, outer.z, far.x, far.z, guard.halfWidth, sample(rail.x, rail.z, rail.y + 0.5) + 4.6, false, true));
     }
   }
-  if (PROVE === 'low-roof') stepNearGate('stall awning');
+  // **The walls back to the ground** — the tunnels' own control: every bridge
+  // parapet piece twinned from the ground up, as the side walls stood before
+  // the tunnel was modelled, straight across the open arch. Walking the line
+  // under a bridge must then stop at its side.
+  if (PROVE === 'parapets-to-ground') {
+    for (const wall of before) {
+      if (wall.kind !== 'bridge parapet' || wall.shape !== 'capsule') continue;
+      const seg = guardSegment(wall);
+      collision.kinded('bridge parapet', () =>
+        collision.addWall(seg.ax, seg.az, seg.bx, seg.bz, wall.halfWidth, wall.topAt(seg.ax, seg.az), false, true, -Infinity, false, Number.NaN, wall.topAt(seg.bx, seg.bz)),
+      );
+    }
+  }
+  if (PROVE === 'low-roof') stepNearGate('castle roof deck');
   // The review's own control (PR #722): a step kinded as one of the roofs the
   // clause used not to know. It stayed green; it must go red.
   if (PROVE === 'reptile-roof') stepNearGate('reptile house roof');
@@ -551,10 +581,10 @@ const PERCH_KINDS: Readonly<Record<string, string>> = {
 if (inPart('core')) {
   console.log('\n4a. ROOFS — every kind named like a roof is one the census asserts, or says why not:');
   const kinds = [...new Set(solids.map((solid) => solid.kind))].filter((kind) => ROOFISH.test(kind));
-  const unclassified = kinds.filter((kind) => !(kind in ROOF_KINDS) && !(kind in NOT_ROOF_KINDS));
+  const unclassified = kinds.filter((kind) => !(kind in ROOF_KINDS) && !(kind in CANOPY_KINDS) && !(kind in NOT_ROOF_KINDS));
   say(
     unclassified.length === 0,
-    `${kinds.length} kinds named like a roof in the built park and its buildings: ${kinds.filter((kind) => kind in ROOF_KINDS).length} roofs the census asserts, ${kinds.filter((kind) => kind in NOT_ROOF_KINDS).length} not roofs, with their reasons${unclassified.length ? ` — and ${unclassified.length} neither: ${unclassified.join(', ')}` : ''}`,
+    `${kinds.length} kinds named like a roof in the built park and its buildings: ${kinds.filter((kind) => kind in ROOF_KINDS).length} roofs the census asserts, ${kinds.filter((kind) => kind in CANOPY_KINDS).length} open-air canopies (ordinary tops), ${kinds.filter((kind) => kind in NOT_ROOF_KINDS).length} not roofs, with their reasons${unclassified.length ? ` — and ${unclassified.length} neither: ${unclassified.join(', ')}` : ''}`,
   );
 }
 
@@ -626,6 +656,8 @@ if (SKIP_CENSUS) {
     // Roofs and enclosures: the places themselves.
     const roofs = result.tops.filter((top) => top.solid.kind in ROOF_KINDS);
     say(roofs.length === 0, `${run.name}: no roof reached${roofs.length ? ` — ${roofs.length}: ${[...new Set(roofs.map((t) => ROOF_KINDS[t.solid.kind]))].join(', ')}, e.g. ${run.link(roofs[0]!.at)}` : ''}`);
+    const canopies = result.tops.filter((top) => top.solid.kind in CANOPY_KINDS);
+    if (canopies.length) note(`${run.name}: ${canopies.length} open-air canop${canopies.length === 1 ? 'y' : 'ies'} reached — ordinary tops (Jim, 19 Oct 2026), not escapes: ${[...new Set(canopies.map((t) => CANOPY_KINDS[t.solid.kind]))].join(', ')}, e.g. ${run.link(canopies[0]!.at)}`);
     const exhibits = result.tops.filter((top) => isEnclosure(top.solid.kind));
     say(exhibits.length === 0, `${run.name}: no enclosure reached${exhibits.length ? ` — ${exhibits.length}: ${[...new Set(exhibits.map((t) => t.solid.kind))].join(', ')}, e.g. ${run.link(exhibits[0]!.at)}` : ''}`);
     // Guards stood on but not passed: what they guard is asserted directly.
@@ -669,10 +701,45 @@ if (SKIP_CENSUS) {
         }
         return false;
       };
+      /**
+       * Along the line and off it: walked along the track either way — under
+       * a bridge, through its tunnel — for up to `ALONG_METRES`, hopping at
+       * the fences every metre and a bit of the way. The way off a point in a
+       * tunnel, where both fences stand by the abutments.
+       */
+      const ALONG_METRES = 12;
+      const walksAlongOff = (at: Stand): boolean => {
+        for (const dir of [1, -1]) {
+          const sim = new SimPlayer(collision, { ...CENSUS_SIM, ground: sample, hopProbe: playerHopProbe(collision) });
+          sim.position.set(at.x, at.y, at.z);
+          sim.previousPosition.copy(sim.position);
+          sim.groundHeight = at.y;
+          sim.groundY = at.y;
+          let last = route.distanceNear(at.x, at.z);
+          let along = 0;
+          let nextHop = 1.2;
+          for (let f = 0; f < 60 * 8 && along < ALONG_METRES; f += 1) {
+            route.tangentAt(last, tangent);
+            sim.step(1 / 60, tangent.x * dir, tangent.z * dir, false);
+            const now = route.distanceNear(sim.position.x, sim.position.z);
+            let moved = route.forwardGap(last, now);
+            if (moved > route.length / 2) moved -= route.length;
+            along += moved * dir;
+            last = now;
+            if (!sim.airborne && along >= nextHop) {
+              nextHop += 1.2;
+              const there: Stand = { x: sim.position.x, z: sim.position.z, y: sim.groundHeight };
+              if (outside(there) || hopsOff(there)) return true;
+            }
+          }
+        }
+        return false;
+      };
       const LINE_STEP = 2.4;
       let points = 0;
       let walked = 0;
       let hopped = 0;
+      let along = 0;
       let searched = 0;
       const trapped: string[] = [];
       const t4b = performance.now();
@@ -688,6 +755,10 @@ if (SKIP_CENSUS) {
         }
         if (hopsOff(at)) {
           hopped += 1;
+          continue;
+        }
+        if (walksAlongOff(at)) {
+          along += 1;
           continue;
         }
         searched += 1;
@@ -712,7 +783,7 @@ if (SKIP_CENSUS) {
       lineLeavable = points > 0 && trapped.length === 0;
       say(
         points > 0 && trapped.length === 0,
-        `the line: from every one of ${points} points along it, ${LINE_STEP} m apart on the track bed, she gets off it again (${walked} walking, ${hopped} with a hop over its fence, ${searched} by her own search)${trapped.length ? ` — ${trapped.length} with no way off: ${trapped.slice(0, 6).join('; ')}` : ''}`,
+        `the line: from every one of ${points} points along it, ${LINE_STEP} m apart on the track bed, she gets off it again (${walked} walking, ${hopped} with a hop over its fence, ${along} walking along it — through a tunnel — and hopping off, ${searched} by her own search)${trapped.length ? ` — ${trapped.length} with no way off: ${trapped.slice(0, 6).join('; ')}` : ''}`,
       );
       // How many places on the line her census reached from the walk — that
       // the line is open is the ruling; this says it is (on stderr).
@@ -1469,7 +1540,7 @@ if (inPart('park')) {
   const firstOn: string[] = [];
   const roofsAsked = new Set<string>();
   collision.forEachSolid((roof) => {
-    if (!(roof.kind in ROOF_KINDS) || spaceAt(roof.centreX, roof.centreZ) !== SPACE_GARDEN) return;
+    if (!(roof.kind in ROOF_KINDS || roof.kind in CANOPY_KINDS) || spaceAt(roof.centreX, roof.centreZ) !== SPACE_GARDEN) return;
     roofsAsked.add(roof.kind);
     for (let x = roof.centreX - roof.reach; x <= roof.centreX + roof.reach; x += 0.5) {
       for (let z = roof.centreZ - roof.reach; z <= roof.centreZ + roof.reach; z += 0.5) {
@@ -1568,6 +1639,86 @@ if (spacesInPart.length) {
   }
   say(pushes > 0 && shuttled === 0, `${pushes} pushes into the tops she steps up onto, 8 bearings each: ${steppedUp} stood her on the top, ${pushes - steppedUp - shuttled} walked her across it or held her at its face, ${shuttled} shuttled her${firstShuttle.length ? ` — ${firstShuttle.join('; ')}` : ''}`);
   note(`clause 11 asks the step up and stops once she has stood on the top for 0.2 s: it says nothing about walking on across it — off its far side into a gap narrower than her body, against a wall, she jitters at the edge (a bed's far side in the suite on seed 5), written down on PR #722 as a gap`);
+}
+
+// ---------------------------------------------------------------------------
+// 12. The line under every bridge
+// ---------------------------------------------------------------------------
+/**
+ * **She walks the line under every bridge, both ways** (Jim, 19 Oct 2026:
+ * *"they should have a modelled tunnel"*): from 6 m before each tunnel to 6 m
+ * past it, along the track's own middle, at a walk. She gets through, she is
+ * never wedged, and her head never rises through the soffit
+ * (`Bridge.soffitYAt`, the drawn arch's one owner). Every bridge the line
+ * runs under, every park asked.
+ */
+if (inPart('park')) {
+  console.log('\n12. TUNNELS — the line under every bridge, both ways:');
+  collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
+  const route = world.train.route;
+  const bridges = world.train.bridges;
+  const at = new Vector3();
+  const along = new Vector3();
+  const TUNNEL_STEP = 0.25;
+  const inTunnel = (d: number): boolean => {
+    route.pointAt(d, at);
+    return bridges.some((bridge) => bridge.soffitYAt(at.x, at.z) !== null);
+  };
+  // The tunnels, as stretches of the loop: from outside one, all the way round.
+  const n = Math.ceil(route.length / TUNNEL_STEP);
+  let start = 0;
+  while (start < n && inTunnel(start * TUNNEL_STEP)) start += 1;
+  const tunnels: { from: number; to: number }[] = [];
+  let open: number | null = null;
+  for (let k = 0; k <= n; k += 1) {
+    const d = (start + k) * TUNNEL_STEP;
+    const inside = inTunnel(route.wrap(d));
+    if (inside && open === null) open = d;
+    if (!inside && open !== null) {
+      tunnels.push({ from: open, to: d });
+      open = null;
+    }
+  }
+  const failed: string[] = [];
+  let walks = 0;
+  for (const tunnel of tunnels) {
+    for (const dir of [1, -1]) {
+      walks += 1;
+      const from = dir > 0 ? tunnel.from - 6 : tunnel.to + 6;
+      const goal = tunnel.to - tunnel.from + 12;
+      route.pointAt(route.wrap(from), at);
+      const sim = new SimPlayer(collision, { ground: sample, hopProbe: playerHopProbe(collision) });
+      sim.placeOnGround(at.x, at.z);
+      const link = `/spawn?pos=${at.x.toFixed(1)},${at.z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
+      let last = route.wrap(from);
+      let travelled = 0;
+      let worstWedge = 0;
+      let worstHead = -Infinity;
+      for (let f = 0; f < 60 * 15 && travelled < goal; f += 1) {
+        route.tangentAt(last, along);
+        sim.step(1 / 60, along.x * dir, along.z * dir, false);
+        const now = route.distanceNear(sim.position.x, sim.position.z);
+        let moved = route.forwardGap(last, now);
+        if (moved > route.length / 2) moved -= route.length;
+        travelled += moved * dir;
+        last = now;
+        worstWedge = Math.max(worstWedge, wedgeDepth(collision, sim.position, sim.groundHeight));
+        for (const bridge of bridges) {
+          const soffit = bridge.soffitYAt(sim.position.x, sim.position.z);
+          if (soffit !== null) worstHead = Math.max(worstHead, sim.position.y + KID_HEIGHT - soffit);
+        }
+      }
+      const where = `the tunnel at ${route.wrap(tunnel.from).toFixed(1)}–${route.wrap(tunnel.to).toFixed(1)} m round the loop, walked ${dir > 0 ? 'with' : 'against'} the train from ${link}`;
+      if (travelled < goal - 0.5) failed.push(`${where}: stopped after ${travelled.toFixed(1)} of ${goal.toFixed(1)} m`);
+      else if (worstWedge > WEDGE_DEPTH) failed.push(`${where}: wedged ${worstWedge.toFixed(2)} m on the way`);
+      else if (worstHead > 0) failed.push(`${where}: her head ${worstHead.toFixed(2)} m through the soffit`);
+    }
+  }
+  say(
+    tunnels.length > 0 && failed.length === 0,
+    `${tunnels.length} tunnel(s) under ${bridges.length} bridge(s), walked both ways along the line's middle: ${failed.length} stopped, wedged or through the soffit${failed.length ? ` — ${failed.slice(0, 6).join('; ')}` : ''}`,
+  );
+  if (tunnels.length === 0) note('clause 12: this park\'s line runs under no bridge, so the clause asserts nothing here');
 }
 
 // ---------------------------------------------------------------------------
