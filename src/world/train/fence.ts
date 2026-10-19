@@ -14,7 +14,9 @@ import { FENCE_HALF_THICKNESS, FENCE_OFFSET, FENCE_SEAM_MARGIN, STATION_GAP } fr
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { MovingPlatform } from '../building/surfaces';
 import { JUMP_PLAN_REACH, guardRadiusNeeded, type Takeoff } from '../jumpReach';
-import type { CollisionWorld } from '../Collision';
+import type { CollisionWorld, WallCollider } from '../Collision';
+import { reachableTops, type ReachableTop } from '../reachableTops';
+import { GUARD_OVER_FEET, jumpRiseAt } from '../jumpReach';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
 import { placeOnSphere, planetRadiusAt, terrainHeight, yAtAltitude } from '../terrain';
@@ -77,6 +79,15 @@ const RAIL_TOP = TOP_RAIL_CENTRE + RAIL_DEPTH / 2;
  */
 export const RAILWAY_GUARD_TOP = RAIL_TOP;
 const RAIL_WIDTH = GUARD_RAIL_WIDTH;
+/**
+ * How far apart the rails of a fence stood taller than designed are, metres —
+ * the designed fence's own gap between its lower bar and its top rail — and
+ * how far under the top rail the highest of them stops.
+ */
+const MID_RAIL_GAP = TOP_RAIL_CENTRE - RAIL_CENTRE;
+const MID_RAIL_CLEAR = 0.25;
+/** The most rails between a bay's top rail and its lower bar's: a fence stood over four metres taller. */
+const MAX_MID_RAILS = 5;
 /** A post's drawn top radius: what of it she could put a foot on — not enough (`FOOT_HALF_WIDTH`). */
 const POST_TOP_RADIUS = 0.09;
 // Re-exported so existing importers keep one obvious home for it; the value
@@ -92,6 +103,24 @@ interface StationSpan {
 }
 
 /**
+ * The railway's fence, built: its group, and the one thing left to do once
+ * the park round the line is finished.
+ */
+export interface RailFence {
+  readonly group: Group;
+  /**
+   * **Stands every post and bay as tall as every jump at it needs** — from the
+   * walk beside it, and from every top she can stand on and reach near it
+   * (`reachableTops`): a bush, a garden wall, a bench. Those are planted by
+   * the world phase, after the railway is built, so this is asked once they
+   * stand (`World`, through `ParkTrain.raiseGuards`). PR #722's review, round
+   * two: from a bush 2 m off the fence she sprint-jumped over it into a fenced
+   * box on the line, because the fence had been sized against the walk alone.
+   */
+  raise(): void;
+}
+
+/**
  * @param walkSurface The highest surface she can walk on at `(x, z)` — the
  *   ground, a path, a plinth: where a jump at the fence can leave from. The
  *   terrain when not given.
@@ -102,7 +131,7 @@ export function buildRailFence(
   bridges: readonly Bridge[],
   stations: readonly StationSpan[],
   walkSurface: (x: number, z: number) => number = terrainHeight,
-): Group {
+): RailFence {
   const group = new Group();
   group.name = 'rail-fence';
 
@@ -303,8 +332,8 @@ export function buildRailFence(
     /**
      * How much taller than designed this post and the top rail at it stand
      * (`liftAt`): 0, except where a jump from higher ground beside the fence
-     * — a platform's end, a bank falling towards it — carries her feet over
-     * the 1.67 m rail.
+     * — a platform's end, a bank falling towards it, a bush or a wall she
+     * stands on — carries her feet over the 1.67 m rail. Set by `raise`.
      */
     lift: number;
   }
@@ -322,15 +351,20 @@ export function buildRailFence(
 
   // --- 1b. how tall each stretch must stand -----------------------------------
   // **Taller than every jump she can make at it** (`jumpReach.ts`; QA on PR
-  // #722). On level ground her feet top out at 1.33 m over it and the rail is
-  // 1.67 m; but from a platform's end beside a box, or a bank falling towards
-  // the fence, she leaves from higher than the fence's foot, and a sprint off
-  // the north station's end on seed 5 cleared the end cap into the box. So
-  // each post stands as tall as the highest her feet can get over its line
-  // from the ground she can reach beside it, where that is over the rail.
-  // That ground is everything she walks on — a building's plinth by the line
-  // as much as a platform (seed 6: a sprint off the library's plinth cleared
-  // the fence beside it) — and a waiting train's floors (seed 8).
+  // #722). On level ground her feet top out at 1.28 m over it, and a guard has
+  // to stand `GUARD_OVER_FEET` (0.2 m) over that — the rail is 1.67 m; but
+  // from a platform's end beside a box, or a bank falling towards the fence,
+  // she leaves from higher than the fence's foot, and a sprint off the north
+  // station's end on seed 5 cleared the end cap into the box. So each post
+  // stands as tall as the highest her feet can get over its line from the
+  // ground she can reach beside it, where that is over the rail. That ground
+  // is everything she walks on — a building's plinth by the line as much as a
+  // platform (seed 6: a sprint off the library's plinth cleared the fence
+  // beside it) — and a waiting train's floors (seed 8); **and every top she
+  // can stand on and reach near it** (`reachableTops`): from a bush 2 m off
+  // the fence, a sprint-jump carried her feet 0.73 m over it and into a box
+  // (the review, round two). Those are planted after the railway is built,
+  // so the heights are found by `raise`, once they stand.
   const platforms = stations.flatMap((station) => [...(station.platform ? [station.platform] : []), ...(station.floors ?? [])]);
   const walkY = (x: number, z: number): number => {
     let y = walkSurface(x, z);
@@ -387,6 +421,9 @@ export function buildRailFence(
    * side: a station's far fence is approached across its own track from the
    * platform, and the strip beyond it is ground she could not get back from.
    */
+  // The tops she can reach near the line, bucketed: set by `raise`.
+  const TOP_BUCKET = 8;
+  let topBuckets = new Map<number, ReachableTop[]>();
   const liftAt = (x: number, z: number): number => {
     const ground = planetRadiusAt(x, terrainHeight(x, z), z);
     const reach = JUMP_PLAN_REACH;
@@ -398,7 +435,20 @@ export function buildRailFence(
         if (cell) takeoffs.push(cell);
       }
     }
-    return Math.max(0, guardRadiusNeeded(takeoffs, x, z) - ground - RAIL_TOP);
+    let need = guardRadiusNeeded(takeoffs, x, z);
+    // And from every top she can reach within a jump of here: the highest
+    // her feet get over this point from the nearest of it, a top being level.
+    const span = reach + 4;
+    for (let i = Math.floor((x - span) / TOP_BUCKET); i <= Math.floor((x + span) / TOP_BUCKET); i += 1) {
+      for (let j = Math.floor((z - span) / TOP_BUCKET); j <= Math.floor((z + span) / TOP_BUCKET); j += 1) {
+        for (const top of topBuckets.get(keyOf(i, j)) ?? []) {
+          const apart = Math.max(0, -top.solid.depthAt(x, z));
+          if (apart > reach) continue;
+          need = Math.max(need, top.radius + jumpRiseAt(apart) + GUARD_OVER_FEET);
+        }
+      }
+    }
+    return Math.max(0, need - ground - RAIL_TOP);
   };
 
   /** A point `side` fence offsets across the line at unwrapped `distance`, as drawn: no lift. */
@@ -409,12 +459,15 @@ export function buildRailFence(
     const z = point.z - tangent.x * side * FENCE_OFFSET;
     return { x, z, y: terrainHeight(x, z), lift: 0 };
   };
-  /** A post on a side of the line, lifted as far as every jump at it needs (`liftAt`). */
-  const sideAt = (distance: number, side: number): Post => {
-    const post = railAt(distance, side);
-    post.lift = liftAt(post.x, post.z);
-    return post;
-  };
+  /** Every run of posts, in order along it — each side of each box, each station's far fence — for `raise`. */
+  const runs: Post[][] = [];
+  /** Each box end's two cap posts, for `raise`. */
+  const caps: [Post, Post][] = [];
+  /** Each post's solid, and each bay's and cap's, so `raise` can stand them to the heights it finds. */
+  const postSolids = new Map<Post, number>();
+  const baySolids: { readonly a: Post; readonly b: Post; readonly wall: WallCollider }[] = [];
+  /** Each end cap's stubs' open ends, and the post each stands as tall as. */
+  const stubEnds: { readonly end: Post; readonly of: Post }[] = [];
   /**
    * Every wall segment this file adds goes through here.
    *
@@ -430,23 +483,28 @@ export function buildRailFence(
    * the ground (`deckSpanAt` above). A real top is that already: the deck is
    * metres above a fence rail, so nothing on it meets one.
    */
+  /** The top rail's top over a post, as a world `y`: where its bay's solid stands to there. */
+  const railTopAt = (p: Post): number => yAtAltitude(p.x, p.z, p.y + RAIL_TOP + p.lift - terrainHeight(p.x, p.z));
+  /** A post's own top, as a world `y`. */
+  const postTopAt = (p: Post): number => yAtAltitude(p.x, p.z, POST_TOP + p.lift);
   const addFenceWall = (a: Post, b: Post): void => {
     // The rail runs from one post's top to the other's, so its solid's top
     // does too: one end each (`TopSlope`), where the posts' own feet differ.
-    const topAt = (p: Post): number => yAtAltitude(p.x, p.z, p.y + RAIL_TOP + p.lift - terrainHeight(p.x, p.z));
     // Fattened to be met square; stood on only where drawn — a 9 cm rail is
     // an edge, not a ledge, so she jumps over a fence and never perches on it.
-    collision.kinded('railway fence', () =>
+    const wall = collision.kinded('railway fence', () =>
       collision.toppedNarrow(RAIL_WIDTH / 2, () =>
-        collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, topAt(a), false, true, -Infinity, false, Number.NaN, topAt(b)),
+        collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, railTopAt(a), false, true, -Infinity, false, Number.NaN, railTopAt(b)),
       ),
     );
+    baySolids.push({ a, b, wall });
   };
   /** A post at `p`, its own solid: the rail's ends stand on it. */
   const addFencePost = (p: Post): void => {
-    collision.kinded('railway fence post', () =>
-      collision.toppedNarrow(POST_TOP_RADIUS, () => collision.addCircle(p.x, p.z, POST_RADIUS, yAtAltitude(p.x, p.z, POST_TOP + p.lift), false, true)),
+    const id = collision.kinded('railway fence post', () =>
+      collision.toppedNarrow(POST_TOP_RADIUS, () => collision.addCircle(p.x, p.z, POST_RADIUS, postTopAt(p), false, true)),
     );
+    postSolids.set(p, id);
   };
   const link = (a: Post, b: Post) => {
     addFenceWall(a, b);
@@ -468,6 +526,8 @@ export function buildRailFence(
       [b, { x: b.x + (a.x - b.x) * stub, z: b.z + (a.z - b.z) * stub, y: b.y, lift: b.lift }],
     ] as const) {
       rails.push({ from, to });
+      // The stub's open end stands as its post does, however `raise` lifts it.
+      stubEnds.push({ end: to, of: from });
     }
   };
 
@@ -570,17 +630,11 @@ export function buildRailFence(
     const rights: Post[] = [];
     for (let i = 0; i <= steps; i += 1) {
       const distance = box.from + ((box.to - box.from) * i) / steps;
-      lefts.push(sideAt(distance, 1));
-      rights.push(sideAt(distance, -1));
+      lefts.push(railAt(distance, 1));
+      rights.push(railAt(distance, -1));
     }
-    for (const run of [lefts, rights]) for (let i = 1; i < run.length; i += 1) liftBay(run[i - 1] as Post, run[i] as Post);
-    for (const end of [0, steps]) {
-      const left = lefts[end] as Post;
-      const right = rights[end] as Post;
-      const lift = capLift(left, right);
-      left.lift = Math.max(left.lift, lift);
-      right.lift = Math.max(right.lift, lift);
-    }
+    runs.push(lefts, rights);
+    caps.push([lefts[0] as Post, rights[0] as Post], [lefts[steps] as Post, rights[steps] as Post]);
     for (let i = 0; i <= steps; i += 1) {
       const left = lefts[i] as Post;
       const right = rights[i] as Post;
@@ -623,9 +677,9 @@ export function buildRailFence(
       route.tangentAt(distance, tangent);
       const x = point.x + tangent.z * farSide * FENCE_OFFSET;
       const z = point.z - tangent.x * farSide * FENCE_OFFSET;
-      run.push({ x, z, y: terrainHeight(x, z), lift: liftAt(x, z) });
+      run.push({ x, z, y: terrainHeight(x, z), lift: 0 });
     }
-    for (let i = 1; i < run.length; i += 1) liftBay(run[i - 1] as Post, run[i] as Post);
+    runs.push(run);
     let previous: Post | null = null;
     for (const post of run) {
       posts.push(post);
@@ -639,7 +693,9 @@ export function buildRailFence(
   const postMaterial = toonMaterial(PALETTE.stonePink);
   const railMaterial = toonMaterial(PALETTE.stonePinkLight);
   const postMesh = new InstancedMesh(new CylinderGeometry(POST_TOP_RADIUS, POST_RADIUS, POST_LENGTH, 6), postMaterial, posts.length);
-  const railMesh = new InstancedMesh(new BoxGeometry(RAIL_WIDTH, RAIL_DEPTH, 1), railMaterial, rails.length * 2);
+  // Room for each bay's lower bar and top rail, and the rails between them a
+  // fence `raise` stands taller needs (`MID_RAIL_GAP`): drawn up to `count`.
+  const railMesh = new InstancedMesh(new BoxGeometry(RAIL_WIDTH, RAIL_DEPTH, 1), railMaterial, rails.length * (2 + MAX_MID_RAILS));
   postMesh.castShadow = false;
   railMesh.castShadow = false;
 
@@ -649,14 +705,6 @@ export function buildRailFence(
   const position = new Vector3();
   const flat = new Vector3();
   const lifted = new Vector3();
-  posts.forEach((post, index) => {
-    // A lifted post is the same post, longer: its foot where it was, its top
-    // `lift` higher.
-    flat.set(post.x, post.y + POST_MIDDLE + post.lift / 2, post.z);
-    placeOnSphere(flat, 0, position, rotation);
-    matrix.compose(position, rotation, post.lift > 0 ? lifted.set(1, (POST_LENGTH + post.lift) / POST_LENGTH, 1) : one);
-    postMesh.setMatrixAt(index, matrix);
-  });
   const stretch = new Vector3();
   const endFrom = new Vector3();
   const endTo = new Vector3();
@@ -665,51 +713,123 @@ export function buildRailFence(
   const turn = new Quaternion();
   const unused = new Quaternion();
   const atMiddle = new Vector3();
-  rails.forEach((rail, index) => {
-    const { from, to } = rail;
-    // **A rail runs from post to post: each end is where its post puts that
-    // height** — leant at the post's own foot, exactly as the post is
-    // (`placeOnSphere`), so at every post the top rail's top is the 8.5 cm
-    // under the cap it was authored at, and the drawn rail lies along the
-    // line its solid's top runs (`addFenceWall`'s `TopSlope`).
-    //
-    // It used to be placed from its own midpoint, level and leant as one
-    // piece. On the sphere that is a straight line tangent at the middle of
-    // the bay, and wherever a bay runs across the slope of the planet its ends
-    // came out up to a quarter of a metre off their posts' heights — one end
-    // through the top of its post, and somewhere in every park a top rail's
-    // top in a cap's plane (`check:coplanar`, seeds 3 and 9, 17 Oct 2026).
-    for (const [slot, centre] of [
-      [0, RAIL_CENTRE],
-      [1, TOP_RAIL_CENTRE],
-    ] as const) {
-      // The top rail rides its posts' lift; the lower bar stays at the knee.
-      flat.set(from.x, from.y + centre + (slot === 1 ? from.lift : 0), from.z);
-      placeOnSphere(flat, 0, endFrom, unused);
-      flat.set(to.x, to.y + centre + (slot === 1 ? to.lift : 0), to.z);
-      placeOnSphere(flat, 0, endTo, unused);
-      position.addVectors(endFrom, endTo).multiplyScalar(0.5);
-      along.subVectors(endTo, endFrom);
-      const length = along.length();
-      along.divideScalar(length);
-      // Turned as its middle leans it — its width level across the bay — and
-      // then swung, the least way, to lie along the line between its ends.
-      flat.set((from.x + to.x) / 2, (from.y + to.y) / 2 + centre + (slot === 1 ? (from.lift + to.lift) / 2 : 0), (from.z + to.z) / 2);
-      placeOnSphere(flat, Math.atan2(to.x - from.x, to.z - from.z), atMiddle, rotation);
-      drawnAlong.set(0, 0, 1).applyQuaternion(rotation);
-      rotation.premultiply(turn.setFromUnitVectors(drawnAlong, along));
-      stretch.set(1, 1, length);
-      matrix.compose(position, rotation, stretch);
-      railMesh.setMatrixAt(index * 2 + slot, matrix);
-    }
-  });
-  postMesh.instanceMatrix.needsUpdate = true;
-  railMesh.instanceMatrix.needsUpdate = true;
+  /** Every post and rail drawn as tall as its lift now stands. */
+  const compose = (): void => {
+    posts.forEach((post, index) => {
+      // A lifted post is the same post, longer: its foot where it was, its top
+      // `lift` higher.
+      flat.set(post.x, post.y + POST_MIDDLE + post.lift / 2, post.z);
+      placeOnSphere(flat, 0, position, rotation);
+      matrix.compose(position, rotation, post.lift > 0 ? lifted.set(1, (POST_LENGTH + post.lift) / POST_LENGTH, 1) : one);
+      postMesh.setMatrixAt(index, matrix);
+    });
+    let drawn = 0;
+    rails.forEach((rail) => {
+      const { from, to } = rail;
+      // **A rail runs from post to post: each end is where its post puts that
+      // height** — leant at the post's own foot, exactly as the post is
+      // (`placeOnSphere`), so at every post the top rail's top is the 8.5 cm
+      // under the cap it was authored at, and the drawn rail lies along the
+      // line its solid's top runs (`addFenceWall`'s `TopSlope`).
+      //
+      // It used to be placed from its own midpoint, level and leant as one
+      // piece. On the sphere that is a straight line tangent at the middle of
+      // the bay, and wherever a bay runs across the slope of the planet its ends
+      // came out up to a quarter of a metre off their posts' heights — one end
+      // through the top of its post, and somewhere in every park a top rail's
+      // top in a cap's plane (`check:coplanar`, seeds 3 and 9, 17 Oct 2026).
+      // A fence stood taller is the same fence with more rails, never a top
+      // rail over an open gap a child would read as a way through: a level
+      // rail where the top rail used to be and one every `MID_RAIL_GAP` over
+      // it, as far up as stays `MID_RAIL_CLEAR` under the top rail at both its
+      // posts.
+      const lowest = Math.min(from.lift, to.lift);
+      const mids = lowest > MID_RAIL_CLEAR ? Math.min(MAX_MID_RAILS, Math.floor((lowest - MID_RAIL_CLEAR) / MID_RAIL_GAP) + 1) : 0;
+      const levels: { centre: number; rides: boolean }[] = [
+        { centre: RAIL_CENTRE, rides: false },
+        { centre: TOP_RAIL_CENTRE, rides: true },
+      ];
+      for (let k = 0; k < mids; k += 1) levels.push({ centre: TOP_RAIL_CENTRE + k * MID_RAIL_GAP, rides: false });
+      for (const { centre, rides } of levels) {
+        // The top rail rides its posts' lift; the lower bar and the rails
+        // between stay level at their own heights.
+        flat.set(from.x, from.y + centre + (rides ? from.lift : 0), from.z);
+        placeOnSphere(flat, 0, endFrom, unused);
+        flat.set(to.x, to.y + centre + (rides ? to.lift : 0), to.z);
+        placeOnSphere(flat, 0, endTo, unused);
+        position.addVectors(endFrom, endTo).multiplyScalar(0.5);
+        along.subVectors(endTo, endFrom);
+        const length = along.length();
+        along.divideScalar(length);
+        // Turned as its middle leans it — its width level across the bay — and
+        // then swung, the least way, to lie along the line between its ends.
+        flat.set((from.x + to.x) / 2, (from.y + to.y) / 2 + centre + (rides ? (from.lift + to.lift) / 2 : 0), (from.z + to.z) / 2);
+        placeOnSphere(flat, Math.atan2(to.x - from.x, to.z - from.z), atMiddle, rotation);
+        drawnAlong.set(0, 0, 1).applyQuaternion(rotation);
+        rotation.premultiply(turn.setFromUnitVectors(drawnAlong, along));
+        stretch.set(1, 1, length);
+        matrix.compose(position, rotation, stretch);
+        railMesh.setMatrixAt(drawn, matrix);
+        drawn += 1;
+      }
+    });
+    railMesh.count = drawn;
+    postMesh.instanceMatrix.needsUpdate = true;
+    railMesh.instanceMatrix.needsUpdate = true;
+  };
+  compose();
   group.add(postMesh, railMesh);
 
   // The crossings themselves no longer get a flat timber deck here — every
   // one now has a real hump-back bridge, built and added to the scene by
   // `bridges.ts`/`ParkTrain` alongside this fence.
 
-  return group;
+  // Where the fence runs, bucketed: what "near the line" means to `raise`.
+  const POST_BUCKET = 8;
+  const postBuckets = new Set<number>();
+  for (const post of posts) postBuckets.add(keyOf(Math.floor(post.x / POST_BUCKET), Math.floor(post.z / POST_BUCKET)));
+  /** Is a solid's footprint within a jump, or a jump and a chain's first link, of any post? */
+  const nearLine = (x: number, z: number, reach: number): boolean => {
+    const span = reach + 2 * JUMP_PLAN_REACH;
+    for (let i = Math.floor((x - span) / POST_BUCKET); i <= Math.floor((x + span) / POST_BUCKET); i += 1) {
+      for (let j = Math.floor((z - span) / POST_BUCKET); j <= Math.floor((z + span) / POST_BUCKET); j += 1) {
+        if (postBuckets.has(keyOf(i, j))) return true;
+      }
+    }
+    return false;
+  };
+
+  const raise = (): void => {
+    // The tops she can reach near the line: takeoffs, as the walk's cells are.
+    topBuckets = new Map();
+    for (const top of reachableTops(collision, nearLine, walkRadius)) {
+      const span = top.solid.reach;
+      for (let i = Math.floor((top.solid.centreX - span) / TOP_BUCKET); i <= Math.floor((top.solid.centreX + span) / TOP_BUCKET); i += 1) {
+        for (let j = Math.floor((top.solid.centreZ - span) / TOP_BUCKET); j <= Math.floor((top.solid.centreZ + span) / TOP_BUCKET); j += 1) {
+          const k = keyOf(i, j);
+          let list = topBuckets.get(k);
+          if (!list) topBuckets.set(k, (list = []));
+          if (!list.includes(top)) list.push(top);
+        }
+      }
+    }
+    // Each post as tall as every jump at it needs; each bay's middle; each
+    // box's end caps, across the track.
+    for (const post of posts) post.lift = liftAt(post.x, post.z);
+    for (const run of runs) for (let i = 1; i < run.length; i += 1) liftBay(run[i - 1] as Post, run[i] as Post);
+    for (const [left, right] of caps) {
+      const lift = capLift(left, right);
+      left.lift = Math.max(left.lift, lift);
+      right.lift = Math.max(right.lift, lift);
+    }
+    for (const { end, of } of stubEnds) end.lift = of.lift;
+    // The solids to what is drawn, and what is drawn to them.
+    const postTops = new Map<number, number>();
+    for (const [post, id] of postSolids) postTops.set(id, postTopAt(post));
+    collision.retopCircles(postTops);
+    for (const { a, b, wall } of baySolids) collision.retopWall(wall, railTopAt(a), railTopAt(b));
+    compose();
+  };
+
+  return { group, raise };
 }

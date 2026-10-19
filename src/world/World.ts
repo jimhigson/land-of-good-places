@@ -416,6 +416,10 @@ export class World implements GameSystem {
     this.fairyLights = new FairyLights(this.collision, phase.fairyPoles);
     this.lampPosts = new LampPosts(this.collision, phase.lamps);
     this.railRace = phase.railRace;
+    // Everything solid beside the railway stands now — the bushes and garden
+    // walls a jump at its fence can leave from — so the fence can be stood as
+    // tall as every one of those jumps needs (PR #722's review, round two).
+    this.train.raiseGuards();
     // Living, pickable flowers — no collision, and they re-seat themselves
     // against the finished park below, so they come after everything solid.
     this.flowers = new Flowers(this.collision);

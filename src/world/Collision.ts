@@ -1836,6 +1836,53 @@ export class CollisionWorld {
   }
 
   /**
+   * **Stands circles registered with {@link addCircle} to new absolute tops**,
+   * by the ids it handed back — the same objects, so everything holding one
+   * still holds the live collider. For a guard whose height is only known once
+   * the park round it is finished: the railway's fence, sized against every
+   * top she can reach beside it (`train/fence.ts`'s `raise`).
+   */
+  retopCircles(tops: ReadonlyMap<number, number>): void {
+    if (!tops.size) return;
+    for (const circle of this.circles) {
+      const top = tops.get(circle.id);
+      if (top === undefined || !circle.topIsAbsolute) continue;
+      circle.topHeight = top;
+      circle.topRadius = radiusFor(circle.x, circle.z, top);
+    }
+    this.revisionCounter += 1;
+  }
+
+  /**
+   * **Stands a wall {@link addWall} returned to new absolute tops**, one at
+   * each end (`topHeightEnd`, as `addWall` takes it) — see {@link retopCircles}.
+   */
+  retopWall(wall: WallCollider, topHeight: number, topHeightEnd = Number.NaN): void {
+    if (!wall.topIsAbsolute) return;
+    const sloped = Number.isFinite(topHeight) && Number.isFinite(topHeightEnd);
+    wall.topHeight = sloped ? (topHeight + topHeightEnd) / 2 : topHeight;
+    wall.topRadius = radiusFor((wall.x1 + wall.x2) / 2, (wall.z1 + wall.z2) / 2, wall.topHeight);
+    if (sloped) {
+      const r1 = radiusFor(wall.x1, wall.z1, topHeight);
+      const r2 = radiusFor(wall.x2, wall.z2, topHeightEnd);
+      const radial = !Number.isNaN(r1) && !Number.isNaN(r2);
+      wall.topSlope = {
+        x1: wall.x1,
+        z1: wall.z1,
+        dx: wall.x2 - wall.x1,
+        dz: wall.z2 - wall.z1,
+        lengthSquared: (wall.x2 - wall.x1) ** 2 + (wall.z2 - wall.z1) ** 2,
+        top1: radial ? r1 : topHeight,
+        top2: radial ? r2 : topHeightEnd,
+        radial,
+      };
+    } else {
+      delete wall.topSlope;
+    }
+    this.revisionCounter += 1;
+  }
+
+  /**
    * Takes back a wall {@link addWall} returned — a locked door opening.
    * `thinnestHalfWidth` is left as the running minimum it was; it can only be
    * conservative after a removal, never wrong.

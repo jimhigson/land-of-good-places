@@ -6,6 +6,7 @@ import { clamp01, smoothstep } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, yAtAltitude } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
+import { roundTopHalf } from './measuredTop';
 
 /**
  * Cute curly cast-iron-style lamp posts, standing just off the paths.
@@ -193,8 +194,15 @@ export class LampPosts implements GameSystem {
     for (const [x, z] of positions) {
       const ground = terrainHeight(x, z);
       this.lampPositions.push(new Vector3(x, ground, z));
-      // Solid to the top of its finial — far over her reach, and a real height.
-      collision.kinded('lamp post', () => collision.addCircle(x, z, LAMP_RADIUS, yAtAltitude(x, z, LAMP_TOP), false, true));
+      // Solid to the top of its finial — far over her reach, and a real height
+      // — and its top is the finial's: a ball's crown, too narrow for her
+      // feet (`roundTopHalf`). As a lamp-wide disc it was the first link of a
+      // chain of lamp posts and fairy-light poles, eight metres apart, that
+      // carried a jump envelope across the park onto a station's roof (the
+      // railway fence's takeoffs, PR #722 round three).
+      collision.kinded('lamp post', () =>
+        collision.toppedNarrow(roundTopHalf(FINIAL_RADIUS), () => collision.addCircle(x, z, LAMP_RADIUS, yAtAltitude(x, z, LAMP_TOP), false, true)),
+      );
     }
     const count = this.lampPositions.length;
 

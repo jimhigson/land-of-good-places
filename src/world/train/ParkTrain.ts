@@ -14,7 +14,7 @@ import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
 import { rideFrame } from '../rail/sweptRail';
 import { computeCrossings, type LevelCrossing } from './crossings';
-import { GUARD_RAIL_WIDTH, buildRailFence } from './fence';
+import { GUARD_RAIL_WIDTH, buildRailFence, type RailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
 import { BRIDGE_WALL_THICKNESS } from './bridgeFootprint';
 import { SmokePuffs } from './puffs';
@@ -214,6 +214,9 @@ export class ParkTrain implements GameSystem, TrainService {
    */
   readonly dwellFloors: readonly MovingPlatform[];
 
+  /** The fence, built; its heights are `raiseGuards`'s. */
+  private readonly fence: RailFence;
+
   /**
    * @param walkSurface The highest surface she can walk on at `(x, z)` — the
    *   ground, a path, a building's plinth — as the world has registered it by
@@ -376,16 +379,16 @@ export class ParkTrain implements GameSystem, TrainService {
 
     // --- the fence (Decision 4 §6: keeping feet off the track) -------------
     // Built last of all the trackside furniture, so it can seam around every
-    // bridge and gap for every platform.
-    this.group.add(
-      buildRailFence(
-        this.route,
-        collision,
-        this.bridges,
-        this.stations.map((station, k) => ({ distance: station.distance, platform: station.asPlatform(), floors: dwell[k] ?? [] })),
-        walkSurface,
-      ),
+    // bridge and gap for every platform. Its height is `raiseGuards`'s, once
+    // the park round the line stands.
+    this.fence = buildRailFence(
+      this.route,
+      collision,
+      this.bridges,
+      this.stations.map((station, k) => ({ distance: station.distance, platform: station.asPlatform(), floors: dwell[k] ?? [] })),
+      walkSurface,
     );
+    this.group.add(this.fence.group);
 
     // Start standing at the first station, so the first thing a child sees is a
     // train waiting for them rather than one disappearing round a corner.
@@ -397,6 +400,16 @@ export class ParkTrain implements GameSystem, TrainService {
 
     this.placeCars();
     setTrainService(this);
+  }
+
+  /**
+   * **Stands the railway's fence as tall as every jump at it needs** — from the
+   * walk beside it and from every top she can reach near it (`RailFence.raise`).
+   * Asked once, by `World`, when everything solid in the park stands: the
+   * bushes and garden walls beside the line are planted after the railway.
+   */
+  raiseGuards(): void {
+    this.fence.raise();
   }
 
   /** Platforms, carriage floors and every bridge deck/tread, for
