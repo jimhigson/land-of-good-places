@@ -500,6 +500,25 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
   (commit 9b3a0b2f). PR body updated (/tmp/es-pr-body4.md); comment issuecomment-6265606013.
 - Sixteen parks at 8adc1ea3: 12 green; red 6 (awning), 9 (walk-off squeeze), 11 (awning + walk-off squeeze), 15 (bench).
 
+## PAUSED 19 Oct 2026 (Jim: token usage at 92%) — resume here
+- The engineer was stopped mid-task; the worktree was clean and everything is pushed (feat/engine-solids @ 23680ecf).
+  PR #722's head (feat/engine-solids-pr) is still 8e8d318a, which predates round four. The tunnel commits and all
+  of round four are unverified by QA.
+- Was doing: "the every-station case and its proof" for check:solids clause 8 (see the Round four section).
+  Proof batch script: /tmp/es-proofs9/run.sh (logs may not survive a reboot; re-run it).
+- To finish:
+  - round four's TODO list below: the census excludes moving bodies; the clause-8 every-station case;
+    every proof red;
+  - the local check, test:procgen and build;
+  - move the PR head (feat/engine-solids-pr) and get CI green;
+  - one combined review+QA pass on the new head, covering the tunnel walk (a deep link just before a bridge),
+    boarding the train with 3 pets (one beside her, two in the backpack), a lap, getting off, walking into and
+    standing on the stopped solid train, plus round three's fixes;
+  - then Jim's yes and the merge.
+- Jim's rulings on this PR are all recorded as PR comments. Two that bind:
+  - "maybe check with me first": no new blocker or guard without asking him;
+  - "I just don't want the world to feel fenced in with tall fences".
+
 ## Round four (19 Oct, afternoon): pets on rides + solid trains (coordinator BLOCKER + Jim's rulings)
 - Jim: "all the pets except one jump into her backpack on getting on any ride, then one rides on the seat
   alongside the player"; "also solid trains". Longer trains DROPPED (next PR, not ours).
