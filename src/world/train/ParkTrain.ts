@@ -10,6 +10,8 @@ import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact'
 import type { MovingPlatform } from '../building/surfaces';
 import { TRACK_CLEARANCE, TrainRoute } from './route';
 import { distanceToRailCorridor, TRAIN_PLAN } from './plan';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './clearance';
+import { terrainHeight } from '../terrain';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
@@ -569,6 +571,17 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 
   /**
+   * **Is a body down on the track itself** — on the line, and not on a
+   * platform beside it: a child of the crowd pushed off a platform's edge, who
+   * must be got off it (`NpcSystem.offTheLine`). One waiting on the platform,
+   * however near its edge, is where she should be.
+   */
+  downOnTheLine(x: number, y: number, z: number, radius: number): boolean {
+    const near = this.nearLine(x, y, z);
+    return near !== null && !near.onPlatform && near.lateral <= ON_THE_LINE + radius;
+  }
+
+  /**
    * Where along the route a body near the line is, metres, how far from its
    * middle, and whether it stands on a platform — `null` for one that is not
    * on the line by the widest reach ({@link ON_THE_LINE}).
@@ -916,6 +929,35 @@ export class ParkTrain implements GameSystem, TrainService {
   leaveSeat(seat: number): void {
     const entry = this.seats[seat];
     if (entry && entry.taken === 'npc') entry.taken = null;
+  }
+
+  wayOff(x: number, z: number, radius: number): { readonly x: number; readonly z: number } {
+    const at = this.route.distanceNear(x, z);
+    this.route.pointAt(at, this.point);
+    this.route.tangentAt(at, this.tangent);
+    // Square off the line, out past its fence, on either side; the side she
+    // is on first.
+    const acrossX = this.tangent.z;
+    const acrossZ = -this.tangent.x;
+    const onSide = (x - this.point.x) * acrossX + (z - this.point.z) * acrossZ >= 0 ? 1 : -1;
+    const out = FENCE_OFFSET + FENCE_HALF_THICKNESS + radius + 0.3;
+    for (const side of [onSide, -onSide]) {
+      const ox = this.point.x + acrossX * side * out;
+      const oz = this.point.z + acrossZ * side * out;
+      const y = terrainHeight(ox, oz);
+      if (this.collision.isClearCircle(ox, oz, radius) && this.collision.clearOfBoundary(ox, oz, radius) && !this.onTheLine(ox, y, oz, radius)) return { x: ox, z: oz };
+    }
+    // Hemmed in either side: the nearest platform's waiting spot.
+    let best = { x: this.stations[0]?.waitX ?? x, z: this.stations[0]?.waitZ ?? z };
+    let nearest = Infinity;
+    for (const station of this.stations) {
+      const gap = Math.hypot(station.waitX - x, station.waitZ - z);
+      if (gap < nearest) {
+        nearest = gap;
+        best = { x: station.waitX, z: station.waitZ };
+      }
+    }
+    return best;
   }
 
   // ---------------------------------------------------------------- internals

@@ -65,6 +65,22 @@ export interface TrainService {
 
   /** Gives the seat up. Safe to call twice. */
   leaveSeat(seat: number): void;
+
+  /** Is a body standing here on the line? — the train's own answer (`ParkTrain.onTheLine`). */
+  onTheLine(x: number, y: number, z: number, radius: number): boolean;
+
+  /** Is a body down on the track itself — on the line and not on a platform? (`ParkTrain.downOnTheLine`) */
+  downOnTheLine(x: number, y: number, z: number, radius: number): boolean;
+
+  /**
+   * **The nearest place off the line** for a child of the crowd stood on it
+   * — pushed off a platform's edge, say, by a player running about on it —
+   * where she is clear of everything and of the line: beside it, out past its
+   * fence, or else on the nearest platform. The train waits for anybody on
+   * the line ahead of it, so a child who could not get off it would hold it
+   * there for ever.
+   */
+  wayOff(x: number, z: number, radius: number): { readonly x: number; readonly z: number };
 }
 
 let current: TrainService | null = null;

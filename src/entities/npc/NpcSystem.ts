@@ -18,7 +18,8 @@ import type { IsoCamera } from '../../core/IsoCamera';
 import { circleSeparation, MAX_DEPENETRATION_SPEED, separatedByHeight, type CollisionWorld } from '../../world/Collision';
 import { NPC_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import type { OnTheLine } from '../../world/train/ParkTrain';
-import type { TrainPassenger } from '../../world/train/service';
+import { trainService, type TrainPassenger } from '../../world/train/service';
+import { terrainHeight } from '../../world/terrain';
 import type { GroundSampler, Player } from '../Player';
 import { CharacterModel } from '../CharacterModel';
 import { ParadeMember } from '../parade/ParadeMember';
@@ -515,6 +516,8 @@ export class NpcSystem implements GameSystem {
    * instance of exactly this.
    */
   private readonly elsewhere = new Set<NpcCharacter>();
+  /** How long each child of the crowd has stood on the railway — see {@link offTheLine}. */
+  private readonly onLineFor = new Map<NpcCharacter, number>();
   /** Who was marked on the *previous* frame — see the guard in
    *  {@link markWhoIsElsewhere}, which needs a transition, not a state. */
   private readonly wasElsewhere = new Set<NpcCharacter>();
@@ -977,6 +980,7 @@ export class NpcSystem implements GameSystem {
 
     this.separate(dt);
     this.separateFromPlayer(dt);
+    this.offTheLine(dt);
 
     for (const character of this.characters) {
       character.syncTransform();
@@ -1154,6 +1158,39 @@ export class NpcSystem implements GameSystem {
       character.position.x -= dx;
       character.position.z -= dz;
       player.nudge(dx, dz);
+    }
+  }
+
+  /**
+   * **A child of the crowd never stays on the railway.** None walks onto it
+   * — no route crosses its corridor — but one can be pushed there: off a
+   * platform's edge by a player running about on it, onto a track bed lower
+   * than she can step back up from. The train stops for anybody on the line
+   * ahead of it (`ParkTrain.wayAhead`), so a child left there would hold it
+   * for ever. After {@link OFF_THE_LINE_SECONDS} there she is set down off it,
+   * where the train says is clear (`TrainService.wayOff`).
+   */
+  private offTheLine(dt: number): void {
+    const service = trainService();
+    if (!service) return;
+    for (const character of this.characters) {
+      if (this.elsewhere.has(character) || onTheTrain(character) || character.climbing || character.scripted || character.seated) {
+        this.onLineFor.delete(character);
+        continue;
+      }
+      const at = character.position;
+      if (!service.downOnTheLine(at.x, at.y, at.z, NPC_RADIUS)) {
+        this.onLineFor.delete(character);
+        continue;
+      }
+      const since = (this.onLineFor.get(character) ?? 0) + dt;
+      if (since < OFF_THE_LINE_SECONDS) {
+        this.onLineFor.set(character, since);
+        continue;
+      }
+      this.onLineFor.delete(character);
+      const off = service.wayOff(at.x, at.z, NPC_RADIUS);
+      at.set(off.x, terrainHeight(off.x, off.z), off.z);
     }
   }
 
@@ -1671,3 +1708,6 @@ function onTheTrain(character: NpcCharacter): boolean {
   const seat = (character.driver as Partial<TrainPassenger>).trainSeat;
   return seat !== null && seat !== undefined;
 }
+
+/** How long a child of the crowd may stand on the railway before she is set down off it — see `NpcSystem.offTheLine`. */
+const OFF_THE_LINE_SECONDS = 3;
