@@ -707,8 +707,9 @@ if (SKIP_CENSUS) {
       let sims = 0;
       let fromTops = 0;
       const inBox: string[] = [];
-      const trappedOnTrack: string[] = [];
       let onTrack = 0;
+      /** Each landing spot inside the fences (to a decimetre), and whether she got out of it. */
+      const escapes = new Map<string, boolean>();
       for (const top of result.tops) {
         const from = top.at;
         const near: typeof guardPoints = [];
@@ -737,15 +738,17 @@ if (SKIP_CENSUS) {
             if (off > FENCE_OFFSET - 0.1) continue;
             if (landed.y > terrainHeight(landed.x, landed.z) + 2.5) continue; // a bridge's deck over the line
             const how = `${top.solid.kind || top.solid.owner || 'a top'} (${top.how}) from ${run.link(from)} at ${point.solid.kind} (${point.x.toFixed(1)}, ${point.z.toFixed(1)}), jumping ${jumpAt.toFixed(1)} m out: came down at (${landed.x.toFixed(2)}, ${landed.z.toFixed(2)}), ${off.toFixed(2)} m off the rail's centre`;
-            if (collision.closedAt(landed.x, landed.z)) {
-              inBox.push(how);
-              continue;
-            }
-            // A station's own track, open for boarding: she must get back out.
-            onTrack += 1;
+            // Inside the fences: a box she cannot get out of, or a station's
+            // own track, open for boarding, that she walks or jumps back out
+            // of. Told apart by trying — not by the corridor's closure, whose
+            // rounded end reaches past a box's end cap onto the station's
+            // track (seed 5: a run off a platform bench, along the open track,
+            // read as a box landing a metre short of the cap).
+            const key = `${landed.x.toFixed(1)},${landed.z.toFixed(1)}`;
+            const known = escapes.get(key);
             const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
-            let out = outside(landed);
-            if (!out) {
+            let out = known ?? outside(landed);
+            if (known === undefined && !out) {
               try {
                 out = reachWithJumps({
                   collision,
@@ -760,17 +763,15 @@ if (SKIP_CENSUS) {
                 out = false;
               }
             }
-            if (!out) trappedOnTrack.push(how);
+            escapes.set(key, out);
+            if (out) onTrack += 1;
+            else inBox.push(`${how}${collision.closedAt(landed.x, landed.z) ? '' : ' (no closure there)'}`);
           }
         }
       }
       say(
         inBox.length === 0,
-        `the railway's boxes are out of reach from every top: ${sims} run-and-jumps from the ${fromTops} tops she reaches within a sprint-jump of a guard, at ${guardPoints.length} guard points: ${inBox.length} came down inside a box${inBox.length ? `:\n${inBox.slice(0, 8).map((h) => `      ${h}`).join('\n')}` : ''}`,
-      );
-      say(
-        trappedOnTrack.length === 0,
-        `of them, ${onTrack} came down on a station's open track, and she gets back out of every one${trappedOnTrack.length ? ` — ${trappedOnTrack.length} not:\n${trappedOnTrack.slice(0, 6).map((h) => `      ${h}`).join('\n')}` : ''}`,
+        `the railway's boxes are out of reach from every top: ${sims} run-and-jumps from the ${fromTops} tops she reaches within a sprint-jump of a guard, at ${guardPoints.length} guard points: ${inBox.length} came down inside a box, with no way back out${inBox.length ? `:\n${inBox.slice(0, 8).map((h) => `      ${h}`).join('\n')}` : ''} (${onTrack} came down inside the fences on a station's open track and got back out)`,
       );
       note(`clause 4c, seed ${PARK_SEED_ASKED}: ${inBox.length} box landing(s) from ${sims} run-and-jumps (${fromTops} tops, ${guardPoints.length} guard points), ${onTrack} on a station's open track, ${((performance.now() - t4c) / 1000).toFixed(0)} s`);
     }

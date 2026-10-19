@@ -46,6 +46,10 @@ const WALK_RINGS = [0.3, 1, 2, 3] as const;
 const CHAIN_GAP = 6;
 /** The highest she chains up from one top to the next, metres: the census's own. */
 const CHAIN_RISE = 1.6;
+/** How much short of her height the room over a top may be and it still count — see its use. */
+const HEADROOM_SPARE = 0.2;
+/** Points a side of the grid a top is measured on across its footprint's square. */
+const TOP_GRID = 9;
 /** Bearings the walk round a top is sampled on. */
 const WALK_BEARINGS = 16;
 
@@ -73,18 +77,21 @@ export function reachableTops(
     if (!solid.topIsAbsolute || !Number.isFinite(solid.topHeight)) return;
     if (spaceAt(solid.centreX, solid.centreZ) !== SPACE_GARDEN) return;
     if (!near(solid.centreX, solid.centreZ, solid.reach)) return;
-    // Its top over its footprint, a few points across it, where her feet fit.
+    // Its top over its footprint, on a grid across it, where her feet fit: a
+    // long wall's top falls along a slope, and its high end is where a jump
+    // from it leaves highest (seed 5's stone wall by the line: measured at its
+    // middle, 3 cm short of where her census stood on it).
     let lowest = Infinity;
     let highest = -Infinity;
-    for (let k = -1; k < 8; k += 1) {
-      const a = (k / 8) * Math.PI * 2;
-      const d = k < 0 ? 0 : solid.reach * 0.8;
-      const x = solid.centreX + Math.cos(a) * d;
-      const z = solid.centreZ + Math.sin(a) * d;
+    for (let k = 0; k < TOP_GRID * TOP_GRID; k += 1) {
+      const x = solid.centreX + solid.reach * ((2 * (k % TOP_GRID)) / (TOP_GRID - 1) - 1);
+      const z = solid.centreZ + solid.reach * ((2 * Math.floor(k / TOP_GRID)) / (TOP_GRID - 1) - 1);
       if (solid.depthAt(x, z) < 0 || !solid.standsAt(x, z)) continue;
-      // Room for all of her over it: a post under a canopy is no top.
+      // Room for all of her over it: a post under a canopy is no top. Asked
+      // with a hand's breadth to spare, so that a bench under a station's
+      // canopy, which her census stands on, is not refused on a centimetre.
       const top = solid.topAt(x, z);
-      if (collision.ceilingAt(x, z, top + 1e-3) - top < KID_HEIGHT) continue;
+      if (collision.ceilingAt(x, z, top + 1e-3) - top < KID_HEIGHT - HEADROOM_SPARE) continue;
       const r = planetRadiusAt(x, top, z);
       lowest = Math.min(lowest, r);
       highest = Math.max(highest, r);

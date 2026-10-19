@@ -231,6 +231,12 @@ export function nearestFit(
   fits: (x: number, z: number) => boolean = () => true,
 ): boolean {
   if (wedgeDepth(collision, position, feetY) <= WEDGE_DEPTH) return false;
+  // Only a squeeze: overlap one push gets her out of is `resolve`'s, next
+  // frame, the way it always was — a wall she hops comes down solid round
+  // her, and is left to push her off itself as it always has.
+  fitProbe.copy(position);
+  collision.resolve(fitProbe, PLAYER_RADIUS, 0, 1, undefined, KID_HEIGHT, feetY);
+  if (wedgeDepth(collision, fitProbe, feetY) <= WEDGE_DEPTH) return false;
   for (const ring of FIT_RINGS) {
     for (let b = 0; b < FIT_BEARINGS; b += 1) {
       const a = (b / FIT_BEARINGS) * Math.PI * 2;
