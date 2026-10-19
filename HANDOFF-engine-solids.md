@@ -543,3 +543,14 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
 - check:solids clause 8 rewritten through Game's wiring (real Player+Parade, attachPlayer/attachParade), margin
   = 2*PLAYER_RADIUS; clause 13 solid train. Proofs added: pets-count-aboard, pets-stay-out, ghost-train,
   frozen-train, train-ignores-on-top, put-down-ignores-train (+ train-ignores-her/-pets(M5: parade null)/-npcs).
+- Later still (19 Oct evening): 97444d7f hover rescue (airborne >= 1 s within 0.5 m, not flying -> teleportTo
+  through the put-down rule: the 0.42 m slot between cars ping-ponged squeeze lift <-> resolver; NO invisible
+  coupling blocker added, per Jim's rule); riders giving up a seat on the last stopped frame are set down at the
+  NEAREST platform; PLATFORM_BESIDE = body middle inside 0.8 (touching its side never holds it). 4715101a
+  NpcSystem.offTheLine: a crowd child on the line 3 s is set down off it (TrainService.downOnTheLine/wayOff).
+  9e67c505 check:exits companions on every holder + every ride ridden to its end (+ EXITS_PROVE in 01d1a06a).
+- 01d1a06a check:solids clauses 8 + 13 committed. Seed 5 park (SOLIDS_SKIP_CENSUS=1, 27 s): 8 and 13 all green.
+  Standing on it: only a carriage's MIDDLE fits her (backrests 0.70 m either side, she is 0.62); a seated rider
+  shoulders her off (separateFromPlayer: rider = furniture), Sunny Side's free carriage is under the canopy, so
+  the clause waits for a stop with a free carriage beside the platform (seed 5: Bluebell Halt, carriage 2).
+- Proof batch: /tmp/es-proofs9/run.sh (9 solids park proofs + 3 exits proofs, logs alongside).
