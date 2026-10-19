@@ -26,20 +26,21 @@
  * 4. **The census.** Every top she can reach, jumps and chains of jumps
  *    included (`lib/solidReach.mts`), in the park and inside every building,
  *    grouped by kind with a deep link to one of each. No escape is reached —
- *    a roof, an enclosure, the railway (its corridor, or any place inside its
- *    fences), the edge of a space — and every region she can drop into, she
- *    can leave. A guard stood on but not passed (a fence's top, a bridge's
- *    parapet) is reported on stderr, not failed: what it guards is asserted.
+ *    a roof, an enclosure, the edge of a space — and every region she can
+ *    drop into, she can leave. **The line is open** (Jim, 19 Oct 2026): she
+ *    may hop its fence onto the track and back, so from every point along it
+ *    she gets off it again, walking or hopping its fence; how many places on
+ *    it the census reaches is said on stderr. A fence's top or a bridge's
+ *    parapet stood on is reported there too, not failed.
  * 5. **Marches.** Every kind of solid this rework added is walked at from
  *    sixteen bearings at 5 cm and at `PLAYER_LONGEST_STEP`, and no body ends up
  *    inside one below its top.
  * 6. **Headroom.** Every top she can reach has room for all of her over it.
  * 7. **The boundary at height.** The park's edge holds a body pushed at it at
  *    every height from the grass to ten metres up.
- * 8. **Guards.** No sprint-jump at the railway's fence or a bridge's railing
- *    clears it, from anywhere she can run within a jump of it, either side
- *    (`lib/guardReach.mts`, against `world/jumpReach.ts`'s highest her feet
- *    can get); and her own sprint-jumps at the closest calls never cross one.
+ * 8. **The train.** Standing on the line ahead of it — at a station and out
+ *    on the loop — the train stops short of her by a safe margin, waits, and
+ *    goes on once she has gone (`ParkTrain.keepClearOf`).
  * 9. **Along the tops.** She walks every wall top and rim she reaches end to
  *    end without the auto-hop throwing her off, and walks up every hoppable
  *    wall where it stands a step high instead of hopping it.
@@ -60,9 +61,8 @@ import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { indexDrawnTops } from './lib/drawnTops.mts';
 import { reachWithJumps, joinsMain, runAndJump, type ReachCost, type ReachedTop, type Stand } from './lib/solidReach.mts';
-import { GUARD_KINDS, measureGuards } from './lib/guardReach.mts';
-import { GUARD_MARGIN, JUMP_PLAN_REACH } from '../src/world/jumpReach.ts';
-import { RAILWAY_GUARD_TOP } from '../src/world/train/fence.ts';
+import { TRAIN_STOPS_SHORT } from '../src/world/train/ParkTrain.ts';
+import type { FrameContext } from '../src/core/types.ts';
 import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe, type HopProbe } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
@@ -79,7 +79,7 @@ import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/worl
 import { REPTILE_ARRIVAL_X, REPTILE_ARRIVAL_Z, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z } from '../src/world/reptileHouse/layout.ts';
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
-import { altitudeAt, planetRadiusAt, terrainHeight } from '../src/world/terrain.ts';
+import { altitudeAt, terrainHeight } from '../src/world/terrain.ts';
 import { carryReference, riseBetween } from '../src/world/building/stepReach.ts';
 import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHeight } from '../src/world/standing.ts';
 
@@ -92,9 +92,9 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  *   half a metre over its drawn seat — clause 2 finds her standing on air.
  * - `too-tall` (core): the precedent bench made 1 m taller — clause 3 cannot
  *   land.
- * - `rail-step`, `low-roof`, `low-exhibit` (park): a step by the gate carrying
- *   the kind of the railway's corridor, a stall's roof, an exhibit — each of
- *   clause 4's escapes must find her on it.
+ * - `low-roof`, `low-exhibit` (park): a step by the gate carrying the kind of
+ *   a stall's roof, an exhibit — each of clause 4's escapes must find her on
+ *   it.
  * - `trap` (core): a ring of tall walls round a castle crate, so dropping off
  *   the crate leaves her nowhere to go — clause 4's trap clause.
  * - `ghost` (core): a bench drawn and never registered — clause 5's march
@@ -109,22 +109,10 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  *   ring round the gate — clause 4 must name every one.
  * - `new-roof` (core): a step kinded `proof: a garage roof`, named like a roof
  *   and in neither list — clause 4a.
- * - `fence-crate` (park): a crate a metre tall against the fence post nearest
- *   the gate — clause 4 must find her over the fence, on the line.
- * - `guards-alone` (park): every top as wide as its footprint, so no rail is
- *   kept from being stood on by how narrow it is — the one proof that must
- *   stay **green** on the railway (heights alone hold it); clause 2 goes red
- *   where the widened rails are stood on.
- * - `low-guard` (park): a run of `railway fence` 3 m long and a metre over the
- *   grass in front of the gate — clause 8's measure and her sprint-jumps.
- * - `fence-bush` (park): a bush, 1.2 m tall, its middle 2 m off the railway
- *   fence nearest the gate, planted after the fence was raised — clause 4c's
- *   run-and-jumps from it must come down inside a box, and clause 8's measure
- *   must find the fence short of it (PR #722's review, round two).
- * - `fences-4m` (park): every railway fence bay and post given a twin four
- *   metres taller — clause 4c's own control, which must stay **green**: with
- *   no fence anyone can clear, its run-and-jumps find no box to land in, so a
- *   box landing it reports is one over a fence, never one it made up.
+ * - `sealed-line` (park): every railway fence bay and post given a twin four
+ *   metres taller, and each box's end closed across the track as tall — a
+ *   fence raised above her jump — so off the line there is no way: clause 4's
+ *   line must find points she cannot get off it from.
  * - `blind-hop` (park): the auto-hop judged from nothing, as it was — clause 9.
  * - `no-crack-rules` (park): her census's girl with nothing to keep her out
  *   of a crack she does not fit — no step-down hold, no walk into a wedge
@@ -144,6 +132,8 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  *   one frame clock and a step on another, and a step-high face hopped. Seed 5
  *   has no face near the line on a slope, so it is green there: run it on seed
  *   6 (`LGP_SEED=6`), whose stone wall at (22.9, 0.5) it must find.
+ * - `train-ignores-her` (park): the train told of nobody on the line — clause 8
+ *   must find it run into her.
  * - `spawn-highest` (park): a spawn asked from `Infinity`, as it was — clause 10.
  * - `single-step`, `drawn-feet` (core): the step-up's one point past her front
  *   edge, and her drawn height as her feet, as each was — clause 11.
@@ -152,8 +142,8 @@ const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 /** Every proof this script knows: a name it does not know would run the check unbroken, and a proof that comes back green proves nothing. */
 const PROOFS = [
   'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
-  'reptile-roof', 'every-roof', 'new-roof', 'fence-crate', 'guards-alone', 'low-guard', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
-  'fence-bush', 'fences-4m', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
+  'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
+  'sealed-line', 'train-ignores-her', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -299,71 +289,38 @@ const ROOF_KINDS: Readonly<Record<string, string>> = {
     }
     collision.kinded("proof: the pit's floor", () => collision.addCircle(cx, cz, 1.3, g + 0.8, false, true));
   }
-  if (PROVE === 'rail-step') stepNearGate('railway corridor');
-  // **The railway's guards, by height alone** (PR #722's review): every top as
-  // wide as its footprint — the width rule off, so no rail, post or parapet is
-  // kept from being stood on by how narrow it is. The corridor between the
-  // fences is a closure, never a body, so nothing invisible holds her either.
-  // What must hold her off the line is then the height of the fence and the
-  // railings she can see: the railway clause stays green. (The one proof that
-  // edits solids in place, by design; the clauses about where she stands go
-  // red with rails for floors, as they should.)
-  if (PROVE === 'guards-alone') collision.everyTopWide();
-  // ... and its control: a crate a metre tall against the fence nearest the
-  // gate, the kind of thing that lets her over a fence — from its top a jump
-  // clears the fence, and the railway clause must see her land on the line.
-  if (PROVE === 'fence-crate') {
+  // **A fence raised above her jump** — the line's own control: every bay and
+  // post of the railway's fence twinned four metres taller, and each box's
+  // end closed across the track as tall (each end cap's stub, run on across
+  // to the far post). Off the line there is then no way but along it to a
+  // platform, so the line's clause must find points she cannot leave.
+  if (PROVE === 'sealed-line') {
     const route = world.train.route;
-    const post = before
-      .filter((s) => s.kind === 'railway fence post')
-      .sort((a, b) => Math.hypot(a.centreX - ENTRANCE_PLAYER_X, a.centreZ - ENTRANCE_PLAYER_Z) - Math.hypot(b.centreX - ENTRANCE_PLAYER_X, b.centreZ - ENTRANCE_PLAYER_Z))[0];
-    if (post) {
-      const rail = route.pointAt(route.distanceNear(post.centreX, post.centreZ), new Vector3());
-      const out = Math.hypot(post.centreX - rail.x, post.centreZ - rail.z) || 1;
-      const ux = (post.centreX - rail.x) / out;
-      const uz = (post.centreZ - rail.z) / out;
-      const cx = post.centreX + ux * (post.reach + 0.75);
-      const cz = post.centreZ + uz * (post.reach + 0.75);
-      collision.kinded('proof: a crate against the fence', () => collision.addBox(cx, cz, 0.6, 0.6, Math.atan2(ux, uz), 0, sample(cx, cz, 50) + 1.0, false, true));
-    }
-  }
-  // **A fence she can jump** — clause 8's own control, both halves of it: a
-  // run of fence 3 m long and a metre over the grass, on the open ground in
-  // front of the gate. A jump clears it, so the instrument must say so, and
-  // her own sprint-jumps at it must come down past it.
-  if (PROVE === 'low-guard') {
-    const cx = ENTRANCE_PLAYER_X;
-    const cz = ENTRANCE_PLAYER_Z - 8;
-    collision.kinded('railway fence', () => collision.addWall(cx - 1.5, cz, cx + 1.5, cz, 0.09, sample(cx, cz, 50) + 1.0, false, true));
-  }
-  // A bush beside the fence nearest the gate, planted after the fence was
-  // stood to what it must stop: from its top, a sprint-jump over the fence.
-  if (PROVE === 'fence-bush') {
-    const route = world.train.route;
-    const post = before
-      .filter((s) => s.kind === 'railway fence post')
-      .sort((a, b) => Math.hypot(a.centreX - ENTRANCE_PLAYER_X, a.centreZ - ENTRANCE_PLAYER_Z) - Math.hypot(b.centreX - ENTRANCE_PLAYER_X, b.centreZ - ENTRANCE_PLAYER_Z))[0];
-    if (post) {
-      const rail = route.pointAt(route.distanceNear(post.centreX, post.centreZ), new Vector3());
-      const out = Math.hypot(post.centreX - rail.x, post.centreZ - rail.z) || 1;
-      const cx = post.centreX + ((post.centreX - rail.x) / out) * 2;
-      const cz = post.centreZ + ((post.centreZ - rail.z) / out) * 2;
-      collision.kinded('bush', () => collision.addCircle(cx, cz, 0.85, sample(cx, cz, 50) + 1.2, false, true));
-    }
-  }
-  // Every railway fence bay and post, twinned four metres taller.
-  if (PROVE === 'fences-4m') {
+    const rail = new Vector3();
+    const tangent = new Vector3();
     for (const guard of before) {
       if (guard.kind !== 'railway fence' && guard.kind !== 'railway fence post') continue;
-      const top = guard.topAt(guard.centreX, guard.centreZ) + 4;
       if (guard.shape === 'circle') {
+        const top = guard.topAt(guard.centreX, guard.centreZ) + 4;
         collision.kinded(guard.kind, () => collision.toppedNarrow(0.05, () => collision.addCircle(guard.centreX, guard.centreZ, guard.halfWidth, top, false, true)));
-      } else {
-        const seg = guardSegment(guard);
-        collision.kinded(guard.kind, () =>
-          collision.toppedNarrow(0.05, () => collision.addWall(seg.ax, seg.az, seg.bx, seg.bz, guard.halfWidth, guard.topAt(seg.ax, seg.az) + 4, false, true, -Infinity, false, Number.NaN, guard.topAt(seg.bx, seg.bz) + 4)),
-        );
+        continue;
       }
+      const seg = guardSegment(guard);
+      collision.kinded(guard.kind, () =>
+        collision.toppedNarrow(0.05, () => collision.addWall(seg.ax, seg.az, seg.bx, seg.bz, guard.halfWidth, guard.topAt(seg.ax, seg.az) + 4, false, true, -Infinity, false, Number.NaN, guard.topAt(seg.bx, seg.bz) + 4)),
+      );
+      // A cap's stub runs across the line: on to its mirror over the middle.
+      const mx = (seg.ax + seg.bx) / 2;
+      const mz = (seg.az + seg.bz) / 2;
+      const at = route.distanceNear(mx, mz);
+      route.pointAt(at, rail);
+      route.tangentAt(at, tangent);
+      const length = Math.hypot(seg.bx - seg.ax, seg.bz - seg.az) || 1;
+      const along = Math.abs(((seg.bx - seg.ax) * tangent.x + (seg.bz - seg.az) * tangent.z) / length);
+      if (along > 0.5) continue;
+      const outer = Math.hypot(seg.ax - rail.x, seg.az - rail.z) > Math.hypot(seg.bx - rail.x, seg.bz - rail.z) ? { x: seg.ax, z: seg.az } : { x: seg.bx, z: seg.bz };
+      const far = { x: 2 * rail.x - outer.x, z: 2 * rail.z - outer.z };
+      collision.kinded('railway fence', () => collision.addWall(outer.x, outer.z, far.x, far.z, guard.halfWidth, sample(rail.x, rail.z, rail.y + 0.5) + 4.6, false, true));
     }
   }
   if (PROVE === 'low-roof') stepNearGate('stall awning');
@@ -677,126 +634,81 @@ if (SKIP_CENSUS) {
       for (const top of perched) byKind.set(top.solid.kind, [...(byKind.get(top.solid.kind) ?? []), top]);
       note(`${run.name}: guards stood on but not passed — ${[...byKind].map(([kind, tops]) => `${kind} ×${tops.length} (${[...new Set(tops.map((t) => t.how))].join('/')}), e.g. ${run.link(tops[0]!.at)}`).join('; ')}`);
     }
-    // On the railway: a reached place inside the fences that walking from the start does not reach.
+    // **The line, open** (Jim, 19 Oct 2026: she may hop its fence onto the
+    // track and back; the train stops for her — clause 8). So it is not an
+    // escape any more, and what matters is the way back off it: from every
+    // point along it, on the track bed, she gets off it again — walking (along
+    // the track and up onto a platform), or hopping its fence. Every point,
+    // not only those the census happened to land her on: anywhere she could
+    // walk along the line to is somewhere she may be.
     if (run.name === 'the park') {
-      const onRail: { stand: Stand; how: string }[] = [];
-      const consider = (stand: Stand, how: string): void => {
-        const at = route.pointAt(route.distanceNear(stand.x, stand.z), railScratch);
-        const off = Math.hypot(at.x - stand.x, at.z - stand.z);
-        if (off > FENCE_OFFSET - 0.2) return;
-        if (stand.y > terrainHeight(stand.x, stand.z) + 2.5) return; // a bridge deck over it
-        if (main(stand.x, stand.z, stand.y)) return; // a level crossing: walked to
-        onRail.push({ stand, how: `${how}, ${off.toFixed(2)} m off the rail's centre, ${altitudeAt(stand.x, stand.y, stand.z).toFixed(2)} m up` });
+      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+      const tangent = new Vector3();
+      /** A hop at the fence either side, from a standstill on the track: the quick way off. */
+      const hopsOff = (at: Stand): boolean => {
+        const d = route.distanceNear(at.x, at.z);
+        route.tangentAt(d, tangent);
+        for (const side of [1, -1]) {
+          const aimX = at.x + tangent.z * side * 4.5;
+          const aimZ = at.z - tangent.x * side * 4.5;
+          const landed = runAndJump({ collision, sample, sim: CENSUS_SIM }, at, aimX, aimZ, 0.5, CENSUS_FPS);
+          if (landed && outside(landed)) return true;
+        }
+        return false;
       };
-      for (const top of result.tops) {
-        // The corridor's own top — the seam under a bridge deck — is the railway wherever it stands.
-        if (top.solid.kind === 'railway corridor') onRail.push({ stand: top.at, how: `on the railway's corridor (${top.how}), ${altitudeAt(top.at.x, top.at.y, top.at.z).toFixed(2)} m up` });
-        else consider(top.at, `on a ${top.solid.kind || 'solid'} (${top.how})`);
-      }
-      for (const region of result.regions.slice(1)) consider(region.entry, `${region.via}`);
-      say(onRail.length === 0, `the railway is out of reach: ${onRail.length} place(s) inside its fences reached off the walk${onRail.length ? `:\n${onRail.slice(0, 12).map((r) => `      ${run.link(r.stand)} — ${r.how}`).join('\n')}` : ''}`);
-    }
-    // 4c. From every top she reaches, a run-and-jump at every guard within a
-    //     sprint-jump of it (PR #722's review, round two: from a bush 2 m off
-    //     the fence she crossed its line 4-5 m out, her feet 0.73 m over it,
-    //     and came down in a fenced box — stage 4b only hopped at a guard
-    //     within 2.5 m of a top, aimed just past it). Aimed 1.5 m past each
-    //     guard point, a metre apart along every fence, post and parapet, at
-    //     run-ups of 0, 1, 2 and 4 m from where she stood on the top. Not one
-    //     may come down inside a box; one that comes down on a station's open
-    //     track must get back out.
-    if (run.name === 'the park') {
-      const t4c = performance.now();
-      const guardPoints: { solid: SolidView; x: number; z: number }[] = [];
-      for (const guard of solids) {
-        if (!(guard.kind in GUARD_KINDS) || !guard.topIsAbsolute || !Number.isFinite(guard.topHeight)) continue;
-        if (guard.shape === 'circle') {
-          guardPoints.push({ solid: guard, x: guard.centreX, z: guard.centreZ });
+      const LINE_STEP = 2.4;
+      let points = 0;
+      let walked = 0;
+      let hopped = 0;
+      let searched = 0;
+      const trapped: string[] = [];
+      const t4b = performance.now();
+      for (let d = 0; d < route.length; d += LINE_STEP) {
+        const rail = route.pointAt(d, railScratch);
+        const y = sample(rail.x, rail.z, rail.y + 0.5);
+        if (!Number.isFinite(y)) continue;
+        const at: Stand = { x: rail.x, z: rail.z, y: standingHeight(y, collision, rail.x, rail.z, y) };
+        points += 1;
+        if (outside(at)) {
+          walked += 1;
           continue;
         }
-        const seg = guardSegment(guard);
-        const n = Math.max(1, Math.ceil(Math.hypot(seg.bx - seg.ax, seg.bz - seg.az) / 1));
-        for (let k = 0; k <= n; k += 1) guardPoints.push({ solid: guard, x: seg.ax + ((seg.bx - seg.ax) * k) / n, z: seg.az + ((seg.bz - seg.az) * k) / n });
-      }
-      const GUARD_BUCKET = 8;
-      const guardBuckets = new Map<string, typeof guardPoints>();
-      for (const point of guardPoints) {
-        const k = `${Math.floor(point.x / GUARD_BUCKET)},${Math.floor(point.z / GUARD_BUCKET)}`;
-        let list = guardBuckets.get(k);
-        if (!list) guardBuckets.set(k, (list = []));
-        list.push(point);
-      }
-      const reachOf = JUMP_PLAN_REACH + 0.5;
-      let sims = 0;
-      let fromTops = 0;
-      const inBox: string[] = [];
-      let onTrack = 0;
-      /** Each landing spot inside the fences (to a decimetre), and whether she got out of it. */
-      const escapes = new Map<string, boolean>();
-      for (const top of result.tops) {
-        const from = top.at;
-        const near: typeof guardPoints = [];
-        for (let i = Math.floor((from.x - reachOf) / GUARD_BUCKET); i <= Math.floor((from.x + reachOf) / GUARD_BUCKET); i += 1) {
-          for (let j = Math.floor((from.z - reachOf) / GUARD_BUCKET); j <= Math.floor((from.z + reachOf) / GUARD_BUCKET); j += 1) {
-            for (const point of guardBuckets.get(`${i},${j}`) ?? []) if (Math.hypot(point.x - from.x, point.z - from.z) <= reachOf) near.push(point);
-          }
+        if (hopsOff(at)) {
+          hopped += 1;
+          continue;
         }
-        if (!near.length) continue;
-        fromTops += 1;
-        for (const point of near) {
-          const dx = point.x - from.x;
-          const dz = point.z - from.z;
-          const d = Math.hypot(dx, dz);
-          if (d < 0.3) continue;
-          const aimX = point.x + (dx / d) * 1.5;
-          const aimZ = point.z + (dz / d) * 1.5;
-          for (const runUp of [0, 1, 2, 4]) {
-            const jumpAt = d + 1.5 - runUp;
-            if (jumpAt < 0.5) continue;
-            sims += 1;
-            const landed = runAndJump({ collision, sample, onWedged, sim: CENSUS_SIM, ...CENSUS_WEDGED_BY }, from, aimX, aimZ, jumpAt, CENSUS_FPS);
-            if (!landed) continue;
-            const rail = route.pointAt(route.distanceNear(landed.x, landed.z), railScratch);
-            const off = Math.hypot(landed.x - rail.x, landed.z - rail.z);
-            if (off > FENCE_OFFSET - 0.1) continue;
-            if (landed.y > terrainHeight(landed.x, landed.z) + 2.5) continue; // a bridge's deck over the line
-            const how = `${top.solid.kind || top.solid.owner || 'a top'} (${top.how}) from ${run.link(from)} at ${point.solid.kind} (${point.x.toFixed(1)}, ${point.z.toFixed(1)}), jumping ${jumpAt.toFixed(1)} m out: came down at (${landed.x.toFixed(2)}, ${landed.z.toFixed(2)}), ${off.toFixed(2)} m off the rail's centre`;
-            // Inside the fences: a box she cannot get out of, or a station's
-            // own track, open for boarding, that she walks or jumps back out
-            // of. Told apart by trying — not by the corridor's closure, whose
-            // rounded end reaches past a box's end cap onto the station's
-            // track (seed 5: a run off a platform bench, along the open track,
-            // read as a box landing a metre short of the cap).
-            const key = `${landed.x.toFixed(1)},${landed.z.toFixed(1)}`;
-            const known = escapes.get(key);
-            const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
-            let out = known ?? outside(landed);
-            if (known === undefined && !out) {
-              try {
-                out = reachWithJumps({
-                  collision,
-                  sample,
-                  grid,
-                  start: landed,
-                  inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - landed.x, z - landed.z) < 14,
-                  fps: CENSUS_FPS,
-                  until: outside,
-                }).stopped;
-              } catch {
-                out = false;
-              }
-            }
-            escapes.set(key, out);
-            if (out) onTrack += 1;
-            else inBox.push(`${how}${collision.closedAt(landed.x, landed.z) ? '' : ' (no closure there)'}`);
-          }
+        searched += 1;
+        let out = false;
+        try {
+          out = reachWithJumps({
+            collision,
+            sample,
+            grid,
+            start: at,
+            inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - at.x, z - at.z) < 20,
+            fps: CENSUS_FPS,
+            until: outside,
+            sim: CENSUS_SIM,
+            ...CENSUS_WEDGED_BY,
+          }).stopped;
+        } catch {
+          out = false;
         }
+        if (!out) trapped.push(`/spawn?pos=${at.x.toFixed(1)},${at.y.toFixed(2)},${at.z.toFixed(1)}&seed=${seed} (${d.toFixed(0)} m round the loop)`);
       }
       say(
-        inBox.length === 0,
-        `the railway's boxes are out of reach from every top: ${sims} run-and-jumps from the ${fromTops} tops she reaches within a sprint-jump of a guard, at ${guardPoints.length} guard points: ${inBox.length} came down inside a box, with no way back out${inBox.length ? `:\n${inBox.slice(0, 8).map((h) => `      ${h}`).join('\n')}` : ''} (${onTrack} came down inside the fences on a station's open track and got back out)`,
+        points > 0 && trapped.length === 0,
+        `the line: from every one of ${points} points along it, ${LINE_STEP} m apart on the track bed, she gets off it again (${walked} walking, ${hopped} with a hop over its fence, ${searched} by her own search)${trapped.length ? ` — ${trapped.length} with no way off: ${trapped.slice(0, 6).join('; ')}` : ''}`,
       );
-      note(`clause 4c, seed ${PARK_SEED_ASKED}: ${inBox.length} box landing(s) from ${sims} run-and-jumps (${fromTops} tops, ${guardPoints.length} guard points), ${onTrack} on a station's open track, ${((performance.now() - t4c) / 1000).toFixed(0)} s`);
+      // How many places on the line her census reached from the walk — that
+      // the line is open is the ruling; this says it is (on stderr).
+      let onLine = 0;
+      const isOnLine = (stand: Stand): boolean => {
+        const at = route.pointAt(route.distanceNear(stand.x, stand.z), railScratch);
+        return Math.hypot(at.x - stand.x, at.z - stand.z) < FENCE_OFFSET - 0.2 && stand.y < terrainHeight(stand.x, stand.z) + 2.5 && !main(stand.x, stand.z, stand.y);
+      };
+      for (const region of result.regions.slice(1)) if (isOnLine(region.entry)) onLine += 1;
+      note(`clause 4, the line: ${points} points along it searched for a way off in ${((performance.now() - t4b) / 1000).toFixed(0)} s; her census came down on it ${onLine} time(s) from the walk (a hop over its fence, a drop off a platform or a bridge), each a region the regions clause asks the same of`);
     }
     // Off the edge of a space: a drop to well below where she started.
     const below = result.regions.slice(1).filter((region) => region.entry.y < run.start.y - 1.5 && run.name !== 'the park');
@@ -1249,31 +1161,6 @@ function guardSegment(solid: SolidView): { ax: number; az: number; bx: number; b
     bz: solid.centreZ + axis.uz * axis.half,
   };
 }
-/**
- * **Did a path cross a segment, net?** Each step of the path that crosses the
- * segment between its ends counts one way or the other by which way it went;
- * a path that ends on the side it started has crossed it net zero times,
- * however it got there. A step that meets the line beyond an end is round the
- * end, not over it.
- */
-function crossesSegment(path: readonly { x: number; z: number }[], seg: { ax: number; az: number; bx: number; bz: number }): boolean {
-  const ex = seg.bx - seg.ax;
-  const ez = seg.bz - seg.az;
-  const side = (x: number, z: number): number => ex * (z - seg.az) - ez * (x - seg.ax);
-  let net = 0;
-  for (let i = 1; i < path.length; i += 1) {
-    const p = path[i - 1]!;
-    const q = path[i]!;
-    const d1 = side(p.x, p.z);
-    const d2 = side(q.x, q.z);
-    if (d1 < 0 === d2 < 0) continue;
-    // Where the step meets the line, as a fraction of the segment.
-    const t = ((p.x - seg.ax) * (q.z - p.z) - (p.z - seg.az) * (q.x - p.x)) / (ex * (q.z - p.z) - ez * (q.x - p.x));
-    if (!(t >= 0 && t <= 1)) continue;
-    net += d2 < 0 ? -1 : 1;
-  }
-  return net !== 0;
-}
 const scratchBody = new Vector3();
 const boundsOfSpace = (name: string): ParkBoundary => spaceRuns.find((run) => run.name === name)?.bounds ?? GARDEN_PLAY_BOUNDARY;
 if (spacesInPart.length) {
@@ -1669,105 +1556,82 @@ if (spacesInPart.length) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. The guards, by every jump at them
+// 8. The train stops for her
 // ---------------------------------------------------------------------------
 /**
- * **No sprint-jump clears a railing or a fence** (QA on PR #722: a sprint down
- * a bridge's ramp cleared its 1.67 m railing by half a metre). Every guard
- * point — the railway's fence and posts, every bridge parapet — against the
- * highest her feet can get over it (`jumpReach.ts`): from every point of the
- * walk she can stand on within a jump, either side of a fence, anywhere on a
- * bridge's deck, at any speed up to her sprint, the lag a run down falling
- * ground leaves her at included. Exhaustive, so every approach is in it, a
- * run down from a crown included. A jump from a top beside a guard is the
- * census's (stage 4b). Then her own simulated sprint-jumps at the closest
- * calls, as a second opinion on the instrument.
+ * **On the line ahead of the train, it stops short of her, waits, and goes on
+ * once she has gone** (Jim, 19 Oct 2026: *"jumping onto the train tracks
+ * sounds ok so long as the train stops if there's someone on the tracks"*).
+ * The park's own train, driven frame by frame through its own `update`, told
+ * of her exactly as `Game` tells it (`ParkTrain.keepClearOf`): first standing
+ * just past its nose while it waits at a station, then out on the loop well
+ * ahead of it, then gone. Its nose must never come nearer her body than
+ * `TRAIN_STOPS_SHORT` less a hand's breadth, it must stand still while she is
+ * there, and it must pass the spot once she has left.
  */
 if (inPart('park')) {
-  console.log('\n8. GUARDS — no sprint-jump at a railing or a fence clears it, from anywhere she can run:');
-  collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
-  const bridges = world.train.bridges;
-  const guardWorld = {
-    collision,
-    sample,
-    route: world.train.route,
-    onDeck: (x: number, z: number): boolean => bridges.some((bridge) => bridge.covers(x, z)),
-    onBridge: (x: number, z: number): boolean => bridges.some((bridge) => bridge.footprintNear(x, z, 0.1)),
-    dwellFloorAt: (x: number, z: number): number => {
-      let y = -Infinity;
-      for (const floor of world.train.dwellFloors) if (floor.surfaceY > y && floor.covers(x, z)) y = floor.surfaceY;
-      return y;
-    },
+  console.log('\n8. THE TRAIN — on the line ahead of it, the train stops short of her, waits, and goes on once she has gone:');
+  const train = world.train;
+  const route = train.route;
+  const her = { x: 0, y: 0, z: 0, radius: PLAYER_RADIUS };
+  let there = false;
+  if (PROVE !== 'train-ignores-her') train.keepClearOf(() => (there ? [her] : []));
+  const at = new Vector3();
+  /** Puts her on the track bed `ahead` metres past the nose; her place along the loop. */
+  const standAhead = (ahead: number): number => {
+    const d = route.wrap(train.noseDistance() + ahead + her.radius);
+    route.pointAt(d, at);
+    her.x = at.x;
+    her.z = at.z;
+    her.y = sample(at.x, at.z, at.y + 0.5);
+    there = true;
+    return d;
   };
-  // The tops her census reached in the park: takeoffs, as the walk is.
-  const parkTops = allReached
-    .filter((r) => r.space === 'the park')
-    .map((r) => ({ solid: r.top.solid, radius: planetRadiusAt(r.top.at.x, r.top.top, r.top.at.z) }));
-  if (!parkTops.length) note('clause 8: the census reached no top in the park (or did not run), so its measure counts the walk alone — no jump from a top is in it');
-  const points = measureGuards(guardWorld, undefined, parkTops);
-  // Within half the guard's margin of the need: the builders and this measure
-  // sample the same rule on grids a quarter-metre apart.
-  const short = points.filter((point) => point.top < point.need - GUARD_MARGIN / 2);
-  short.sort((a, b) => b.need - b.top - (a.need - a.top));
-  const byKind = new Map<string, number>();
-  for (const point of points) byKind.set(point.solid.kind, (byKind.get(point.solid.kind) ?? 0) + 1);
-  const spawnAt = (x: number, z: number): string => `/spawn?pos=${x.toFixed(1)},${z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
-  say(
-    points.length > 0 && short.length === 0,
-    `${points.length} guard points (${[...byKind].map(([kind, n]) => `${n} ${kind}`).join(', ')}): ${short.length} a jump clears` +
-      (short.length
-        ? ` — e.g. ${short
-            .slice(0, 4)
-            .map((point) => `${point.solid.kind} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}) by ${(point.need - point.top).toFixed(2)} m from ${spawnAt(point.from!.x, point.from!.z)}`)
-            .join('; ')}`
-        : ''),
-  );
-  // The control: the same instrument against the guards as they were before
-  // they answered to every jump — every top at the railway's guard height
-  // over the walk beside it. It has to find QA's railing.
-  const asWas = measureGuards(guardWorld, (_solid, x, z) => planetRadiusAt(x, sample(x, z, 1e3), z) + RAILWAY_GUARD_TOP, parkTops);
-  const wasShort = asWas.filter((point) => point.top < point.need - GUARD_MARGIN / 2);
-  say(wasShort.length > 0, `CONTROL: at the guard height alone (${RAILWAY_GUARD_TOP.toFixed(2)} m over the walk beside them), ${wasShort.length} of the same points are cleared by a jump${wasShort.length ? '' : ' — none, so this instrument cannot say no'}`);
-  // Her own sprint-jumps at the closest calls: from a run-up behind the
-  // takeoff the measure found, through the guard point, jumping at the
-  // takeoff. None may come down on the far side of the guard.
-  // The closest calls on walls: a post is in the walls either side of it.
-  const closest = [...points].filter((point) => point.solid.shape !== 'circle').sort((a, b) => a.top - a.need - (b.top - b.need)).slice(0, 24);
-  let crossed = 0;
-  let tried = 0;
-  const firstCrossed: string[] = [];
-  for (const point of closest) {
-    const from = point.from;
-    if (!from) continue;
-    const dx = point.x - from.x;
-    const dz = point.z - from.z;
-    const d = Math.hypot(dx, dz);
-    if (d < 0.3) continue;
-    const ux = dx / d;
-    const uz = dz / d;
-    for (const runUp of [3, 6]) {
-      const sx = from.x - ux * runUp;
-      const sz = from.z - uz * runUp;
-      const start = { x: sx, z: sz, y: sample(sx, sz, 1e3) };
-      tried += 1;
-      const trail: { x: number; z: number }[] = [];
-      const landed = runAndJump({ collision, sample }, start, point.x + ux * 2, point.z + uz * 2, d + 2, CENSUS_FPS, null, trail);
-      if (!landed) continue;
-      // Over it is her path crossing the guard's own line between its ends,
-      // and coming down off it on the far side. Round an end is not over it —
-      // at a station, where the fence turns into the end cap across the
-      // track, a run off the platform's end comes down beside the fence's far
-      // side without ever crossing it (seeds 1, 3, 6, 7 and 8: the first cut
-      // asked which side of the line's extension she landed on, and called
-      // each of those a crossing).
-      if (crossesSegment(trail, guardSegment(point.solid)) && point.solid.depthAt(landed.x, landed.z) < 0) {
-        crossed += 1;
-        if (firstCrossed.length < 3) firstCrossed.push(`${point.solid.kind} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}), run from ${spawnAt(sx, sz)}, came down at (${landed.x.toFixed(1)}, ${landed.z.toFixed(1)})`);
-      }
+  const frame = {
+    dt: 1 / 60,
+    elapsed: 0,
+    input: { justPressed: () => false } as unknown as FrameContext['input'],
+    playerPosition: new Vector3(),
+    cameraForward: new Vector3(0, 0, -1),
+    frame: 0,
+  };
+  /** How far her body's edge is in front of the nose: negative once the nose is past her. */
+  const gapTo = (d: number): number => {
+    let ahead = route.forwardGap(train.noseDistance(), d);
+    if (ahead > route.length / 2) ahead -= route.length;
+    return ahead - her.radius;
+  };
+  /** Runs the train for `seconds`; the nearest the nose came to her, and how long it stood still. */
+  const drive = (seconds: number, d: number): { nearest: number; stood: number; moved: number } => {
+    let nearest = Infinity;
+    let stood = 0;
+    let moved = 0;
+    for (let t = 0; t < seconds; t += frame.dt) {
+      frame.elapsed += frame.dt;
+      frame.frame += 1;
+      frame.playerPosition.set(her.x, her.y, her.z);
+      const before = train.noseDistance();
+      train.update(frame as unknown as FrameContext);
+      moved += route.forwardGap(before, train.noseDistance());
+      if (train.runningSpeed === 0) stood += frame.dt;
+      nearest = Math.min(nearest, gapTo(d));
     }
-  }
-  say(tried > 0 && crossed === 0, `her own sprint-jumps at the ${closest.length} closest calls: ${crossed} of ${tried} came down past the guard${firstCrossed.length ? ` — ${firstCrossed.join('; ')}` : ''}`);
-  note(`clause 8 measured ${points.length} guard points against every takeoff of the walk within ${JUMP_PLAN_REACH.toFixed(2)} m on a 0.25 m grid (closures, solids and the parked train left out) and against the ${parkTops.length} tops her census reached in the park; clause 4c runs her own jumps from each of those tops`);
+    return { nearest, stood, moved };
+  };
+  const margin = TRAIN_STOPS_SHORT - 0.1;
+  // At the station it starts at, standing just past its nose while it waits.
+  const atStation = standAhead(2.2);
+  const waiting = drive(14, atStation);
+  say(waiting.nearest >= margin && waiting.stood > 10, `at a station: on the line ${(2.2).toFixed(1)} m past its nose as it waits, the train stays ${waiting.nearest.toFixed(2)} m short of her (at least ${margin.toFixed(2)} asked) and stands ${waiting.stood.toFixed(1)} s of 14`);
+  // Out on the loop, well ahead of it: it brakes, stands, waits.
+  const onTheLoop = standAhead(20);
+  const coming = drive(20, onTheLoop);
+  say(coming.nearest >= margin && coming.stood > 3 && coming.moved > 5, `on the loop: 20 m ahead of it, the train comes on ${coming.moved.toFixed(1)} m and stops ${coming.nearest.toFixed(2)} m short of her (at least ${margin.toFixed(2)} asked), standing ${coming.stood.toFixed(1)} s`);
+  // She hops off the line: it goes on past where she stood.
+  there = false;
+  const going = drive(12, onTheLoop);
+  say(gapTo(onTheLoop) < -2, `once she has gone, it goes on: ${going.moved.toFixed(1)} m in 12 s, its nose ${(-gapTo(onTheLoop) - her.radius).toFixed(1)} m past where she stood`);
+  note(`clause 8 drove the park's own train ${(frame.elapsed).toFixed(0)} s through its own update at 60 fps, told of her as Game tells it (keepClearOf); stopping short is asked of ${TRAIN_STOPS_SHORT} m less 0.1`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');
