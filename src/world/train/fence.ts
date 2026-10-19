@@ -16,7 +16,7 @@ import type { MovingPlatform } from '../building/surfaces';
 import { JUMP_PLAN_REACH, guardRadiusNeeded, type Takeoff } from '../jumpReach';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { reachableTops, type ReachableTop } from '../reachableTops';
-import { GUARD_OVER_FEET, jumpRiseAt } from '../jumpReach';
+import { GUARD_OVER_FEET, riseOverTakeoff } from '../jumpReach';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
 import { placeOnSphere, planetRadiusAt, terrainHeight, yAtAltitude } from '../terrain';
@@ -453,7 +453,7 @@ export function buildRailFence(
         for (const top of topBuckets.get(keyOf(i, j)) ?? []) {
           const apart = Math.max(0, -top.solid.depthAt(x, z));
           if (apart > JUMP_PLAN_REACH) continue;
-          need = Math.max(need, top.radius + jumpRiseAt(apart) + GUARD_OVER_FEET);
+          need = Math.max(need, top.radius + riseOverTakeoff(top.solid.centreX, top.solid.centreZ, x, z, apart) + GUARD_OVER_FEET);
         }
       }
     }

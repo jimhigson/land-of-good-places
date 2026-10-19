@@ -50,6 +50,18 @@ export function stepCeilingAt(x: number, z: number, y: number): number {
 }
 
 /**
+ * **How far under the step's own reach a top must be for her to start up it,
+ * metres** — and so where a top stops being a step and starts being a hop:
+ * the step-up (`standing.ts`'s `walkingOntoStep`) and the auto-hop
+ * (`CollisionWorld.hopsOver`) both draw the line here. The step she starts is
+ * finished by `resolve`, asked at her own column, and by her feet, asked from
+ * where she stands once over the top; a top at the very limit was a step to
+ * one and a wall to the other, and she stood at its face with neither (seed
+ * 2's stone wall at (19.4, 18.6), 0.620 m: QA on PR #722, round two).
+ */
+export const STEP_MARGIN = 0.03;
+
+/**
  * **How far `b` stands above `a` along the local up** — the one owner of "is
  * this rise within a step", for everything that decides steps without asking
  * `WalkSurfaces.sample` itself (`NavGrid`'s edges, its line walk and its

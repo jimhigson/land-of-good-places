@@ -63,7 +63,7 @@ import { reachWithJumps, joinsMain, runAndJump, type ReachCost, type ReachedTop,
 import { GUARD_KINDS, measureGuards } from './lib/guardReach.mts';
 import { GUARD_MARGIN, JUMP_PLAN_REACH } from '../src/world/jumpReach.ts';
 import { RAILWAY_GUARD_TOP } from '../src/world/train/fence.ts';
-import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe } from './playerSim.mts';
+import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe, type HopProbe } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
@@ -81,7 +81,7 @@ import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { FENCE_OFFSET } from '../src/world/train/clearance.ts';
 import { altitudeAt, planetRadiusAt, terrainHeight } from '../src/world/terrain.ts';
 import { carryReference, riseBetween } from '../src/world/building/stepReach.ts';
-import { STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHeight } from '../src/world/standing.ts';
+import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHeight } from '../src/world/standing.ts';
 
 /**
  * **The red proofs.** Each breaks one thing and must turn its clause red, in
@@ -1213,7 +1213,7 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
  * asks (`playerHopProbe`), never one that cannot fire.
  */
 /** Her auto-hop as `Player` asks it — or, for the proof, without her feet: the hop the first cut judged from nothing. */
-const hopProbeFor = (world: CollisionWorld): ((probe: Vector3, feet: Vector3, feetAt?: (x: number, z: number) => number) => boolean) =>
+const hopProbeFor = (world: CollisionWorld): HopProbe =>
   PROVE === 'blind-hop' ? (probe) => world.wouldAutoHopClear(probe, PLAYER_RADIUS, JUMP_APEX_HEIGHT) : playerHopProbe(world);
 /** A wall's long axis: the direction its footprint reaches furthest from its middle, and how far (its ends, less its own half-width). */
 function wallAxis(solid: SolidView): { ux: number; uz: number; half: number } {
@@ -1452,7 +1452,9 @@ if (spacesInPart.length) {
         if (collision.deepestSolidOverlap(scratchBody.set(cx, contactGround, cz), PLAYER_RADIUS - 0.05, 0, undefined, KID_HEIGHT) > 0.02) continue;
         const rise = riseBetween(cx, contactGround, cz, ex, top, ez);
         if (rise < 0.05) continue;
-        const want = rise <= BUILDING_STEP_UP ? 'step' : rise <= MAX_AUTO_HOP_HEIGHT ? 'hop' : null;
+        // What she should do, by the line both halves draw (`STEP_MARGIN`):
+        // a step, or — within the auto-hop's height — a hop.
+        const want = rise <= BUILDING_STEP_UP - STEP_MARGIN ? 'step' : rise <= MAX_AUTO_HOP_HEIGHT ? 'hop' : null;
         if (!want) continue;
         faces += 1;
         if (want === 'step') stepFaces += 1;

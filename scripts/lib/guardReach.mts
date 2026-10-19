@@ -15,7 +15,7 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld, SolidView } from '../../src/world/Collision.ts';
-import { GUARD_OVER_FEET, JUMP_PLAN_REACH, guardRadiusNeeded, jumpRiseAt, type Takeoff } from '../../src/world/jumpReach.ts';
+import { GUARD_OVER_FEET, JUMP_PLAN_REACH, guardRadiusNeeded, riseOverTakeoff, type Takeoff } from '../../src/world/jumpReach.ts';
 import { planetRadiusAt } from '../../src/world/terrain.ts';
 import { standingHeight } from '../../src/world/standing.ts';
 
@@ -216,7 +216,7 @@ export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: num
         for (const t of tops) {
           const apart = Math.max(0, -t.solid.depthAt(p.x, p.z));
           if (apart > JUMP_PLAN_REACH) continue;
-          const n = t.radius + jumpRiseAt(apart) + GUARD_OVER_FEET;
+          const n = t.radius + riseOverTakeoff(t.solid.centreX, t.solid.centreZ, p.x, p.z, apart) + GUARD_OVER_FEET;
           if (n > need) {
             need = n;
             from = { x: t.solid.centreX, z: t.solid.centreZ, radius: t.radius, slopeX: 0, slopeZ: 0 };

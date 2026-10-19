@@ -46,8 +46,21 @@ const WALK_RINGS = [0.3, 1, 2, 3] as const;
 const CHAIN_GAP = 6;
 /** The highest she chains up from one top to the next, metres: the census's own. */
 const CHAIN_RISE = 1.6;
+/**
+ * **What her jump reaches at an everyday frame clock, short of the continuous
+ * arc**, metres: `JUMP_APEX_HEIGHT` is 1.2812 m in the limit and 1.2267 m
+ * sampled at 60 fps, the clock her census jumps at. Reached here is what the
+ * census can reach, so a top within a few centimetres of the arc's limit is
+ * not a takeoff the fence must answer to (seed 10: the reptile house's
+ * sculpted coils, 2.2 m over a plinth that puts the arc's limit 3 cm over
+ * the lowest, were a ladder up its body five metres high). A guard's own
+ * height is sized to the limit itself (`riseOverTakeoff`), never this.
+ */
+const ARC_SAMPLED_SHORT = 0.0545;
 /** How much short of her height the room over a top may be and it still count — see its use. */
 const HEADROOM_SPARE = 0.2;
+/** The buildings whose solids are their own bodies (`CollisionWorld.ownedBy`, `World`). */
+const BUILDING_OWNERS: ReadonlySet<string> = new Set(['castle', 'hotel', 'library', 'reptile house']);
 /** Points a side of the grid a top is measured on across its footprint's square. */
 const TOP_GRID = 9;
 /** Bearings the walk round a top is sampled on. */
@@ -77,6 +90,13 @@ export function reachableTops(
     if (!solid.topIsAbsolute || !Number.isFinite(solid.topHeight)) return;
     if (spaceAt(solid.centreX, solid.centreZ) !== SPACE_GARDEN) return;
     if (!near(solid.centreX, solid.centreZ, solid.reach)) return;
+    // A building's own body — its walls, its roof, a sculpted shell — is not
+    // somewhere she stands: `check:solids` holds her off every building's
+    // roof, and where she does stand by one, its plinth and its steps, is its
+    // walk surface, which every guard answers to as the walk. Climbed as a
+    // ladder of tops by the envelope, the reptile house's coils (seed 10) put
+    // a fence by the line five metres over what her census can reach.
+    if (BUILDING_OWNERS.has(solid.owner)) return;
     // Its top over its footprint, on a grid across it, where her feet fit: a
     // long wall's top falls along a slope, and its high end is where a jump
     // from it leaves highest (seed 5's stone wall by the line: measured at its
@@ -122,7 +142,11 @@ export function reachableTops(
         const outer = radii[o] as number;
         const across = Math.abs((WALK_RINGS[o] as number) - (WALK_RINGS[k] as number));
         const descent = o > k && Number.isFinite(outer) && across > 0 ? Math.max(0, (outer - r) / across) : o < k && Number.isFinite(outer) && across > 0 ? Math.max(0, (r - outer) / across) : 0;
-        best = Math.max(best, r + runLagOver(Math.min(descent, 0.5)) + jumpRiseAt(WALK_RINGS[k] as number));
+        // (Not the planet's lean: that is the guard's own margin, asked where
+        // a guard is sized — `riseOverTakeoff` — and here it would carry the
+        // envelope up a ladder of lamp heads and fairy-light knobs, each too
+        // small to run along, onto every roof in the park.)
+        best = Math.max(best, r + runLagOver(Math.min(descent, 0.5)) + jumpRiseAt(WALK_RINGS[k] as number) - ARC_SAMPLED_SHORT);
         if (best + JUMP_CLEARANCE_GRACE >= c.lowest) return best;
       }
     }
@@ -157,7 +181,7 @@ export function reachableTops(
           if (c.reached) continue;
           const apart = Math.max(0, Math.hypot(c.solid.centreX - from.solid.centreX, c.solid.centreZ - from.solid.centreZ) - c.solid.reach - from.solid.reach);
           if (apart > CHAIN_GAP || c.lowest - from.highest > CHAIN_RISE) continue;
-          if (from.highest + jumpRiseAt(apart) + JUMP_CLEARANCE_GRACE >= c.lowest) reach(c);
+          if (from.highest + jumpRiseAt(apart) - ARC_SAMPLED_SHORT + JUMP_CLEARANCE_GRACE >= c.lowest) reach(c);
         }
       }
     }

@@ -1,11 +1,10 @@
 import { Vector3 } from 'three';
 import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
-import { riseBetween } from './building/stepReach';
+import { STEP_MARGIN, riseBetween } from './building/stepReach';
 import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../core/constants';
 import { planetRadiusAt, yAtRadius } from './terrain';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 import { FOOT_HALF_WIDTH } from './measuredTop';
-import { KID_HEIGHT } from '../art/models/kidHeight';
 
 /**
  * Deliberately simple solid-object handling.
@@ -2893,20 +2892,13 @@ export class CollisionWorld {
     // room for her over it (the step-up's own rules, `walkingOntoStep`). Any
     // other top within a step is hopped: a face she can neither climb nor hop
     // is a face she stands pressed against for ever.
-    if (over <= BUILDING_STEP_UP && standableTop(solid) && (!meet || this.headroomOver(solid, meet, fromY))) return false;
+    // A step — wide enough to stand on, a hair under the step's reach, where
+    // the step-up draws the same line (`STEP_MARGIN`) — is the step-up's,
+    // never a hop; over that, within the hop's height, it is a hop.
+    if (over <= BUILDING_STEP_UP - STEP_MARGIN && standableTop(solid)) return false;
     return autoHopClears(over, apexClearance);
   }
 
-  /**
-   * Is there room for all of her over `solid`'s top, just inside its face
-   * where she meets it? (`standing.ts`'s `solidStepCeiling`, asked of one
-   * solid: the underside over the point, less her height.)
-   */
-  private headroomOver(solid: Readonly<SolidHeights>, meet: { x: number; z: number; inX: number; inZ: number }, fromY: number): boolean {
-    const x = meet.x + meet.inX;
-    const z = meet.z + meet.inZ;
-    return solidTopAt(solid, x, z) <= this.ceilingAt(x, z, fromY) - KID_HEIGHT;
-  }
 
 
   /**

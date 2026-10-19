@@ -1,4 +1,5 @@
-import { GRAVITY, JUMP_SPEED, PLAYER_HEIGHT_DAMP_HALF_LIFE, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../core/constants';
+import { GRAVITY, GROUND_SPHERE_RADIUS, JUMP_SPEED, PLAYER_HEIGHT_DAMP_HALF_LIFE, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../core/constants';
+import { SPACE_GARDEN, spaceAt } from './spaces';
 import { JUMP_CLEARANCE_GRACE } from './Collision';
 
 /**
@@ -56,6 +57,41 @@ export function runLagOver(descent: number): number {
 }
 
 /**
+ * **How fast a run across the planet takes the ground down under her, in
+ * world `y`, metres a metre** — for a run from `(x, z)` the way `(dirX,
+ * dirZ)` (a unit vector) goes, over ground that is level over the planet:
+ * the lean alone, outward. Her drawn height damps after the ground in world
+ * `y`, so a run outward leaves her above whatever she runs on, level or not —
+ * a row of bushes at the park's edge as much as a bank — and a jump leaves
+ * from there (`Player`'s take-off: her drawn height, where it is over the
+ * ground). PR #722, round three: sprinting along bush tops 77 m out on seed
+ * 10, she took off 0.34 m over them and cleared a fence sized as if a top
+ * were somewhere she could not lag over.
+ */
+export function leanFall(x: number, z: number, dirX: number, dirZ: number): number {
+  const r = Math.hypot(x, z);
+  if (r < 1e-6 || spaceAt(x, z) !== SPACE_GARDEN) return 0;
+  const outward = (x * dirX + z * dirZ) / r;
+  if (outward <= 0) return 0;
+  return (r / Math.sqrt(Math.max(1, GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS - r * r))) * outward;
+}
+
+/**
+ * **The highest her feet get at `(x, z)` over a takeoff at `(fromX, fromZ)`,
+ * `distance` metres short of it in plan** — {@link jumpRiseAt}, over the lag
+ * a run that way leaves her at: `descent`, the takeoff's own ground falling
+ * along the run (a level top's is 0), and the planet's lean ({@link
+ * leanFall}). `distance` is the jump's own: to a top's nearest edge, it is
+ * less than the way from its middle, which gives the run's direction alone.
+ */
+export function riseOverTakeoff(fromX: number, fromZ: number, x: number, z: number, distance: number, descent = 0): number {
+  const across = Math.hypot(x - fromX, z - fromZ);
+  const ux = across > 1e-6 ? (x - fromX) / across : 0;
+  const uz = across > 1e-6 ? (z - fromZ) / across : 0;
+  return runLagOver(descent + leanFall(fromX, fromZ, ux, uz)) + jumpRiseAt(distance);
+}
+
+/**
  * How much a guard keeps over what she can clear, past the clearance grace
  * below. Her frame clock only ever takes her lower than the continuous arc
  * {@link jumpRiseAt} is (1.2267 m at 60 fps, 1.2538 m at 120, against
@@ -100,9 +136,9 @@ export function guardRadiusNeeded(takeoffs: Iterable<Takeoff>, x: number, z: num
     const dz = z - q.z;
     const distance = Math.hypot(dx, dz);
     if (distance > JUMP_PLAN_REACH) continue;
-    // The ground's fall along her run towards the guard.
+    // The ground's fall along her run towards the guard, and the planet's.
     const descent = distance > 1e-6 ? -(q.slopeX * dx + q.slopeZ * dz) / distance : 0;
-    need = Math.max(need, q.radius + runLagOver(descent) + jumpRiseAt(distance));
+    need = Math.max(need, q.radius + riseOverTakeoff(q.x, q.z, x, z, distance, descent));
   }
   return need + GUARD_OVER_FEET;
 }

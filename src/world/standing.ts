@@ -1,7 +1,8 @@
 import { Vector3 as Vector3Impl, type Vector3 } from 'three';
 import { JUMP_CLEARANCE_GRACE, type CollisionWorld } from './Collision';
 import type { GroundSampler } from '../entities/Player';
-import { carryFrom, stepCeilingAt } from './building/stepReach';
+import { STEP_MARGIN, carryFrom, stepCeilingAt } from './building/stepReach';
+export { STEP_MARGIN } from './building/stepReach';
 import { PLAYER_RADIUS } from '../core/constants';
 import { KID_HEIGHT } from '../art/models/kidHeight';
 
@@ -318,9 +319,16 @@ export function walkingOntoStep(
     // top is drawn: a garden wall's top drawn out along the planet's lean
     // starts beyond its face, and pressed against that face she was never
     // over it (QA on PR #722, seed 5's stone wall at (−49.6, 61.6)).
-    const step = stepCeilingAt(aheadX, aheadZ, from);
+    //
+    // And a hair under the step's own reach (`STEP_MARGIN`): the step she
+    // starts here is finished by `resolve`, asked at her own column, and by
+    // her feet, asked from where she stands once over the top — a top at the
+    // very limit was a step here and a wall there, and she stood at its face
+    // with neither (seed 2's stone wall at (19.4, 18.6), 0.620 m: QA on PR
+    // #722, round two). Over the margin it is the auto-hop's (`hopsOver`).
+    const step = stepCeilingAt(aheadX, aheadZ, from) - STEP_MARGIN;
     if (stepTop(aheadX, aheadZ, step) <= from + STEP_ABOVE) continue;
-    if (stepTop(aheadX, aheadZ, solidStepCeiling(collision, aheadX, aheadZ, from, step)) > from + STEP_ABOVE) return true;
+    if (stepTop(aheadX, aheadZ, solidStepCeiling(collision, aheadX, aheadZ, from, step + STEP_MARGIN) - STEP_MARGIN) > from + STEP_ABOVE) return true;
   }
   return false;
 }
@@ -340,6 +348,8 @@ export function teleportHeight(ground: GroundSampler, collision: CollisionWorld,
 
 /** How far over the surface she stands on a top must be to be a step up rather than where she is: float noise and the clearance grace's flat edge. */
 const STEP_ABOVE = 0.02;
+
+
 
 /**
  * **One frame of vertical motion in the air, and a head that stops at an
