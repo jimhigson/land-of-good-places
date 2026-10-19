@@ -175,6 +175,17 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   }
 
   /**
+   * **How far back along her trail this companion walks**, metres — its place
+   * in her line ({@link spaceOut}), `null` when it is not in the line. A check
+   * asking whether a companion is following her asks this rather than a
+   * fixed reach, because the line is as long as she has companions out:
+   * seven of them stretch ten metres behind her.
+   */
+  followDistance(uid: string): number | null {
+    return this.members.find((member) => member.uid === uid)?.offset ?? null;
+  }
+
+  /**
    * Who of her line is out right now, and riding with her if anyone is — the
    * question `check:exits` asks of every ride she boards, answered by the one
    * system that owns those bodies.
@@ -246,8 +257,13 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   private rotateTimer = 0;
   private rotation = 0;
   private overflow = 0;
-  /** Signature of the last sync, so a store notification is usually free. */
-  private signature = '';
+  /**
+   * Signature of the last sync, so a store notification is usually free;
+   * `null` forces the next one. (Not `''`: a line with nobody in it signs as
+   * `''`, so resetting to it could never send the last of them into her
+   * backpack when she boards something.)
+   */
+  private signature: string | null = '';
   /**
    * Scratch handed to the ride and straight on to one member, so a descent with
    * eight companions in it allocates nothing per frame. Never held by anybody:
@@ -330,7 +346,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     // draws its own.
     const rides = ride !== null && ride !== 'drawn by the ride' && ride !== 'in her backpack';
     this.aboard = { holder, ride, companion: rides ? (this.members[0]?.uid ?? null) : null, stays: false };
-    this.signature = '';
+    this.signature = null;
     this.sync(gameStore.get());
   }
 
@@ -347,7 +363,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     const rode = this.members.find((member) => member.onSeat) ?? null;
     rode?.leaveSeat();
     this.formUpBehind();
-    this.signature = '';
+    this.signature = null;
     this.sync(gameStore.get());
     // Her companion hops down from where it sat to its place in the line.
     if (rode && this.members.includes(rode)) {
@@ -370,6 +386,10 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   private formUpBehind(): void {
     const at = this.player.position;
     const facing = this.player.facing;
+    // Her floor, not her height: a ride may hand her back moving, a little
+    // over the surface she is about to land on (the slide's drop into the
+    // balls), and the line forms on that surface.
+    const floor = this.groundAt(at.x, at.z, at.y);
     let bestX = 0;
     let bestZ = 0;
     let best = 0;
@@ -380,8 +400,8 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       for (let d = FORM_UP_STEP; d <= FORM_UP_REACH + 1e-9; d += FORM_UP_STEP) {
         const x = at.x + ux * d;
         const z = at.z + uz * d;
-        const y = this.groundAt(x, z, at.y);
-        if (Math.abs(y - at.y) > BUILDING_STEP_UP) break;
+        const y = this.groundAt(x, z, floor);
+        if (Math.abs(y - floor) > BUILDING_STEP_UP) break;
         if (this.collision.closedAt(x, z) || !this.collision.clearOfBoundary(x, z, MEMBER_RADIUS)) break;
         if (this.offLimits?.(x, y, z, MEMBER_RADIUS)) break;
         FORM_UP_PROBE.set(x, y, z);
@@ -395,11 +415,11 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       }
       if (best >= FORM_UP_REACH - 1e-9) break;
     }
-    this.trail.reset(at.x + bestX * best, this.groundAt(at.x + bestX * best, at.z + bestZ * best, at.y), at.z + bestZ * best);
+    this.trail.reset(at.x + bestX * best, this.groundAt(at.x + bestX * best, at.z + bestZ * best, floor), at.z + bestZ * best);
     for (let d = best - FORM_UP_STEP; d > 1e-9; d -= FORM_UP_STEP) {
-      this.trail.push(at.x + bestX * d, this.groundAt(at.x + bestX * d, at.z + bestZ * d, at.y), at.z + bestZ * d);
+      this.trail.push(at.x + bestX * d, this.groundAt(at.x + bestX * d, at.z + bestZ * d, floor), at.z + bestZ * d);
     }
-    this.trail.push(at.x, at.y, at.z);
+    this.trail.push(at.x, floor, at.z);
   }
 
   /** How many owned things are waiting their turn behind the visible eight. */
@@ -714,7 +734,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       if (this.rotateTimer >= ROTATE_SECONDS) {
         this.rotateTimer = 0;
         this.rotation += 1;
-        this.signature = '';
+        this.signature = null;
         this.sync(gameStore.get());
       }
     }

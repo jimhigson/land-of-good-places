@@ -68,6 +68,16 @@ const ROOF_UNDERSIDE = PLATFORM_HEIGHT + CANOPY_HEIGHT - ROOF_THICKNESS / 2 - (R
 const ROOF_TOP = PLATFORM_HEIGHT + CANOPY_HEIGHT + ROOF_THICKNESS / 2 + (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
 
 /** The bench at the back of the sheltered end: its seat and its back, in from the platform's back edge. */
+/**
+ * The waiting spot ({@link Station.waitX}): 0.45 m behind the platform's middle
+ * line and 1.2 m along it, towards the open end — the canopy's posts stand at
+ * −2.6 and −0.2 along and the bench from −2.4 to −0.4. With the crowd's arrival
+ * radius (0.6 m, `trainTrip.ts`) a child waits at least 2.0 m from the line's
+ * middle: her body a metre clear of the engine's eaves.
+ */
+const WAIT_ACROSS = 0.45;
+const WAIT_ALONG = 1.2;
+
 const BENCH_LENGTH = 2.0;
 const BENCH_ALONG = -1.4;
 const BENCH_SEAT_DEPTH = 0.52;
@@ -105,6 +115,16 @@ export class Station {
 
   /** Top of the platform, in world units. */
   readonly surfaceY: number;
+
+  /**
+   * **Where a child of the crowd waits for the train**: on the platform's open
+   * end and back half — {@link WAIT_ACROSS} behind its middle line and
+   * {@link WAIT_ALONG} along from its middle, clear of the canopy's posts and
+   * the bench — so a child waiting is never in the way of the train she is
+   * waiting for (it stops for anybody in its way: `ParkTrain.wayAhead`).
+   */
+  readonly waitX: number;
+  readonly waitZ: number;
 
   /** Lamp materials, brightened after dark. */
   readonly lamps: MeshBasicMaterial[] = [];
@@ -145,6 +165,9 @@ export class Station {
     const yaw = Math.atan2(tangent.x, tangent.z);
     this.cosYaw = Math.cos(yaw);
     this.sinYaw = Math.sin(yaw);
+    const wait = this.local(-trackSide * WAIT_ACROSS, WAIT_ALONG);
+    this.waitX = wait.x;
+    this.waitZ = wait.z;
 
     this.group.name = `train-station-${options.index}`;
     this.group.position.set(this.standX, ground, this.standZ);

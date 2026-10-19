@@ -385,6 +385,11 @@ export class FerrisWheelRide implements GameSystem {
     this.player = player;
   }
 
+  /** How many of her companions sit in the car's chairs now — `check:exits` asks, of the car it built. */
+  get companionsAboard(): number {
+    return this.gondola?.passengerCount ?? 0;
+  }
+
   /**
    * Her line, for the car to seat her companion from — the front of it
    * (`Parade.frontOfLine`), asked as the car is built. Given by

@@ -6,7 +6,13 @@
  * ```
  *
  * Jim: *"When going down the slide, the pet should slide down behind the
- * player."*
+ * player."* And since 19 Oct 2026: *"all the pets except one jump into her
+ * backpack on getting on any ride, then one rides on the seat alongside the
+ * player"* — so three companions are out, the front of her line rides the
+ * chute behind her, the other two ride in her backpack, and all three must be
+ * back out with her at the bottom. With one companion on the chute the pair
+ * clauses (in order, no two on one spot) have nothing to ask; that is said on
+ * stderr every run.
  *
  * ### Why a script, and why it drives every frame
  *

@@ -109,15 +109,24 @@ const HARDEST_BRAKING = 9;
  * metres, beyond its own radius: the train's swept clearance
  * (`TRACK_CLEARANCE`, which every prop beside the railway keeps), so the train
  * stops for anybody it could touch — and touches nobody, so it can never push
- * her into a fence, a wall or a trap. Beside a platform the line runs straight
- * and the train sweeps no wider than its body, so there a body is on the line
- * once it is within a hand of where the carriages' sides pass
- * ({@link PLATFORM_SIDE}): she may stand on the platform to wait, but not with
- * her toes over the edge.
+ * her into a fence, a wall or a trap.
+ *
+ * Beside a platform the line runs straight and the train sweeps no wider than
+ * its body, so there it is narrower, and asked two ways:
+ *
+ * - **ahead of the train**, a body is in its way once it reaches the engine's
+ *   widest — the cab's eaves ({@link PLATFORM_AHEAD}) — and a hand: she may
+ *   wait on the platform, but not with her toes over the edge;
+ * - **beside it, standing**, only once it reaches inside where the carriages'
+ *   sides pass ({@link PLATFORM_BESIDE}): a train pulling away slides past a
+ *   body touching its side and pushes nobody, so a child leaning on a
+ *   carriage, or one of the crowd pressed against it, does not hold it there.
  */
 const ON_THE_LINE = TRACK_CLEARANCE;
-/** The same beside a platform: the carriages' own half-width and a hand. */
-const PLATFORM_SIDE = CARRIAGE_BODY_HALF_WIDTH + 0.1;
+/** Ahead of the train beside a platform: the cab's eaves (`ENGINE_PIECES`), and a hand. */
+const PLATFORM_AHEAD = CARRIAGE_BODY_HALF_WIDTH + 0.12 + 0.08;
+/** Beside a standing train at a platform: inside the carriages' sides by more than a resolve's contact. */
+const PLATFORM_BESIDE = CARRIAGE_BODY_HALF_WIDTH - 0.02;
 /** How long the line must stay clear before the train toots for the next person on it. */
 const TOOT_REARM_SECONDS = 3;
 /** How often the driver toots again while somebody stays on the line: he keeps asking, and waits. */
@@ -396,6 +405,8 @@ export class ParkTrain implements GameSystem, TrainService {
         name: planned.name,
         x: station.standX,
         z: station.standZ,
+        waitX: station.waitX,
+        waitZ: station.waitZ,
       });
     }
 
@@ -556,8 +567,21 @@ export class ParkTrain implements GameSystem, TrainService {
     return this.lineAt(x, y, z, radius) !== null;
   }
 
-  /** Where along the route a body on the line is, metres — `null` for one that is not on it. */
+  /**
+   * Where along the route a body near the line is, metres, how far from its
+   * middle, and whether it stands on a platform — `null` for one that is not
+   * on the line by the widest reach ({@link ON_THE_LINE}).
+   */
   private lineAt(x: number, y: number, z: number, radius: number): number | null {
+    const near = this.nearLine(x, y, z);
+    if (!near) return null;
+    return near.lateral > (near.onPlatform ? PLATFORM_AHEAD : ON_THE_LINE) + radius ? null : near.at;
+  }
+
+  private readonly nearScratch = { at: 0, lateral: 0, onPlatform: false };
+
+  /** {@link lineAt}'s measure, before any reach is applied: `null` only above or below the line's level. */
+  private nearLine(x: number, y: number, z: number): { at: number; lateral: number; onPlatform: boolean } | null {
     // Where along the line she is, to the centimetre: the route's nearest
     // sample, then onto the line itself along its tangent there — the samples
     // alone put a pet 0.13 m nearer than it stood.
@@ -568,13 +592,12 @@ export class ParkTrain implements GameSystem, TrainService {
       at = this.route.wrap(at + (x - this.point.x) * this.tangent.x + (z - this.point.z) * this.tangent.z);
     }
     this.route.pointAt(at, this.point);
-    // On a platform she may wait, a hand back from where the carriages pass;
-    // anywhere else, clear of all the train sweeps.
-    const onPlatform = this.platformDecks.some((deck) => deck.covers(x, z) && y >= deck.surfaceY - 0.05);
-    const reach = (onPlatform ? PLATFORM_SIDE : ON_THE_LINE) + radius;
-    if (Math.hypot(x - this.point.x, z - this.point.z) > reach) return null;
     if (y > this.point.y + 2 || y < this.point.y - 1.5) return null;
-    return at;
+    const near = this.nearScratch;
+    near.at = at;
+    near.lateral = Math.hypot(x - this.point.x, z - this.point.z);
+    near.onPlatform = this.platformDecks.some((deck) => deck.covers(x, z) && y >= deck.surfaceY - 0.05);
+    return near;
   }
 
   /** Everybody the train looks out for: her, her line, and whoever else {@link keepClearOf} was given. */
@@ -616,10 +639,14 @@ export class ParkTrain implements GameSystem, TrainService {
     for (const body of this.lookout()) {
       // Nowhere near the train at all: not worth finding on the route.
       if (Math.hypot(body.x - loco.x, body.z - loco.z) > LOOK_AHEAD + length + body.radius) continue;
-      const at = this.lineAt(body.x, body.y, body.z, body.radius);
-      if (at === null) continue;
+      const near = this.nearLine(body.x, body.y, body.z);
+      if (!near) continue;
+      const at = near.at;
+      const beside = this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius;
+      const reach = near.onPlatform ? (beside ? PLATFORM_BESIDE : PLATFORM_AHEAD) : ON_THE_LINE;
+      if (near.lateral > reach + body.radius) continue;
       const ahead = this.route.forwardGap(nose, at);
-      if (this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius) return 0;
+      if (beside) return 0;
       if (ahead > LOOK_AHEAD + body.radius + TRAIN_STOPS_SHORT) continue;
       way = Math.min(way, Math.max(0, ahead - body.radius - TRAIN_STOPS_SHORT));
     }

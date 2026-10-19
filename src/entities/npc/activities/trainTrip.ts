@@ -166,7 +166,7 @@ export class TrainTrip implements Activity {
         const stop = service.stops[this.stop];
         if (!stop) return this.abandon(host);
 
-        const step = this.walk.step(host, context, intent, stop.x, stop.z);
+        const step = this.walk.step(host, context, intent, stop.waitX, stop.waitZ);
         if (step === 'givenUp') return this.abandon(host);
         if (step === 'arrived') {
           this.mode = 'waiting';
@@ -246,8 +246,13 @@ const TRAIN_INTERVAL_MAX = 70;
 /** …and the chance they actually go, when they do wonder. */
 const TRAIN_CHANCE = 0.55;
 
-/** Close enough to the middle of the platform to count as waiting on it. */
-const PLATFORM_ARRIVE = 1.6;
+/**
+ * Close enough to the waiting spot (`TrainStop.waitX/waitZ`) to count as
+ * waiting on the platform. It was 1.6 m round the platform's middle, a circle
+ * that reached over the edge onto the track — and a child waiting there is in
+ * the train's way, so the train it is waiting for stood and waited for it.
+ */
+const PLATFORM_ARRIVE = 0.6;
 
 /** Longest a child spends walking to a station, or standing on one. */
 const WALK_TIMEOUT = 60;

@@ -23,6 +23,14 @@ export interface TrainStop {
   /** Centre of the platform. */
   readonly x: number;
   readonly z: number;
+  /**
+   * **Where a child waits for the train**: on the platform, back from its edge
+   * — never where a carriage will pass, since the train stops for anybody in
+   * its way (`ParkTrain.wayAhead`), and a child waiting in its way would hold
+   * the very train she is waiting for.
+   */
+  readonly waitX: number;
+  readonly waitZ: number;
 }
 
 /**
