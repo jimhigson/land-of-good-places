@@ -176,6 +176,23 @@ const AUTO_HOP_LOOKAHEAD = 0.5;
  * down clear at once, which is where the escort was taking her anyway.
  */
 const WEDGE_SECONDS = 0.5;
+
+/**
+ * **A hover is a wedge too** — airborne this long in all, never further than
+ * {@link HOVER_SPAN} from where it began, and she is put down through the one
+ * rule, as a wedge is. Dropped into the gap between two of the train's cars
+ * (0.42 m, against her 1.24 m), the squeeze lift set her on one car's top and
+ * the resolver pushed her back off it into the gap, for ever: 0.13 m up and
+ * down and 0.45 m to and fro, airborne on eight frames in nine — so the wedge
+ * rescue, which waits for her feet, never asked. A jump is airborne 0.78 s and
+ * rises 1.28 m; a fall leaves the span at once; flying under the jet pack is
+ * left alone.
+ */
+const HOVER_SECONDS = 1;
+/** How far, metres, up, down or across, a hover may wander and still be one. */
+const HOVER_SPAN = 0.5;
+/** On her feet this long at a stretch, she has landed: the hover is over. */
+const HOVER_LANDED_SECONDS = 0.25;
 /**
  * **The longest a wedge waits before it tries again, seconds.** When the rule
  * finds nowhere within reach to put her, it says so and leaves her where she
@@ -681,6 +698,10 @@ export class Player implements GameSystem {
   private flightHighest = -Infinity;
   /** How long she has been wedged inside something solid, seconds — see {@link WEDGE_SECONDS}. */
   private wedgedFor = 0;
+  /** A hover's time in the air so far, where it began, and how long she has stood since — see {@link HOVER_SECONDS}. */
+  private hoverFor = 0;
+  private readonly hoverAt = new Vector3();
+  private landedFor = 0;
   /**
    * How long the current wedge must last before it lets go of her, seconds:
    * {@link WEDGE_SECONDS}, doubled after each time the rule found nowhere to
@@ -1799,6 +1820,26 @@ export class Player implements GameSystem {
     } else {
       this.wedgedFor = 0;
       this.wedgeWait = WEDGE_SECONDS;
+    }
+    // --- a hover lets go of her too ({@link HOVER_SECONDS}) ------------------
+    if (this.airborne && !this.flying) {
+      this.landedFor = 0;
+      const p = this.position;
+      if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(p.y - this.hoverAt.y) > HOVER_SPAN) {
+        this.hoverAt.copy(p);
+        this.hoverFor = dt;
+      } else {
+        this.hoverFor += dt;
+      }
+      if (this.hoverFor >= HOVER_SECONDS) {
+        this.hoverFor = 0;
+        this.wedgeRescues += 1;
+        this.lastWedge = { x: p.x, y: p.y, z: p.z, depth: 0, afterLanding: this.sinceLanding };
+        this.teleportTo(p.x, groundY, p.z);
+      }
+    } else {
+      this.landedFor += dt;
+      if (this.landedFor >= HOVER_LANDED_SECONDS || this.flying) this.hoverFor = 0;
     }
 
     // A little sparkle the moment the jump actually carries her over a wall's

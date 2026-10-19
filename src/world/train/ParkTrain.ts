@@ -117,16 +117,17 @@ const HARDEST_BRAKING = 9;
  * - **ahead of the train**, a body is in its way once it reaches the engine's
  *   widest — the cab's eaves ({@link PLATFORM_AHEAD}) — and a hand: she may
  *   wait on the platform, but not with her toes over the edge;
- * - **beside it, standing**, only once it reaches inside where the carriages'
- *   sides pass ({@link PLATFORM_BESIDE}): a train pulling away slides past a
- *   body touching its side and pushes nobody, so a child leaning on a
- *   carriage, or one of the crowd pressed against it, does not hold it there.
+ * - **beside it, standing**, only a body over it — its middle inside where
+ *   the carriages' sides pass ({@link PLATFORM_BESIDE}), which is a body up on
+ *   a carriage: a train pulling away slides past anybody touching its side,
+ *   or leaning on it, and pushes nobody, so a child against a carriage, or one
+ *   of the crowd idling at the platform's edge, does not hold it there.
  */
 const ON_THE_LINE = TRACK_CLEARANCE;
 /** Ahead of the train beside a platform: the cab's eaves (`ENGINE_PIECES`), and a hand. */
 const PLATFORM_AHEAD = CARRIAGE_BODY_HALF_WIDTH + 0.12 + 0.08;
-/** Beside a standing train at a platform: inside the carriages' sides by more than a resolve's contact. */
-const PLATFORM_BESIDE = CARRIAGE_BODY_HALF_WIDTH - 0.02;
+/** Beside a standing train at a platform: a body's middle inside the carriages' sides — up on one. */
+const PLATFORM_BESIDE = CARRIAGE_BODY_HALF_WIDTH;
 /** How long the line must stay clear before the train toots for the next person on it. */
 const TOOT_REARM_SECONDS = 3;
 /** How often the driver toots again while somebody stays on the line: he keeps asking, and waits. */
@@ -643,8 +644,8 @@ export class ParkTrain implements GameSystem, TrainService {
       if (!near) continue;
       const at = near.at;
       const beside = this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius;
-      const reach = near.onPlatform ? (beside ? PLATFORM_BESIDE : PLATFORM_AHEAD) : ON_THE_LINE;
-      if (near.lateral > reach + body.radius) continue;
+      const reach = near.onPlatform ? (beside ? PLATFORM_BESIDE : PLATFORM_AHEAD + body.radius) : ON_THE_LINE + body.radius;
+      if (near.lateral > reach) continue;
       const ahead = this.route.forwardGap(nose, at);
       if (beside) return 0;
       if (ahead > LOOK_AHEAD + body.radius + TRAIN_STOPS_SHORT) continue;
@@ -824,9 +825,21 @@ export class ParkTrain implements GameSystem, TrainService {
       if (now === seatNumber) continue;
       this.aboard.delete(character);
       const seat = this.seats[seatNumber];
-      const station = this.stations[this.stoppedStop ?? -1];
-      if (!seat || !station) continue;
+      if (!seat) continue;
       this.seatPosition(seat, 0, character.position.y);
+      // The platform she was at: the nearest to her seat, not the stop the
+      // train is standing at — she may give her seat up on its last frame
+      // there, and be set down on the first frame it is moving again.
+      let station: Station | null = null;
+      let nearest = Infinity;
+      for (const candidate of this.stations) {
+        const gap = Math.hypot(candidate.standX - this.seatWorld.x, candidate.standZ - this.seatWorld.z);
+        if (gap < nearest) {
+          nearest = gap;
+          station = candidate;
+        }
+      }
+      if (!station) continue;
       this.route.pointAt(station.distance, this.point);
       character.setCarriedPose(this.seatWorld.x + station.standX - this.point.x, this.seatWorld.z + station.standZ - this.point.z);
     }
