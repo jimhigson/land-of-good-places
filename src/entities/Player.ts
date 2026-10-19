@@ -525,6 +525,10 @@ export class Player implements GameSystem {
   /** Her feet at a plan point, reached on foot from {@link hopFeet}: where the auto-hop judges a face from. */
   private readonly feetFromHop = (x: number, z: number): number =>
     this.groundAt(x, z, carryReference(this.hopFeet.x, this.hopFeet.z, this.hopFeet.y, x, z));
+  /** Her feet where the step-up asks, and at a plan point reached on foot from them: where it judges a face from. */
+  private readonly stepFeet = new Vector3();
+  private readonly feetFromStep = (x: number, z: number): number =>
+    this.groundAt(x, z, carryReference(this.stepFeet.x, this.stepFeet.z, this.stepFeet.y, x, z));
 
   /** Start facing the camera, so the first thing you see is her face. */
   private facingAngle = CAMERA_YAW_DEGREES * DEG;
@@ -1406,6 +1410,9 @@ export class Player implements GameSystem {
     // The reach is the sampler's own, asked from the same carried reference
     // the sampler below is asked from, so every top the lateral rule lets her
     // climb onto is a top she is then stood on.
+    // Judged from where her body meets the face, on the level she walks
+    // (`walkingOntoStep`'s `feetAt`): the point the auto-hop judges it from.
+    this.stepFeet.set(this.position.x, reference, this.position.z);
     const stepping =
       following &&
       inputLength > 1e-4 &&
@@ -1416,6 +1423,9 @@ export class Player implements GameSystem {
         this.moveDirection.x / inputLength,
         this.moveDirection.z / inputLength,
         reference,
+        undefined,
+        undefined,
+        this.feetFromStep,
       );
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,

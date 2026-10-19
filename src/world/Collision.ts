@@ -360,6 +360,73 @@ function contactAlong(
   return { x: fromX + ux * after, z: fromZ + uz * after, ...into };
 }
 
+/**
+ * **How far along the line from `(fromX, fromZ)` in the unit direction
+ * `(ux, uz)` it enters a footprint** (`depthAt`: positive inside it), within
+ * `reach` ahead — or, from inside one, how far behind (a negative distance,
+ * within `back`): a step she has started carries her middle over a face before
+ * the top is under her feet. `NaN` when the line does not enter it.
+ */
+function entryAlong(
+  fromX: number,
+  fromZ: number,
+  ux: number,
+  uz: number,
+  reach: number,
+  back: number,
+  depthAt: (x: number, z: number) => number,
+): number {
+  const inside = (t: number): boolean => depthAt(fromX + ux * t, fromZ + uz * t) >= 0;
+  const STEPS = 12;
+  // `outside` and `inn` bracket the face along the line, whichever way it lies.
+  let outside = 0;
+  let inn = Number.NaN;
+  if (inside(0)) {
+    inn = 0;
+    outside = Number.NaN;
+    for (let k = 1; k <= STEPS; k += 1) {
+      const t = (-back * k) / STEPS;
+      if (!inside(t)) {
+        outside = t;
+        break;
+      }
+      inn = t;
+    }
+    if (Number.isNaN(outside)) return Number.NaN;
+  } else {
+    for (let k = 1; k <= STEPS; k += 1) {
+      const t = (reach * k) / STEPS;
+      if (inside(t)) {
+        inn = t;
+        break;
+      }
+      outside = t;
+    }
+    if (Number.isNaN(inn)) return Number.NaN;
+  }
+  for (let k = 0; k < 10; k += 1) {
+    const mid = (outside + inn) / 2;
+    if (inside(mid)) inn = mid;
+    else outside = mid;
+  }
+  return inn;
+}
+
+/**
+ * **Where a face she walks into is judged from** — the one owner of the point
+ * the step-up (`standing.ts`'s `walkingOntoStep`, through
+ * {@link CollisionWorld.faceMeetAhead}) and the auto-hop
+ * ({@link CollisionWorld.hopsOver}) both ask a face's height over: her own
+ * radius back from where the line she walks enters its footprint, where her
+ * body meets it head on. A pure function of her line and the body, so the
+ * answer a face gets moves neither with the frame clock nor with how far into
+ * it a step she has started has carried her (QA on PR #722, round three: down a
+ * slope her feet fell as she walked into a wall a step high, and 0.582 m where
+ * she met it was 0.590 m by the time she was half in — a hop on one clock, a
+ * step on another; and the step-up, asking from her feet, gave up half way).
+ */
+export const FACE_TOP_INSIDE = 0.01;
+
 /** A wall whose top stands straight over its footprint. */
 function unshifted(wall: Readonly<WallCollider>): boolean {
   return wall.topShiftX === 0 && wall.topShiftZ === 0;
@@ -1390,6 +1457,48 @@ export class CollisionWorld {
     // overhanging her side of a wall is met before the wall is.
     const drawn = this.highestTopAt(x, z, ceiling);
     return drawn > best ? drawn : best;
+  }
+
+  /**
+   * **Where she meets the first face ahead that stands over her feet** — a
+   * standable top more than `above` and at most `under` over `(x, feetY, z)`,
+   * whose footprint the line she walks (unit `(ux, uz)`) enters within
+   * `reach` — written to `out` as the point a body's `radius` back from that
+   * entry ({@link FACE_TOP_INSIDE}: the point the auto-hop judges the same
+   * face from). False when no such face is ahead.
+   */
+  faceMeetAhead(
+    x: number,
+    z: number,
+    ux: number,
+    uz: number,
+    reach: number,
+    radius: number,
+    feetY: number,
+    above: number,
+    under: number,
+    out: { x: number; z: number },
+  ): boolean {
+    if (!this.anyTopToStandOn()) return false;
+    const gathered = this.gatherNear(x + (ux * reach) / 2, z + (uz * reach) / 2, reach / 2 + 0.05);
+    let best = Infinity;
+    const consider = (solid: SolidHeights, depthAt: (px: number, pz: number) => number): void => {
+      if (!solid.topIsAbsolute || !standableTop(solid)) return;
+      const entry = entryAlong(x, z, ux, uz, Math.min(reach, best), radius, depthAt);
+      if (!(entry < best)) return;
+      const top = solidTopAt(solid, x + ux * (entry + FACE_TOP_INSIDE), z + uz * (entry + FACE_TOP_INSIDE));
+      if (!Number.isFinite(top)) return;
+      const rise = riseBetween(x, feetY, z, x + ux * (entry + FACE_TOP_INSIDE), top, z + uz * (entry + FACE_TOP_INSIDE));
+      if (rise <= above || rise > under) return;
+      best = entry;
+    };
+    for (const circle of gathered ? this.nearCircles : this.circles) consider(circle, (px, pz) => circle.radius - Math.hypot(px - circle.x, pz - circle.z));
+    for (const wall of gathered ? this.nearWalls : this.walls) consider(wall, (px, pz) => wallFootprintDepth(wall, px, pz));
+    for (const box of gathered ? this.nearBoxes : this.boxes) consider(box, (px, pz) => boxDepth(box, px, pz, 0));
+    if (!Number.isFinite(best)) return false;
+    out.x = x + ux * (best - radius);
+    out.z = z + uz * (best - radius);
+    return true;
   }
 
   /**
@@ -2864,6 +2973,10 @@ export class CollisionWorld {
     if (!feet || !solid.topIsAbsolute) return autoHopClears(solid.hopHeight, apexClearance);
     const top = solidTopAt(solid, position.x, position.z);
     if (!Number.isFinite(top)) return autoHopClears(solid.hopHeight, apexClearance);
+    // The top she is on, or one level with her: no height at all — asked of
+    // her own feet first, so that a face judged from where she met it (below)
+    // is never asked once she is up on it.
+    if (riseBetween(feet.x, feet.y, feet.z, position.x, top, position.z) <= HOP_STEP_ABOVE) return false;
     // **Judged from where she will meet its face, not from wherever she is
     // when the lookahead first touches it** (QA on PR #722, round two). The
     // lookahead reaches a body's width and half a metre ahead of her; asked
@@ -2876,7 +2989,35 @@ export class CollisionWorld {
     // Only where she walks there on the level she is on: across a drop (off
     // the end of the wall she walks along) she meets the face from wherever
     // she lands, and that is judged when she has landed.
-    let meet = feetAt ? contactAlong(feet.x, feet.z, position.x, position.z, radius, depthAt) : null;
+    //
+    // Met head on, at the one point both halves judge it from
+    // (`FACE_TOP_INSIDE`): a body's radius back from where her line enters it,
+    // its top just inside that — so a step she has started, carrying her into
+    // the face on a slope, never turns into a hop half way in. Brushed in
+    // passing, where her line never enters it, where her body first touches.
+    let meet: { x: number; z: number } | null = null;
+    let topX = position.x;
+    let topZ = position.z;
+    let at = top;
+    if (feetAt) {
+      const dx = position.x - feet.x;
+      const dz = position.z - feet.z;
+      const length = Math.hypot(dx, dz);
+      const entry = length > 1e-9 ? entryAlong(feet.x, feet.z, dx / length, dz / length, length + radius, radius, depthAt) : Number.NaN;
+      if (Number.isFinite(entry)) {
+        const ux = dx / length;
+        const uz = dz / length;
+        meet = { x: feet.x + ux * (entry - radius), z: feet.z + uz * (entry - radius) };
+        topX = feet.x + ux * (entry + FACE_TOP_INSIDE);
+        topZ = feet.z + uz * (entry + FACE_TOP_INSIDE);
+        const inside = solidTopAt(solid, topX, topZ);
+        if (Number.isFinite(inside)) at = inside;
+        else {
+          topX = position.x;
+          topZ = position.z;
+        }
+      } else meet = contactAlong(feet.x, feet.z, position.x, position.z, radius, depthAt);
+    }
     let fromY = feet.y;
     if (meet && feetAt) {
       const there = feetAt(meet.x, meet.z);
@@ -2885,7 +3026,12 @@ export class CollisionWorld {
     }
     const fromX = meet ? meet.x : feet.x;
     const fromZ = meet ? meet.z : feet.z;
-    const over = riseBetween(fromX, fromY, fromZ, position.x, top, position.z);
+    if (!meet) {
+      topX = position.x;
+      topZ = position.z;
+      at = top;
+    }
+    const over = riseBetween(fromX, fromY, fromZ, topX, at, topZ);
     // The top she is on, or one level with her: no height at all.
     if (over <= HOP_STEP_ABOVE) return false;
     // **A step only if it is a step she takes** — wide enough to stand on, with

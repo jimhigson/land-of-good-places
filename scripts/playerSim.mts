@@ -234,6 +234,10 @@ export class SimPlayer {
   /** `Player`'s own: her feet at a plan point, reached on foot from {@link feet} — where the auto-hop judges a face from. */
   private readonly feetFromHop = (x: number, z: number): number =>
     this.sampleGround(x, z, carryReference(this.feet.x, this.feet.z, this.feet.y, x, z));
+  /** `Player`'s own: her feet where the step-up asks, and at a plan point reached on foot from them. */
+  private readonly stepFeet = new Vector3();
+  private readonly feetFromStep = (x: number, z: number): number =>
+    this.sampleGround(x, z, carryReference(this.stepFeet.x, this.stepFeet.z, this.stepFeet.y, x, z));
 
   constructor(collision: CollisionWorld, options: SimOptions = {}) {
     this.collision = collision;
@@ -320,10 +324,11 @@ export class SimPlayer {
 
     // `Player.update`'s step up onto a solid, name for name: only walking
     // *into* one (the point past her front edge), from the same reference.
+    this.stepFeet.set(this.position.x, reference, this.position.z);
     const stepping =
       following &&
       inputLength > 1e-4 &&
-      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples, this.stepTop);
+      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples, this.stepTop, this.feetFromStep);
     const stepCeiling = stepping
       ? (x: number, z: number): number => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z))
       : undefined;

@@ -1,9 +1,9 @@
 import { Vector3 as Vector3Impl, type Vector3 } from 'three';
-import { JUMP_CLEARANCE_GRACE, type CollisionWorld } from './Collision';
+import { JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type CollisionWorld } from './Collision';
 import type { GroundSampler } from '../entities/Player';
-import { STEP_MARGIN, carryFrom, stepCeilingAt } from './building/stepReach';
+import { STEP_MARGIN, carryFrom, riseBetween, stepCeilingAt } from './building/stepReach';
 export { STEP_MARGIN } from './building/stepReach';
-import { PLAYER_RADIUS } from '../core/constants';
+import { BUILDING_STEP_UP, PLAYER_RADIUS } from '../core/constants';
 import { KID_HEIGHT } from '../art/models/kidHeight';
 
 /**
@@ -300,9 +300,22 @@ export function walkingOntoStep(
    * top is drawn instead, as this did before seed 5's knee-high wall.
    */
   stepTop: (x: number, z: number, ceiling: number) => number = (px, pz, ceiling) => collision.stepTopAt(px, pz, ceiling),
+  /**
+   * Her feet at a plan point, reached on foot from where she stands — given,
+   * a face is judged from where her body meets it head on, the point the
+   * auto-hop judges it from (`CollisionWorld.faceMeetAhead`), not from
+   * wherever she is when it is asked: down a slope into a wall a step high her
+   * feet fall as the step carries her in, and asked from them she gave up half
+   * way (QA on PR #722, round three).
+   */
+  feetAt?: (x: number, z: number) => number,
 ): boolean {
   if (!collision.anyTopToStandOn()) return false;
-  const carry = carryFrom(x, z, reference);
+  let carry = carryFrom(x, z, reference);
+  if (feetAt && collision.faceMeetAhead(x, z, dirX, dirZ, STEP_LOOKAHEAD, PLAYER_RADIUS, reference, STEP_ABOVE, MAX_AUTO_HOP_HEIGHT, meetScratch)) {
+    const there = feetAt(meetScratch.x, meetScratch.z);
+    if (Number.isFinite(there) && Math.abs(riseBetween(x, reference, z, meetScratch.x, there, meetScratch.z)) <= BUILDING_STEP_UP) carry = carryFrom(meetScratch.x, meetScratch.z, there);
+  }
   for (let i = 1; i <= samples; i += 1) {
     const along = (STEP_LOOKAHEAD * i) / samples;
     const aheadX = x + dirX * along;
@@ -348,6 +361,9 @@ export function teleportHeight(ground: GroundSampler, collision: CollisionWorld,
 
 /** How far over the surface she stands on a top must be to be a step up rather than where she is: float noise and the clearance grace's flat edge. */
 const STEP_ABOVE = 0.02;
+
+/** Scratch for {@link walkingOntoStep}'s meet point. */
+const meetScratch = { x: 0, z: 0 };
 
 
 
