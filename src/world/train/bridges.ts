@@ -434,8 +434,6 @@ function snapToWallTop(level: number, topY: number): number {
 
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
-/** How many pieces a parapet segment's solid is cut into, so its top follows the coping's bend. */
-const PARAPET_PIECES = 4;
 
 /**
  * Built on first use, never at module load: `pinkStoneTexture` paints a
@@ -1072,38 +1070,60 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       const humpA = humpAbove(previous.x, previous.z, topA);
       const humpB = humpAbove(point.x, point.z, topB);
       if (Math.max(humpA, humpB) > PARAPET_MIN_HUMP) {
-        // The drawn parapet's own top, arc included — not `+ PARAPET_HEIGHT`
-        // recomputed here. A collider that stopped at the un-arced height
-        // would let a child climb the drawn stone and step over it.
-        //
-        // In pieces, each its own top at each end (`TopSlope`): the coping's
-        // line bends along a segment — the arc, the taper on a ramp — and one
-        // straight top from end to end stood 0.25 m under it mid-segment
-        // (one height, the higher end's, stood 0.57 m over it). The pieces lie
-        // end to end on the segment's own line at its own width, so the solid
-        // they make is the segment's, and only its top follows the stone.
+        // The drawn parapet's own top, as the sweep drew it (`ShellGeometry.
+        // parapetLine`, one owner: the coping's too) — not the formula behind
+        // it, which near a ramp's foot stands up to half a metre off the
+        // drawn stone. In pieces cut at every ring of the drawn line, each
+        // its own top at each end (`TopSlope`), so its top bends exactly where
+        // the drawn wall does; the pieces lie end to end on the segment's own
+        // chord at its own width, so the solid they make is the segment's.
         //
         // And to the coping's top where a coping is laid on it — the stone a
         // child sees and stands on, `COPING_HEIGHT − COPING_SINK` over the
-        // wall's own top, on a parapet at least a block tall (the very test
-        // `buildCopingRun` makes).
-        const drawnTop = (surface: number, x: number, z: number): number => {
-          const wallTop = parapetTopFor(surface, x, z);
-          return wallTop - surface >= COPING_HEIGHT ? wallTop + COPING_HEIGHT - COPING_SINK : wallTop;
+        // wall's own top, on a ring-to-ring stretch whose wall is a block tall
+        // at both rings (the very test `buildCopingRun` makes, stretch by
+        // stretch). Asked at each point instead, a piece over the stretch
+        // where the coping stops stood its top a coping's height over the
+        // bare wall (seeds 0 and 1, `check:solids`' drawn tops: 0.17 m).
+        const si = side === 1 ? 0 : 1;
+        const line = shell.parapetLine;
+        /** The drawn line's stretch over `u`, its index: the one whose rings bracket it. */
+        const stretchAt = (u: number): number => {
+          let lo = 0;
+          let hi = line.length - 2;
+          while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if ((line[mid] as (typeof line)[number]).along <= u) lo = mid;
+            else hi = mid - 1;
+          }
+          return Math.max(0, lo);
         };
-        let pieceX = previous.x;
-        let pieceZ = previous.z;
-        let pieceTop = drawnTop(topA, previous.x, previous.z);
-        for (let k = 1; k <= PARAPET_PIECES; k += 1) {
-          const t = k / PARAPET_PIECES;
-          const x = previous.x + (point.x - previous.x) * t;
-          const z = previous.z + (point.z - previous.z) * t;
-          const surface = k === PARAPET_PIECES ? topB : surfaceProfile(x, z, previousAlong + (clamped - previousAlong) * t);
-          const top = drawnTop(surface, x, z);
-          walls.push({ x1: pieceX, z1: pieceZ, x2: x, z2: z, topHeight: pieceTop, topHeightEnd: top });
-          pieceX = x;
-          pieceZ = z;
-          pieceTop = top;
+        const cuts = [previousAlong];
+        for (const ring of line) if (ring.along > previousAlong + 1e-6 && ring.along < clamped - 1e-6) cuts.push(ring.along);
+        cuts.push(clamped);
+        const span = clamped - previousAlong;
+        for (let k = 0; k + 1 < cuts.length; k += 1) {
+          const u0 = cuts[k] as number;
+          const u1 = cuts[k + 1] as number;
+          const i = stretchAt((u0 + u1) / 2);
+          const a = line[i] as (typeof line)[number];
+          const b = (line[i + 1] ?? a) as (typeof line)[number];
+          const coped = Math.min((a.top[si] as number) - a.surface, (b.top[si] as number) - b.surface) >= COPING_HEIGHT;
+          const lift = coped ? COPING_HEIGHT - COPING_SINK : 0;
+          const wallTop = (u: number): number => {
+            const f = b.along - a.along > 1e-9 ? Math.min(1, Math.max(0, (u - a.along) / (b.along - a.along))) : 0;
+            return (a.top[si] as number) + ((b.top[si] as number) - (a.top[si] as number)) * f;
+          };
+          const t0 = span > 1e-9 ? (u0 - previousAlong) / span : 0;
+          const t1 = span > 1e-9 ? (u1 - previousAlong) / span : 1;
+          walls.push({
+            x1: previous.x + (point.x - previous.x) * t0,
+            z1: previous.z + (point.z - previous.z) * t0,
+            x2: previous.x + (point.x - previous.x) * t1,
+            z2: previous.z + (point.z - previous.z) * t1,
+            topHeight: wallTop(u0) + lift,
+            topHeightEnd: wallTop(u1) + lift,
+          });
         }
       }
       previous = point;

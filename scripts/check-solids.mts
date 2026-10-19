@@ -635,6 +635,18 @@ if (SKIP_CENSUS) {
       for (const top of perched) byKind.set(top.solid.kind, [...(byKind.get(top.solid.kind) ?? []), top]);
       note(`${run.name}: guards stood on but not passed — ${[...byKind].map(([kind, tops]) => `${kind} ×${tops.length} (${[...new Set(tops.map((t) => t.how))].join('/')}), e.g. ${run.link(tops[0]!.at)}`).join('; ')}`);
     }
+    /**
+     * Is `at` on the line — inside its fences, down at the track rather than
+     * on a bridge's deck over it? Once the line has a way off from every
+     * point of it (below), coming down on it is a way out of anywhere: the
+     * strip beyond its far fence is left over the line (seeds 1, 3, 4, 7, 10).
+     */
+    let lineLeavable = false;
+    const onTheLine = (at: Stand): boolean => {
+      if (run.name !== 'the park') return false;
+      const rail = route.pointAt(route.distanceNear(at.x, at.z), railScratch);
+      return Math.hypot(at.x - rail.x, at.z - rail.z) < FENCE_OFFSET - 0.2 && at.y < rail.y + 1.5 && at.y > rail.y - 1.5;
+    };
     // **The line, open** (Jim, 19 Oct 2026: she may hop its fence onto the
     // track and back; the train stops for her — clause 8). So it is not an
     // escape any more, and what matters is the way back off it: from every
@@ -697,6 +709,7 @@ if (SKIP_CENSUS) {
         }
         if (!out) trapped.push(`/spawn?pos=${at.x.toFixed(1)},${at.y.toFixed(2)},${at.z.toFixed(1)}&seed=${seed} (${d.toFixed(0)} m round the loop)`);
       }
+      lineLeavable = points > 0 && trapped.length === 0;
       say(
         points > 0 && trapped.length === 0,
         `the line: from every one of ${points} points along it, ${LINE_STEP} m apart on the track bed, she gets off it again (${walked} walking, ${hopped} with a hop over its fence, ${searched} by her own search)${trapped.length ? ` — ${trapped.length} with no way off: ${trapped.slice(0, 6).join('; ')}` : ''}`,
@@ -719,8 +732,9 @@ if (SKIP_CENSUS) {
     for (const region of result.regions.slice(1)) {
       let out = false;
       // Out is anywhere her walking from the start reaches, or any top she
-      // walks off into it; the search stops at the first.
-      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+      // walks off into it, or the line once it has a way off everywhere; the
+      // search stops at the first.
+      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || (lineLeavable && onTheLine(at)) || joinsMain({ collision, sample }, main, at, 60);
       try {
         out = reachWithJumps({
           collision,
@@ -746,7 +760,7 @@ if (SKIP_CENSUS) {
     // and jumping get her back to the walk?
     const strandedOn: string[] = [];
     for (const top of result.hemmedIn) {
-      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+      const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || (lineLeavable && onTheLine(at)) || joinsMain({ collision, sample }, main, at, 60);
       let out = false;
       try {
         out = reachWithJumps({
