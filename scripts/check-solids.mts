@@ -1648,6 +1648,8 @@ if (spacesInPart.length) {
   note(`clause 11 asks the step up and stops once she has stood on the top for 0.2 s: it says nothing about walking on across it — off its far side into a gap narrower than her body, against a wall, she jitters at the edge (a bed's far side in the suite on seed 5), written down on PR #722 as a gap`);
 }
 
+/** The line's tunnels, as stretches of the loop (route distances, unwrapped from outside one): clause 12's, for clause 8's stop in a tunnel. */
+let tunnelsOnLine: readonly { readonly from: number; readonly to: number }[] = [];
 // ---------------------------------------------------------------------------
 // 12. The line under every bridge
 // ---------------------------------------------------------------------------
@@ -1686,6 +1688,7 @@ if (inPart('park')) {
       open = null;
     }
   }
+  tunnelsOnLine = tunnels;
   const failed: string[] = [];
   let walks = 0;
   for (const tunnel of tunnels) {
@@ -1825,6 +1828,27 @@ if (inPart('park')) {
   say(forPet.nearest >= margin && forPet.stood > 3, `a pet: 20 m ahead of it, the train stops ${forPet.nearest.toFixed(2)} m short of it (at least ${margin.toFixed(2)} asked), standing ${forPet.stood.toFixed(1)} s`);
   petThere = false;
   drive(12, petAt, pet.radius);
+  // In a tunnel: her on the line under a bridge, the train coming up to it.
+  const tunnel = tunnelsOnLine[0];
+  if (!tunnel) note('clause 8: this park\'s line runs under no bridge, so the stop in a tunnel asserts nothing here');
+  else {
+    const mid = route.wrap((tunnel.from + tunnel.to) / 2);
+    // Run it round, with nobody on the line, until it is 15-30 m short of the tunnel.
+    for (let t = 0; t < 240; t += frame.dt) {
+      const gap = route.forwardGap(train.noseDistance(), mid);
+      if (gap > 15 && gap < 30 && train.runningSpeed > 1) break;
+      drive(frame.dt, mid);
+    }
+    route.pointAt(mid, at);
+    her.x = at.x;
+    her.z = at.z;
+    her.y = sample(at.x, at.z, at.y + 0.5);
+    there = true;
+    const inTunnel = drive(20, mid);
+    say(inTunnel.nearest >= margin && inTunnel.stood > 3, `in a tunnel: under the bridge at ${route.wrap(tunnel.from).toFixed(1)}–${route.wrap(tunnel.to).toFixed(1)} m round the loop, the train stops ${inTunnel.nearest.toFixed(2)} m short of her (at least ${margin.toFixed(2)} asked), standing ${inTunnel.stood.toFixed(1)} s`);
+    there = false;
+    drive(12, mid);
+  }
   // A child of the crowd on the line ahead, through World's own wiring.
   if (!kid) say(false, 'a child of the crowd: the headless park has no child in its crowd to stand on the line');
   else {
