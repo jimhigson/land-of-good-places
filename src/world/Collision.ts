@@ -178,6 +178,17 @@ interface SolidHeights {
    */
   closure: boolean;
   /**
+   * **A body that moves** ({@link CollisionWorld.addMovingBox}) — the train's
+   * engine and carriages, moved every frame by the train itself
+   * ({@link CollisionWorld.moveBox}). Every query a mover asks reads it where
+   * it is now (it is filed in the grid's wide bucket, never by cell); nothing
+   * that plans the ground counts it — it is banded, so the route lattice and
+   * the planner's ground queries pass it by, as they must a thing that will
+   * not be there in a minute; and moving it is not a change to the park, so
+   * {@link CollisionWorld.revision} does not move with it.
+   */
+  moving: boolean;
+  /**
    * The last bucketed query that gathered it ({@link CollisionWorld.gatherNear}),
    * so one query gathers it once however many of its cells it is filed in.
    * Shared by every world it is in (a {@link CollisionWorld.near} view holds
@@ -636,6 +647,8 @@ export interface SolidView {
   readonly hopHeight: number;
   readonly autoHoppable: boolean;
   readonly banded: boolean;
+  /** A body that moves (the train) — see {@link SolidHeights.moving}. */
+  readonly moving: boolean;
 }
 
 /**
@@ -1278,6 +1291,7 @@ export class CollisionWorld {
       hopHeight: !topIsAbsolute ? topHeight : hopHeight,
       topHalf: this.currentTopHalf,
       closure: this.currentClosure,
+      moving: false,
       visit: 0,
     };
   }
@@ -1654,6 +1668,12 @@ export class CollisionWorld {
       stamp(Math.min(w.x1, w.x2) - h, Math.min(w.z1, w.z2) - h, Math.max(w.x1, w.x2) + h, Math.max(w.z1, w.z2) + h, (cell) => cell.walls.push(w));
     }
     for (const b of this.boxes) {
+      // A moving body is wherever it is now, not where the grid was built:
+      // every cell's query reads it, from the wide bucket.
+      if (b.moving) {
+        wide.boxes.push(b);
+        continue;
+      }
       // The turned box's own axis-aligned bound: each half-extent projected onto each axis.
       const reachX = Math.abs(b.cos) * b.halfX + Math.abs(b.sin) * b.halfZ + b.rounding;
       const reachZ = Math.abs(b.sin) * b.halfX + Math.abs(b.cos) * b.halfZ + b.rounding;
@@ -2100,6 +2120,43 @@ export class CollisionWorld {
   }
 
   /**
+   * **A body that moves** — a filled box like {@link addBox}'s, with an
+   * absolute top and an absolute base, that its owner moves every frame with
+   * {@link moveBox}: the train's engine and carriages. See
+   * {@link SolidHeights.moving} for what that changes and what it does not.
+   *
+   * `base` must be a height in the world below which nothing stands — the
+   * ground under the body, less a margin — so the body is banded: the route
+   * lattice and the planner's ground queries pass it by, while everything a
+   * mover asks (being pushed out, standing on its top, bumping its side) meets
+   * it exactly as it meets the scenery.
+   */
+  addMovingBox(cx: number, cz: number, halfX: number, halfZ: number, yaw: number, top: number, base: number): BoxCollider {
+    const box = this.addBox(cx, cz, halfX, halfZ, yaw, 0, top, false, true, base);
+    box.moving = true;
+    return box;
+  }
+
+  /**
+   * **Moves a body {@link addMovingBox} registered** — in place, to `(cx, cz)`
+   * turned by `yaw` (as {@link addBox} takes it), with its absolute `top` and
+   * `base` there. Not a change to the park: {@link revision} does not move, so
+   * nothing that caches the park rebuilds — which is why only a moving body may
+   * be moved (anything else throws).
+   */
+  moveBox(box: BoxCollider, cx: number, cz: number, yaw: number, top: number, base: number): void {
+    if (!box.moving) throw new Error('CollisionWorld.moveBox: only a body addMovingBox registered may move');
+    box.cx = cx;
+    box.cz = cz;
+    box.cos = Math.cos(yaw);
+    box.sin = Math.sin(yaw);
+    box.topHeight = top;
+    box.topRadius = radiusFor(cx, cz, top);
+    box.baseHeight = base;
+    box.baseRadius = radiusFor(cx, cz, base);
+  }
+
+  /**
    * Takes back a box {@link addBox} or {@link addRectangle} returned — the
    * same toggle {@link removeWall} is for walls (a library box that must come
    * and go: the secret shelf's closed and open sets).
@@ -2291,6 +2348,7 @@ export class CollisionWorld {
         hopHeight: circle.hopHeight,
         autoHoppable: circle.autoHoppable,
         banded: banded(circle),
+        moving: circle.moving,
       });
     }
     for (const wall of this.walls) {
@@ -2319,6 +2377,7 @@ export class CollisionWorld {
         hopHeight: wall.hopHeight,
         autoHoppable: wall.autoHoppable,
         banded: banded(wall),
+        moving: wall.moving,
       });
     }
     for (const box of this.boxes) {
@@ -2340,6 +2399,7 @@ export class CollisionWorld {
         hopHeight: box.hopHeight,
         autoHoppable: box.autoHoppable,
         banded: banded(box),
+        moving: box.moving,
       });
     }
   }

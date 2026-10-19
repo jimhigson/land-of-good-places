@@ -908,8 +908,7 @@ export class NpcSystem implements GameSystem {
    */
   *onTheLine(): Iterable<OnTheLine> {
     for (const character of this.characters) {
-      const seat = (character.driver as Partial<TrainPassenger>).trainSeat;
-      if (seat !== null && seat !== undefined) continue;
+      if (onTheTrain(character)) continue;
       yield { x: character.position.x, y: character.position.y, z: character.position.z, radius: NPC_RADIUS };
     }
   }
@@ -1097,6 +1096,9 @@ export class NpcSystem implements GameSystem {
    *   children on their cushions): the player takes it all, through
    *   `Player.nudge`, so the child stays exactly on her cushion.
    * - **both**: neither can move, so neither is moved.
+   * - **a child riding the train is furniture** like one on a cushion: the
+   *   train places her in her seat every frame, so a player who has jumped up
+   *   onto the carriage beside her takes the whole correction.
    */
   private separateFromPlayer(dt: number): void {
     const player = this.player;
@@ -1112,7 +1114,7 @@ export class NpcSystem implements GameSystem {
       // player's own seatmate out through the bodywork beside her.
       if (character.climbing || character.scripted) continue;
       // Two pieces of furniture: nobody can step aside, so nobody is moved.
-      const childSeated = character.seated;
+      const childSeated = character.seated || onTheTrain(character);
       if (childSeated && playerRiding) continue;
       // One above the other — she is stood on a wall or a table — and so not
       // in each other's way at all. See `separatedByHeight`.
@@ -1662,4 +1664,10 @@ function pickColours(rng: Rng): KidColours {
     shoe: rng.pick(SHOE_COLOURS),
     bag: rng.pick(BAG_COLOURS),
   };
+}
+
+/** Is this child riding the train — in a seat it places her in every frame (`ParkTrain.carryPassengers`)? */
+function onTheTrain(character: NpcCharacter): boolean {
+  const seat = (character.driver as Partial<TrainPassenger>).trainSeat;
+  return seat !== null && seat !== undefined;
 }

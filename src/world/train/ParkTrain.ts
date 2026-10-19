@@ -5,7 +5,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
-import type { CollisionWorld } from '../Collision';
+import type { BoxCollider, CollisionWorld } from '../Collision';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import { TRACK_CLEARANCE, TrainRoute } from './route';
@@ -31,7 +31,7 @@ import {
   type Locomotive,
   type TrainCar,
 } from './trainModel';
-import { CARRIAGE_BODY_HALF_WIDTH } from './trainDimensions';
+import { CARRIAGE_BODY_HALF_WIDTH, LOCO_BODY_TOP_Y } from './trainDimensions';
 import { playChuff, playStationBell, playTrainWhistle, setTrainAudioCarry } from './trainSounds';
 import { setTrainService, type TrainPassenger, type TrainService, type TrainStop } from './service';
 
@@ -163,6 +163,70 @@ const AUDIBLE_RANGE = 42;
 /** Shared empty list: "nothing you can do with this train from here, just now". */
 const NO_ACTIONS: readonly ZoneAction[] = [];
 
+/**
+ * **One solid piece of a car**, in the car's own frame: centred at `(x, z)`,
+ * `halfX` across and `halfZ` along, its top `top` above the car's floor datum
+ * (the rails' ground, where the car's root stands). `narrow` for a top no
+ * child could stand on — a rim, a backrest, a round boiler — which she bumps,
+ * jumps over or falls off, but never lands on.
+ */
+interface CarPiece {
+  readonly x: number;
+  readonly z: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+  readonly top: number;
+  readonly narrow: boolean;
+}
+
+/** How far below a car's datum its pieces begin: under the ground, so nobody stands beneath one. */
+const PIECE_BASE = -0.5;
+/** Half a narrow piece's depth: a backrest's, fattened from its drawn 0.1 m to the rim's 0.16 m so she meets it square. */
+const RIM_HALF = 0.08;
+
+/**
+ * **The engine, as solid as it is drawn** (`createLocomotive`): the chassis, the
+ * boiler and smokebox, the cab under its roof, the funnel, the dome and the
+ * buffer beam. Only the cab's roof is a top she could stand on — the boiler is
+ * round, and the rest are rims and posts.
+ */
+const ENGINE_PIECES: readonly CarPiece[] = [
+  { x: 0, z: 0, halfX: CARRIAGE_BODY_HALF_WIDTH, halfZ: (LOCO_LENGTH - 0.2) / 2, top: CAR_FLOOR_Y, narrow: true },
+  { x: 0, z: (-0.55 + 2.1) / 2, halfX: 0.56, halfZ: (2.1 + 0.55) / 2, top: CAR_FLOOR_Y + 1.11, narrow: true },
+  { x: 0, z: -1.05, halfX: CARRIAGE_BODY_HALF_WIDTH + 0.12, halfZ: 0.75, top: CAR_FLOOR_Y + 1.27, narrow: false },
+  { x: 0, z: 1.25, halfX: 0.27, halfZ: 0.27, top: LOCO_BODY_TOP_Y, narrow: true },
+  { x: 0, z: 0.35, halfX: 0.22, halfZ: 0.22, top: CAR_FLOOR_Y + 1.23, narrow: true },
+  { x: 0, z: LOCO_LENGTH / 2 - 0.05, halfX: CARRIAGE_BODY_HALF_WIDTH + 0.1, halfZ: 0.09, top: CAR_FLOOR_Y + 0.1, narrow: true },
+];
+
+/**
+ * **A carriage, as solid as it is drawn** (`createCarriage`): an open tub whose
+ * top is its rim — the cream strip round its sides and ends — and its two
+ * backrests standing up out of it. She stands on a carriage at its rim: the
+ * seats are 6 cm under it, and the footwell between them and the gaps behind
+ * the backrests are narrower than she is (0.54 m and 0.35 m against her
+ * 1.24 m), so there is nowhere lower in a carriage for her to stand. Measured
+ * on seed 5, rims of their own (0.16 m wide, too narrow to stand on) left her
+ * four centimetres either side to land in, so every jump onto the carriage put
+ * her on a rim and off again — a tub she could see the top of and never reach.
+ */
+const CARRIAGE_PIECES: readonly CarPiece[] = [
+  { x: 0, z: 0, halfX: CARRIAGE_BODY_HALF_WIDTH, halfZ: CARRIAGE_LENGTH / 2, top: CAR_FLOOR_Y + 0.48, narrow: false },
+  { x: 0, z: 0.78, halfX: CARRIAGE_BODY_HALF_WIDTH - 0.09, halfZ: RIM_HALF, top: SEAT_Y + 0.34, narrow: true },
+  { x: 0, z: -0.78, halfX: CARRIAGE_BODY_HALF_WIDTH - 0.09, halfZ: RIM_HALF, top: SEAT_Y + 0.34, narrow: true },
+];
+
+/** A car's pieces in the collision world, and the pieces they are. */
+interface CarBody {
+  readonly car: TrainCar;
+  readonly pieces: readonly CarPiece[];
+  readonly boxes: BoxCollider[];
+}
+
+const _pieceAt = /* @__PURE__ */ new Vector3();
+const _pieceTop = /* @__PURE__ */ new Vector3();
+const _pieceBase = /* @__PURE__ */ new Vector3();
+
 interface Seat {
   /** Which car, and which of its seats. */
   readonly car: number;
@@ -235,6 +299,11 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly headlight: PointLight;
 
   private readonly seats: Seat[] = [];
+  /** The children carried last frame, by seat — see {@link carryPassengers}. */
+  private readonly aboard = new Map<NpcCharacter, number>();
+  /** Every car's solid pieces — see {@link CarBody}; moved with the car every frame ({@link placeCars}). */
+  private readonly bodies: CarBody[] = [];
+  private readonly collision: CollisionWorld;
 
   /** Distance of the *locomotive's centre* along the route. */
   private distance = 0;
@@ -425,6 +494,25 @@ export class ParkTrain implements GameSystem, TrainService {
     this.dwellRemaining = DWELL_SECONDS;
     this.stoppedStop = 0;
     this.nextStop = 1 % this.stations.length;
+
+    // **Solid, as drawn** (Jim, 19 Oct 2026: *"also solid trains"*): every
+    // car's pieces, registered once and moved with it every frame — she bumps
+    // its sides and ends, never walks through it, and may jump up onto it
+    // while it stands (and then it waits for her: `wayAhead`). Riders are
+    // carried, never collided, so nobody aboard is pushed by their own train.
+    this.collision = collision;
+    for (const car of this.cars) {
+      const pieces = car === this.locomotive ? ENGINE_PIECES : CARRIAGE_PIECES;
+      const kind = car === this.locomotive ? 'train engine' : 'train carriage';
+      const boxes = pieces.map((piece) =>
+        collision.kinded(kind, () =>
+          piece.narrow
+            ? collision.toppedNarrow(RIM_HALF, () => collision.addMovingBox(0, 0, piece.halfX, piece.halfZ, 0, piece.top, PIECE_BASE))
+            : collision.addMovingBox(0, 0, piece.halfX, piece.halfZ, 0, piece.top, PIECE_BASE),
+        ),
+      );
+      this.bodies.push({ car, pieces, boxes });
+    }
 
     this.placeCars();
     setTrainService(this);
@@ -700,11 +788,27 @@ export class ParkTrain implements GameSystem, TrainService {
    * platform — answers when it asks how high the ground is.
    */
   carryPassengers(characters: readonly NpcCharacter[]): void {
+    // **Off the train, onto the platform.** A child who gave her seat up last
+    // frame is still standing where it was — inside a carriage, which is
+    // solid — so she is carried one last step, to the platform beside her
+    // seat, and walks off from there.
+    for (const [character, seatNumber] of this.aboard) {
+      const now = (character.driver as Partial<TrainPassenger>).trainSeat;
+      if (now === seatNumber) continue;
+      this.aboard.delete(character);
+      const seat = this.seats[seatNumber];
+      const station = this.stations[this.stoppedStop ?? -1];
+      if (!seat || !station) continue;
+      this.seatPosition(seat, 0, character.position.y);
+      this.route.pointAt(station.distance, this.point);
+      character.setCarriedPose(this.seatWorld.x + station.standX - this.point.x, this.seatWorld.z + station.standZ - this.point.z);
+    }
     for (const character of characters) {
       const seatNumber = (character.driver as Partial<TrainPassenger>).trainSeat;
       if (seatNumber === null || seatNumber === undefined) continue;
       const seat = this.seats[seatNumber];
       if (!seat || seat.taken !== 'npc') continue;
+      this.aboard.set(character, seatNumber);
 
       // Feet on the carriage floor — same reference as the player's, since
       // she now sits too (see `updateRider`). `NpcCharacter.animate` reads
@@ -866,6 +970,30 @@ export class ParkTrain implements GameSystem, TrainService {
 
       // Wheels roll off distance travelled, so they never skate.
       for (const wheel of car.wheels) wheel.rotation.x = this.wheelSpin / 0.2;
+    }
+    this.moveBodies();
+  }
+
+  /**
+   * Every car's solid pieces to where the car now is — leant, turned and
+   * lifted exactly as its meshes are, by asking the car's own matrix where each
+   * piece's middle, top and base are.
+   */
+  private moveBodies(): void {
+    for (const body of this.bodies) {
+      const root = body.car.root;
+      root.updateMatrixWorld();
+      // The collision world's yaw takes a box's local X onto the world, as
+      // `atan2(z, x)` measures it; a car's local X is its width.
+      const yaw = -planYawOf(root);
+      for (let i = 0; i < body.pieces.length; i += 1) {
+        const piece = body.pieces[i]!;
+        const box = body.boxes[i]!;
+        root.localToWorld(_pieceAt.set(piece.x, 0, piece.z));
+        root.localToWorld(_pieceTop.set(piece.x, piece.top, piece.z));
+        root.localToWorld(_pieceBase.set(piece.x, PIECE_BASE, piece.z));
+        this.collision.moveBox(box, _pieceAt.x, _pieceAt.z, yaw, _pieceTop.y, _pieceBase.y);
+      }
     }
   }
 
