@@ -527,3 +527,19 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
 - TODO: census excludes moving bodies; check:exits every holder with 3 pets (one beside, rest stowed, ride runs,
   off, all back free); check:solids clause 8 via real wiring + solid-train clauses; proofs red; fix
   check:pet-slide (one pet now); run check/test:procgen/build; PR; preview plays.
+- Later (19 Oct pm): 5dffa34e check:park rail.walkable is level-aware (pre-existing from the tunnel commit
+  4687a570: a route ending on a deck 1 m over the tunnel mouth read as the track reached; control: a 6 m fence+
+  corridor gap -> 11 points). 3443b9e8 children wait at Station.waitX (open end, back half, arrival 0.6 m ->
+  >= 2.0 m from the line); parade force-resync uses signature null ('' == empty line, so the last never stowed);
+  form-up on her floor; check:pet-slide = one companion rides, two in backpack, all back out.
+- Platform reach: ahead of the train PLATFORM_AHEAD (cab eaves 0.92 + 0.08) + r; BESIDE a standing train only a
+  body whose middle is inside 0.8 (up on a carriage) — an NPC idling at a platform edge at 1.25 m held the train
+  for minutes (check:exits "never stood at a platform she could board", check:solids ride case).
+- check:exits (uncommitted at this note): 3 pets; World.attachParade; watchCompanions asks every holder 0.3 s
+  in (13 holders), companionsBack after every judge; 4d: cat bus to the gate, Rail Race (chooseLevel(1)), Sky
+  Cruiser, ferris to their ends, the train a whole lap + Get off + it leaves; Next day judged by followDistance
+  (check:exits never ran store microtasks, so wild-caught pets never joined the line before; my explicit
+  sync made them join -> line of 6-7). PASSED at 3443b9e8+edits.
+- check:solids clause 8 rewritten through Game's wiring (real Player+Parade, attachPlayer/attachParade), margin
+  = 2*PLAYER_RADIUS; clause 13 solid train. Proofs added: pets-count-aboard, pets-stay-out, ghost-train,
+  frozen-train, train-ignores-on-top, put-down-ignores-train (+ train-ignores-her/-pets(M5: parade null)/-npcs).
