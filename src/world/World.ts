@@ -466,6 +466,9 @@ export class World implements GameSystem {
     // this cannot be a constructor argument in either direction — it is the
     // same late-binding `attachPlayer` has always used.
     this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
+    // The train stops for anyone on the line ahead of it (Jim, 19 Oct 2026),
+    // the crowd as much as her — `Game` tells it of her and her parade.
+    this.train.keepClearOf(() => this.npcs.onTheLine());
 
     // Every world label, into the one manager. A label that is not here is
     // never drawn, so a new owner that forgets this line is found on sight.

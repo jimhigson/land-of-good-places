@@ -456,3 +456,24 @@ Work list (tick as done, commit each):
   bush-top lean jumps into boxes (seeds 2, 8, 10, 12, 14, 15), wedged jumps among bush clusters, along-walk hops at
   L corners. Rerun at 726201ae: /tmp/es-r15 (jobs.txt, job.sh).
 - Local at 0f9c6b78: check:library, check:exits, check:hotel, check:wall-tunnelling, check:hop-clearance exit 0.
+
+## Round 3, after the RULING CHANGE (19 Oct, Jim): open tracks, the train stops, no taller fence
+Coordinator's brief (binding): revert every railway guard height (fence = main's knee-high 0.67 m top, POST_LENGTH
+0.95, POST_MIDDLE 0.48, rail centre 0.62; no lifts; bridges = main's look, no railings); tracks open (corridor stays a
+closure for NavGrid/NPCs); the train stops for ANYONE on the line ahead (her, her pets, any NPC) — one owner in the
+train; never trapped on the line; checks: the census asserts a way off from every line point (red: a fence raised
+above her jump), a train clause with her, a pet and an NPC, each proved red. Every OTHER guard stays as is (nursery
+glass, planting beds, solid roofs, toilet nook ceiling, narrow-top rule). NO new invisible blocker or guard of any
+height without Jim's approval — ask the coordinator (where/why/what it blocks). Stay in scope.
+- Done: aea71977 face judged from where her body meets it, head on, by both halves (entryAlong/faceMeetAhead; the
+  entry behind her once a step carries her middle over the face); 9cb40c8d/bff45dbc clause 9 room rule (stop excused
+  only where nothing taller than a step leaves no room ahead) + obstructed approaches left out + proof feet-judged
+  (red on seed 6); 40c59b5b hold never puts her back into a wedge + settlesWedged (30 frame-sized pushes, not one
+  long one) in nearestFit/liftOutOfSqueeze/dropWedges; e4c9f326 the railway revert + ParkTrain.keepClearOf/wayAhead
+  (stands 1.5 m short, 24 m look-ahead, hardest braking 9 m/s2 only when late, stands for anyone alongside, toots
+  once per stop); 12b78c3b check:solids: the line (every 2.4 m point gets off: walk/hop/search; proof sealed-line)
+  and clause 8 the train (proofs train-ignores-her/-pets/-npcs); c3a1a97a census landings settle 0.6 s after the
+  LAST landing (transient 1-frame wedges were counted). Crowd wiring: NpcSystem.onTheLine (riders excluded), World.
+- Seed 5 park at c3a1a97a: all green (census 42 s; the line 89 points, 21 walk + 68 hop; train 1.53/1.49 m short).
+- Known, NOT fixed (no new blockers without Jim): under each bridge the parapet walls stand from the ground across
+  the arch (main's collider), so walking along the line she is stopped at the bridge's sides and hops out instead.

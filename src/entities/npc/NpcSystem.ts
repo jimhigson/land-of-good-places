@@ -16,7 +16,9 @@ import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { circleSeparation, MAX_DEPENETRATION_SPEED, separatedByHeight, type CollisionWorld } from '../../world/Collision';
-import { PLAYER_RADIUS } from '../../core/constants';
+import { NPC_RADIUS, PLAYER_RADIUS } from '../../core/constants';
+import type { OnTheLine } from '../../world/train/ParkTrain';
+import type { TrainPassenger } from '../../world/train/service';
 import type { GroundSampler, Player } from '../Player';
 import { CharacterModel } from '../CharacterModel';
 import { ParadeMember } from '../parade/ParadeMember';
@@ -895,6 +897,21 @@ export class NpcSystem implements GameSystem {
    */
   get all(): readonly NpcCharacter[] {
     return this.characters;
+  }
+
+  /**
+   * **Every child of the crowd who could be standing on the railway**, for the
+   * train to stop for (Jim, 19 Oct 2026: *"make the train stop if anyone is in
+   * front of it"* — `ParkTrain.keepClearOf`): each at its feet, with its
+   * body's radius. Not one the train is carrying: a rider is on the line by
+   * being on the train.
+   */
+  *onTheLine(): Iterable<OnTheLine> {
+    for (const character of this.characters) {
+      const seat = (character.driver as Partial<TrainPassenger>).trainSeat;
+      if (seat !== null && seat !== undefined) continue;
+      yield { x: character.position.x, y: character.position.y, z: character.position.z, radius: NPC_RADIUS };
+    }
   }
 
   update(context: FrameContext): void {

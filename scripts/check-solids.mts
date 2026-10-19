@@ -66,7 +66,7 @@ import type { FrameContext } from '../src/core/types.ts';
 import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe, type HopProbe } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
-import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
+import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, NPC_RADIUS, PARADE_MEMBER_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_BOUNDARY, circleBoundary, type ParkBoundary } from '../src/world/boundary.ts';
@@ -132,8 +132,9 @@ import { STEP_MARGIN, STEP_SAMPLES, solidStepCeiling, standingHeight, teleportHe
  *   one frame clock and a step on another, and a step-high face hopped. Seed 5
  *   has no face near the line on a slope, so it is green there: run it on seed
  *   6 (`LGP_SEED=6`), whose stone wall at (22.9, 0.5) it must find.
- * - `train-ignores-her` (park): the train told of nobody on the line — clause 8
- *   must find it run into her.
+ * - `train-ignores-her`, `train-ignores-pets`, `train-ignores-npcs` (park): the
+ *   train told of her, of a pet, or of the crowd no longer — clause 8 must
+ *   find it run into each.
  * - `spawn-highest` (park): a spawn asked from `Infinity`, as it was — clause 10.
  * - `single-step`, `drawn-feet` (core): the step-up's one point past her front
  *   edge, and her drawn height as her feet, as each was — clause 11.
@@ -143,7 +144,7 @@ const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 const PROOFS = [
   'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
-  'sealed-line', 'train-ignores-her', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
+  'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -1559,33 +1560,47 @@ if (spacesInPart.length) {
 // 8. The train stops for her
 // ---------------------------------------------------------------------------
 /**
- * **On the line ahead of the train, it stops short of her, waits, and goes on
- * once she has gone** (Jim, 19 Oct 2026: *"jumping onto the train tracks
- * sounds ok so long as the train stops if there's someone on the tracks"*).
- * The park's own train, driven frame by frame through its own `update`, told
- * of her exactly as `Game` tells it (`ParkTrain.keepClearOf`): first standing
- * just past its nose while it waits at a station, then out on the loop well
- * ahead of it, then gone. Its nose must never come nearer her body than
- * `TRAIN_STOPS_SHORT` less a hand's breadth, it must stand still while she is
- * there, and it must pass the spot once she has left.
+ * **On the line ahead of the train, it stops short of anyone, waits, and goes
+ * on once they have gone** (Jim, 19 Oct 2026: *"make the fence around the
+ * track back to its old height, and make the train stop if anyone is in front
+ * of it"*). The park's own train, driven frame by frame through its own
+ * `update`: told of her and of a pet as `Game` tells it, by their sizes
+ * (`ParkTrain.keepClearOf`), and of the crowd by `World`'s own wiring
+ * (`NpcSystem.onTheLine`), with one of the crowd put on the line. Her first
+ * standing just past its nose while it waits at a station, then out on the
+ * loop well ahead of it, then gone; a pet, then a child of the crowd, each
+ * ahead of it on the loop. Its nose must never come nearer a body than
+ * `TRAIN_STOPS_SHORT` less a hand's breadth, it must stand still while they
+ * are there, and it must pass the spot once they have left.
  */
 if (inPart('park')) {
-  console.log('\n8. THE TRAIN — on the line ahead of it, the train stops short of her, waits, and goes on once she has gone:');
+  console.log('\n8. THE TRAIN — on the line ahead of it, the train stops short of anyone, waits, and goes on once they have gone:');
   const train = world.train;
   const route = train.route;
+  // Her and a pet of her parade, as `Game` hands them over; the crowd is
+  // `World`'s to hand over, and has been since the park was built.
   const her = { x: 0, y: 0, z: 0, radius: PLAYER_RADIUS };
+  const pet = { x: 0, y: 0, z: 0, radius: PARADE_MEMBER_RADIUS };
   let there = false;
+  let petThere = false;
   if (PROVE !== 'train-ignores-her') train.keepClearOf(() => (there ? [her] : []));
+  if (PROVE !== 'train-ignores-pets') train.keepClearOf(() => (petThere ? [pet] : []));
+  // The proof's own break of the crowd's wiring: World asks this, every frame.
+  if (PROVE === 'train-ignores-npcs') world.npcs.onTheLine = function* () {};
+  const kid = world.npcs.all.find((character) => !((character.driver as { trainSeat?: number | null }).trainSeat ?? null));
   const at = new Vector3();
-  /** Puts her on the track bed `ahead` metres past the nose; her place along the loop. */
-  const standAhead = (ahead: number): number => {
-    const d = route.wrap(train.noseDistance() + ahead + her.radius);
+  /** Stands `body` on the track bed `ahead` metres past the nose; its place along the loop. */
+  const putAhead = (body: { x: number; y: number; z: number; radius: number }, ahead: number): number => {
+    const d = route.wrap(train.noseDistance() + ahead + body.radius);
     route.pointAt(d, at);
-    her.x = at.x;
-    her.z = at.z;
-    her.y = sample(at.x, at.z, at.y + 0.5);
-    there = true;
+    body.x = at.x;
+    body.z = at.z;
+    body.y = sample(at.x, at.z, at.y + 0.5);
     return d;
+  };
+  const standAhead = (ahead: number): number => {
+    there = true;
+    return putAhead(her, ahead);
   };
   const frame = {
     dt: 1 / 60,
@@ -1595,14 +1610,14 @@ if (inPart('park')) {
     cameraForward: new Vector3(0, 0, -1),
     frame: 0,
   };
-  /** How far her body's edge is in front of the nose: negative once the nose is past her. */
-  const gapTo = (d: number): number => {
+  /** How far a body's edge is in front of the nose: negative once the nose is past it. */
+  const gapTo = (d: number, radius = her.radius): number => {
     let ahead = route.forwardGap(train.noseDistance(), d);
     if (ahead > route.length / 2) ahead -= route.length;
-    return ahead - her.radius;
+    return ahead - radius;
   };
-  /** Runs the train for `seconds`; the nearest the nose came to her, and how long it stood still. */
-  const drive = (seconds: number, d: number): { nearest: number; stood: number; moved: number } => {
+  /** Runs the train for `seconds`; the nearest the nose came to a body, and how long it stood still. */
+  const drive = (seconds: number, d: number, radius = her.radius): { nearest: number; stood: number; moved: number } => {
     let nearest = Infinity;
     let stood = 0;
     let moved = 0;
@@ -1614,7 +1629,7 @@ if (inPart('park')) {
       train.update(frame as unknown as FrameContext);
       moved += route.forwardGap(before, train.noseDistance());
       if (train.runningSpeed === 0) stood += frame.dt;
-      nearest = Math.min(nearest, gapTo(d));
+      nearest = Math.min(nearest, gapTo(d, radius));
     }
     return { nearest, stood, moved };
   };
@@ -1631,7 +1646,23 @@ if (inPart('park')) {
   there = false;
   const going = drive(12, onTheLoop);
   say(gapTo(onTheLoop) < -2, `once she has gone, it goes on: ${going.moved.toFixed(1)} m in 12 s, its nose ${(-gapTo(onTheLoop) - her.radius).toFixed(1)} m past where she stood`);
-  note(`clause 8 drove the park's own train ${(frame.elapsed).toFixed(0)} s through its own update at 60 fps, told of her as Game tells it (keepClearOf); stopping short is asked of ${TRAIN_STOPS_SHORT} m less 0.1`);
+  // A pet of her parade on the line ahead: the same stop, for a smaller body.
+  petThere = true;
+  const petAt = putAhead(pet, 20);
+  const forPet = drive(20, petAt, pet.radius);
+  say(forPet.nearest >= margin && forPet.stood > 3, `a pet: 20 m ahead of it, the train stops ${forPet.nearest.toFixed(2)} m short of it (at least ${margin.toFixed(2)} asked), standing ${forPet.stood.toFixed(1)} s`);
+  petThere = false;
+  drive(12, petAt, pet.radius);
+  // A child of the crowd on the line ahead, through World's own wiring.
+  if (!kid) say(false, 'a child of the crowd: the headless park has no child in its crowd to stand on the line');
+  else {
+    const body = { x: 0, y: 0, z: 0, radius: NPC_RADIUS };
+    const kidAt = putAhead(body, 20);
+    kid.position.set(body.x, body.y, body.z);
+    const forKid = drive(20, kidAt, NPC_RADIUS);
+    say(forKid.nearest >= margin && forKid.stood > 3, `a child of the crowd: 20 m ahead of it, through World's own wiring, the train stops ${forKid.nearest.toFixed(2)} m short of them (at least ${margin.toFixed(2)} asked), standing ${forKid.stood.toFixed(1)} s`);
+  }
+  note(`clause 8 drove the park's own train ${(frame.elapsed).toFixed(0)} s through its own update at 60 fps, told of her and a pet as Game tells it (keepClearOf) and of the crowd by World's own wiring; stopping short is asked of ${TRAIN_STOPS_SHORT} m less 0.1`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');
