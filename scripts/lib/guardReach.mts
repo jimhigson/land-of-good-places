@@ -15,7 +15,7 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld, SolidView } from '../../src/world/Collision.ts';
-import { JUMP_PLAN_REACH, guardRadiusNeeded, type Takeoff } from '../../src/world/jumpReach.ts';
+import { GUARD_OVER_FEET, JUMP_PLAN_REACH, guardRadiusNeeded, jumpRiseAt, type Takeoff } from '../../src/world/jumpReach.ts';
 import { planetRadiusAt } from '../../src/world/terrain.ts';
 import { standingHeight } from '../../src/world/standing.ts';
 
@@ -70,7 +70,16 @@ const GRID = 0.25;
  * middle) with the radius it stands to and the radius it must, for `tops`
  * (each guard's own top, or a hypothetical one for a control).
  */
-export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: number, z: number) => number): GuardPoint[] {
+/**
+ * A top she reached (`check:solids`' census): its solid, and its height as a
+ * radius — where a jump at a guard can leave from, as the walk is.
+ */
+export interface TopTakeoff {
+  readonly solid: SolidView;
+  readonly radius: number;
+}
+
+export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: number, z: number) => number, tops: readonly TopTakeoff[] = []): GuardPoint[] {
   const { collision, sample, route, onDeck, onBridge, dwellFloorAt } = world;
   const guards: SolidView[] = [];
   collision.forEachSolid((solid) => {
@@ -187,7 +196,6 @@ export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: num
           near.push(q);
         }
       }
-      if (!near.length) continue;
       let need = -Infinity;
       let from: Takeoff | null = null;
       for (const q of near) {
@@ -197,6 +205,25 @@ export function measureGuards(world: GuardWorld, top?: (solid: SolidView, x: num
           from = q;
         }
       }
+      // And from every top she reached, within a jump of it — a railway
+      // guard's, never a parapet's (nothing she reaches stands on a deck):
+      // the highest her feet get over this point from the nearest of it, a
+      // top being level (PR #722's review, round two: a bush 2 m off the
+      // fence). Her census found these, by her own simulated jumps, so this
+      // half measures the fence against what she does, not what the fence's
+      // own builder guessed she could (`reachableTops`).
+      if (role === 'railway') {
+        for (const t of tops) {
+          const apart = Math.max(0, -t.solid.depthAt(p.x, p.z));
+          if (apart > JUMP_PLAN_REACH) continue;
+          const n = t.radius + jumpRiseAt(apart) + GUARD_OVER_FEET;
+          if (n > need) {
+            need = n;
+            from = { x: t.solid.centreX, z: t.solid.centreZ, radius: t.radius, slopeX: 0, slopeZ: 0 };
+          }
+        }
+      }
+      if (!Number.isFinite(need)) continue;
       const guardTop = top ? top(guard, p.x, p.z) : planetRadiusAt(p.x, guard.topAt(p.x, p.z), p.z);
       out.push({ solid: guard, x: p.x, z: p.z, top: guardTop, need, from });
     }

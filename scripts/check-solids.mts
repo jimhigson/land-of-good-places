@@ -60,11 +60,11 @@ import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { indexDrawnTops } from './lib/drawnTops.mts';
 import { reachWithJumps, joinsMain, runAndJump, type ReachCost, type ReachedTop, type Stand } from './lib/solidReach.mts';
-import { measureGuards } from './lib/guardReach.mts';
+import { GUARD_KINDS, measureGuards } from './lib/guardReach.mts';
 import { GUARD_MARGIN, JUMP_PLAN_REACH } from '../src/world/jumpReach.ts';
 import { RAILWAY_GUARD_TOP } from '../src/world/train/fence.ts';
 import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe } from './playerSim.mts';
-import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, type SolidView } from '../src/world/Collision.ts';
+import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
@@ -117,7 +117,18 @@ import { STEP_SAMPLES, standingHeight, teleportHeight } from '../src/world/stand
  *   where the widened rails are stood on.
  * - `low-guard` (park): a run of `railway fence` 3 m long and a metre over the
  *   grass in front of the gate — clause 8's measure and her sprint-jumps.
+ * - `fence-bush` (park): a bush, 1.2 m tall, its middle 2 m off the railway
+ *   fence nearest the gate, planted after the fence was raised — clause 4c's
+ *   run-and-jumps from it must come down inside a box, and clause 8's measure
+ *   must find the fence short of it (PR #722's review, round two).
+ * - `fences-4m` (park): every railway fence bay and post given a twin four
+ *   metres taller — clause 4c's own control, which must stay **green**: with
+ *   no fence anyone can clear, its run-and-jumps find no box to land in, so a
+ *   box landing it reports is one over a fence, never one it made up.
  * - `blind-hop` (park): the auto-hop judged from nothing, as it was — clause 9.
+ * - `drawn-step` (park): the step-up asks where a top is drawn, as it did,
+ *   not the body she walks into — clause 9 must find her stopped dead at seed
+ *   5's knee-high stone wall at (-49.6, 61.6).
  * - `spawn-highest` (park): a spawn asked from `Infinity`, as it was — clause 10.
  * - `single-step`, `drawn-feet` (core): the step-up's one point past her front
  *   edge, and her drawn height as her feet, as each was — clause 11.
@@ -127,6 +138,7 @@ const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 const PROOFS = [
   'infinite', 'tall-top', 'too-tall', 'rail-step', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
   'reptile-roof', 'every-roof', 'new-roof', 'fence-crate', 'guards-alone', 'low-guard', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
+  'fence-bush', 'fences-4m', 'drawn-step',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -302,6 +314,36 @@ const ROOF_KINDS: Readonly<Record<string, string>> = {
     const cx = ENTRANCE_PLAYER_X;
     const cz = ENTRANCE_PLAYER_Z - 8;
     collision.kinded('railway fence', () => collision.addWall(cx - 1.5, cz, cx + 1.5, cz, 0.09, sample(cx, cz, 50) + 1.0, false, true));
+  }
+  // A bush beside the fence nearest the gate, planted after the fence was
+  // stood to what it must stop: from its top, a sprint-jump over the fence.
+  if (PROVE === 'fence-bush') {
+    const route = world.train.route;
+    const post = before
+      .filter((s) => s.kind === 'railway fence post')
+      .sort((a, b) => Math.hypot(a.centreX - ENTRANCE_PLAYER_X, a.centreZ - ENTRANCE_PLAYER_Z) - Math.hypot(b.centreX - ENTRANCE_PLAYER_X, b.centreZ - ENTRANCE_PLAYER_Z))[0];
+    if (post) {
+      const rail = route.pointAt(route.distanceNear(post.centreX, post.centreZ), new Vector3());
+      const out = Math.hypot(post.centreX - rail.x, post.centreZ - rail.z) || 1;
+      const cx = post.centreX + ((post.centreX - rail.x) / out) * 2;
+      const cz = post.centreZ + ((post.centreZ - rail.z) / out) * 2;
+      collision.kinded('bush', () => collision.addCircle(cx, cz, 0.85, sample(cx, cz, 50) + 1.2, false, true));
+    }
+  }
+  // Every railway fence bay and post, twinned four metres taller.
+  if (PROVE === 'fences-4m') {
+    for (const guard of before) {
+      if (guard.kind !== 'railway fence' && guard.kind !== 'railway fence post') continue;
+      const top = guard.topAt(guard.centreX, guard.centreZ) + 4;
+      if (guard.shape === 'circle') {
+        collision.kinded(guard.kind, () => collision.toppedNarrow(0.05, () => collision.addCircle(guard.centreX, guard.centreZ, guard.halfWidth, top, false, true)));
+      } else {
+        const seg = guardSegment(guard);
+        collision.kinded(guard.kind, () =>
+          collision.toppedNarrow(0.05, () => collision.addWall(seg.ax, seg.az, seg.bx, seg.bz, guard.halfWidth, guard.topAt(seg.ax, seg.az) + 4, false, true, -Infinity, false, Number.NaN, guard.topAt(seg.bx, seg.bz) + 4)),
+        );
+      }
+    }
   }
   if (PROVE === 'low-roof') stepNearGate('stall awning');
   // The review's own control (PR #722): a step kinded as one of the roofs the
@@ -630,6 +672,107 @@ if (SKIP_CENSUS) {
       }
       for (const region of result.regions.slice(1)) consider(region.entry, `${region.via}`);
       say(onRail.length === 0, `the railway is out of reach: ${onRail.length} place(s) inside its fences reached off the walk${onRail.length ? `:\n${onRail.slice(0, 12).map((r) => `      ${run.link(r.stand)} — ${r.how}`).join('\n')}` : ''}`);
+    }
+    // 4c. From every top she reaches, a run-and-jump at every guard within a
+    //     sprint-jump of it (PR #722's review, round two: from a bush 2 m off
+    //     the fence she crossed its line 4-5 m out, her feet 0.73 m over it,
+    //     and came down in a fenced box — stage 4b only hopped at a guard
+    //     within 2.5 m of a top, aimed just past it). Aimed 1.5 m past each
+    //     guard point, a metre apart along every fence, post and parapet, at
+    //     run-ups of 0, 1, 2 and 4 m from where she stood on the top. Not one
+    //     may come down inside a box; one that comes down on a station's open
+    //     track must get back out.
+    if (run.name === 'the park') {
+      const t4c = performance.now();
+      const guardPoints: { solid: SolidView; x: number; z: number }[] = [];
+      for (const guard of solids) {
+        if (!(guard.kind in GUARD_KINDS) || !guard.topIsAbsolute || !Number.isFinite(guard.topHeight)) continue;
+        if (guard.shape === 'circle') {
+          guardPoints.push({ solid: guard, x: guard.centreX, z: guard.centreZ });
+          continue;
+        }
+        const seg = guardSegment(guard);
+        const n = Math.max(1, Math.ceil(Math.hypot(seg.bx - seg.ax, seg.bz - seg.az) / 1));
+        for (let k = 0; k <= n; k += 1) guardPoints.push({ solid: guard, x: seg.ax + ((seg.bx - seg.ax) * k) / n, z: seg.az + ((seg.bz - seg.az) * k) / n });
+      }
+      const GUARD_BUCKET = 8;
+      const guardBuckets = new Map<string, typeof guardPoints>();
+      for (const point of guardPoints) {
+        const k = `${Math.floor(point.x / GUARD_BUCKET)},${Math.floor(point.z / GUARD_BUCKET)}`;
+        let list = guardBuckets.get(k);
+        if (!list) guardBuckets.set(k, (list = []));
+        list.push(point);
+      }
+      const reachOf = JUMP_PLAN_REACH + 0.5;
+      let sims = 0;
+      let fromTops = 0;
+      const inBox: string[] = [];
+      const trappedOnTrack: string[] = [];
+      let onTrack = 0;
+      for (const top of result.tops) {
+        const from = top.at;
+        const near: typeof guardPoints = [];
+        for (let i = Math.floor((from.x - reachOf) / GUARD_BUCKET); i <= Math.floor((from.x + reachOf) / GUARD_BUCKET); i += 1) {
+          for (let j = Math.floor((from.z - reachOf) / GUARD_BUCKET); j <= Math.floor((from.z + reachOf) / GUARD_BUCKET); j += 1) {
+            for (const point of guardBuckets.get(`${i},${j}`) ?? []) if (Math.hypot(point.x - from.x, point.z - from.z) <= reachOf) near.push(point);
+          }
+        }
+        if (!near.length) continue;
+        fromTops += 1;
+        for (const point of near) {
+          const dx = point.x - from.x;
+          const dz = point.z - from.z;
+          const d = Math.hypot(dx, dz);
+          if (d < 0.3) continue;
+          const aimX = point.x + (dx / d) * 1.5;
+          const aimZ = point.z + (dz / d) * 1.5;
+          for (const runUp of [0, 1, 2, 4]) {
+            const jumpAt = d + 1.5 - runUp;
+            if (jumpAt < 0.5) continue;
+            sims += 1;
+            const landed = runAndJump({ collision, sample, onWedged }, from, aimX, aimZ, jumpAt, CENSUS_FPS);
+            if (!landed) continue;
+            const rail = route.pointAt(route.distanceNear(landed.x, landed.z), railScratch);
+            const off = Math.hypot(landed.x - rail.x, landed.z - rail.z);
+            if (off > FENCE_OFFSET - 0.1) continue;
+            if (landed.y > terrainHeight(landed.x, landed.z) + 2.5) continue; // a bridge's deck over the line
+            const how = `${top.solid.kind || top.solid.owner || 'a top'} (${top.how}) from ${run.link(from)} at ${point.solid.kind} (${point.x.toFixed(1)}, ${point.z.toFixed(1)}), jumping ${jumpAt.toFixed(1)} m out: came down at (${landed.x.toFixed(2)}, ${landed.z.toFixed(2)}), ${off.toFixed(2)} m off the rail's centre`;
+            if (collision.closedAt(landed.x, landed.z)) {
+              inBox.push(how);
+              continue;
+            }
+            // A station's own track, open for boarding: she must get back out.
+            onTrack += 1;
+            const outside = (at: Stand): boolean => main(at.x, at.z, at.y) || joinsMain({ collision, sample }, main, at, 60);
+            let out = outside(landed);
+            if (!out) {
+              try {
+                out = reachWithJumps({
+                  collision,
+                  sample,
+                  grid,
+                  start: landed,
+                  inSpace: (x, z) => spaceAt(x, z) === id && Math.hypot(x - landed.x, z - landed.z) < 14,
+                  fps: CENSUS_FPS,
+                  until: outside,
+                }).stopped;
+              } catch {
+                out = false;
+              }
+            }
+            if (!out) trappedOnTrack.push(how);
+          }
+        }
+      }
+      say(
+        inBox.length === 0,
+        `the railway's boxes are out of reach from every top: ${sims} run-and-jumps from the ${fromTops} tops she reaches within a sprint-jump of a guard, at ${guardPoints.length} guard points: ${inBox.length} came down inside a box${inBox.length ? `:\n${inBox.slice(0, 8).map((h) => `      ${h}`).join('\n')}` : ''}`,
+      );
+      say(
+        trappedOnTrack.length === 0,
+        `of them, ${onTrack} came down on a station's open track, and she gets back out of every one${trappedOnTrack.length ? ` — ${trappedOnTrack.length} not:\n${trappedOnTrack.slice(0, 6).map((h) => `      ${h}`).join('\n')}` : ''}`,
+      );
+      note(`clause 4c, seed ${PARK_SEED_ASKED}: ${inBox.length} box landing(s) from ${sims} run-and-jumps (${fromTops} tops, ${guardPoints.length} guard points), ${onTrack} on a station's open track, ${((performance.now() - t4c) / 1000).toFixed(0)} s`);
     }
     // Off the edge of a space: a drop to well below where she started.
     const below = result.regions.slice(1).filter((region) => region.entry.y < run.start.y - 1.5 && run.name !== 'the park');
@@ -1048,7 +1191,7 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
  * asks (`playerHopProbe`), never one that cannot fire.
  */
 /** Her auto-hop as `Player` asks it — or, for the proof, without her feet: the hop the first cut judged from nothing. */
-const hopProbeFor = (world: CollisionWorld): ((probe: Vector3, feet: Vector3) => boolean) =>
+const hopProbeFor = (world: CollisionWorld): ((probe: Vector3, feet: Vector3, feetAt?: (x: number, z: number) => number) => boolean) =>
   PROVE === 'blind-hop' ? (probe) => world.wouldAutoHopClear(probe, PLAYER_RADIUS, JUMP_APEX_HEIGHT) : playerHopProbe(world);
 /** A wall's long axis: the direction its footprint reaches furthest from its middle, and how far (its ends, less its own half-width). */
 function wallAxis(solid: SolidView): { ux: number; uz: number; half: number } {
@@ -1194,86 +1337,146 @@ if (spacesInPart.length) {
     `clause 9: of ${walks} walks along a top, ${fellOff} stepped off its side before its end${firstFell.length ? ` (e.g. ${firstFell.join('; ')})` : ''} — ` +
       `a fall, not a hop, so not asserted here: what it asserts is that the auto-hop never throws her off (a bush's crown beside a wall can nudge her off a narrow top)`,
   );
-  // Up a low wall: from the ground beside every auto-hoppable solid, walking
-  // in, wherever its top is a step over that ground.
-  let ups = 0;
-  let hopsOver = 0;
+  // **Every face of every wall she can hop, from both sides: a step she steps
+  // up, a hop she hops, never stopped dead — and the same whatever the frame
+  // clock** (QA on PR #722, round two: seed 5's knee-high stone wall at
+  // (-49.6, 61.6), 0.12-0.41 m over her feet, stopped her at its face — its
+  // top drawn out along the lean beyond her step's reach, and the hop rightly
+  // calling it a step; and 15 of 49 faces hopped on one sweep, 12 on the
+  // next). A walk in at every metre of every face, both sides, at a walk and
+  // a sprint, at 60 fps (three phases of the clock), 30, 120 and a jittered
+  // clock. What she should do is the face's own rise over the ground where
+  // her body meets it (the hop's own judgement, `CollisionWorld.hopsOver`):
+  // a step at most `BUILDING_STEP_UP`, a hop up to `MAX_AUTO_HOP_HEIGHT`.
+  let faces = 0;
+  let stepFaces = 0;
+  let hopFaces = 0;
+  const stoppedAt: string[] = [];
+  const hoppedInstead: string[] = [];
+  const unsteady: string[] = [];
   let hopsAtTaller = 0;
-  const firstHop: string[] = [];
   const hoppable: SolidView[] = [];
   collision.forEachSolid((solid) => {
     if (!solid.autoHoppable || !solid.topIsAbsolute) return;
     if (!spacesInPart.some((run) => spaceAt(solid.centreX, solid.centreZ) === spaceAt(run.start.x, run.start.z))) return;
     hoppable.push(solid);
   });
+  type Outcome = 'on' | 'over' | 'hop' | 'stopped' | 'other';
+  /** One walk in at a face: from `(sx, sz)` along `(dx, dz)` until she stands on the wall, crosses it, hops, or 2 s pass. */
+  const walkIn = (solid: SolidView, sx: number, sz: number, dx: number, dz: number, clock: (f: number) => number, sprint: boolean, nx: number, nz: number): { outcome: Outcome; asked: { px: number; pz: number; fx: number; fy: number; fz: number } | null } => {
+    const probe = hopProbeFor(collision);
+    let asked: { px: number; pz: number; fx: number; fy: number; fz: number } | null = null;
+    const sim = new SimPlayer(collision, {
+      ground: sample,
+      hopProbe: (at, feet, feetAt) => {
+        const hop = probe(at, feet, feetAt);
+        if (hop && !asked) asked = { px: at.x, pz: at.z, fx: feet.x, fy: feet.y, fz: feet.z };
+        return hop;
+      },
+      drawnStep: PROVE === 'drawn-step',
+    });
+    sim.placeOnGround(sx, sz);
+    const sideOf = (x: number, z: number): number => (x - solid.centreX) * nx + (z - solid.centreZ) * nz;
+    const startSide = sideOf(sx, sz);
+    let elapsed = 0;
+    for (let f = 0; elapsed < 2; f += 1) {
+      const step = clock(f);
+      elapsed += step;
+      const was = sim.airborne;
+      sim.step(step, dx, dz, sprint);
+      if (!was && sim.airborne && sim.verticalVelocity > JUMP_SPEED * 0.5) return { outcome: 'hop', asked };
+      if (!sim.airborne && solid.standsAt(sim.position.x, sim.position.z) && Math.abs(sim.groundHeight - solid.topAt(sim.position.x, sim.position.z)) < 0.03) return { outcome: 'on', asked };
+      if (!sim.airborne && sideOf(sim.position.x, sim.position.z) * startSide < 0 && solid.depthAt(sim.position.x, sim.position.z) < -0.05) return { outcome: 'over', asked };
+    }
+    const gap = -solid.depthAt(sim.position.x, sim.position.z);
+    return { outcome: gap <= PLAYER_RADIUS + 0.05 ? 'stopped' : 'other', asked };
+  };
+  let jitterSeed = 1;
+  const jitter = (): number => {
+    jitterSeed = (jitterSeed * 1103515245 + 12345) & 0x7fffffff;
+    return jitterSeed / 0x7fffffff;
+  };
+  const CLOCKS: readonly { name: string; clock: () => (f: number) => number; phase: number }[] = [
+    { name: '60 fps', clock: () => () => 1 / 60, phase: 0 },
+    { name: '60 fps, 4 cm on', clock: () => () => 1 / 60, phase: 0.037 },
+    { name: '60 fps, 7 cm on', clock: () => () => 1 / 60, phase: 0.071 },
+    { name: '30 fps', clock: () => () => 1 / 30, phase: 0 },
+    { name: '120 fps', clock: () => () => 1 / 120, phase: 0 },
+    { name: 'a jittered clock', clock: () => () => 1 / (45 + jitter() * 30), phase: 0 },
+  ];
   for (const solid of hoppable) {
+    if (solid.shape !== 'capsule') continue;
     const axis = wallAxis(solid);
     const nx = -axis.uz;
     const nz = axis.ux;
     collision.setPlayBounds(spaceAt(solid.centreX, solid.centreZ) === SPACE_GARDEN ? GARDEN_PLAY_BOUNDARY : boundsOfSpace(spacesInPart.find((run) => spaceAt(run.start.x, run.start.z) === spaceAt(solid.centreX, solid.centreZ))?.name ?? ''));
-    for (let t = -axis.half; t <= axis.half + 1e-6; t += 1) {
+    const n = Math.max(1, Math.round((axis.half * 2) / 1));
+    for (let k = 0; k <= n; k += 1) {
+      const t = -axis.half * 0.9 + (axis.half * 1.8 * k) / n;
       for (const side of [1, -1]) {
         const ex = solid.centreX + axis.ux * t;
         const ez = solid.centreZ + axis.uz * t;
-        const sx = ex + nx * side * (solid.halfWidth + PLAYER_RADIUS + 0.6);
-        const sz = ez + nz * side * (solid.halfWidth + PLAYER_RADIUS + 0.6);
-        const ground = sample(sx, sz, solid.topAt(ex, ez) + 1);
-        const rise = altitudeAt(ex, solid.topAt(ex, ez), ez) - altitudeAt(sx, ground, sz);
-        if (!(rise > 0.03 && rise <= BUILDING_STEP_UP - 0.02)) continue;
-        if (collision.deepestSolidOverlap(scratchBody.set(sx, ground, sz), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02) continue;
-        ups += 1;
-        // Where the hop she takes was asked from: her probe and her feet.
-        const probe = hopProbeFor(collision);
-        let asked: { px: number; pz: number; fx: number; fy: number; fz: number } | null = null;
-        const sim = new SimPlayer(collision, {
-          ground: sample,
-          hopProbe: (at, feet) => {
-            const hop = probe(at, feet);
-            if (hop) asked = { px: at.x, pz: at.z, fx: feet.x, fy: feet.y, fz: feet.z };
-            return hop;
-          },
-        });
-        sim.position.set(sx, ground, sz);
-        sim.previousPosition.copy(sim.position);
-        sim.groundHeight = ground;
-        sim.groundY = ground;
-        for (let f = 0; f < Math.ceil(1.2 / dt); f += 1) {
-          const was = sim.airborne;
-          sim.step(dt, -nx * side * 0.5, -nz * side * 0.5, false);
-          // Stood on its top: she stepped up, and what she walks into beyond
-          // it is another wall's question (seeds 2, 3 and 7: walked on over
-          // this one, she hopped the next, and the first cut counted it here).
-          if (!sim.airborne && solid.standsAt(sim.position.x, sim.position.z) && Math.abs(sim.groundHeight - solid.topAt(sim.position.x, sim.position.z)) < 0.03) break;
-          if (!was && sim.airborne && sim.verticalVelocity > JUMP_SPEED * 0.5) {
-            // A hop is hers to take where something more than a step over her
-            // feet stands at her probe — an L's other arm, taller where they
-            // meet (seeds 1, 2 and 8). Hopped over instead of stepping up is a
-            // hop with nothing of the kind there.
-            const at = asked as { px: number; pz: number; fx: number; fy: number; fz: number } | null;
-            let overStep = false;
-            if (at) {
-              collision.forEachSolid((other) => {
-                if (overStep || !other.autoHoppable || other.depthAt(at.px, at.pz) <= -PLAYER_RADIUS) return;
-                // Over her feet as the hop itself asks it (`CollisionWorld.hopsOver`).
-                if (riseBetween(at.fx, at.fy, at.fz, at.px, other.topAt(at.px, at.pz), at.pz) > BUILDING_STEP_UP) overStep = true;
-              });
+        // Where her body meets the face, and a run-up behind it.
+        const cx = ex + nx * side * (solid.halfWidth + PLAYER_RADIUS);
+        const cz = ez + nz * side * (solid.halfWidth + PLAYER_RADIUS);
+        const sx = ex + nx * side * (solid.halfWidth + PLAYER_RADIUS + 1.2);
+        const sz = ez + nz * side * (solid.halfWidth + PLAYER_RADIUS + 1.2);
+        const top = solid.topAt(ex, ez);
+        const contactGround = sample(cx, cz, top + 0.5);
+        const startGround = sample(sx, sz, top + 0.5);
+        if (!Number.isFinite(contactGround) || !Number.isFinite(startGround)) continue;
+        // Only a face she can walk up to with nothing else in her way.
+        if (collision.deepestSolidOverlap(scratchBody.set(sx, startGround, sz), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 0.02) continue;
+        if (collision.deepestSolidOverlap(scratchBody.set(cx, contactGround, cz), PLAYER_RADIUS - 0.05, 0, undefined, KID_HEIGHT) > 0.02) continue;
+        const rise = riseBetween(cx, contactGround, cz, ex, top, ez);
+        if (rise < 0.05) continue;
+        const want = rise <= BUILDING_STEP_UP ? 'step' : rise <= MAX_AUTO_HOP_HEIGHT ? 'hop' : null;
+        if (!want) continue;
+        faces += 1;
+        if (want === 'step') stepFaces += 1;
+        else hopFaces += 1;
+        const where = `${solid.kind || solid.owner} at (${ex.toFixed(1)}, ${ez.toFixed(1)}), ${rise.toFixed(2)} m over where she meets it, from /spawn?pos=${sx.toFixed(1)},${sz.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
+        const classes = new Set<string>();
+        for (const { name, clock, phase } of CLOCKS) {
+          for (const sprint of [false, true]) {
+            const { outcome, asked } = walkIn(solid, sx - nx * side * phase, sz - nz * side * phase, -nx * side, -nz * side, clock(), sprint, nx, nz);
+            if (outcome === 'stopped') {
+              if (stoppedAt.length < 6 && !stoppedAt.some((w) => w.startsWith(where))) stoppedAt.push(`${where} (${want}, ${name}${sprint ? ', a sprint' : ''})`);
+              classes.add('stopped');
+              continue;
             }
-            if (overStep) {
-              hopsAtTaller += 1;
-              break;
+            if (want === 'step' && outcome === 'hop') {
+              // A hop is hers to take where something more than a step over
+              // her feet stands at her probe — an L's other arm, taller where
+              // they meet: the hop doing its job.
+              const at = asked as { px: number; pz: number; fx: number; fy: number; fz: number } | null;
+              let overStep = false;
+              if (at) {
+                collision.forEachSolid((other) => {
+                  if (overStep || other === solid || !other.autoHoppable || other.depthAt(at.px, at.pz) <= -PLAYER_RADIUS) return;
+                  if (riseBetween(at.fx, at.fy, at.fz, at.px, other.topAt(at.px, at.pz), at.pz) > BUILDING_STEP_UP) overStep = true;
+                });
+              }
+              if (overStep) {
+                hopsAtTaller += 1;
+                classes.add('step');
+                continue;
+              }
+              if (hoppedInstead.length < 6 && !hoppedInstead.some((w) => w.startsWith(where))) hoppedInstead.push(`${where} (${name}${sprint ? ', a sprint' : ''})`);
             }
-            hopsOver += 1;
-            if (firstHop.length < 4) firstHop.push(`${solid.kind || solid.owner} ${rise.toFixed(2)} m over the ground at (${sx.toFixed(1)}, ${sz.toFixed(1)})`);
-            break;
+            classes.add(outcome === 'hop' ? 'hop' : outcome === 'other' ? 'other' : 'step');
           }
         }
+        if (classes.size > 1) unsteady.push(`${where}: ${[...classes].join(' / ')}`);
       }
     }
   }
-  if (hoppable.length === 0) note(`clause 9: no wall in ${spacesInPart.map((run) => run.name).join(', ')} is auto-hoppable, so the step-up half asserts nothing in this part`);
+  if (hoppable.length === 0) note(`clause 9: no wall in ${spacesInPart.map((run) => run.name).join(', ')} is auto-hoppable, so its step-or-hop half asserts nothing in this part`);
   else {
-    say(ups > 0 && hopsOver === 0, `${ups} walks into ${hoppable.length} hoppable walls where they stand a step high: ${hopsOver} hopped her over instead of stepping up${firstHop.length ? ` — ${firstHop.join('; ')}` : ''}`);
-    note(`clause 9: of the ${ups} walks into a wall a step high, ${hopsAtTaller} hopped where something more than a step over her feet stood at her probe (an L's other arm, taller where they meet) — the hop doing its job, so not counted against the wall; a walk ends once she stands on the wall's top`);
+    say(faces > 0 && stoppedAt.length === 0, `${faces} faces of ${hoppable.length} hoppable walls, both sides, every metre (${stepFaces} a step high, ${hopFaces} a hop), each walked into at a walk and a sprint on ${CLOCKS.length} frame clocks: ${stoppedAt.length} stopped her dead${stoppedAt.length ? ` — ${stoppedAt.join('; ')}` : ''}`);
+    say(hoppedInstead.length === 0, `of those a step high, ${hoppedInstead.length} hopped her over instead of stepping up${hoppedInstead.length ? ` — ${hoppedInstead.join('; ')}` : ''}`);
+    say(unsteady.length === 0, `every face got one answer on every frame clock: ${unsteady.length} did not${unsteady.length ? ` — ${unsteady.slice(0, 6).join('; ')}` : ''}`);
+    note(`clause 9: of the walks into a face a step high, ${hopsAtTaller} hopped where something more than a step over her feet stood at her probe (an L's other arm, taller where they meet) — the hop doing its job, so not counted against the face`);
   }
 }
 
@@ -1427,7 +1630,12 @@ if (inPart('park')) {
       return y;
     },
   };
-  const points = measureGuards(guardWorld);
+  // The tops her census reached in the park: takeoffs, as the walk is.
+  const parkTops = allReached
+    .filter((r) => r.space === 'the park')
+    .map((r) => ({ solid: r.top.solid, radius: planetRadiusAt(r.top.at.x, r.top.top, r.top.at.z) }));
+  if (!parkTops.length) note('clause 8: the census reached no top in the park (or did not run), so its measure counts the walk alone — no jump from a top is in it');
+  const points = measureGuards(guardWorld, undefined, parkTops);
   // Within half the guard's margin of the need: the builders and this measure
   // sample the same rule on grids a quarter-metre apart.
   const short = points.filter((point) => point.top < point.need - GUARD_MARGIN / 2);
@@ -1448,7 +1656,7 @@ if (inPart('park')) {
   // The control: the same instrument against the guards as they were before
   // they answered to every jump — every top at the railway's guard height
   // over the walk beside it. It has to find QA's railing.
-  const asWas = measureGuards(guardWorld, (_solid, x, z) => planetRadiusAt(x, sample(x, z, 1e3), z) + RAILWAY_GUARD_TOP);
+  const asWas = measureGuards(guardWorld, (_solid, x, z) => planetRadiusAt(x, sample(x, z, 1e3), z) + RAILWAY_GUARD_TOP, parkTops);
   const wasShort = asWas.filter((point) => point.top < point.need - GUARD_MARGIN / 2);
   say(wasShort.length > 0, `CONTROL: at the guard height alone (${RAILWAY_GUARD_TOP.toFixed(2)} m over the walk beside them), ${wasShort.length} of the same points are cleared by a jump${wasShort.length ? '' : ' — none, so this instrument cannot say no'}`);
   // Her own sprint-jumps at the closest calls: from a run-up behind the
@@ -1490,7 +1698,7 @@ if (inPart('park')) {
     }
   }
   say(tried > 0 && crossed === 0, `her own sprint-jumps at the ${closest.length} closest calls: ${crossed} of ${tried} came down past the guard${firstCrossed.length ? ` — ${firstCrossed.join('; ')}` : ''}`);
-  note(`clause 8 measured ${points.length} guard points against every takeoff of the walk within ${JUMP_PLAN_REACH.toFixed(2)} m on a 0.25 m grid (closures, solids and the parked train left out); jumps from a top beside a guard are clause 4's (stage 4b), not this one's`);
+  note(`clause 8 measured ${points.length} guard points against every takeoff of the walk within ${JUMP_PLAN_REACH.toFixed(2)} m on a 0.25 m grid (closures, solids and the parked train left out) and against the ${parkTops.length} tops her census reached in the park; clause 4c runs her own jumps from each of those tops`);
 }
 
 console.log(failures ? `\n${failures} clause(s) FAILED.` : '\ncheck:solids OK');

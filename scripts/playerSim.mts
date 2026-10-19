@@ -122,6 +122,12 @@ export interface SimOptions {
    */
   feetOnGround?: boolean;
   /**
+   * The step-up asks where a top is drawn, not the body she walks into, as it
+   * did before seed 5's knee-high wall stopped her dead (`check:solids`'
+   * `drawn-step` proof).
+   */
+  drawnStep?: boolean;
+  /**
    * Uneven ground. Omitted, everything stands on y = 0 and the vertical loop
    * is the flat-world one the wall harnesses have always used.
    */
@@ -205,6 +211,7 @@ export class SimPlayer {
   private readonly hopProbe: HopProbe;
   private readonly stepSamples: number;
   private readonly feetOnGround: boolean;
+  private readonly stepTop: ((x: number, z: number, ceiling: number) => number) | undefined;
   readonly radius: number;
   private readonly substepping: boolean;
   private readonly ground: GroundSampler | null;
@@ -229,6 +236,7 @@ export class SimPlayer {
     this.groundReference = options.groundReference ?? 'surface';
     this.stepSamples = options.stepSamples ?? STEP_SAMPLES;
     this.feetOnGround = options.feetOnGround ?? true;
+    this.stepTop = options.drawnStep ? (x, z, ceiling) => collision.highestTopAt(x, z, ceiling) : undefined;
   }
 
   /**
@@ -305,7 +313,7 @@ export class SimPlayer {
     const stepping =
       following &&
       inputLength > 1e-4 &&
-      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples);
+      walkingOntoStep(this.collision, this.position.x, this.position.z, dirX / inputLength, dirZ / inputLength, reference, this.stepSamples, this.stepTop);
     const stepCeiling = stepping
       ? (x: number, z: number): number => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z))
       : undefined;

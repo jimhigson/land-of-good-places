@@ -287,6 +287,12 @@ export function walkingOntoStep(
   dirZ: number,
   reference: number,
   samples = STEP_SAMPLES,
+  /**
+   * What she steps onto at a point within a ceiling — the body she walks
+   * into (`stepTopAt`). Only `check:solids`' `drawn-step` proof asks where a
+   * top is drawn instead, as this did before seed 5's knee-high wall.
+   */
+  stepTop: (x: number, z: number, ceiling: number) => number = (px, pz, ceiling) => collision.stepTopAt(px, pz, ceiling),
 ): boolean {
   if (!collision.anyTopToStandOn()) return false;
   const carry = carryFrom(x, z, reference);
@@ -307,8 +313,8 @@ export function walkingOntoStep(
     // starts beyond its face, and pressed against that face she was never
     // over it (QA on PR #722, seed 5's stone wall at (−49.6, 61.6)).
     const step = stepCeilingAt(aheadX, aheadZ, from);
-    if (collision.stepTopAt(aheadX, aheadZ, step) <= from + STEP_ABOVE) continue;
-    if (collision.stepTopAt(aheadX, aheadZ, solidStepCeiling(collision, aheadX, aheadZ, from, step)) > from + STEP_ABOVE) return true;
+    if (stepTop(aheadX, aheadZ, step) <= from + STEP_ABOVE) continue;
+    if (stepTop(aheadX, aheadZ, solidStepCeiling(collision, aheadX, aheadZ, from, step)) > from + STEP_ABOVE) return true;
   }
   return false;
 }
