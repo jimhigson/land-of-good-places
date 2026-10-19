@@ -79,6 +79,17 @@
  * Red on the old breakfast: with the rule bypassed (`putDownSpot` returning the
  * spot it was given) and `standUp` ending on the seat as it did, (4) fails on
  * `lobby-a-1` and `lobby-b-1` — see the PR for the transcript and geometry.
+ *
+ * And 4c/4d are proved red by `EXITS_PROVE=<name>`:
+ *
+ * - `pets-stay-out`: no backpack — every ride taken as no ride, so her line
+ *   walks behind her wherever a ride takes her, the train included (the
+ *   blocker as it was): 4c must find her line out on every ride, and 4d the
+ *   train never leaving the platform with her aboard.
+ * - `pets-stay-in`: her line never comes back out of her backpack when she
+ *   gets off — 4c's every exit must find it missing.
+ * - `pets-count-aboard`: her companion counted as standing on the line while
+ *   it rides beside her — 4d's train must never leave with her aboard.
  */
 import './headless-canvas.mjs';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -418,6 +429,25 @@ world.attachPlayer(player as never);
 const parade = new Parade(player as never, collision, camera);
 scene.add(parade.group);
 world.attachParade(parade);
+/** The red proofs (see the header): each breaks one thing 4c or 4d is for. */
+const PROVE = process.env['EXITS_PROVE'] ?? '';
+const PROOFS = ['pets-stay-out', 'pets-stay-in', 'pets-count-aboard'];
+if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`EXITS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
+if (PROVE === 'pets-stay-out') {
+  (Parade.prototype as unknown as { embark: (holder: RideHolder) => void }).embark = function (this: { aboard: unknown }, holder: RideHolder) {
+    this.aboard = { holder, ride: 'not a ride', companion: null, stays: true };
+  };
+}
+if (PROVE === 'pets-stay-in') {
+  (Parade.prototype as unknown as { disembark: () => void }).disembark = function (this: { aboard: unknown }) {
+    this.aboard = null;
+  };
+}
+if (PROVE === 'pets-count-aboard') {
+  (Parade.prototype as unknown as { standing: () => Iterable<unknown> }).standing = function* (this: { members: { root: { visible: boolean; position: unknown } }[] }) {
+    for (const member of this.members) if (member.root.visible) yield member.root.position;
+  };
+}
 // The trees are `Game`'s system, not `World`'s; built here as `Game` builds them.
 const hudStub = { setPrompt(): void {} };
 const trees = new TreeClimbing(player, world.npcs, hudStub as never, world.scenery.climbableTrees);
