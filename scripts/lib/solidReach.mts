@@ -218,7 +218,12 @@ export function runAndJump(
     const steer = landedAt < 0 && d > 0.15;
     sim.step(dt, steer ? dx / d : 0, steer ? dz / d : 0, true);
     trail?.push({ x: sim.position.x, z: sim.position.z });
-    if (jumped && landedAt < 0 && wasAirborne && !sim.airborne) landedAt = frame;
+    // Settled 0.6 s after her last landing, not her first: a landing that
+    // bounces her off one top onto the ground beside it is asked where it
+    // ends, once the pushes there have had their way — not one frame after
+    // she came down overlapping the bush she slid off (seed 5, the open line:
+    // 0.53 m in a bush a frame after landing, out of it twelve frames later).
+    if (jumped && wasAirborne && !sim.airborne) landedAt = frame;
     if (landedAt >= 0 && frame >= landedAt + Math.ceil(0.6 / dt)) break;
   }
   if (!jumped || landedAt < 0 || sim.airborne) return null;
@@ -257,17 +262,21 @@ function walkOff(options: Pick<ReachOptions, 'collision' | 'sample' | 'onWedged'
   sim.groundY = top;
   // Walking for up to 1.2 s, then standing for up to a second — but where she
   // comes down is the answer, so once she has fallen and landed she stops
-  // walking and settles for a quarter of a second: walking on across the
-  // ground below was most of what a drop cost, and told nothing.
+  // walking and settles: walking on across the ground below was most of what
+  // a drop cost, and told nothing. Settled as `runAndJump` settles, 0.6 s
+  // after her last landing: the pushes out of whatever she came down against
+  // take that long to have their way, and a landing asked sooner read as a
+  // wedge she was already being walked out of (seed 5, the open line).
   const walkFrames = Math.ceil(1.2 / dt);
-  const settleFrames = Math.ceil(0.25 / dt);
+  const settleFrames = Math.ceil(0.6 / dt);
   let fell = false;
   let landedAt = -1;
   for (let frame = 0; frame < walkFrames + Math.ceil(1 / dt); frame += 1) {
     const walking = frame < walkFrames && landedAt < 0;
+    const was = sim.airborne;
     sim.step(dt, walking ? o.nx : 0, walking ? o.nz : 0, false);
     if (sim.airborne) fell = true;
-    else if (fell && landedAt < 0) landedAt = frame;
+    else if (fell && (was || landedAt < 0)) landedAt = frame;
     if (landedAt >= 0 && frame >= landedAt + settleFrames) break;
   }
   // Where she can be, not where a drop wedged her: off a bush into the crack
