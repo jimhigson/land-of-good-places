@@ -111,7 +111,7 @@ import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
-import { CollisionWorld, JUMP_CLEARANCE_GRACE, type WallCollider } from '../src/world/Collision.ts';
+import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED } from '../src/core/constants.ts';
@@ -460,12 +460,28 @@ const onGround = (x: number, z: number): Vector3 => new Vector3(x, surfaces.samp
 const remove = process.env['LIBRARY_CHECK_REMOVE'];
 /** The solids `LIBRARY_CHECK_REMOVE` took out: a clause that takes a solid out and puts it back leaves these out. */
 const removedOnPurpose = new Set<LibrarySolid>();
+/**
+ * Takes a registered solid out of the collision world, whatever its shape: a
+ * disc (by id), a capsule, or a box — one filled box per case, desk and chair
+ * since PR #722 (`props.box`), so `removeWall` on a box's handle would take
+ * nothing out and a red proof would come out green.
+ */
+const takeOut = (solid: LibrarySolid): void => {
+  if (typeof solid.handle === 'number') collision.removeCircle(solid.handle);
+  else if ('halfX' in solid.handle) collision.removeBox(solid.handle);
+  else collision.removeWall(solid.handle);
+};
+/** Puts a solid {@link takeOut} took out back: the same object (`restoreWall` / `restoreBox`). A disc cannot come back — `CollisionWorld` restores only walls and boxes. */
+const putBack = (solid: LibrarySolid): void => {
+  if (typeof solid.handle === 'number') throw new Error(`${solid.what} is a disc, and CollisionWorld restores only walls and boxes`);
+  if ('halfX' in solid.handle) collision.restoreBox(solid.handle);
+  else collision.restoreWall(solid.handle);
+};
 if (remove) {
   const victims = library.solids.filter((solid) => solid.what.includes(remove));
   if (victims.length === 0) throw new Error(`LIBRARY_CHECK_REMOVE=${remove} names no solid`);
   for (const victim of victims) {
-    if (typeof victim.handle === 'number') collision.removeCircle(victim.handle);
-    else collision.removeWall(victim.handle);
+    takeOut(victim);
     removedOnPurpose.add(victim);
   }
   note(`REMOVED ${victims.map((v) => v.what).join(', ')} on purpose — this run must go red`);
@@ -733,10 +749,24 @@ console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every 
         `at the lintel (at least ${atLintel.toFixed(2)}), and past where the shut shelf stops a walker (${atShelf.toFixed(2)}) — so she cleared the shelf and met the lintel`,
     );
   }
-  // Every height, floor to a metre over the wall's top: the shut shelf holds
-  // whoever is below its top less the jump grace, the lintel whoever is above
-  // its base, and the two bands overlap — no height slips between them.
-  const heights = Math.round((LIBRARY_WALL_HEIGHT + 1) / 0.05);
+  // The lintel's top is the wall's own top — one owner, read back off both
+  // colliders. Every room wall has its real top since PR #722 (nothing drawn
+  // carries a flag for one), so over the wall's top the room holds no flier
+  // anywhere, and the lintel can hold her exactly as high as the wall beside
+  // it does, no higher and no lower.
+  const wallX = OX - LIBRARY_HALF_X;
+  const westSpans = library.roomWalls.filter((wall) => Math.abs(wall.x1 - wallX) < 1e-6 && Math.abs(wall.x2 - wallX) < 1e-6);
+  say(
+    westSpans.length === 2 && westSpans.every((span) => Math.abs(span.topHeight - library.lintel.topHeight) < 1e-9),
+    `the lintel's top is the west wall's own: ${library.lintel.topHeight.toFixed(2)} m, against the wall's ${westSpans.length} spans at ` +
+      `${westSpans.map((span) => span.topHeight.toFixed(2)).join(', ')} m (two spans wanted, either side of the doorway)`,
+  );
+  // Every height the wall itself holds a flier at — the floor up to where her
+  // feet plus the jump grace reach the wall's top: the shut shelf holds
+  // whoever is below its top less the grace, the lintel whoever is above its
+  // base, and the two bands overlap — no height slips between them.
+  const held = library.lintel.topHeight - LIBRARY_FLOOR_Y - JUMP_CLEARANCE_GRACE - 0.05;
+  const heights = Math.floor(held / 0.05);
   let furthest = { x: Infinity, feet: 0 };
   let swept = 0;
   for (let i = 0; i <= heights; i += 1) {
@@ -748,26 +778,42 @@ console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every 
     }
   }
   say(
-    furthest.x >= atLintel,
-    `${swept} marches at every height from the floor to ${(LIBRARY_WALL_HEIGHT + 1).toFixed(1)} m, 5 cm apart, both strides: the furthest west any got is x ${furthest.x.toFixed(2)} ` +
-      `(at ${furthest.feet.toFixed(2)} m), at least ${atLintel.toFixed(2)} — the shut shelf holds her below ${(caseTop - JUMP_CLEARANCE_GRACE).toFixed(2)} m, the lintel from ${library.lintel.baseHeight.toFixed(2)} m`,
+    heights >= 60 && furthest.x >= atLintel,
+    `${swept} marches at every height from the floor to ${(heights * 0.05).toFixed(2)} m (the highest the wall's top holds a flier), 5 cm apart, both strides: ` +
+      `the furthest west any got is x ${furthest.x.toFixed(2)} (at ${furthest.feet.toFixed(2)} m), at least ${atLintel.toFixed(2)} — ` +
+      `the shut shelf holds her below ${(caseTop - JUMP_CLEARANCE_GRACE).toFixed(2)} m, the lintel from ${library.lintel.baseHeight.toFixed(2)} m up to the wall's top at ${library.lintel.topHeight.toFixed(2)} m`,
   );
-  // CONTROL — the shut shelf's colliders out, the doorway as the open shelf
+  // CONTROL — over the wall's top: a flier whose feet clear the top by the
+  // grace passes the lintel and the plain west wall alike, so the lintel's
+  // ceiling is the wall's, not a hole of its own. The plain wall is marched
+  // at the south span, well clear of the doorway.
+  const over = library.lintel.topHeight - LIBRARY_FLOOR_Y - JUMP_CLEARANCE_GRACE + 0.05;
+  const plainZ = (LIBRARY_SECRET_BOOKCASE.at.z + LIBRARY_DEN_DOOR_HALF + LIBRARY_HALF_Z) / 2;
+  const overLintel = westAt(over, 0.05);
+  const overWall = marchAt(new Vector3(OX - 16, LIBRARY_FLOOR_Y + over, OZ + plainZ), -1, 0, 0.05, over).x - OX;
+  const outside = -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - PLAYER_RADIUS;
+  say(
+    overLintel < outside && overWall < outside,
+    `CONTROL, a flier at ${over.toFixed(2)} m (over the wall's top by the jump grace): she passes over the lintel (to x ${overLintel.toFixed(2)}) ` +
+      `and over the plain west wall at z ${plainZ.toFixed(2)} (to x ${overWall.toFixed(2)}) alike — the lintel ends where the wall does`,
+  );
+  // CONTROL — the shut shelf's collider out, the doorway as the open shelf
   // will leave it (plan Step 12): a walker passes under the lintel into the
   // den, and the flier still stops at it. So the lintel is a band, not a wall,
-  // and what stopped the flier above was the lintel, not the shelf.
-  const shelf = library.solids.filter((solid) => solid.what.startsWith(`bookcase ${LIBRARY_SECRET_BOOKCASE.id} (`) && !removedOnPurpose.has(solid));
-  for (const solid of shelf) collision.removeWall(solid.handle as WallCollider);
+  // and what stopped the flier above was the lintel, not the shelf. The shelf
+  // is one filled box since PR #722, named by its case.
+  const shelf = library.solids.filter((solid) => solid.what === `bookcase ${LIBRARY_SECRET_BOOKCASE.id}` && !removedOnPurpose.has(solid));
+  for (const solid of shelf) takeOut(solid);
   try {
     const walker = westAt(0, 0.05);
     const alone = westAt(flier, 0.05);
     say(
-      libraryDenContains(walker, LIBRARY_SECRET_BOOKCASE.at.z) && walker < -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - PLAYER_RADIUS && alone >= atLintel,
-      `CONTROL, the shut shelf's ${shelf.length} colliders out: a walker on the floor passes under the lintel into the den (to x ${walker.toFixed(2)}), ` +
+      libraryDenContains(walker, LIBRARY_SECRET_BOOKCASE.at.z) && walker < outside && alone >= atLintel,
+      `CONTROL, the shut shelf's ${shelf.length} collider(s) out: a walker on the floor passes under the lintel into the den (to x ${walker.toFixed(2)}), ` +
         `and the flier at ${flier.toFixed(2)} m still stops at x ${alone.toFixed(2)} — the lintel alone holds her`,
     );
   } finally {
-    for (const solid of shelf) collision.restoreWall(solid.handle as WallCollider);
+    for (const solid of shelf) putBack(solid);
   }
 }
 
@@ -1300,7 +1346,18 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // naming the books.
   const shift = mutating('shift-books') ? 1 : 0;
   if (shift > 0) note('SHIFTED the pairing this check expects by one on purpose (slot i must hold BOOKS[i+1]) — this run must go red, naming the books');
-  const expected = LIBRARY_READABLE_SLOTS.map((slot, i) => ({ slot, book: BOOKS[(i + shift) % BOOKS.length]! }));
+  // A slot past the last book waits for one (the big readers' shelf, until its
+  // chapter books land): it holds nothing, and nothing below asks it to.
+  const expected = LIBRARY_READABLE_SLOTS.map((slot, i): { slot: (typeof LIBRARY_READABLE_SLOTS)[number]; book: (typeof BOOKS)[number] | null } => ({
+    slot,
+    book: i < BOOKS.length ? BOOKS[(i + shift) % BOOKS.length]! : null,
+  }));
+  const waiting = expected.filter(({ book }) => book === null);
+  note(
+    waiting.length === 0
+      ? `every one of the ${LIBRARY_READABLE_SLOTS.length} slots holds a book`
+      : `${waiting.length} slot(s) WAIT for their books, so nothing is asserted about what stands in them: ${waiting.map(({ slot }) => `slot ${slot.index + 1} (${slot.bookcase}, shelf ${slot.shelf}, ${slot.along} m along)`).join(', ')}`,
+  );
 
   // Every `library.book.<id>` mesh in the room (an outline is `<…>.outline`).
   const named = new Map<string, Mesh[]>();
@@ -1326,6 +1383,7 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   let worstOut = { what: 'none', by: -Infinity };
   let placedOk = 0;
   for (const { slot, book } of expected) {
+    if (!book) continue;
     const mesh = named.get(book.id)?.[0];
     const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
     const box = boxes.get(`bookcase ${slot.bookcase}`);
@@ -1422,6 +1480,7 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // Each zone in its slot, read against the expected pairing.
   let zonesOk = 0;
   for (const { slot, book } of expected) {
+    if (!book) continue;
     const zone = zones.find((candidate) => candidate.id === shelfBookZoneId(book.id));
     const mesh = named.get(book.id)?.[0];
     if (!zone || !mesh) {

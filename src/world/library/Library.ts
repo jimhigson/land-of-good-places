@@ -11,7 +11,7 @@ import { highlightObject } from '../highlight';
 import type { PlacedEntry } from '../parkLayout';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { terrainHeight } from '../terrain';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { BUILDING_STEP_UP } from '../../core/constants';
@@ -98,12 +98,15 @@ import type { OpenAreaPoint } from '../dismount';
  * keeps words off in-world boards (`core/textures.ts`); the pill is screen
  * constant, so it is never too small to read.
  *
- * ## What later PRs add (#714 parts 3-5)
+ * ## What the rest of the Library adds (#714 parts 4-5)
  *
- * The readable books stand in `LIBRARY_READABLE_SLOTS` (#718: a gap is
- * already left on each shelf), the owl librarian behind the desk at
- * `LIBRARY_LIBRARIAN_SPOT`, and the secret den behind `LIBRARY_SECRET_BOOKCASE`
- * (#719). Their stand spots are kept clear today.
+ * The readable books stand in `LIBRARY_READABLE_SLOTS` (#718, `shelfBooks.ts`:
+ * the twelve picture books, then the big readers' shelf, whose slots wait as
+ * gaps until their chapter books land), and her two story cushions offer a
+ * seat. Still to come on their own tracks: the owl librarian behind the desk
+ * at `LIBRARY_LIBRARIAN_SPOT` and story time (#718), and the secret shelf
+ * swinging open onto the den below, with its dragon and the cat (#719). Every
+ * one of their stand spots is a keep-out already.
  *
  * ## The secret den (#719)
  *
@@ -200,7 +203,7 @@ export class Library implements GameSystem {
   readonly denRoot = new Group();
   /** The den's three walls' colliders: west, north, south (`den wall (…)` in {@link solids}). */
   readonly denWalls: readonly WallCollider[];
-  /** The banded collider of the lintel over the den's doorway — solid only above the secret shelf's top, less the jump grace. */
+  /** The banded collider of the lintel over the den's doorway — solid from the secret shelf's top, less the jump grace, up to the wall's own top. */
   readonly lintel: WallCollider;
   /** The west wall's two spans and the lintel, one group, so they can fade while she is in the den (plan Step 12). */
   readonly westWall: Group;
@@ -224,6 +227,14 @@ export class Library implements GameSystem {
   private readonly playerSeats: readonly PlayerSeat[];
   /** The cushion she is sitting on, or null when she is not. */
   private seatedOn: LibraryPlayerSeat | null = null;
+  /**
+   * Whoever sits on a story cushion is held by this (`Player.beginRide` takes
+   * a `RideHolder`), and let go by getting up — the "Next day" button's way
+   * off, and `check:exits`'. **A seat, not a ride** (Jim, 19 Oct 2026: her pets
+   * ride along only on a ride): her line stays out at her heels, as at the
+   * hotel's breakfast chairs and the castle's banquet.
+   */
+  private readonly cushionHolder: RideHolder = { holding: 'a story cushion', letGo: () => this.standUp(), companion: 'not a ride' };
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -456,16 +467,22 @@ export class Library implements GameSystem {
    * she is not sitting, so `Game` can call it unasked — `Hotel.wakeNap`'s
    * shape.
    *
-   * `endRide` hands her back airborne at the floor, inside the cushion's soft
-   * plate, which catches her at its top; she walks off it. Cushions are soft
-   * (`props.soft`: a plate, no collider), so nothing has to step her back off
-   * a seat the way the castle's bench must.
+   * `endRide` is given the cushion's own spot on the floor — the floor, never
+   * the seat, as every `RideExit` is — and the put-down rule
+   * (`world/dismount.ts`) does the rest, as it does for every seat in the game:
+   * the cushion is a solid now (a low one she steps up onto), so its middle is
+   * not clear floor at the floor's height, and the rule stands her on the
+   * nearest clear floor that reaches the room, beside it. Nothing here steps
+   * her off a seat by hand.
    */
   standUp(): void {
     if (this.seatedOn === null) return;
+    const seat = this.playerSeats.find((candidate) => candidate.id === this.seatedOn);
     this.seatedOn = null;
     const player = this.player;
-    if (player?.riding) player.endRide();
+    if (!player?.riding) return;
+    const at = seat?.at ?? { x: player.position.x - LIBRARY_ORIGIN_X, z: player.position.z - LIBRARY_ORIGIN_Z };
+    player.endRide({ x: LIBRARY_ORIGIN_X + at.x, y: LIBRARY_FLOOR_Y, z: LIBRARY_ORIGIN_Z + at.z });
   }
 
   update(context: FrameContext): void {
@@ -557,7 +574,7 @@ export class Library implements GameSystem {
     const player = this.player;
     const seat = this.playerSeats.find((candidate) => candidate.id === id);
     if (!player || !seat || !this.inside || player.riding || this.spaces.isChanging) return;
-    player.beginRide();
+    player.beginRide(this.cushionHolder);
     player.setRidePose(LIBRARY_ORIGIN_X + seat.at.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + seat.at.z, (seat.facing * Math.PI) / 180);
     player.ridePosture = 'listening';
     this.seatedOn = id;

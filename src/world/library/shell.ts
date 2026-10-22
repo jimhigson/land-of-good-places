@@ -522,10 +522,11 @@ export interface ReadingRoomShell {
   /**
    * **The lintel's collider** — banded: absent to anything whose feet are
    * below its base (`baseHeight`), so a walker and a jump pass under it and the
-   * ground fill sees a doorway, and solid above (a jet pack flies 12 m up
-   * indoors). Registered raw, like the room's walls: `LibraryProps`' keep-out
-   * test is two-dimensional and would misread a collider that is only there
-   * above the case's top.
+   * ground fill sees a doorway; solid from there to the wall's own top, which
+   * is every room wall's top too (real tops, PR #722 — over it the walls hold
+   * nobody, and neither does this). Registered raw, like the room's walls:
+   * `LibraryProps`' keep-out test is two-dimensional and would misread a
+   * collider that is only there above the case's top.
    */
   readonly lintel: WallCollider;
   readonly fabric: ReadingRoomFabric;
@@ -634,25 +635,30 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
 
   // The lintel over the den's doorway: from the secret shelf's top (measured,
   // never typed) to the wall's top, the wall's own depth — so the shut shelf
-  // and the lintel read as the wall. Its collider is the band above
-  // `JUMP_CLEARANCE_GRACE` + `LINTEL_OVERLAP` under the shelf's top: a flier
-  // high enough to clear the shut shelf meets it, a walker and a jump never do.
+  // and the lintel read as the wall. Its collider is the band from
+  // `JUMP_CLEARANCE_GRACE` + `LINTEL_OVERLAP` under the shelf's top up to the
+  // wall's own top, the top every room wall has (real tops, PR #722): a flier
+  // high enough to clear the shut shelf meets it, a walker and a jump never
+  // do, and over the wall's top it holds nobody — exactly as the wall beside
+  // it holds nobody there.
   const [gapNorth, gapSouth] = denGap;
   const shelfTop = libraryBookcaseSize(LIBRARY_SECRET_BOOKCASE.kind).height;
   const lintelMesh = solid(new Mesh(new BoxGeometry(LIBRARY_WALL_HALF * 2, LIBRARY_WALL_HEIGHT - shelfTop, gapSouth - gapNorth), westMaterial));
   lintelMesh.name = 'library.lintel';
   lintelMesh.position.set(-LIBRARY_HALF_X, (shelfTop + LIBRARY_WALL_HEIGHT) / 2, (gapNorth + gapSouth) / 2);
   westWall.add(lintelMesh);
-  const lintel = collision.addWall(
-    originX - LIBRARY_HALF_X,
-    originZ + gapNorth,
-    originX - LIBRARY_HALF_X,
-    originZ + gapSouth,
-    LIBRARY_WALL_HALF,
-    Infinity,
-    false,
-    false,
-    LIBRARY_FLOOR_Y + shelfTop - JUMP_CLEARANCE_GRACE - LINTEL_OVERLAP,
+  const lintel = collision.kinded('library lintel', () =>
+    collision.addWall(
+      originX - LIBRARY_HALF_X,
+      originZ + gapNorth,
+      originX - LIBRARY_HALF_X,
+      originZ + gapSouth,
+      LIBRARY_WALL_HALF,
+      LIBRARY_FLOOR_Y + LIBRARY_WALL_HEIGHT,
+      false,
+      true,
+      LIBRARY_FLOOR_Y + shelfTop - JUMP_CLEARANCE_GRACE - LINTEL_OVERLAP,
+    ),
   );
   return { walls, westWall, westMaterial, lintel, fabric: { floor: floorMaterial, wall: material } };
 }
@@ -674,9 +680,9 @@ export interface LibraryDenShell {
  *   of one lies over the other's — and a walkable plate from the den's west
  *   edge to the room's inner wall face, so the doorway has floor under it from
  *   both sides.
- * - **Three walls**, each one box and one capsule through `LibraryProps`, so
- *   each is held clear of every stand spot and a check can take one out by
- *   name. The west wall's box takes both corners; the north and south walls'
+ * - **Three walls**, each one box and one capsule through `LibraryProps`, to
+ *   the drawn wall's own top, so each is held clear of every stand spot and a
+ *   check can take one out by name. The west wall's box takes both corners; the north and south walls'
  *   run from it to the room's west wall's outer face, abutting it rather than
  *   buried in it, so no two top faces share a plane. The south wall is on the
  *   camera's near side, so it is hidden, not shortened — the room's own rule:
@@ -718,9 +724,11 @@ export function buildLibraryDenShell(denRoot: Group, props: LibraryProps, surfac
   wallBox('west', outerWest, inner.west, outerNorth, outerSouth, false);
   wallBox('north', inner.west, roomWallOuter, outerNorth, inner.north, false);
   wallBox('south', inner.west, roomWallOuter, inner.south, outerSouth, true);
-  const west = props.wall('den wall (west)', { x: westX, z: northZ }, { x: westX, z: southZ }, t, 'wall');
-  const north = props.wall('den wall (north)', { x: westX, z: northZ }, { x: roomWallX, z: northZ }, t, 'wall');
-  const south = props.wall('den wall (south)', { x: westX, z: southZ }, { x: roomWallX, z: southZ }, t, 'wall');
+  // To the drawn wall's own top, as every room wall is (real tops, PR #722):
+  // nothing drawn carries a flag for a top any more.
+  const west = props.wall('den wall (west)', { x: westX, z: northZ }, { x: westX, z: southZ }, t, LIBRARY_WALL_HEIGHT);
+  const north = props.wall('den wall (north)', { x: westX, z: northZ }, { x: roomWallX, z: northZ }, t, LIBRARY_WALL_HEIGHT);
+  const south = props.wall('den wall (south)', { x: westX, z: southZ }, { x: roomWallX, z: southZ }, t, LIBRARY_WALL_HEIGHT);
   return { walls: [west, north, south] };
 }
 
