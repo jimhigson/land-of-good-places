@@ -14,7 +14,12 @@ in this worktree's gitignored `.claude/scratch/`.
       check:library exit 0, **60 ✓ 0 ✗**; check:tap-spacing exit 0, **10 spaces, 131 zones,
       27 portal bands; 231 zone-band and 20 close zone-zone pairs; 20 same-action overlaps**.
 - [x] **Step 5 — the readable books on their shelves.** Done, green, pushed (commits below).
-- [ ] Milestone: fast-forward the PR head `feat/library` to this branch once Step 5 is pushed.
+- [x] **Milestone (Jim's promised "read a book off the shelf"):** the PR head was fast-forwarded to
+      Step 5 — `git push origin feat/library-714-owl:feat/library`, `9e49816b..eb5200e2`, accepted
+      (checked first: `merge-base --is-ancestor origin/feat/library HEAD`). It started PR #720's
+      CI run **38828139475** and Update adoption **38828139496** on eb5200e2; not waited for (the
+      task). Its preview is the one to send, with a deep link that stands her beside a book (QA
+      notes below). This handoff line itself is one commit past the PR head.
 - [ ] Step 6 — the owl (next task on this track).
 
 ## Step 5: what was built
