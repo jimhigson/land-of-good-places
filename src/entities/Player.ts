@@ -1068,6 +1068,23 @@ export class Player implements GameSystem {
   }
 
   /**
+   * **Standing still, on her own feet**: nothing asks her to move — no stick,
+   * no tap route, no script walking her — and she has come to rest. Not
+   * riding (a ride is placing her) and not in the air.
+   *
+   * Asked by the crowd (`NpcSystem.separateFromPlayer`): a child walking past
+   * a child who is standing still goes round her, and does not shove her.
+   * Waiting on a platform for the train, children walking up to their own
+   * waiting spots used to push her, a centimetre a frame, a metre across the
+   * platform into the train's way — and the train, which stops for anybody in
+   * its way, stood short of the station for her (22 Oct 2026, check:solids).
+   * One owner, so "standing still" means one thing wherever it is asked.
+   */
+  get isStandingStill(): boolean {
+    return !this.ridingFlag && !this.airborne && this.scriptedWalkSpeed === 0 && this.desiredVelocity.lengthSq() === 0 && this.velocity.lengthSq() < 1e-6;
+  }
+
+  /**
    * True where she may actually take off: a jet pack is on her back **and**
    * there is room here to use it.
    *
