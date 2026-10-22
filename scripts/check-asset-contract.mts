@@ -101,6 +101,7 @@ import {
   createLibraryDragonNest,
   createLibraryOwl,
 } from '../src/art/models/libraryCreatures.ts';
+import { createLibraryDen, createLibraryDenLantern, createLibrarySecretBook } from '../src/art/models/libraryDenAssets.ts';
 
 /**
  * How far a declared height may sit from the measured one, in metres.
@@ -335,6 +336,13 @@ function collect(): Subject[] {
   add('library.dragonNest', createLibraryDragonNest());
   add('library.cat', createLibraryCat());
   add('library.bookPile', createLibraryBookPile());
+
+  // The secret den's kit (#719): the den's room (its origin is the bottom of
+  // its floor slab, its plinth — so its base is zero like any other), a wall
+  // lantern (its bottom at zero, its back on the wall) and the pull book.
+  add('library.den', createLibraryDen());
+  add('library.denLantern', createLibraryDenLantern());
+  add('library.secretBook', createLibrarySecretBook());
 
   // Scenery. Seeded, so a few seeds each is a fair sample of what a seed can do.
   for (const seed of [0, 1, 2, 3]) {

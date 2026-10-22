@@ -237,21 +237,23 @@ def verify_png(path: str, size, colour_mode: str) -> None:
     assert data.endswith(PNG_TRAILER), f"{path}: {len(data)} bytes and no IEND at the end — truncated"
 
 
-def clear_renders() -> int:
-    """Delete every picture (and any leftover part-file) before a run, so the
-    set on disk is only ever one run's output."""
+def clear_renders(out: str = OUT) -> int:
+    """Delete every picture (and any leftover part-file) in ``out`` before a
+    run, so the set on disk is only ever one run's output. ``out`` defaults to
+    this script's folder; the den kit's render (``library_den_render.py``)
+    passes its own."""
     gone = 0
-    for name in os.listdir(OUT):
+    for name in os.listdir(out):
         if name.endswith(".png") or name.endswith(".png.part"):
-            os.remove(os.path.join(OUT, name))
+            os.remove(os.path.join(out, name))
             gone += 1
     return gone
 
 
 def shoot(stem: str, objects, azimuth: float, elevation: float, camera, pad: float = 1.25,
-          size=(900, 700)) -> None:
+          size=(900, 700), out: str = OUT) -> None:
     """Render, framing ``objects`` (which need not be everything visible), to
-    ``<stem>.png`` — via a checked part-file and an atomic rename."""
+    ``<out>/<stem>.png`` — via a checked part-file and an atomic rename."""
     scene = bpy.context.scene
     scene.render.resolution_x, scene.render.resolution_y = size
     scene.render.resolution_percentage = 100
@@ -261,8 +263,8 @@ def shoot(stem: str, objects, azimuth: float, elevation: float, camera, pad: flo
     bpy.context.view_layer.update()
     frame(objects, azimuth, elevation, camera, pad)
     bpy.ops.render.render(write_still=False)
-    final = os.path.join(OUT, f"{stem}.png")
-    part = os.path.join(OUT, f".{stem}.png.part")
+    final = os.path.join(out, f"{stem}.png")
+    part = os.path.join(out, f".{stem}.png.part")
     bpy.data.images["Render Result"].save_render(filepath=part, scene=scene)
     verify_png(part, size, scene.render.image_settings.color_mode)
     os.replace(part, final)

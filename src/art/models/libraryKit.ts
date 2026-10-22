@@ -1,7 +1,8 @@
-import { Matrix4, Mesh, MeshBasicMaterial, Raycaster, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
+import { Matrix4, Vector3 } from 'three';
 import { geometryTriangles, measureTriangleSets, type MeasuredTop } from '../../world/measuredTop';
 import { LIBRARY_GLB_BASE64 } from '../assets/libraryGlb';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
+import { eachGlbVertex, glbBounds, glbFirstHit, glbTreads, type KitBounds } from '../style/glbMeasure';
 
 /**
  * **The Library kit's bare geometry, read once, and every figure the park
@@ -39,28 +40,15 @@ export function libraryPartNames(): readonly string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Measuring bare geometry
+// Measuring bare geometry — `art/style/glbMeasure.ts`, over this kit's parts
 // ---------------------------------------------------------------------------
 
 /** An axis-aligned extent, in the asset's own frame (game axes: +Y up, the front on +Z). */
-export interface KitBounds {
-  readonly minX: number;
-  readonly maxX: number;
-  readonly minY: number;
-  readonly maxY: number;
-  readonly minZ: number;
-  readonly maxZ: number;
-}
+export type { KitBounds };
 
 /** Every vertex of a node, in its asset's frame (the node's own translation applied). */
 function eachVertex(name: string, visit: (x: number, y: number, z: number) => void): void {
-  const part = libraryPart(name);
-  const position = part.geometry.getAttribute('position') as BufferAttribute;
-  const p = new Vector3();
-  for (let i = 0; i < position.count; i += 1) {
-    p.fromBufferAttribute(position, i).multiply(part.scale).applyQuaternion(part.quaternion).add(part.position);
-    visit(p.x, p.y, p.z);
-  }
+  eachGlbVertex(libraryPart(name), visit);
 }
 
 /**
@@ -81,25 +69,7 @@ export function kitTop(names: readonly string[], keep?: (x: number, z: number) =
 
 /** The extent of the named nodes' vertices — never a bounding box of a bounding box. */
 export function kitBounds(names: readonly string[], keep?: (x: number, y: number, z: number) => boolean): KitBounds {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const name of names) {
-    eachVertex(name, (x, y, z) => {
-      if (keep && !keep(x, y, z)) return;
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-      minZ = Math.min(minZ, z);
-      maxZ = Math.max(maxZ, z);
-    });
-  }
-  if (!Number.isFinite(minX)) throw new Error(`libraryKit: nothing to measure in ${names.join(', ')}`);
-  return { minX, maxX, minY, maxY, minZ, maxZ };
+  return glbBounds(names.map(libraryPart), keep);
 }
 
 /**
@@ -107,57 +77,12 @@ export function kitBounds(names: readonly string[], keep?: (x: number, y: number
  * the z it runs over, merged by height (to the millimetre). Lowest first.
  */
 export function kitTreads(name: string): { readonly y: number; readonly minZ: number; readonly maxZ: number }[] {
-  const part = libraryPart(name);
-  const geometry: BufferGeometry = part.geometry;
-  const position = geometry.getAttribute('position') as BufferAttribute;
-  const index = geometry.getIndex();
-  const count = index ? index.count : position.count;
-  const a = new Vector3();
-  const b = new Vector3();
-  const c = new Vector3();
-  const ab = new Vector3();
-  const ac = new Vector3();
-  const byHeight = new Map<number, { y: number; minZ: number; maxZ: number }>();
-  const at = (i: number, target: Vector3): Vector3 =>
-    target
-      .fromBufferAttribute(position, index ? index.getX(i) : i)
-      .multiply(part.scale)
-      .applyQuaternion(part.quaternion)
-      .add(part.position);
-  for (let i = 0; i + 2 < count; i += 3) {
-    at(i, a);
-    at(i + 1, b);
-    at(i + 2, c);
-    const normal = ab.subVectors(b, a).cross(ac.subVectors(c, a));
-    const length = normal.length();
-    if (length < 1e-9 || normal.y / length < 0.999) continue;
-    const y = (a.y + b.y + c.y) / 3;
-    const key = Math.round(y * 1000);
-    const tread = byHeight.get(key) ?? { y, minZ: Infinity, maxZ: -Infinity };
-    tread.minZ = Math.min(tread.minZ, a.z, b.z, c.z);
-    tread.maxZ = Math.max(tread.maxZ, a.z, b.z, c.z);
-    byHeight.set(key, tread);
-  }
-  return [...byHeight.values()].sort((p, q) => p.y - q.y); // flat-ok: tread heights in the glb's own asset frame, unplaced
+  return glbTreads(libraryPart(name));
 }
 
 /** The first hit of a ray against the named nodes, or `null` — for clear openings, measured the Artist's way. */
 function firstHit(names: readonly string[], origin: Vector3, direction: Vector3): number | null {
-  const ray = new Raycaster(origin, direction.clone().normalize());
-  // Front faces only: a ray meets the outside of the masonry, as a child would.
-  const material = new MeshBasicMaterial();
-  let best: number | null = null;
-  for (const name of names) {
-    const part = libraryPart(name);
-    const mesh = new Mesh(part.geometry, material);
-    mesh.position.copy(part.position);
-    mesh.quaternion.copy(part.quaternion);
-    mesh.scale.copy(part.scale);
-    mesh.updateMatrixWorld(true);
-    for (const hit of ray.intersectObject(mesh, false)) best = best === null ? hit.distance : Math.min(best, hit.distance);
-  }
-  material.dispose();
-  return best;
+  return glbFirstHit(names.map(libraryPart), origin, direction);
 }
 
 /**

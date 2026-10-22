@@ -30,15 +30,16 @@ packGlbAsset({
   constantName: 'LIBRARY_DEN_GLB_BASE64',
   label: 'pack:library-den',
   /**
-   * 120 KB: a room of three walls (two cut with book niches), a floor and a
-   * lintel, thirty niche boards, nine stars and a moon, a lantern and the pull
-   * book — about 3 000 triangles at the ~35 bytes a triangle a box-built part
-   * costs here (the castle interior's 128 KB holds 4 342). The boards are the
-   * biggest line: a one-segment bevel keeps a board at 24 shared vertices, the
-   * figure `library_build.lying_book` records, and nothing here is instanced,
-   * because the books that fill the niches are the library kit's own blocks.
+   * 100 KB, against 80.2 KB on the day: a room of three walls (two cut with
+   * book niches), a floor and a lintel, thirty niche boards, nine stars and a
+   * moon, a lantern and the pull book — 2 748 triangles at the ~30 bytes a
+   * triangle a box-built part costs here (the castle interior's 128 KB holds
+   * 4 342). The boards are the biggest line, 1 320 of the triangles: a
+   * one-segment bevel keeps a board at 24 shared vertices, the figure
+   * `library_build.lying_book` records. Nothing here is instanced, because
+   * the books that fill the niches are the library kit's own blocks.
    */
-  budgetBytes: 120 * 1024,
+  budgetBytes: 100 * 1024,
   docLines: [
     "**The Library's secret den kit, as authored geometry.** Do not edit — generated.",
     '',
