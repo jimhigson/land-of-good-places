@@ -18,8 +18,13 @@ there; each ends in an `exit=N` line written after the run).
       doc, `Library.ts`, `docs/design/LABELS.md`, `scripts/check-labels.mts`, `scripts/check-library.mts`.
       `check:library` **135 ✓, 0 ✗, exit 0** (`library-1.log`): +34 clauses (OWL 11, CARD 7,
       RECOMMEND 8, SHUSH 7, HOUSEKEEPING 1).
-- [ ] Reds proved (section below is filled in as each runs).
-- [ ] Gate: `tsc --noEmit` exit 0 (`tsc-1.log`); the rest below.
+- [x] Four reds proved and pasted with their geometry (section below).
+- [x] Gate green (table below): tsc, typecheck:test, check:library, tap-spacing, labels,
+      brevity, assets, check:solids core; the scripts typecheck instrument at its baseline 56.
+- [x] A real look in headless Chrome: six shots, 0 page errors (section below).
+- [ ] **Not this track's**: the full `pnpm run check` / `test:procgen` / CI gate (the PR's CI
+      on the integration head, once the Story-time and Join stages merge this branch), the
+      labels scene (Step 10), the den/perch shush conditions (For the join).
 
 ## What was built (commits 14bcb5cf, 2f5f286b, …)
 
@@ -209,6 +214,41 @@ in 3 s, so the walking CONTROL covers the same ground at a walk and never trips 
 | `check:labels` | 0 | 12570 frames at 390x844; **55 labels registered** (54 at the base: +1, the owl's bubble); no overlap, nothing flickered; the library is registered (the control line) — its scene is Step 10 |
 | `check:brevity` | 0 | 354 pieces, 6 recorded exceptions (unchanged: the owl's words were already in `libraryLines.ts`) |
 | `check:assets` | 0 | 135 assets, 48 creatures, 28 recorded drift (unchanged) |
+| `check:solids` (core) | 0 | "check:solids OK"; **the library: 14 tops reached** (13 at the base — the new one is the owl, `(library capsule) [chain 1] /library?at=6.0,5.4&seed=5`: reached by a chain, i.e. off the desk, exactly Decision 1), 0 drop regions, 679 jumps, no roof / enclosure / off-floor, every top she reaches she can get down from, nothing wedged |
+| scripts typecheck instrument (`wf/tsconfig.scripts.library-v2.json` re-pointed at this tree, `tsc-scripts.log`) | 2, as the integration tree | **56 messages, the integration handoff's 56**: the one in check-library.mts is the pre-existing `process.exit` typing on the last line; none from Step 6 |
+
+## A real look (headless Chrome, `playwright-core` 1.62.1, `channel: 'chrome'`, throwaway profile; my own dev server on port 6471, pid 84810, stopped by PID)
+
+Script: `owl6/owl-look.mjs` (a copy of the worktree's gitignored `.claude/scratch/owl-look.mjs`);
+shots in `owl6/looks/`, 1280×800, seed 5, **0 page errors**. What the game itself reported through
+`window.game` on the way, in the order played:
+
+- `/library?at=6,8.7&facing=180&seed=5` — standing at the desk's front the selection holds
+  `library-owl`; the owl is already saying "Come to my desk for your library card!"
+  (`1-desk-chip.png`: the owl behind her desk in the lamp's pool, the bubble over her; her
+  chip is put away under the bubble while she talks — the hotel desk's rule — and shows when
+  the line ends).
+- The press (label `Get a library card!`) → the four lines; `3-card-handover.png` is "Here is
+  your very own library card!" (the sparkles and the flap are not caught in that frame; the
+  check measures the flap at −0.90).
+- A second press (label `Say hello!`) → `recommendedBookId = fountainWish` (`4-hello.png`);
+  at its stand (−5.6, 2.8) the selection holds `library-book:fountainWish` and its chip says
+  **Read me!** (`5-glowing-book.png`) — standing exactly on the stand her own body hides the
+  book, so the link to send is beside it: **`/library?at=-6.8,2.8&facing=134`** (1.2 m from
+  the stand, inside the zone's 3 m reach, looking at the book).
+- Back at the desk, `input.pressVirtual('jump')` → `lastSaid = "Shhh!"`, `shushes = 1`
+  (`6-shush.png`: "Shhh!" over the owl, the child mid-landing).
+
+**For QA by eye** (things a frame at this size cannot settle): the rainbow outline rings the
+owl when she is selected (the chip and the bubble were both over her); the six warm sparkles
+and the wing flap on the hand-over line; the book's own glow (its cover emissive breathing
+0.25–0.60) from the side-on link above; the head turning as she walks past the desk.
+
+**Preview sentence for Jim** (take the host from the PR's newest preview comment):
+`/library?at=6,8.7&facing=180` — the owl behind the desk turns to watch you; press **Get a
+library card!** and she talks you through your card (it is in your backpack); press **Say
+hello!** and she names a book; walk to `/library?at=-6.8,2.8&facing=134` and that book glows
+with a **Read me!** chip; sprint or jump anywhere in the room and she says **Shhh!**
 
 ## Decisions (with reasons) — Jim is away
 
@@ -273,6 +313,11 @@ in 3 s, so the walking CONTROL covers the same ground at a walk and never trips 
 - **The owl shushes a runner anywhere in the room** (no distance condition in the plan): a sprint
   at the far west wall still gets a "Shhh!" from the desk. Her bubble hides when she is off
   screen, so from far away the child sees nothing. Say if you want a range.
+- **The glow does not survive a reload.** The recommendation is stateless (nothing saved, the
+  plan's Decision 9), so after a reload the book glows again only once she presses **Say
+  hello!** again — the same book, because the order is seeded. "Glows until read" could instead
+  mean: lit whenever she holds the card and has an unread book. One line in `LibraryOwl.glow`
+  if you want that.
 
 ## Parks
 
