@@ -123,7 +123,6 @@ import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { END_HALF, LibraryProps, libraryKeepOuts, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
 import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/library/furnish.ts';
-import { BOOKS } from '../src/world/library/books.ts';
 import { SHELF_BOOK_ZONE_PREFIX, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
 import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
@@ -150,6 +149,7 @@ import {
   LIBRARY_AISLES,
   LIBRARY_ARRIVAL,
   LIBRARY_BOOKCASES,
+  LIBRARY_DEN_DOOR_HALF,
   LIBRARY_DEN_INNER,
   LIBRARY_DESK_STAND,
   LIBRARY_DOOR_HALF,
@@ -166,7 +166,6 @@ import {
   LIBRARY_READABLE_SLOTS,
   LIBRARY_SECRET_BOOKCASE,
   LIBRARY_WALL_HALF,
-  LIBRARY_WALL_HEIGHT,
   libraryCushion,
   libraryFacingStoryChair,
   type FurnitureSpec,
@@ -1714,12 +1713,13 @@ type Steer = (input: InputSystem) => void;
  * - `child.stand(x, z, facing?)` — stand her at a room-local spot (degrees, the
  *   layout's convention) without a change of space; for a clause already inside.
  * - `child.step(steer?)`, `child.run(seconds, steer?)` — frames.
- * - `child.towards(dx, dz, sprint?)` — a {@link Steer} that holds the stick
- *   the way a thumb would to walk her along world direction (dx, dz): the
+ * - `child.towards(dx, dz, sprint?, amount?)` — a {@link Steer} that holds the
+ *   stick the way a thumb would to walk her along world direction (dx, dz): the
  *   stick is camera-relative, so it is solved from the live camera's ground
  *   basis, and fed in through `input.setNavigationMove` (tap-to-move's road
- *   into the same stick). Sprint is `setNavigationSprint`, released every frame
- *   a steer does not ask for it.
+ *   into the same stick). `amount` is how far the stick is pushed (1, full
+ *   tilt; less walks her slower, as the stick does). Sprint is
+ *   `setNavigationSprint`, released every frame a steer does not ask for it.
  * - `child.room()` — where she stands, room-local.
  * - `child.player`, `child.input`, `child.frames` — the real ones, for the
  *   rest (`input.pressVirtual('jump')`, `player.isRunning`, `player.riding`…).
@@ -1737,7 +1737,7 @@ interface RealChild {
   run(seconds: number, steer?: Steer): void;
   enter(at?: { readonly x: number; readonly z: number; readonly facing?: number }): void;
   stand(x: number, z: number, facing?: number): void;
-  towards(dx: number, dz: number, sprint?: boolean): Steer;
+  towards(dx: number, dz: number, sprint?: boolean, amount?: number): Steer;
   room(): { readonly x: number; readonly z: number };
 }
 
@@ -1780,11 +1780,12 @@ const child: RealChild = (() => {
       player.teleportTo(OX + x, LIBRARY_FLOOR_Y, OZ + z, facing === undefined ? undefined : (facing * Math.PI) / 180);
       camera.snapTo(player.position);
     },
-    towards(dx, dz, sprint = false) {
+    towards(dx, dz, sprint = false, amount = 1) {
       const length = Math.hypot(dx, dz);
       if (length === 0) throw new Error('WITH A REAL CHILD: towards() needs a direction');
-      const x = dx / length;
-      const z = dz / length;
+      if (!(amount > 0 && amount <= 1)) throw new Error(`WITH A REAL CHILD: towards() wants a stick amount in (0, 1], not ${amount}`);
+      const x = (dx / length) * amount;
+      const z = (dz / length) * amount;
       return (held) => {
         const right = camera.right;
         const forward = camera.forward;
@@ -1869,19 +1870,35 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
   const actions = (id: string): readonly ZoneAction[] => zone(id)?.actions?.() ?? [];
   /** The Read chips offered right now (Step 5's `library-book:<id>` zones). */
   const readChips = (): number => zones().filter((candidate) => candidate.id.startsWith('library-book:')).length;
-  /** The readable books drawn on the shelves (Step 5's `library.book.<id>` meshes): what arms the Read-chip half below. */
+  /** The readable books drawn on the shelves (Step 5's `library.book.<id>` meshes — READABLE's own name pattern, never an outline `<…>.outline`): what arms the Read-chip half below. */
   let drawnReadable = 0;
   library.roomRoot.traverse((node) => {
-    if (node.name.startsWith('library.book.')) drawnReadable += 1;
+    if (node instanceof Mesh && /^library\.book\.[^.]+$/.test(node.name)) drawnReadable += 1;
   });
-  /** How far she coasts from a full-stick walk once the stick is let go: her own top speed and braking. */
-  const coast = (PLAYER_MAX_SPEED * PLAYER_MAX_SPEED) / (2 * PLAYER_DECELERATION);
-  /** Walk her onto room-local (x, z) on the stick, let go a stopping distance short, and let her come to rest. */
+  /**
+   * How hard to push the stick for the last stretch onto the cushion: the
+   * amount at which, let go, she coasts {@link ONTO_COAST} at most — from her
+   * own braking (`v² / 2·PLAYER_DECELERATION`, with `v` the stick's share of
+   * `PLAYER_MAX_SPEED`). Full tilt would coast 0.8 m, off the far side of a
+   * 0.45 m cushion.
+   */
+  const ONTO_COAST = 0.1;
+  const lightTouch = Math.min(1, Math.sqrt(2 * PLAYER_DECELERATION * ONTO_COAST) / PLAYER_MAX_SPEED);
+  /**
+   * Walk her onto room-local (x, z) on the stick and let her come to rest
+   * there. **The stick stays held until she is over the spot**: a solid within
+   * a step of the floor — the cushion, since PR #722 — is climbed only while
+   * she is walking *into* it (`Player.update` asks `walkingOntoStep` of the
+   * stick's own direction); let go short of it and coasting, she meets its
+   * side as a wall and stops at its face. Full tilt from afar, then the light
+   * touch above for the last stretch.
+   */
   const walkOnto = (x: number, z: number): void => {
-    for (let frame = 0; frame < Math.round(6 / CHILD_DT); frame += 1) {
+    for (let frame = 0; frame < Math.round(8 / CHILD_DT); frame += 1) {
       const here = child.room();
-      if (Math.hypot(x - here.x, z - here.z) <= coast) break;
-      child.step(child.towards(x - here.x, z - here.z));
+      const left = Math.hypot(x - here.x, z - here.z);
+      if (left <= ONTO_COAST) break;
+      child.step(child.towards(x - here.x, z - here.z, false, left > 1.6 ? 1 : lightTouch));
     }
     child.run(1);
   };
@@ -1899,7 +1916,7 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
   const wanted = LIBRARY_PLAYER_SEATS.map((id) => `library-sit:${id}`).sort();
   say(sitZones.join(' ') === wanted.join(' '), `Sit chips on ${sitZones.join(', ') || 'no cushion'} (wanted ${wanted.join(', ')}: her two cushions, never a child's)`);
 
-  // She walks onto the cushion from 2.5 m out, on the stick: a soft top she steps up onto.
+  // She walks onto the cushion from 2.5 m out, on the stick: a low solid she steps up onto while walking into it.
   const start = { x: cushion.at.x + Math.sin(away) * 2.5, z: cushion.at.z + Math.cos(away) * 2.5 };
   const startClear = collision.isClearCircle(OX + start.x, OZ + start.z, PLAYER_RADIUS);
   child.stand(start.x, start.z, libraryFacingStoryChair(cushion.at));
@@ -1907,7 +1924,7 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
   say(
     startClear && offCentre() <= 0.3 && Math.abs(feet() - cushionTop) <= FEET_TOLERANCE,
     `from (${start.x.toFixed(2)}, ${start.z.toFixed(2)}) (clear floor: ${startClear}) she walks onto ${seatId} and comes to rest ` +
-      `${offCentre().toFixed(2)} m from its middle (0.3 allowed), her feet ${feet().toFixed(3)} m up on its soft top (${cushionTop.toFixed(3)})`,
+      `${offCentre().toFixed(2)} m from its middle (0.3 allowed), her feet ${feet().toFixed(3)} m up on its top (${cushionTop.toFixed(3)}; the stick at ${lightTouch.toFixed(2)} for the last stretch)`,
   );
 
   // The chip she is offered standing there — and, for the control below, the Read chips while she stands.
