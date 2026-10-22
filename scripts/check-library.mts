@@ -16,6 +16,8 @@
  * LIBRARY_CHECK_REMOVE='den wall (west)' pnpm run check:library  # a wall of the secret den out: DEN WALLS must go red
  * LIBRARY_CHECK_REMOVE='bookcase west-2' pnpm run check:library  # the shut secret shelf out: the den is reachable, must go red
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
+ * LIBRARY_CHECK_MUTATE=seal-den pnpm run check:library        # a wall across the doorway once the leaf has landed: SECRET SHELF's open fills must go red
+ * LIBRARY_CHECK_MUTATE=open-leaf-hollow pnpm run check:library  # the open leaf's collider out once it has landed: its middle is reachable, must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -94,6 +96,17 @@
  * 14. WITH A REAL CHILD — from here on a real `Player`, stepped the game's way
  *     and steered by the stick ({@link RealChild}): from the arrival, she walks
  *     into the room on the floor. Parts 4 and 5 add their clauses to it.
+ * 15. SECRET SHELF, GUARD, FRESH VISIT (#719, plan Step 12) — the real child
+ *     presses **Pull the book!** at the pull stand: the gold book slides out,
+ *     the leaf swings monotonically to π/2 in 1.8–2.0 s with the shut
+ *     collider holding to the last frame, and open, the fill reaches every
+ *     keep-out (the den's included) with zero pockets, the den is leavable, the
+ *     open leaf is solid and landable, the walls hold in room ∪ den, a walker
+ *     passes under the lintel, the swing sweeps no other solid, and the west
+ *     wall and the leaf fade while she is in the den. Found in the den with the
+ *     leaf shut, the guard opens it in one frame; a link into the den opens it
+ *     in the same call; and out through the door and back in from the park,
+ *     the leaf is shut and the den sealed again.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -106,7 +119,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Vector3, type BufferAttribute, type Light, type Object3D, type Texture } from 'three';
+import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -121,10 +134,12 @@ import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS } from '../src/world/library/books.
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
-import { END_HALF, LibraryProps, libraryKeepOuts, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
+import { END_HALF, LibraryProps, libraryKeepOuts, segmentDistance, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
 import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/library/furnish.ts';
 import { SHELF_BOOK_ZONE_PREFIX, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
-import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
+import { buildLibraryDenShell, buildReadingRoomShell, libraryDenGap, LIBRARY_SECRET_BOOK_ZONE } from '../src/world/library/shell.ts';
+import { SECRET_LEAF_OPEN, SLIDE, SLIDE_SECONDS, SWING_END, SWING_SECONDS, TWINKLE_PERIOD } from '../src/world/library/secretShelf.ts';
+import { ART } from '../src/art/style/artPalette.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
 import {
@@ -150,10 +165,12 @@ import {
   LIBRARY_ARRIVAL,
   LIBRARY_BOOKCASES,
   LIBRARY_DEN_DOOR_HALF,
+  LIBRARY_DEN_DOORWAY_STAND,
   LIBRARY_DEN_INNER,
   LIBRARY_DESK_STAND,
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
+  LIBRARY_DRAGON_STAND,
   LIBRARY_FLOOR_Y,
   LIBRARY_FURNITURE,
   LIBRARY_HALF_X,
@@ -164,7 +181,9 @@ import {
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAYER_SEATS,
   LIBRARY_READABLE_SLOTS,
+  LIBRARY_SECRET_BOOK,
   LIBRARY_SECRET_BOOKCASE,
+  LIBRARY_SECRET_STAND,
   LIBRARY_WALL_HALF,
   libraryCushion,
   libraryFacingStoryChair,
@@ -857,6 +876,17 @@ console.log('\nLANDING — her feet find every solid top across its drawn footpr
   for (const line of firstMiss) say(false, line);
   say(standables.length >= 10 && missed === 0, `${standables.length} tops, ${points} landings across their drawn footprints: ${missed} fell through`);
   say(controls > 0 && controlWrong === 0, `CONTROL: ${controls} landings 0.1 m outside a footprint found the floor (${controlWrong} found a top in the air)`);
+  // The secret shelf (#719) registers two tops and only one is ever in the
+  // world: shut, the case's is somewhere to land and the open leaf's is den
+  // floor nobody can reach. `Library.standables` says so, or the landings
+  // above would have asked the air to hold her.
+  const shutTop = standables.some((s) => s.what === `bookcase ${LIBRARY_SECRET_BOOKCASE.id}`);
+  const openTop = standables.some((s) => s.what === SECRET_LEAF_OPEN);
+  const openRegistered = library.solids.some((s) => s.what === SECRET_LEAF_OPEN);
+  say(
+    shutTop && !openTop && openRegistered,
+    `the secret shelf's shut top is in the world and its open one (registered: ${openRegistered}) is not — only the state the leaf is in is somewhere to land`,
+  );
   note(`${shared} point(s) shared by two solids (a lamp on a desk or a table) left to the higher one; the tops: ${standables.map((s) => `${s.what} ${s.top.toFixed(2)}`).join(', ')}`);
 }
 
@@ -2072,6 +2102,511 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
 }
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──
+
+/**
+ * **How deep room-local `p` is inside a registered solid**, metres (negative:
+ * outside) — a disc by its radius, a capsule by its half-thickness about its
+ * segment, a box by the least inward distance to its four edges, whichever way
+ * they are wound. For the SWEEP clause, which asks it of every solid the
+ * swinging leaf passes over.
+ */
+function depthInSolid(solid: LibrarySolid, p: LocalPoint): number {
+  if (solid.shape === 'disc') return solid.radius - Math.hypot(p.x - solid.points[0]!.x, p.z - solid.points[0]!.z);
+  if (solid.shape === 'wall') return solid.radius - segmentDistance(solid.points[0]!, solid.points[1]!, p);
+  const corners = solid.points;
+  let area = 0;
+  for (let i = 0; i < corners.length; i += 1) {
+    const a = corners[i]!;
+    const b = corners[(i + 1) % corners.length]!;
+    area += a.x * b.z - b.x * a.z;
+  }
+  const orientation = Math.sign(area) || 1;
+  let depth = Infinity;
+  for (let i = 0; i < corners.length; i += 1) {
+    const a = corners[i]!;
+    const b = corners[(i + 1) % corners.length]!;
+    const ex = b.x - a.x;
+    const ez = b.z - a.z;
+    const cross = (ex * (p.z - a.z) - ez * (p.x - a.x)) / Math.hypot(ex, ez);
+    depth = Math.min(depth, cross * orientation);
+  }
+  return depth;
+}
+
+/** How far a point of the swinging leaf may reach into another solid's footprint and still be a graze, not a sweep: a centimetre, under the leaf's own ink. */
+const SWEEP_GRAZE = 0.01;
+/** The plan's accepted clip north of the doorway's edge by the leaf's front-free corner (4.5 cm at about 8.5°, plan Step 12), as the most it may be. */
+const JAMB_CLIP_ACCEPTED = 0.05;
+/** A point-sized probe for "is this exact spot bare floor" — where a body of her size would be in a wall either way. */
+const POINT_PROBE = 0.05;
+
+/**
+ * **SECRET SHELF** (#719, plan Step 12) — the real child, at the pull stand,
+ * presses **Pull the book!** and the leaf swings open into the den.
+ *
+ * Measured on every frame of the swing: the angle never falls back, never
+ * steps further than the ease-out cubic's steepest rate, lands at exactly
+ * `SWING_END` 1.8–2.0 s after the press (the slide, then the swing), and the
+ * shut case's middle is solid on every turning frame — the swap is on landing.
+ * Open: the fill from the arrival reaches every keep-out, the den's included,
+ * with zero pockets; the case's old middle is clear and the open leaf's is not;
+ * a fill seeded beside the dragon reaches the arrival and the way out
+ * (enterable *and* leavable); the open leaf is marched at from sixteen bearings
+ * and landed on across its footprint; the walls still hold, in room ∪ den; a
+ * walker passes under the lintel; and the pull zone offers nothing. SWEEP:
+ * the leaf's rectangle, sampled through every angle, passes over no other
+ * solid and no keep-out outside the den, and its front-free corner clips the
+ * north jamb's drawn edge by no more than the plan accepts. FADE: in the den
+ * the west wall and the leaf go translucent; in the central aisle nothing does.
+ *
+ * `seal-den` walls the doorway up once the leaf has landed (the open fills go
+ * red); `open-leaf-hollow` takes the open collider out once it has landed (the
+ * open leaf's middle is reachable). `LIBRARY_CHECK_REMOVE='bookcase west-2'`
+ * is REACHABILITY's red above: the den reachable while shut.
+ */
+console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swings open into the den, the shut collider holding to the last frame:');
+{
+  const leaf = library.secretShelf;
+  const spec = LIBRARY_SECRET_BOOKCASE;
+  const size = libraryBookcaseSize(spec.kind);
+  const [gapNorth, gapSouth] = libraryDenGap();
+  const shut = leaf.shutFootprint;
+  const open = leaf.openFootprint;
+  const player = child.player;
+  const middleClear = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, PLAYER_RADIUS);
+  /**
+   * Is a footprint's middle bare floor, asked with a point-sized probe: the
+   * open footprint lies 0.3 m off the den's south wall, so a body of her size
+   * at its middle is in that wall whether or not the leaf is there, and only a
+   * point can say which.
+   */
+  const middleBare = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, POINT_PROBE);
+  const zones = (): InteractZone[] => library.interactZones();
+  const pullZone = (): InteractZone | undefined => zones().find((zone) => zone.id === LIBRARY_SECRET_BOOK_ZONE);
+  const pullChip = (): ZoneAction | undefined => pullZone()?.actions?.().find((action) => action.id === PRIMARY_ACTION);
+  const denSpots = libraryKeepOuts().filter((spot) => spot.den);
+
+  // Shut to begin with: SIT left her standing in the room, and nothing has pulled the book.
+  say(!leaf.open && !leaf.swinging && leaf.angle === 0 && !library.denOpen && !library.denRoot.visible, `shut to begin with: angle ${leaf.angle}, open ${leaf.open}, the den hidden (${library.denRoot.visible})`);
+  say(
+    !middleClear(shut) && !middleBare(shut) && middleBare(open),
+    `shut, the case's middle (${shut.x.toFixed(2)}, ${shut.z.toFixed(2)}) is solid and the open footprint's middle (${open.x.toFixed(2)}, ${open.z.toFixed(2)}) is bare den floor (a ${POINT_PROBE} m probe is clear there)`,
+  );
+  // The open footprint, read back against the layout: along the den's south
+  // wall's inner face, the leaf's own length and depth, facing into the den.
+  say(
+    Math.abs(open.x - (spec.at.x - size.length / 2)) < 1e-9 &&
+      Math.abs(open.z + open.halfDepth - LIBRARY_DEN_INNER.south) < 1e-9 &&
+      Math.abs(open.z - (gapSouth - size.depth / 2)) < 1e-9 &&
+      open.facing === 180 &&
+      Math.abs(open.halfLength - size.length / 2) < 1e-9 &&
+      Math.abs(open.halfDepth - size.depth / 2) < 1e-9,
+    `the open footprint lies flush along the den's south wall (its back on z ${(open.z + open.halfDepth).toFixed(2)}, the wall's inner face ${LIBRARY_DEN_INNER.south.toFixed(2)}), ` +
+      `x ${(open.x - open.halfLength).toFixed(2)}..${(open.x + open.halfLength).toFixed(2)}, facing ${open.facing} (into the den), the case's own ${size.length.toFixed(2)} x ${size.depth.toFixed(2)}`,
+  );
+
+  // At the pull stand; the twinkle, over one period shut.
+  child.stand(LIBRARY_SECRET_STAND.x, LIBRARY_SECRET_STAND.z, LIBRARY_SECRET_STAND.facing);
+  camera.snapTo(player.position);
+  let peak = 0;
+  let trough = 1;
+  for (let i = 0; i < Math.round(TWINKLE_PERIOD / CHILD_DT) + 2; i += 1) {
+    child.step();
+    const opacity = (leaf.twinkle.material as SpriteMaterial).opacity;
+    peak = Math.max(peak, opacity);
+    trough = Math.min(trough, opacity);
+  }
+  say(peak > 0.9 && trough === 0, `shut, the gold book twinkles: over ${TWINKLE_PERIOD} s its sprite's opacity peaks at ${peak.toFixed(2)} and rests at ${trough.toFixed(2)}`);
+
+  // The chip: on the gold book where it stands shut, stood at the pull stand, the rainbow round the book itself.
+  library.roomRoot.updateMatrixWorld(true);
+  const bookWorld = leaf.pullBook.getWorldPosition(new Vector3());
+  const zone = pullZone();
+  const chip = pullChip();
+  const reach = zone ? Math.hypot(player.position.x - zone.standX, player.position.z - zone.standZ) : Infinity;
+  const zoneOffBook = zone ? Math.hypot(zone.x - bookWorld.x, zone.z - bookWorld.z) : Infinity;
+  const standOff = zone ? Math.hypot(zone.standX - (OX + LIBRARY_SECRET_STAND.x), zone.standZ - (OZ + LIBRARY_SECRET_STAND.z)) : Infinity;
+  say(
+    !!zone && chip?.label === LIBRARY_CHIPS.pull && reach <= standRadiusOf(zone) && zoneOffBook < 1e-6 && standOff < 1e-9 && zone.highlight?.object === leaf.pullBook && zone.verb === 'Pull',
+    `standing at ${LIBRARY_SECRET_STAND.what} (${LIBRARY_SECRET_STAND.x.toFixed(2)}, ${LIBRARY_SECRET_STAND.z.toFixed(2)}), '${LIBRARY_SECRET_BOOK_ZONE}' offers '${chip?.label ?? 'nothing'}' ` +
+      `(wanted '${LIBRARY_CHIPS.pull}'), ${reach.toFixed(2)} m from its stand (reach ${zone ? standRadiusOf(zone) : '?'}), the zone ${zoneOffBook.toFixed(3)} m off the book, ` +
+      `its stand ${standOff.toFixed(3)} m off the layout's, verb '${zone?.verb ?? '?'}', the rainbow ${zone?.highlight?.object === leaf.pullBook ? 'rings' : 'does NOT ring'} the gold book`,
+  );
+  // The gold book itself: inside its case's drawn box (drawn implies solid), on its shelf, in gold.
+  const bookLocal = { x: bookWorld.x - OX, z: bookWorld.z - OZ };
+  const shelfTop = size.shelfTops[LIBRARY_SECRET_BOOK.shelf] ?? Number.NaN;
+  const bookBase = bookWorld.y - LIBRARY_FLOOR_Y; // flat-ok: height over the reading room's own flat floor, off the sphere
+  const gold = (leaf.pullBook.material as MeshToonMaterial).color.equals(new Color(ART.helmetGold));
+  say(
+    outsideBox(shut, bookLocal.x, bookLocal.z) < 0 && Math.abs(bookBase - shelfTop) <= 0.02 && gold && leaf.pullBook.name === 'library.secretBook',
+    `the gold book '${leaf.pullBook.name}' stands ${(-outsideBox(shut, bookLocal.x, bookLocal.z)).toFixed(3)} m inside the shut case's drawn box at (${bookLocal.x.toFixed(2)}, ${bookLocal.z.toFixed(2)}), ` +
+      `its base at ${bookBase.toFixed(3)} m on shelf ${LIBRARY_SECRET_BOOK.shelf} (${shelfTop.toFixed(3)}), painted ${gold ? 'helmetGold' : 'NOT gold'}`,
+  );
+
+  // Press. The swing, frame by frame.
+  const homeZ = leaf.pullBook.position.z;
+  const pressedAt = child.frames;
+  chip?.run();
+  let lastAngle = leaf.angle;
+  let monotone = true;
+  let maxStep = 0;
+  let landedFrame = -1;
+  let turningFrames = 0;
+  let heldThrough = true;
+  let slidOut = 0;
+  for (let i = 0; i < 150; i += 1) {
+    child.step();
+    const angle = leaf.angle;
+    if (angle < lastAngle - 1e-9) monotone = false;
+    maxStep = Math.max(maxStep, angle - lastAngle);
+    slidOut = Math.max(slidOut, leaf.pullBook.position.z - homeZ);
+    if (angle > 0 && !leaf.open) {
+      turningFrames += 1;
+      if (middleClear(shut)) heldThrough = false;
+    }
+    if (landedFrame < 0 && leaf.open) landedFrame = child.frames - pressedAt;
+    lastAngle = angle;
+  }
+  const steepest = (SWING_END * 3) / SWING_SECONDS;
+  const landedAfter = landedFrame * CHILD_DT;
+  say(
+    leaf.swinging === false && leaf.open && monotone && maxStep <= steepest * CHILD_DT + 1e-6,
+    `the swing is monotone (never falls back) and never steps more than its steepest rate: the largest frame step ${maxStep.toFixed(4)} rad ` +
+      `(the ease-out cubic's ${(steepest * CHILD_DT).toFixed(4)} at most)`,
+  );
+  say(
+    Math.abs(leaf.angle - SWING_END) <= 1e-6 && landedFrame > 0 && landedAfter >= 1.8 && landedAfter <= 2.0,
+    `it lands at ${leaf.angle.toFixed(6)} rad (π/2 wanted) ${landedAfter.toFixed(3)} s after the press (1.8–2.0: the slide's ${SLIDE_SECONDS} s then the swing's ${SWING_SECONDS} s)`,
+  );
+  say(
+    turningFrames >= 60 && heldThrough,
+    `during the swing (${turningFrames} turning frames) the shut case's middle was never clear floor: she can never walk through a half-open leaf; the swap is the landing frame`,
+  );
+  say(
+    slidOut >= SLIDE - 0.005 && Math.abs(leaf.pullBook.position.z - homeZ) < 1e-3,
+    `the gold book slid ${slidOut.toFixed(3)} m out of its row (${SLIDE} wanted) and has eased home (${(leaf.pullBook.position.z - homeZ).toFixed(4)} m out now)`,
+  );
+
+  // The mutations: once the leaf has landed, wall the doorway up, or take the open collider out.
+  const sealing = mutating('seal-den') ? collision.addWall(OX - LIBRARY_HALF_X, OZ + gapNorth, OX - LIBRARY_HALF_X, OZ + gapSouth, LIBRARY_WALL_HALF) : null;
+  if (sealing) note(`WALLED the den's doorway up (x ${-LIBRARY_HALF_X}, z ${gapNorth}..${gapSouth}, half ${LIBRARY_WALL_HALF}) once the leaf landed, on purpose — this run must go red`);
+  const openSolid = library.solids.find((solid) => solid.what === SECRET_LEAF_OPEN);
+  const hollow = mutating('open-leaf-hollow') ? openSolid : undefined;
+  if (hollow) {
+    takeOut(hollow);
+    note(`TOOK the open leaf's collider ('${SECRET_LEAF_OPEN}') out once it landed, on purpose — this run must go red`);
+  }
+
+  // OPEN: the doorway is clear, the open leaf solid, the den enterable and leavable.
+  say(middleClear(shut) && !middleBare(open), `open: the case's old middle is clear floor for a body of her size and the open leaf's middle is solid to a ${POINT_PROBE} m probe`);
+  const pullOffer = pullZone()?.actions?.().length ?? -1;
+  say(pullOffer === 0, `open, the pull zone offers ${pullOffer} action(s): unselectable, so Selection's cached box for a book that has swung away is never consulted`);
+  say(library.denOpen && library.denRoot.visible, `the Library says the den is open (${library.denOpen}) and draws it (${library.denRoot.visible})`);
+  const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  const keepOuts = libraryKeepOuts();
+  const unreached = keepOuts.filter((spot) => !reachedAt(seen, OX + spot.x, OZ + spot.z));
+  for (const spot of unreached.slice(0, 4)) say(false, `${spot.what} at (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) is not reachable from the arrival with the leaf open`);
+  say(
+    unreached.length === 0 && denSpots.length > 0,
+    `from the arrival the fill reaches every keep-out, the den's ${denSpots.length} included: ${keepOuts.length - unreached.length} of ${keepOuts.length}`,
+  );
+  const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
+  say(pockets.length === 0, `zero pockets with the leaf open: ${pockets.length} clear cell(s) unreached of ${seen.clear.size}${pockets.length > 0 ? `, e.g. (${cellCentre(pockets[0]!).x.toFixed(2)}, ${cellCentre(pockets[0]!).z.toFixed(2)})` : ''}`);
+  say(
+    reachedAt(seen, OX + shut.x, OZ + shut.z) && !reachedAt(seen, OX + open.x, OZ + open.z),
+    `the fill reaches the case's old middle (${shut.x.toFixed(2)}, ${shut.z.toFixed(2)}) and not the open leaf's (${open.x.toFixed(2)}, ${open.z.toFixed(2)})`,
+  );
+  const fromDen = fill(collision, OX + LIBRARY_DRAGON_STAND.x, OZ + LIBRARY_DRAGON_STAND.z);
+  say(
+    reachedAt(fromDen, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z) && reachedAt(fromDen, OX + LIBRARY_DOOR_X, OZ + LIBRARY_HALF_Z),
+    `a fill seeded ${LIBRARY_DRAGON_STAND.what} reaches the arrival and the way out's centre: the den is enterable and leavable (${fromDen.reached.size} cells)`,
+  );
+
+  // MARCHED at the open leaf, 16 bearings, both strides: her edge never gets into its drawn footprint past the corner allowance.
+  {
+    let marches = 0;
+    let skipped = 0;
+    let deepest = 0;
+    const reachOut = Math.hypot(open.halfLength, open.halfDepth) + 2.2;
+    for (let b = 0; b < 16; b += 1) {
+      const angle = (b / 16) * Math.PI * 2;
+      const start = new Vector3(OX + open.x + Math.cos(angle) * reachOut, 0, OZ + open.z + Math.sin(angle) * reachOut);
+      if (!onFloor(start.x - OX, start.z - OZ) || !collision.isClearCircle(start.x, start.z, PLAYER_RADIUS)) {
+        skipped += 1;
+        continue;
+      }
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        const end = march(collision, start, new Vector3(OX + open.x, 0, OZ + open.z), step, reachOut + 1);
+        deepest = Math.max(deepest, PLAYER_RADIUS - outsideBox(open, end.x - OX, end.z - OZ));
+      }
+    }
+    say(
+      marches >= 8 && deepest <= CORNER_ALLOWANCE,
+      `${marches} marches at the open leaf from 16 bearings at 5 cm and the sprint stride (${skipped} starts skipped: off the floor or inside a solid): ` +
+        `deepest a body's edge got into its drawn footprint ${deepest.toFixed(3)} m, allowance ${CORNER_ALLOWANCE.toFixed(3)}`,
+    );
+  }
+
+  // LANDING on the open leaf: her feet find its top across its footprint; a
+  // ring outside finds the floor — or another top where another standable
+  // stands (west-3's, the case south of the doorway, at the leaf's hinge end),
+  // as LANDING's own control leaves those to the higher one.
+  {
+    const present = library.standables;
+    const standable = present.find((s) => s.what === SECRET_LEAF_OPEN);
+    const shutStill = present.some((s) => s.what === `bookcase ${spec.id}`);
+    if (!standable) {
+      say(false, `the open leaf's top ('${SECRET_LEAF_OPEN}') is not in the world's tops now it has landed — nothing landed on`);
+    } else {
+      let points = 0;
+      let missed = 0;
+      let controls = 0;
+      let controlWrong = 0;
+      let covered = 0;
+      for (const [u, v] of grid(standable.footprint, 0)) {
+        points += 1;
+        const y = standingAt(collision, surfaces.sample.bind(surfaces), OX + u, OZ + v, standable.top + 0.1);
+        if (Math.abs(y - standable.top) > FEET_TOLERANCE) missed += 1;
+      }
+      for (const [u, v] of grid(standable.footprint, 0.1)) {
+        if (present.some((other) => other !== standable && footprintCovers(other.footprint, u, v))) {
+          covered += 1;
+          continue;
+        }
+        controls += 1;
+        const y = standingAt(collision, surfaces.sample.bind(surfaces), OX + u, OZ + v, standable.top + 0.1);
+        if (Math.abs(y) > FEET_TOLERANCE) controlWrong += 1;
+      }
+      say(
+        !shutStill && points > 100 && missed === 0 && controls > 40 && controlWrong === 0,
+        `her feet find the open leaf's top (${standable.top.toFixed(2)} m) at ${points - missed} of ${points} landings across its footprint, and the floor at ${controls - controlWrong} of ${controls} ` +
+          `points 0.1 m outside it (${covered} under another top, left to it); the shut case's top is ${shutStill ? 'STILL' : 'no longer'} somewhere to land`,
+      );
+    }
+  }
+
+  // The walls hold with the leaf open: the same 48 marches end in the room or the den, or through the door.
+  {
+    let escaped = 0;
+    let intoDen = 0;
+    for (let i = 0; i < 12; i += 1) {
+      const t = -0.9 + (1.8 * i) / 11;
+      for (const [from, to] of [
+        [new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ - 6), new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ - 30)],
+        [new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ + 9), new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ + 30)],
+        [new Vector3(OX - 12, 0, OZ + t * LIBRARY_INNER_Z), new Vector3(OX - 40, 0, OZ + t * LIBRARY_INNER_Z)],
+        [new Vector3(OX + 12, 0, OZ + t * LIBRARY_INNER_Z), new Vector3(OX + 40, 0, OZ + t * LIBRARY_INNER_Z)],
+      ] as const) {
+        const end = march(collision, from, to, PLAYER_LONGEST_STEP, 30);
+        const lx = end.x - OX;
+        const lz = end.z - OZ;
+        const inRoom = Math.abs(lx) <= LIBRARY_HALF_X + 0.05 && Math.abs(lz) <= LIBRARY_HALF_Z + 0.05;
+        const inDen = libraryDenContains(lx, lz);
+        const throughDoor = Math.abs(lx - LIBRARY_DOOR_X) < LIBRARY_DOOR_HALF && lz > LIBRARY_INNER_Z;
+        if (inDen) intoDen += 1;
+        if (!inRoom && !inDen && !throughDoor) escaped += 1;
+      }
+    }
+    say(escaped === 0 && intoDen > 0, `the walls hold with the leaf open: ${escaped} of 48 marches left the room and the den other than through the door (${intoDen} ended in the den, through its doorway)`);
+  }
+
+  // Under the lintel, open: a walker passes into the den, a flier over the case's height still stops.
+  {
+    const caseTop = size.height;
+    const throughZ = OZ + spec.at.z;
+    const atLintel = -LIBRARY_INNER_X + PLAYER_RADIUS - RESOLVER_SLACK;
+    const outside = -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - PLAYER_RADIUS;
+    const walker = marchAt(new Vector3(OX - 16, LIBRARY_FLOOR_Y, throughZ), -1, 0, 0.05, 0).x - OX;
+    const flier = marchAt(new Vector3(OX - 16, LIBRARY_FLOOR_Y + caseTop + 0.8, throughZ), -1, 0, 0.05, caseTop + 0.8).x - OX;
+    say(
+      libraryDenContains(walker, spec.at.z) && walker < outside && flier >= atLintel,
+      `with the leaf open a walker on the floor passes under the lintel into the den (to x ${walker.toFixed(2)}) and a flier at ${(caseTop + 0.8).toFixed(2)} m still stops at it (x ${flier.toFixed(2)}, at least ${atLintel.toFixed(2)})`,
+    );
+  }
+
+  // The mutations' traces come out, so what follows measures the game.
+  if (sealing) collision.removeWall(sealing);
+  if (hollow) putBack(hollow);
+
+  // SWEEP: the leaf's rectangle, sampled through every angle of its swing, in the room's frame.
+  {
+    const hinge = { x: spec.at.x, z: gapSouth };
+    const yaw = (spec.facing * Math.PI) / 180;
+    const L = size.length;
+    const D = size.depth;
+    /** Leaf-local (u along its length, v through its depth) at swing angle `a`, room-local. */
+    const leafPoint = (a: number, u: number, v: number): LocalPoint => {
+      const hx = u * Math.cos(a) + v * Math.sin(a);
+      const hz = -u * Math.sin(a) + v * Math.cos(a);
+      return { x: hinge.x + hx * Math.cos(yaw) + hz * Math.sin(yaw), z: hinge.z - hx * Math.sin(yaw) + hz * Math.cos(yaw) };
+    };
+    // CONTROL on the sweep's own geometry: shut, the leaf's middle is the shut footprint's; open, the open one's.
+    const shutMiddle = leafPoint(0, L / 2, D / 2);
+    const openMiddle = leafPoint(SWING_END, L / 2, D / 2);
+    say(
+      Math.hypot(shutMiddle.x - shut.x, shutMiddle.z - shut.z) < 1e-9 && Math.hypot(openMiddle.x - open.x, openMiddle.z - open.z) < 1e-9,
+      `CONTROL: the sweep's leaf at 0 is the shut footprint (middle ${shutMiddle.x.toFixed(2)}, ${shutMiddle.z.toFixed(2)}) and at π/2 the open one (${openMiddle.x.toFixed(2)}, ${openMiddle.z.toFixed(2)})`,
+    );
+    const others = library.solids.filter((solid) => solid.handle !== leaf.shutColliders[0] && solid.handle !== leaf.openColliders[0]);
+    const roomKeepOuts = libraryKeepOuts().filter((spot) => !spot.den);
+    let deepestSolid = { what: 'none', depth: -Infinity, at: { x: 0, z: 0 }, angle: 0 };
+    let deepestInClip = { what: 'none', depth: -Infinity, angle: 0 };
+    let deepestKeepOut = { what: 'none', depth: -Infinity };
+    let clip = { over: -Infinity, angle: 0 };
+    let samples = 0;
+    let inClip = 0;
+    const steps = 180;
+    for (let ai = 0; ai <= steps; ai += 1) {
+      const a = (ai / steps) * SWING_END;
+      for (let u = 0; u <= L + 1e-9; u += 0.05) {
+        for (const v of [0, D / 2, D]) {
+          const p = leafPoint(a, u, v);
+          samples += 1;
+          // North of the doorway's north edge is the accepted clip: the
+          // front-free corner's swing past the shut case's own north end, into
+          // the jamb's drawn edge and the drawn end of the case beside it
+          // (west-1). It is measured by itself below, and bounded; here it is
+          // set apart so that bound, not this clause, is what accepts it.
+          const over = gapNorth - p.z;
+          if (over > 0) {
+            inClip += 1;
+            if (over > clip.over) clip = { over, angle: a };
+            for (const solid of others) {
+              const depth = depthInSolid(solid, p);
+              if (depth > deepestInClip.depth) deepestInClip = { what: solid.what, depth, angle: a };
+            }
+            continue;
+          }
+          for (const solid of others) {
+            const depth = depthInSolid(solid, p);
+            if (depth > deepestSolid.depth) deepestSolid = { what: solid.what, depth, at: p, angle: a };
+          }
+          for (const spot of roomKeepOuts) {
+            const depth = spot.radius - Math.hypot(p.x - spot.x, p.z - spot.z);
+            if (depth > deepestKeepOut.depth) deepestKeepOut = { what: spot.what, depth };
+          }
+        }
+      }
+    }
+    say(
+      others.length > 50 && samples - inClip > 40000 && deepestSolid.depth <= SWEEP_GRAZE,
+      `the swing sweeps no other solid: ${samples - inClip} leaf points through ${steps + 1} angles against ${others.length} solids, the deepest any gets into one ` +
+        `${deepestSolid.depth.toFixed(3)} m (${deepestSolid.what}, at (${deepestSolid.at.x.toFixed(2)}, ${deepestSolid.at.z.toFixed(2)}), ${((deepestSolid.angle * 180) / Math.PI).toFixed(1)}°; a graze of ${SWEEP_GRAZE} allowed)`,
+    );
+    say(
+      roomKeepOuts.length > 50 && deepestKeepOut.depth <= 0,
+      `and no keep-out outside the den: the nearest the leaf comes to one is ${(-deepestKeepOut.depth).toFixed(3)} m short of ${deepestKeepOut.what} (${roomKeepOuts.length} room keep-outs)`,
+    );
+    say(
+      clip.over > 0 && clip.over <= JAMB_CLIP_ACCEPTED,
+      `the front-free corner swings ${Math.max(0, clip.over).toFixed(3)} m north of the doorway's edge at ${((clip.angle * 180) / Math.PI).toFixed(1)}° — through the jamb's drawn edge and ` +
+        `${deepestInClip.depth.toFixed(3)} m into ${deepestInClip.what} at ${((deepestInClip.angle * 180) / Math.PI).toFixed(1)}° (${inClip} leaf points) — ` +
+        `the plan's accepted clip, up to ${JAMB_CLIP_ACCEPTED}: a slit beside the shut case would give the secret away`,
+    );
+  }
+
+  // FADE: in the den, the west wall (its spans and the lintel) and the open leaf go translucent; in the central aisle, nothing does.
+  child.stand(LIBRARY_DEN_DOORWAY_STAND.x, LIBRARY_DEN_DOORWAY_STAND.z, LIBRARY_DEN_DOORWAY_STAND.facing);
+  camera.snapTo(player.position);
+  for (let i = 0; i < 60; i += 1) child.step();
+  say(library.westMaterial.opacity < 0.5, `in the den (${LIBRARY_DEN_DOORWAY_STAND.what}), the west wall fades to ${library.westMaterial.opacity.toFixed(2)} within 60 frames`);
+  const behindLeaf = { x: open.x, z: open.z - open.halfDepth - PLAYER_RADIUS - 0.3 };
+  child.stand(behindLeaf.x, behindLeaf.z, 0);
+  camera.snapTo(player.position);
+  for (let i = 0; i < 60; i += 1) child.step();
+  say(leaf.fader.alpha < 0.5, `standing in the den just north of the open leaf at (${behindLeaf.x.toFixed(2)}, ${behindLeaf.z.toFixed(2)}), the leaf hides her and fades to ${leaf.fader.alpha.toFixed(2)}`);
+  child.stand(0.6, 1.2, 180);
+  camera.snapTo(player.position);
+  for (let i = 0; i < 90; i += 1) child.step();
+  const fadedStacks = library.stacks.filter((stack) => stack.alpha < 0.999).map((stack) => stack.id);
+  say(
+    library.westMaterial.opacity === 1 && leaf.fader.alpha === 1 && fadedStacks.length === 0,
+    `CONTROL: in the open central aisle the west wall (${library.westMaterial.opacity.toFixed(2)}) and the leaf (${leaf.fader.alpha.toFixed(2)}) are solid again and no stack fades (${fadedStacks.join(', ') || 'none'})`,
+  );
+  note(
+    `SECRET SHELF: hinge at (${spec.at.x.toFixed(2)}, ${gapSouth.toFixed(2)}), the leaf ${size.length.toFixed(2)} x ${size.depth.toFixed(2)} x ${size.height.toFixed(2)}; ` +
+      `shut footprint (${shut.x.toFixed(2)}, ${shut.z.toFixed(2)}) facing ${shut.facing}, open (${open.x.toFixed(2)}, ${open.z.toFixed(2)}) facing ${open.facing}; ` +
+      `the gold book at (${bookLocal.x.toFixed(2)}, ${bookLocal.z.toFixed(2)}) shut; landed ${landedAfter.toFixed(3)} s after the press; ${child.frames} frames stepped so far`,
+  );
+}
+
+/**
+ * **GUARD** (plan Decision 24) — found in the den with the leaf shut (what a
+ * jet pack over the west wall, or a hand-typed link, amounts to), the leaf is
+ * open one frame later, silently; and `requestEnter` into the den opens it in
+ * the same call. Proved red by hand: the guard's lines deleted from
+ * `Library.updateSecretLeaf`.
+ */
+console.log('\nGUARD — found in the den with the leaf shut, it opens at once; a link into the den opens it in the same call:');
+{
+  const leaf = library.secretShelf;
+  const shut = leaf.shutFootprint;
+  const open = leaf.openFootprint;
+  const middleClear = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, PLAYER_RADIUS);
+  const middleBare = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, POINT_PROBE);
+  child.enter();
+  say(!leaf.open && leaf.angle === 0 && !library.denRoot.visible, `in at the arrival the leaf is shut (angle ${leaf.angle}) and the den hidden (drawn: ${library.denRoot.visible})`);
+  const inDen = { x: -21, z: -5 };
+  child.stand(inDen.x, inDen.z, 270);
+  const before = leaf.open;
+  child.step();
+  say(
+    !before && leaf.open && Math.abs(leaf.angle - SWING_END) < 1e-9 && library.denRoot.visible && middleClear(shut) && !middleBare(open),
+    `stood in the den at (${inDen.x}, ${inDen.z}) with the leaf shut, one frame later it is open (angle ${leaf.angle.toFixed(4)}), the den drawn (${library.denRoot.visible}), ` +
+      `the doorway clear (${middleClear(shut)}) and the open leaf solid (${!middleBare(open)})`,
+  );
+  child.enter();
+  const shutBetween = !leaf.open && leaf.angle === 0;
+  child.enter({ x: inDen.x, z: inDen.z, facing: 270 });
+  const where = child.room();
+  say(
+    shutBetween && leaf.open && libraryDenContains(where.x, where.z) && library.denRoot.visible,
+    `shut again at the arrival (${shutBetween}); /library?at=${inDen.x},${inDen.z} (requestEnter into the den) opens it in the same call, before any frame: open ${leaf.open}, she stands at (${where.x.toFixed(2)}, ${where.z.toFixed(2)})`,
+  );
+  child.enter({ x: LIBRARY_SECRET_STAND.x, z: LIBRARY_SECRET_STAND.z, facing: LIBRARY_SECRET_STAND.facing });
+  say(!leaf.open && leaf.angle === 0 && !library.denRoot.visible, `a link to the pull stand shuts it again (angle ${leaf.angle}, den drawn ${library.denRoot.visible})`);
+}
+
+/**
+ * **FRESH VISIT** — pulled open, then out through the door link and back in
+ * from the park at a sprint through the front door: the leaf is shut, the den
+ * hidden, and its spots unreached again — every visit from the park starts
+ * with the trick there to find.
+ */
+console.log('\nFRESH VISIT — out through the door and back in from the park, the leaf is shut again and the den sealed:');
+{
+  const leaf = library.secretShelf;
+  const player = child.player;
+  const denSpots = libraryKeepOuts().filter((spot) => spot.den);
+  library
+    .interactZones()
+    .find((zone) => zone.id === LIBRARY_SECRET_BOOK_ZONE)
+    ?.actions?.()
+    .find((action) => action.id === PRIMARY_ACTION)
+    ?.run();
+  child.run(2.2);
+  say(leaf.open, `pulled open again from the pull stand before leaving (open ${leaf.open})`);
+  say(library.requestEnterDoor(), '/library-door puts her outside');
+  child.run(1.2);
+  say(!library.playerIsInside && !leaf.open && leaf.angle === 0, `outside (inside ${library.playerIsInside}), the leaf shut behind her (angle ${leaf.angle})`);
+  // A sprint in through the front door, on the stick, from the foot of the steps.
+  const frame = library.frame;
+  const start = frame.foot(0, library.plan.stepFrontZ + 2.5);
+  player.teleportTo(start.x, onGround(start.x, start.z).y, start.z, frame.yaw + Math.PI);
+  camera.snapTo(player.position);
+  const inward = child.towards(-Math.sin(frame.yaw), -Math.cos(frame.yaw), true);
+  for (let i = 0; i < Math.round(4 / CHILD_DT) && !library.playerIsInside; i += 1) child.step(inward);
+  child.run(0.5);
+  const at = child.room();
+  say(
+    library.playerIsInside && Math.hypot(at.x - LIBRARY_ARRIVAL.x, at.z - LIBRARY_ARRIVAL.z) < 0.01 && !leaf.open && leaf.angle === 0 && !library.denRoot.visible,
+    `a sprint through the front door enters at the arrival (${at.x.toFixed(2)}, ${at.z.toFixed(2)}) with the leaf shut (angle ${leaf.angle}) and the den hidden (drawn: ${library.denRoot.visible})`,
+  );
+  const sealed = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  const leaked = denSpots.filter((spot) => reachedAt(sealed, OX + spot.x, OZ + spot.z)).length;
+  say(denSpots.length > 0 && leaked === 0, `and the den is sealed again: ${denSpots.length - leaked} of ${denSpots.length} den spots unreached from the arrival`);
+}
 
 console.log('\nHOUSEKEEPING:');
 {
