@@ -129,7 +129,11 @@ BLEND = os.path.join(REPO, "art", "blend", "library.blend")
 # =============================================================================
 
 KID_MODULE = "src/art/models/kid.ts"
-CHILD_HEIGHT = ts_const(KID_MODULE, "KID_HEIGHT")
+# `KID_HEIGHT` moved to a leaf of its own on the engine branch (so the
+# collision engine can ask without loading the whole kid model); kid.ts only
+# re-exports it, and a re-export is not a declaration this regex can read.
+KID_HEIGHT_MODULE = "src/art/models/kidHeight.ts"
+CHILD_HEIGHT = ts_const(KID_HEIGHT_MODULE, "KID_HEIGHT")
 TALLEST_CHILD = ts_const(KID_MODULE, "TALLEST_CHILD_HEIGHT")
 # **The one seat height at which a child's feet reach the floor.** The rig has
 # no knee (kid.ts, `KID_HIP_HEIGHT`'s own doc): sat on a seat of height H her
@@ -2212,7 +2216,7 @@ def main() -> None:
     print(report_extras())
     print(f"\n  read from the game: KID_HEIGHT {CHILD_HEIGHT}, TALLEST_CHILD_HEIGHT "
           f"{TALLEST_CHILD}, KID_HIP_HEIGHT {CHILD_HIP}, KID_REACH_HEIGHT {CHILD_REACH} "
-          f"({KID_MODULE}); COUNTER_TOP_Y {COUNTER_TOP} ({COUNTER_MODULE})")
+          f"({KID_MODULE}; KID_HEIGHT from {KID_HEIGHT_MODULE}); COUNTER_TOP_Y {COUNTER_TOP} ({COUNTER_MODULE})")
     tris = total_triangles()
     assert tris <= TRIANGLE_BUDGET, f"{tris} triangles against a budget of {TRIANGLE_BUDGET}"
     print(f"\n  {len(bpy.data.objects)} nodes, {tris} triangles (budget {TRIANGLE_BUDGET})")

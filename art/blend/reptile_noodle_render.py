@@ -115,7 +115,7 @@ def configure() -> None:
 
 def stand_in_child() -> bpy.types.Object:
     """A KID_HEIGHT box on the exhibit's stand spot. Removed after the shots."""
-    height = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+    height = ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
     # The stand spot is a table row, not a `export const`; read the two
     # numbers off the `noodle` entry's `stand:` line with the same discipline
     # (a regex that must match exactly once).
