@@ -5,6 +5,7 @@
  * pnpm run check:served-book-reader                 # serves the game itself (the gate's form)
  * CHECK_BOOK_READER_URL=http://127.0.0.1:5471 pnpm run check:book-reader   # against your own server
  * CHECK_BOOK_READER_PARK=shown …                     # keep the paused park drawn under the book (QA shots)
+ * CHECK_BOOK_READER_CHAPTER=overlong …               # mutation: the chapter fixture carries the over-long page (must go red)
  * ```
  *
  * **Frame-rate independent.** Every read after an input waits for the game's
@@ -48,8 +49,9 @@
  *    forward button must cover it, the back button must sit clear of it, a
  *    tap must pan to the facing page and then turn the leaf, ‹ must come
  *    back, and reading to the last page there must file the bookmark too.
- * 5. **All twelve books resolve.** Each is opened in turn and every face
- *    painted: 4–6 pages, an even number of faces, every texture a real canvas,
+ * 5. **Every book resolves.** Each is opened in turn and every face
+ *    painted: its kind's page count (`BOOK_PAGE_COUNTS`: a picture book 4–6, a
+ *    chapter book 8–10), an even number of faces, every texture a real canvas,
  *    every picture's model coverage — read off the rendered *pixels* — above
  *    nothing, and every face with words at or above the floor. And **no book
  *    links a shader program**: after the first book (which warms them all —
@@ -68,9 +70,31 @@
  *    one book found (driven through the game's own store and the dex's own
  *    list of entries), that book is read to its end: no celebration may show
  *    over its last page; closing it must let the Cute-o-dex's out, and closing
- *    that the library's — one at a time, never two at once. And `C`, the
- *    dex's own key, must not open the dex over an open book.
- * 9. **A book straight off the shelf** (#718). In a fresh profile, the real
+ *    that the library's (every picture book read) — one at a time, never two
+ *    at once. And `C`, the dex's own key, must not open the dex over an open
+ *    book.
+ * 9. **Every page's words stay in their box, in both orientations.** Every
+ *    worded face of every book opened above is held to where its words had to
+ *    go, measured from outside the painter: the lines, joined, are the page's
+ *    words exactly (nothing cut off); every line re-measured here in the face's
+ *    own font is no wider than its box; the painted block sits inside its box
+ *    and clear of the picture; and the painted **pixels** carry no ink in the
+ *    page's margins, below the words or beside them. Then **every chapter
+ *    page** — each real chapter book's, and a fixture chapter book's that
+ *    lives in this check, 20 to 40 words a page, standing in until the real
+ *    books land — is held to it on the laptop (a landscape spread), on the
+ *    portrait phone (one page at a time) and on the landscape phone. On the
+ *    first two every page must fit, with a picture at least
+ *    `CHAPTER_MIN_PICTURE_SCALE` of full size; a phone held on its side may instead
+ *    show the reader's "turn your phone upright" card, and then its pages
+ *    are not measured (it says so). CONTROL: an over-long fixture page (far
+ *    over forty words) must be refused on the laptop — the card up — and its
+ *    painted overflow must be seen by the same instrument, or the check
+ *    cannot tell an over-long page from a good one and fails. Then (9b) the
+ *    picture models' sheet, a book that lives here: every model a chapter
+ *    book may name is drawn on a page this check opens, and opening the sheet
+ *    links no shader program.
+ * 10. **A book straight off the shelf** (#718). In a fresh profile, the real
  *    `/library?at=` link stands her at the first readable book's stand
  *    (`SHELF_BOOKS[0]`), facing its case: the game's own selection must hold
  *    that book's zone (so its chip shows over it), and running the zone's
@@ -85,7 +109,19 @@
  */
 import { mkdirSync } from 'node:fs';
 import { chromium, type Page } from 'playwright-core';
-import { BOOKS, BOOK_MAX_PAGES, BOOK_MIN_PAGES, bookCollectionId } from '../src/world/library/books.ts';
+import { BOOKS, BOOK_PAGE_COUNTS, PICTURE_MODELS, bookCollectionId, type LibraryBook, type PictureActor } from '../src/world/library/books.ts';
+import {
+  CHAPTER_MIN_PICTURE_SCALE,
+  PAGE_CANVAS_HEIGHT,
+  PAGE_CANVAS_WIDTH,
+  PAGE_FRAME_INSET,
+  PAGE_FRAME_STROKE,
+  PAGE_MARGIN_BOTTOM,
+  PAGE_MARGIN_TOP,
+  PAGE_MARGIN_X,
+} from '../src/world/library/reader/pageGeometry.ts';
+import { READER_WORDS } from '../src/world/library/reader/readerWords.ts';
+import { PALETTE } from '../src/core/palette.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 import { SHELF_BOOKS, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
 import { LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
@@ -116,6 +152,8 @@ const SHELF_STAND_TOLERANCE = 0.1;
 const FIRST = BOOKS[0]?.id ?? '';
 const READ_THROUGH = BOOKS[3]?.id ?? FIRST;
 const LAST = BOOKS[BOOKS.length - 1]?.id ?? FIRST;
+const FIRST_BOOK = BOOKS.find((book) => book.id === FIRST);
+if (!FIRST_BOOK) throw new Error('check:book-reader: the library has no books at all');
 
 /**
  * **The paused park under the book is drawn only until the first screenshot**
@@ -429,6 +467,509 @@ function textFloor(where: string, measured: { rootPx: number; faces: FaceMeasure
   return smallest;
 }
 
+
+// ------------------------------------------------- words in their box (item 9)
+
+/**
+ * **A chapter book that lives here and nowhere else** — 20 to 40 words a page,
+ * the brevity rule's whole range for a chapter page (`check:brevity`'s
+ * `chapterPage`), with a twenty-word page, two forty-word pages (one of them
+ * dialogue, quotes and all) and a page of longer words, written the way the
+ * drafted chapter books are. It stands
+ * in for the real chapter books until they land, and is measured alongside
+ * them after. The game ships no placeholder book; `markBookRead` would file
+ * nothing for this one even if it were read to its end.
+ */
+const FIXTURE_PAGES: readonly string[] = [
+  'Biscuit packed a picnic for everybody in the park. Then the wind blew his hat away, so RiPika ran fast.',
+  'Sir Hopsalot hopped to the front of the queue. “Make way for the magnificent bunny!” he announced, and everybody laughed at his very tall ears.',
+  'Biscuit packed a picnic for everybody in the park. Then the wind blew his hat away, so RiPika ran after it all the way to the fountain and back again.',
+  'Trilla bounced into the library to find a book of songs. It was dim and cosy and as quiet as a whisper, and everybody was reading without making a single sound.',
+  'Up and up went the great wheel, all the way to space, where millions of stars twinkled. Chicken-looter was not scared one bit. He was so happy that he laid a surprise egg!',
+  'Detective Biscuit examined the muddy footprints through his magnifying glass. “Whoever made these,” he announced importantly, “has remarkably enormous feet and absolutely terrible manners.” Everybody looked down at his feet.',
+  'Biscuit packed a picnic for everybody in the park. Then the wind blew his hat away, so RiPika ran after it all the way to the fountain and back again. RiPika laughed until her ears flapped like two big flags.',
+  'Sir Hopsalot folded his magnificent ears and bent down low. WHOOSH! Under the bar they went, side by side, and over the finish line in a shower of confetti. “You are magnificent,” said Sir Hopsalot. “So are you!” said RiPika.',
+];
+
+/** Far over a chapter page's forty words: a page that cannot fit any screen this reader draws, at the floor. */
+const OVERLONG_PAGE = Array.from(
+  { length: 8 },
+  (_, index) =>
+    `On the ${['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'][index]} morning Biscuit packed another enormous picnic, and the wind blew everything away across the park again.`,
+).join(' ');
+
+const FIXTURE_PICTURES: readonly LibraryBook['pages'][number]['picture'][] = [
+  { cast: [{ model: 'biscuit', mood: 'happy', pose: 'wave' }], sky: 'skyDayBottom', ground: 'grassLight', decor: ['clouds'] },
+  { cast: [{ model: 'bunny', mood: 'happy', at: [-0.7, 0, 0], turn: 20 }, { model: 'ripika', at: [0.8, 0, 0], turn: -20 }], sky: 'skyDayBottom', ground: 'pathSand' },
+  { cast: [{ model: 'ripika', mood: 'surprised', pose: 'armsUp' }], sky: 'skyDayBottom', ground: 'grassLight', decor: ['speed'] },
+  { cast: [{ model: 'trilla', mood: 'happy' }, { model: 'book', colour: 'markerSky', at: [0.7, 0, 0.3] }], sky: 'buildingFloor', ground: 'woodLight' },
+  { cast: [{ model: 'star', colour: 'flowerYellow', size: 2 }], sky: 'skyNightBottom', night: true, decor: ['stars'] },
+  { cast: [{ model: 'biscuit', mood: 'surprised' }], sky: 'skyDayBottom', ground: 'pathSand', decor: ['sparkles'] },
+  { cast: [{ model: 'kid', mood: 'happy', pose: 'armsUp' }, { model: 'ripika', mood: 'happy', at: [1.1, 0, 0.2] }], sky: 'skyDayBottom', ground: 'grassLight', decor: ['hearts'] },
+  { cast: [{ model: 'kid', mood: 'blink', at: [-0.6, 0, 0], turn: 20 }, { model: 'biscuit', at: [0.8, 0, 0.2], turn: -20 }], sky: 'skySunsetBottom', ground: 'grassLight' },
+];
+
+function fixtureChapterBook(id: string, title: string, texts: readonly string[]): LibraryBook {
+  return {
+    id,
+    kind: 'chapter',
+    title,
+    cover: 'markerSky',
+    titlePicture: { cast: [{ model: 'biscuit', mood: 'happy' }], sky: 'skyDayBottom', ground: 'grassLight' },
+    pages: texts.map((text, index) => ({ text, picture: FIXTURE_PICTURES[index % FIXTURE_PICTURES.length]! })),
+  };
+}
+
+/**
+ * `CHECK_BOOK_READER_CHAPTER=overlong` — the check's own mutation: the fixture
+ * chapter book carries the over-long page as its last, so it is measured as a
+ * page that must fit. This run must go red (the item 9 reds in
+ * HANDOFF-library-books2.md were proved this way).
+ */
+const CHAPTER_MUTATION = process.env.CHECK_BOOK_READER_CHAPTER ?? '';
+if (CHAPTER_MUTATION !== '' && CHAPTER_MUTATION !== 'overlong') {
+  throw new Error(`CHECK_BOOK_READER_CHAPTER=${CHAPTER_MUTATION}: the only mutation is 'overlong'`);
+}
+const CHAPTER_FIXTURE = fixtureChapterBook(
+  'checkChapterFixture',
+  'A Check Fixture',
+  CHAPTER_MUTATION === 'overlong' ? [...FIXTURE_PAGES, OVERLONG_PAGE] : FIXTURE_PAGES,
+);
+const OVERLONG_FIXTURE = fixtureChapterBook('checkOverlongFixture', 'An Over-long Fixture', [OVERLONG_PAGE]);
+
+/** Words as a reader counts them. */
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter((word) => word.length > 0).length;
+}
+
+interface Rect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** One worded face of the open book, measured from outside its painter. */
+interface WordsMeasure {
+  readonly index: number;
+  readonly kind: string;
+  readonly page: number;
+  readonly fontPx: number;
+  readonly lines: string[];
+  readonly font: string | null;
+  readonly lineHeight: number;
+  readonly area: Rect | null;
+  readonly block: Rect | null;
+  readonly pictureBox: Rect | null;
+  readonly pictureScale: number | null;
+  /** Every line, re-measured here in the face's own font. */
+  readonly widths: number[];
+  /** Ink-coloured pixels found in the page's margins, painted: below the words, and either side. */
+  readonly ink: { readonly bottom: number; readonly left: number; readonly right: number; readonly first: string | null };
+}
+
+/**
+ * Where ink may not be: the bands between the page's printable area and its
+ * cover-coloured frame — below the words and beside them. A line of words that
+ * runs past its box runs into one of these, whatever the painter believes it
+ * did, so the pixels are asked directly.
+ */
+const INK_BANDS = (() => {
+  const frameInner = PAGE_FRAME_INSET + PAGE_FRAME_STROKE / 2 + 2;
+  return {
+    bottom: { top: PAGE_CANVAS_HEIGHT - PAGE_MARGIN_BOTTOM + 4, bottom: PAGE_CANVAS_HEIGHT - frameInner },
+    left: { left: frameInner, right: PAGE_MARGIN_X - 6 },
+    right: { left: PAGE_CANVAS_WIDTH - PAGE_MARGIN_X + 6, right: PAGE_CANVAS_WIDTH - frameInner },
+    rows: { top: PAGE_MARGIN_TOP, bottom: PAGE_CANVAS_HEIGHT - PAGE_MARGIN_BOTTOM },
+  };
+})();
+const INK_RGB = [(PALETTE.ink >> 16) & 0xff, (PALETTE.ink >> 8) & 0xff, PALETTE.ink & 0xff] as const;
+
+async function measureWords(page: Page): Promise<WordsMeasure[]> {
+  return page.evaluate(
+    ({ bands, ink }) => {
+      const r = (window as unknown as { game: any }).game.bookReader;
+      const scratch = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+      const out: unknown[] = [];
+      (r.facesPainted() as any[]).forEach((painted, index) => {
+        if (!painted || painted.fontPx <= 0) return;
+        const words = painted.words as { font: string; lineHeight: number; area: Rect; block: Rect } | null;
+        const lines = [...(painted.lines as readonly string[])];
+        let widths: number[] = [];
+        if (words) {
+          scratch.font = words.font;
+          widths = lines.map((line) => scratch.measureText(line).width);
+        }
+        const canvas = painted.texture.image as HTMLCanvasElement;
+        const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+        const count = { bottom: 0, left: 0, right: 0, first: null as string | null };
+        const isInk = (x: number, y: number): boolean => {
+          const at = (Math.floor(y) * canvas.width + Math.floor(x)) * 4;
+          const dr = (pixels[at] ?? 0) - ink[0];
+          const dg = (pixels[at + 1] ?? 0) - ink[1];
+          const db = (pixels[at + 2] ?? 0) - ink[2];
+          return dr * dr + dg * dg + db * db <= 70 * 70;
+        };
+        for (let y = bands.bottom.top; y < bands.bottom.bottom; y += 1) {
+          for (let x = bands.left.left; x < bands.right.right; x += 1) {
+            if (isInk(x, y)) {
+              count.bottom += 1;
+              count.first ??= `(${x}, ${y}) below the words`;
+            }
+          }
+        }
+        for (let y = bands.rows.top; y < bands.rows.bottom; y += 1) {
+          for (const [side, band] of [
+            ['left', bands.left],
+            ['right', bands.right],
+          ] as const) {
+            for (let x = band.left; x < band.right; x += 1) {
+              if (isInk(x, y)) {
+                count[side] += 1;
+                count.first ??= `(${x}, ${y}) in the ${side} margin`;
+              }
+            }
+          }
+        }
+        out.push({
+          index,
+          kind: painted.face.kind as string,
+          page: painted.face.page as number,
+          fontPx: painted.fontPx as number,
+          lines,
+          font: words?.font ?? null,
+          lineHeight: words?.lineHeight ?? 0,
+          area: words?.area ?? null,
+          block: words?.block ?? null,
+          pictureBox: painted.pictureBox ?? null,
+          pictureScale: painted.pictureScale ?? null,
+          widths,
+          ink: count,
+        });
+      });
+      return out as WordsMeasure[];
+    },
+    { bands: INK_BANDS, ink: INK_RGB },
+  );
+}
+
+/** The words a face should carry: the title, a page's text, or "The End". */
+function expectedWords(book: LibraryBook, face: WordsMeasure): string | null {
+  if (face.kind === 'title') return book.title;
+  if (face.kind === 'story') return book.pages[face.page]?.text ?? null;
+  if (face.kind === 'end') return READER_WORDS.theEnd;
+  return null;
+}
+
+/**
+ * Item 9's clauses for every worded face of the open book: nothing cut off,
+ * every line within its box, the block inside its box and clear of the
+ * picture, no ink in the margins — and, for a chapter page, a picture kept at
+ * least `MIN_PICTURE_SCALE` of its size. Returns the faces measured, and the
+ * smallest picture scale among its story pages.
+ */
+function wordsInTheirBox(where: string, book: LibraryBook, faces: readonly WordsMeasure[]): { measured: number; smallestPicture: number } {
+  let measured = 0;
+  let smallestPicture = Infinity;
+  for (const face of faces) {
+    const label = `${where} ${book.id} face ${face.index} (${face.kind}${face.kind === 'story' ? ` page ${face.page + 1}` : ''})`;
+    const meant = expectedWords(book, face);
+    const painted = face.lines.join(' ');
+    assert(
+      meant !== null && painted.split(/\s+/).join(' ') === meant.split(/\s+/).join(' '),
+      `${label} carries every word`,
+      meant === null ? `a ${face.kind} face with words on it` : `${wordCount(painted)} of ${wordCount(meant)} words painted, in ${face.lines.length} line(s)`,
+    );
+    if (!face.area || !face.block || face.font === null) {
+      assert(false, `${label} reports where its words went`, 'no words record from the painter');
+      continue;
+    }
+    measured += 1;
+    const width = face.area.right - face.area.left;
+    const widest = Math.max(...face.widths);
+    assert(widest <= width + 0.5, `${label} every line fits across its box`, `widest line ${widest.toFixed(1)} of ${width.toFixed(1)} canvas px (re-measured in ${face.font})`);
+    const block = face.block;
+    const area = face.area;
+    const inside = block.top >= area.top - 0.5 && block.bottom <= area.bottom + 0.5 && block.left >= area.left - 0.5 && block.right <= area.right + 0.5;
+    assert(
+      inside && Math.abs(block.bottom - block.top - face.lines.length * face.lineHeight) < 0.5,
+      `${label} the words stay inside their box`,
+      `block ${rectText(block)} in box ${rectText(area)}, ${face.lines.length} line(s) of ${face.lineHeight.toFixed(1)} px`,
+    );
+    if (face.pictureBox) {
+      // Above the words on a page, below them on a title page: either way, never across them.
+      const picture = face.pictureBox;
+      assert(
+        picture.bottom <= block.top + 0.5 || picture.top >= block.bottom - 0.5,
+        `${label} the words are clear of the picture`,
+        `picture ${rectText(picture)}, words ${rectText(block)}`,
+      );
+    }
+    const inkTotal = face.ink.bottom + face.ink.left + face.ink.right;
+    assert(inkTotal === 0, `${label} no ink in the margins`, inkTotal === 0 ? 'none' : `${inkTotal} ink pixel(s), the first at ${face.ink.first}`);
+    if (face.kind === 'story' && face.pictureScale !== null) {
+      smallestPicture = Math.min(smallestPicture, face.pictureScale);
+      if (book.kind === 'chapter') {
+        assert(
+          face.pictureScale >= CHAPTER_MIN_PICTURE_SCALE - 1e-9,
+          `${label} keeps a picture`,
+          `drawn at ${(face.pictureScale * 100).toFixed(0)}% of full size (at least ${(CHAPTER_MIN_PICTURE_SCALE * 100).toFixed(0)}%), words at ${face.fontPx} canvas px`,
+        );
+      }
+    }
+  }
+  return { measured, smallestPicture };
+}
+
+/** Whether the reader's "turn your phone upright" card is up, and what it says. */
+async function uprightCard(page: Page): Promise<{ fits: boolean; shown: boolean; words: string; onScreen: boolean; turnable: boolean }> {
+  return page.evaluate(() => {
+    const r = (window as unknown as { game: any }).game.bookReader;
+    const card = document.querySelector('.book-upright') as HTMLElement | null;
+    const rect = card?.getBoundingClientRect();
+    const next = document.querySelector('.book-turn--next') as HTMLButtonElement | null;
+    const prev = document.querySelector('.book-turn--prev') as HTMLButtonElement | null;
+    return {
+      fits: r.pagesFit as boolean,
+      shown: !!card && getComputedStyle(card).display !== 'none',
+      words: (card?.querySelector('.book-upright-words') as HTMLElement | null)?.textContent ?? '',
+      onScreen: !!rect && rect.width > 0 && rect.left >= -1 && rect.top >= -1 && rect.right <= window.innerWidth + 1 && rect.bottom <= window.innerHeight + 1,
+      turnable: !!next && !!prev && (!next.disabled || !prev.disabled),
+    };
+  });
+}
+
+
+/**
+ * **The picture models' sheet** — a book that lives here, one page per few of
+ * the models the chapter books brought (`books.ts`'s `PICTURE_MODELS`, the
+ * mini to the `prop`), posed the ways their pages ask for: the mini's grab,
+ * Grandpa Tock asleep, stretched and tucked in, the owl's shush, a jet pack
+ * on the reader and on Trilla, the primitive props. Item 9b opens it and
+ * holds every picture to having drawn its models, and asserts every model in
+ * the list is on it, so a model no book uses yet is still drawn on every run;
+ * its screenshots are the book engineers' sheet to compose from.
+ */
+const MAGNIFYING_GLASS: PictureActor = {
+  model: 'prop',
+  at: [0.55, 0.9, 0.3],
+  parts: [
+    { shape: 'ring', size: [0.26, 0.035, 0], at: [0, 0.2, 0], colour: 'woodDark' },
+    { shape: 'cylinder', size: [0.21, 0.01, 0.21], at: [0, 0.2, 0], tilt: [90, 0], colour: 'skyDayBottom', outline: false },
+    { shape: 'cylinder', size: [0.045, 0.2, 0.045], at: [0, 0, 0], colour: 'woodDark' },
+  ],
+};
+const BENCH: PictureActor = {
+  model: 'prop',
+  at: [-1.2, 0, -0.4],
+  parts: [
+    { shape: 'box', size: [1.3, 0.08, 0.42], at: [0, 0.46, 0], colour: 'woodLight' },
+    { shape: 'box', size: [1.3, 0.3, 0.06], at: [0, 0.72, -0.19], colour: 'woodLight' },
+    { shape: 'box', size: [0.08, 0.44, 0.38], at: [-0.55, 0.22, 0], colour: 'woodDark' },
+    { shape: 'box', size: [0.08, 0.44, 0.38], at: [0.55, 0.22, 0], colour: 'woodDark' },
+  ],
+};
+const FOOTPRINTS: PictureActor = {
+  model: 'prop',
+  at: [0, 0, 0.6],
+  parts: [0, 1, 2, 3].flatMap((i): NonNullable<PictureActor['parts']> => [
+    { shape: 'ball', size: [0.42, 0.03, 0.48], at: [-1.2 + i * 0.8, 0.01, (i % 2) * 0.35], colour: 'pathSandDark', outline: false },
+    ...[-0.13, -0.045, 0.045, 0.13].map((dx) => ({ shape: 'ball' as const, size: [0.08, 0.03, 0.08] as const, at: [-1.2 + i * 0.8 + dx, 0.012, (i % 2) * 0.35 - 0.3] as const, colour: 'pathSandDark' as const, outline: false })),
+  ]),
+};
+const RUBBER_DUCK: PictureActor = {
+  model: 'prop',
+  at: [0.9, 0, 0.3],
+  parts: [
+    { shape: 'ball', size: [0.3, 0.22, 0.38], at: [0, 0.11, 0], colour: 'flowerYellow' },
+    { shape: 'ball', size: [0.17, 0.17, 0.17], at: [0, 0.29, 0.1], colour: 'flowerYellow' },
+    { shape: 'cone', size: [0.07, 0.1, 0.07], at: [0, 0.27, 0.22], tilt: [90, 0], colour: 'markerLemon' },
+  ],
+};
+const RAINBOW_ARCH: PictureActor = {
+  model: 'prop',
+  at: [0, 0, -1.6],
+  parts: (['markerPink', 'slideChute', 'markerLemon', 'markerMint', 'markerSky', 'markerLilac'] as const).map((colour, band) => ({
+    shape: 'ring' as const,
+    size: [3.2 - band * 0.22, 0.12, 0] as const,
+    colour,
+    arc: 180,
+  })),
+};
+const PICNIC: PictureActor = {
+  model: 'prop',
+  at: [0, 0, 0.2],
+  parts: [
+    { shape: 'box', size: [1.4, 0.02, 1], at: [0, 0.01, 0], colour: 'flowerRed', outline: false },
+    { shape: 'cylinder', size: [0.26, 0.1, 0.26], at: [-0.35, 0.07, 0.1], sides: 3, colour: 'signBoard' },
+    { shape: 'cylinder', size: [0.26, 0.1, 0.26], at: [-0.1, 0.07, -0.15], sides: 3, turn: 40, colour: 'signBoard' },
+    { shape: 'cylinder', size: [0.36, 0.14, 0.36], at: [0.35, 0.09, 0], colour: 'blossomPink' },
+    { shape: 'cylinder', size: [0.3, 0.1, 0.3], at: [0.35, 0.21, 0], colour: 'blossomWhite' },
+  ],
+};
+const UMBRELLA: PictureActor = {
+  model: 'prop',
+  at: [-0.9, 0, 0],
+  parts: [
+    { shape: 'cylinder', size: [0.04, 1.2, 0.04], at: [0, 0.6, 0], colour: 'woodDark' },
+    { shape: 'cone', size: [0.9, 0.4, 0.9], at: [0, 1.25, 0], tilt: [180, 0], colour: 'markerSky' },
+  ],
+};
+const FERRIS_STAND_IN: PictureActor = {
+  model: 'prop',
+  at: [0, 0, -2],
+  parts: [
+    { shape: 'ring', size: [4, 0.14, 0], at: [0, 2.3, 0], colour: 'markerLilac' },
+    ...[0, 30, 60, 90, 120, 150].map((angle) => ({ shape: 'cylinder' as const, size: [0.06, 3.8, 0.06] as const, at: [0, 2.3, 0] as const, tilt: [0, angle] as const, colour: 'stoneGrey' as const })),
+    ...[0, 60, 120, 180, 240, 300].map((angle) => ({
+      shape: 'box' as const,
+      size: [0.4, 0.34, 0.34] as const,
+      at: [Math.cos((angle * Math.PI) / 180) * 1.95, 2.3 + Math.sin((angle * Math.PI) / 180) * 1.95 - 0.25, 0.1] as const,
+      colour: 'markerSky' as const,
+    })),
+    ...[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => ({
+      shape: 'ball' as const,
+      size: [0.12, 0.12, 0.12] as const,
+      at: [Math.cos((angle * Math.PI) / 180) * 2.05, 2.3 + Math.sin((angle * Math.PI) / 180) * 2.05, 0.08] as const,
+      colour: 'flowerYellow' as const,
+      glow: true,
+      outline: false,
+    })),
+    { shape: 'cylinder', size: [0.16, 2.3, 0.16], at: [-0.7, 1.15, -0.1], tilt: [0, -17], colour: 'stoneGrey' },
+    { shape: 'cylinder', size: [0.16, 2.3, 0.16], at: [0.7, 1.15, -0.1], tilt: [0, 17], colour: 'stoneGrey' },
+  ],
+};
+const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
+  {
+    text: 'A mini grabs a star by the pink wall.',
+    picture: {
+      cast: [{ model: 'pinkWall', at: [0, 0, -1] }, { model: 'mini', mood: 'surprised', grab: 1, at: [-0.4, 0, 0.2] }, { model: 'star', colour: 'flowerYellow', size: 1.2, at: [0.7, 0, 0.3] }],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'Grandpa Tock sleeps, and wakes, and hides.',
+    picture: {
+      cast: [
+        { model: 'tortoise', mood: 'blink', at: [-1.4, 0, 0] },
+        { model: 'tortoise', mood: 'happy', pose: 'stretch', at: [0, 0, 0.2] },
+        { model: 'tortoise', pose: 'tuck', at: [1.4, 0, 0] },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'The owl says shush to Mrs Crumpet.',
+    picture: {
+      cast: [
+        { model: 'owl', mood: 'surprised', at: [-0.6, 0, -0.2], turn: 25 },
+        { model: 'book', colour: 'markerMint', size: 3, at: [0.8, 0, 0] },
+        { model: 'kitten', mood: 'blink', at: [0.8, 0.3, 0] },
+      ],
+      sky: 'buildingFloor',
+      ground: 'woodLight',
+    },
+  },
+  {
+    text: 'Pink, blue and rainbow candy floss!',
+    picture: {
+      cast: [
+        { model: 'candyFloss', variant: 'pink', at: [-0.5, 0, 0], size: 2 },
+        { model: 'candyFloss', variant: 'blue', at: [0, 0, 0.1], size: 2 },
+        { model: 'candyFloss', variant: 'rainbow', at: [0.5, 0, 0], size: 2 },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'Up you zoom with Trilla, jet packs on!',
+    picture: {
+      cast: [{ model: 'kid', mood: 'happy', pose: 'armsUp', jetpack: 'on', at: [-0.6, 0.4, 0], turn: 30 }, { model: 'trilla', mood: 'happy', jetpack: 'on', at: [0.8, 0.6, 0], turn: 30 }],
+      sky: 'skySunsetBottom',
+      decor: ['clouds', 'speed'],
+    },
+  },
+  {
+    text: 'A disco ball, a tree and a surprise egg.',
+    picture: {
+      cast: [
+        { model: 'lollipopTree', at: [-1.5, 0, -1] },
+        { model: 'discoBall', at: [0.2, 0, 0] },
+        { model: 'surpriseEgg', colour: 'blossomPink', accent: 'markerSky', size: 3, at: [1.2, 0, 0.3] },
+        { model: 'jetpack', at: [-0.6, 0, 0.6] },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+    },
+  },
+  {
+    text: 'A cloud frowns and an alien waves.',
+    picture: {
+      cast: [{ model: 'stormCloud', mood: 'frown', at: [-0.8, 1, 0] }, { model: 'stormCloud', colour: 'blossomWhite', mood: 'happy', at: [1.4, 1.2, -0.5] }, { model: 'alienSaucer', size: 0.3, at: [0.4, 0, 0.5] }],
+      sky: 'skyDayBottom',
+    },
+  },
+  {
+    text: 'Detective Biscuit finds some footprints.',
+    picture: { cast: [{ model: 'biscuit', mood: 'frown', pose: 'wave' }, MAGNIFYING_GLASS, BENCH, FOOTPRINTS], sky: 'skyDayBottom', ground: 'grassLight' },
+  },
+  {
+    text: 'RiPika has a duck, a picnic and a rainbow.',
+    picture: { cast: [RAINBOW_ARCH, { model: 'ripika', mood: 'happy', pose: 'wave' }, RUBBER_DUCK, PICNIC, UMBRELLA], sky: 'skyDayBottom', ground: 'grassLight' },
+  },
+  {
+    text: 'The great wheel lights up for the night.',
+    picture: { cast: [FERRIS_STAND_IN, { model: 'kid', mood: 'surprised', keyring: false, turn: 150, at: [0.8, 0, 1] }], sky: 'skyNightBottom', night: true, ground: 'grassDark', decor: ['stars'] },
+  },
+];
+const MODEL_SHEET: LibraryBook = {
+  id: 'checkModelSheet',
+  kind: 'picture',
+  title: 'The Model Sheet',
+  cover: 'markerLilac',
+  titlePicture: { cast: [{ model: 'owl', mood: 'happy' }], sky: 'buildingFloor', ground: 'woodLight' },
+  pages: SHEET_PAGES,
+};
+
+/** Every colour a check fixture names must be the palette's (the check is not type-checked against it). */
+function fixtureColourProblems(books: readonly LibraryBook[]): string[] {
+  const problems: string[] = [];
+  const known = new Set(Object.keys(PALETTE));
+  const check = (where: string, key: string | undefined): void => {
+    if (key !== undefined && !known.has(key)) problems.push(`${where}: '${key}' is not a PALETTE key`);
+  };
+  for (const book of books) {
+    check(`${book.id} cover`, book.cover);
+    for (const [index, picture] of [book.titlePicture, ...book.pages.map((page) => page.picture)].entries()) {
+      check(`${book.id} picture ${index} sky`, picture.sky);
+      check(`${book.id} picture ${index} ground`, picture.ground);
+      for (const actor of picture.cast) {
+        check(`${book.id} picture ${index} ${actor.model}`, actor.colour);
+        check(`${book.id} picture ${index} ${actor.model} accent`, actor.accent);
+        for (const part of actor.parts ?? []) check(`${book.id} picture ${index} prop ${part.shape}`, part.colour);
+      }
+    }
+  }
+  return problems;
+}
+
+/** Opens a book (by id when it is on the shelf, else the object itself) and waits for every face to paint. */
+async function openAndPaint(page: Page, book: LibraryBook): Promise<void> {
+  const onShelf = BOOKS.some((candidate) => candidate.id === book.id);
+  await page.evaluate(
+    ({ id, data, onShelf: shelved }) => {
+      const r = (window as unknown as { game: any }).game.bookReader;
+      if (shelved) r.openBook(id);
+      else r.openLibraryBook(data);
+    },
+    { id: book.id, data: book, onShelf },
+  );
+  await waitPainted(page);
+}
+
 // ---------------------------------------------------------------- the run
 
 console.log(`check:book-reader — the library's picture books, in Chromium, against ${BASE} (#717)`);
@@ -604,6 +1145,7 @@ try {
     await waitPainted(page);
     const smallest = textFloor(viewport.name, await measureFaces(page));
     said.push(`  (${viewport.name}: the smallest page text is ${smallest.toFixed(1)} CSS px on screen)`);
+    wordsInTheirBox(viewport.name, FIRST_BOOK, await measureWords(page));
     const layout = await measureLayout(page);
     const [leftPage, rightPage] = layout.pages;
     const tall = viewport.height > viewport.width;
@@ -726,8 +1268,8 @@ try {
   await page.waitForTimeout(400);
   await nextFrames(page);
 
-  // 5. All twelve books.
-  said.push('\nall twelve books:');
+  // 5. Every book on the shelf.
+  said.push(`\nevery book (${BOOKS.length}):`);
   for (const book of BOOKS) {
     const linksBefore = await page.evaluate((id) => {
       const before = (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links;
@@ -744,7 +1286,8 @@ try {
     );
     const measured = await measureFaces(page);
     const pages = book.pages.length;
-    assert(pages >= BOOK_MIN_PAGES && pages <= BOOK_MAX_PAGES, `${book.id} page count`, `${pages} pages`);
+    const counts = BOOK_PAGE_COUNTS[book.kind];
+    assert(pages >= counts.min && pages <= counts.max, `${book.id} page count`, `${pages} pages (a ${book.kind} book has ${counts.min}-${counts.max})`);
     assert(measured.faces.length % 2 === 0, `${book.id} faces pair into spreads`, `${measured.faces.length} faces`);
     // A printed picture book's order: "The End" last, on a right-hand page,
     // and with an odd number of pages the title on a right-hand page too.
@@ -765,8 +1308,151 @@ try {
       `${pictures.length} pictures, the thinnest covering ${(thinnest * 100).toFixed(1)}% of its pixels`,
     );
     textFloor(book.id, measured);
+    wordsInTheirBox('laptop', book, await measureWords(page));
     await page.screenshot({ path: `${SHOTS}/book-${book.id}.png` });
   }
+
+  // 9. Every chapter page's words in their box, in both orientations.
+  const realChapterBooks = BOOKS.filter((book) => book.kind === 'chapter');
+  said.push(`\nchapter pages, in both orientations (${realChapterBooks.length} chapter book(s) on the shelf, and the check's fixture):`);
+  if (CHAPTER_MUTATION === '') {
+    const counts = CHAPTER_FIXTURE.pages.map((entry) => wordCount(entry.text));
+    assert(
+      counts.every((count) => count >= 20 && count <= 40) && Math.min(...counts) === 20 && Math.max(...counts) === 40,
+      "the fixture chapter book spans a chapter page's whole 20 to 40 words",
+      `${counts.join(', ')} words a page`,
+    );
+  } else {
+    process.stderr.write(`check:book-reader: CHECK_BOOK_READER_CHAPTER=${CHAPTER_MUTATION} — the fixture carries the over-long page; this run must go red\n`);
+  }
+  let chapterFacesMeasured = 0;
+  let fontNoted = false;
+  for (const book of [...realChapterBooks, CHAPTER_FIXTURE]) {
+    await openAndPaint(page, book);
+    for (const viewport of VIEWPORTS) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.waitForTimeout(400);
+      await nextFrames(page);
+      await waitPainted(page);
+      const card = await uprightCard(page);
+      const where = `${viewport.name} ${book.id}`;
+      if (!card.fits) {
+        const tall = viewport.height > viewport.width;
+        assert(
+          viewport.name === 'phone-landscape',
+          `${where} only a phone held on its side may be asked to turn — here every page must fit`,
+          viewport.name === 'phone-landscape'
+            ? 'a phone held on its side: the card is allowed'
+            : `legible ${tall ? 'on a phone held upright' : 'in a landscape spread'} is the brief, and the reader asked her to turn the phone upright here`,
+        );
+        assert(
+          card.shown && card.onScreen && card.words === READER_WORDS.turnUpright && !card.turnable,
+          `${where} asks her to turn the phone upright, and turns no page under the card`,
+          `card ${card.shown ? 'up' : 'not up'}${card.onScreen ? ', on screen' : ', off screen'}, says "${card.words}", page buttons ${card.turnable ? 'still live' : 'off'}`,
+        );
+        await page.screenshot({ path: `${SHOTS}/chapter-${book.id}-${viewport.name}.png` });
+        if (viewport.name === 'phone-landscape') {
+          process.stderr.write(
+            `check:book-reader: ${where} — its pages do not fit a phone held on its side at the floor, so the reader shows its ` +
+              `"${READER_WORDS.turnUpright}" card instead; its pages are not measured there\n`,
+          );
+          continue;
+        }
+        // On a laptop or a phone held upright the card is already a failure;
+        // the pages are measured anyway, so the one that does not fit is named.
+      } else {
+        assert(!card.shown, `${where} no "turn upright" card over pages that fit`, card.shown ? 'the card is up' : 'none');
+      }
+      textFloor(where, await measureFaces(page));
+      const chapterFaces = await measureWords(page);
+      const { measured, smallestPicture } = wordsInTheirBox(viewport.name, book, chapterFaces);
+      chapterFacesMeasured += measured;
+      said.push(`  (${where}: ${measured} worded face(s) measured, the smallest picture ${(smallestPicture * 100).toFixed(0)}% of full size)`);
+      const sample = chapterFaces.find((face) => face.kind === 'story' && face.font !== null);
+      if (!fontNoted && sample?.font) {
+        fontNoted = true;
+        // Which face the browser drew the house stack in decides how many
+        // lines a paragraph takes: written down, so a CI log says which.
+        const perChar = await page.evaluate((font) => {
+          const ctx = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+          ctx.font = font;
+          const text = 'the quick brown fox jumps over the lazy dog';
+          return ctx.measureText(text).width / text.length / Number.parseFloat(ctx.font.match(/(\d+(?:\.\d+)?)px/)?.[1] ?? '1');
+        }, sample.font);
+        process.stderr.write(`check:book-reader: the page font here (${sample.font}) sets ${perChar.toFixed(3)} em a character\n`);
+      }
+      if (card.fits) {
+        await page.click('.book-turn--next');
+        await settleTurn(page);
+        await page.screenshot({ path: `${SHOTS}/chapter-${book.id}-${viewport.name}.png` });
+      }
+    }
+    await page.setViewportSize({ width: first.width, height: first.height });
+    await page.waitForTimeout(400);
+    await nextFrames(page);
+  }
+  // CONTROL: the instrument can tell an over-long page from a good one.
+  {
+    await openAndPaint(page, OVERLONG_FIXTURE);
+    const card = await uprightCard(page);
+    const story = (await measureWords(page)).find((face) => face.kind === 'story');
+    const overflow = story?.block && story.area ? story.block.bottom - story.area.bottom : -Infinity;
+    assert(
+      !card.fits && card.shown,
+      `CONTROL: the over-long page (${wordCount(OVERLONG_PAGE)} words) is refused on the laptop`,
+      `pagesFit ${card.fits}, the "turn upright" card ${card.shown ? 'up' : 'not up'}`,
+    );
+    assert(
+      !!story && overflow > 0.5 && story.ink.bottom > 0,
+      'CONTROL: the instrument sees the over-long page run out of its box',
+      story ? `the words' block runs ${overflow.toFixed(1)} canvas px past its box; ${story.ink.bottom} ink pixel(s) below the words` : 'no story face was painted',
+    );
+    await page.screenshot({ path: `${SHOTS}/chapter-control-overlong.png` });
+  }
+  // 9b. The picture models' sheet: every model in the list draws, and none links a program.
+  said.push("\nthe picture models' sheet:");
+  {
+    const colourProblems = fixtureColourProblems([CHAPTER_FIXTURE, OVERLONG_FIXTURE, MODEL_SHEET]);
+    assert(colourProblems.length === 0, "every colour the check's own books name is the palette's", colourProblems.join('; ') || 'all are');
+    const modelsOf = (books: readonly LibraryBook[]): Set<string> =>
+      new Set(books.flatMap((book) => [book.titlePicture, ...book.pages.map((entry) => entry.picture)].flatMap((picture) => picture.cast.map((actor) => actor.model))));
+    const drawn = new Set([...modelsOf(BOOKS), ...modelsOf([MODEL_SHEET])]);
+    const undrawn = PICTURE_MODELS.filter((model) => !drawn.has(model));
+    assert(undrawn.length === 0, 'every picture model is drawn on a page this check opens', undrawn.length === 0 ? `all ${PICTURE_MODELS.length}` : `never drawn: ${undrawn.join(', ')}`);
+    const linksBefore = await page.evaluate(() => (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links);
+    await openAndPaint(page, MODEL_SHEET);
+    await page.waitForTimeout(200);
+    const linksAfter = await page.evaluate(() => (window as unknown as { __bookReaderLinks: { links: number } }).__bookReaderLinks.links);
+    assert(
+      linksAfter === linksBefore,
+      "the model sheet opens without linking a shader program (the warm-up compiles every model's)",
+      `${linksAfter - linksBefore} program link(s) while it opened and painted`,
+    );
+    const sheet = await measureFaces(page);
+    const pictures = sheet.faces.filter((face) => face.coverage !== null);
+    const thin = pictures.filter((face) => (face.coverage ?? 0) <= MIN_COVERAGE);
+    assert(
+      pictures.length === MODEL_SHEET.pages.length + 1 && thin.length === 0,
+      "every picture on the model sheet drew its models",
+      `${pictures.length} pictures, the thinnest covering ${(Math.min(...pictures.map((face) => face.coverage ?? 0)) * 100).toFixed(1)}% of its pixels` +
+        (thin.length > 0 ? `; drew nothing on face(s) ${thin.map((face) => face.index).join(', ')}` : ''),
+    );
+    for (let guard = 0; guard < 10; guard += 1) {
+      const state = await readerState(page);
+      await page.screenshot({ path: `${SHOTS}/model-sheet-spread-${state.spread}.png` });
+      if (state.spread >= state.spreads - 1) break;
+      await turnAndWait(page, 'next');
+    }
+  }
+  process.stderr.write(
+    `check:book-reader: the picture models' sheet is in ${SHOTS}/model-sheet-spread-*.png — what every model a chapter book may name looks like\n`,
+  );
+
+  process.stderr.write(
+    `check:book-reader: chapter pages — ${realChapterBooks.length} real chapter book(s) measured` +
+      (realChapterBooks.length === 0 ? ' (none is on the shelf yet; the fixture stands in)' : '') +
+      `, ${chapterFacesMeasured} worded chapter face(s) held to their boxes across the viewports where they fit\n`,
+  );
 
   // 6. Reading to the end files a bookmark, and the bookmark reopens the book.
   said.push(`\nreading ${READ_THROUGH} to the end:`);
@@ -899,7 +1585,7 @@ try {
   await nextFrames(page);
   const afterDexPrize = await openPrizes(page);
   assert(
-    afterDexPrize.length === 1 && afterDexPrize[0] === 'You read every book!',
+    afterDexPrize.length === 1 && afterDexPrize[0] === 'You read every picture book!',
     'closing that lets the library celebration out, on its own',
     `showing ${JSON.stringify(afterDexPrize)}`,
   );
@@ -910,7 +1596,7 @@ try {
   const afterBoth = await openPrizes(page);
   assert(afterBoth.length === 0, 'and then the park is back', `showing ${JSON.stringify(afterBoth)}`);
 
-  // 9. A book straight off the shelf (#718; plan Step 5's served item).
+  // 10. A book straight off the shelf (#718; plan Step 5's served item).
   const shelf = SHELF_BOOKS[0];
   if (!shelf) throw new Error('check:book-reader: SHELF_BOOKS is empty — no readable book stands on a shelf to take down');
   const stand = { x: Number(shelf.slot.stand.x.toFixed(2)), z: Number(shelf.slot.stand.z.toFixed(2)) };

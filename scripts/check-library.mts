@@ -79,9 +79,11 @@
  *     den's floor too; with a control — the same floor under a near-dark rig
  *     goes below it.
  * 12. READABLE — the readable books (#718), one per `BOOKS` entry: their
- *     slots' shelves within her reach; one `library.book.<id>` mesh each, in
- *     its own slot (by index), wholly inside its case's drawn box, on its
- *     board, in its cover's paint; a Read zone each, inside only and never
+ *     slots' shelves within her reach; slot `i` holds `BOOKS[i]` and is of
+ *     that book's kind (the picture books' twelve, then the big readers'
+ *     shelf), counted from `BOOKS`, never typed; one `library.book.<id>` mesh
+ *     each, in its own slot (by index), wholly inside its case's drawn box, on
+ *     its board, in its cover's paint; a Read zone each, inside only and never
  *     while she rides, stood at its slot's stand, whose chip opens its own
  *     book through the attached opener; and a stack's book fading with it.
  *     REACHABILITY also asserts every readable book is out of her walk.
@@ -115,6 +117,7 @@ import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
+import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS } from '../src/world/library/books.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
@@ -1256,7 +1259,7 @@ console.log('\nLIGHT — dim, warm, never black:');
   }
 }
 
-console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach, in their own slots, inside their cases, each opening its own book:`);
+console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach, in their own slots of their own kind, inside their cases, each opening its own book:`);
 {
   const heights = LIBRARY_READABLE_SLOTS.map((slot) => {
     const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
@@ -1264,9 +1267,30 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   });
   const highest = Math.max(...heights);
   say(
-    LIBRARY_READABLE_SLOTS.length === BOOKS.length && highest <= KID_REACH_HEIGHT,
+    LIBRARY_READABLE_SLOTS.length >= BOOKS.length && BOOKS.length > 0 && highest <= KID_REACH_HEIGHT,
     `${LIBRARY_READABLE_SLOTS.length} slots for ${BOOKS.length} books, the highest shelf ${highest.toFixed(3)} m, her reach ${KID_REACH_HEIGHT} m`,
   );
+  // Slot i holds BOOKS[i] (the pairing is by index): every book's slot must be
+  // of its own kind, so the picture books' slots come first, then the big
+  // readers' — whichever list grows. Counted from BOOKS, never typed.
+  const pictureSlots = LIBRARY_READABLE_SLOTS.filter((slot) => slot.kind === 'picture');
+  const chapterSlots = LIBRARY_READABLE_SLOTS.filter((slot) => slot.kind === 'chapter');
+  const firstChapterSlot = LIBRARY_READABLE_SLOTS.findIndex((slot) => slot.kind === 'chapter');
+  const ordered = firstChapterSlot < 0 || LIBRARY_READABLE_SLOTS.slice(firstChapterSlot).every((slot) => slot.kind === 'chapter');
+  const wrongKind = BOOKS.map((book, index) => ({ book, slot: LIBRARY_READABLE_SLOTS[index] })).filter(({ book, slot }) => slot?.kind !== book.kind);
+  say(
+    ordered && wrongKind.length === 0,
+    `every one of the ${BOOKS.length} books stands on a slot of its own kind: ${pictureSlots.length} picture-book slots, then ${chapterSlots.length} on the big readers' shelf` +
+      (wrongKind.length > 0 ? ` — wrong: ${wrongKind.map(({ book, slot }) => `${book.id} (${book.kind}) on ${slot ? `a ${slot.kind} slot` : 'no slot'}`).join(', ')}` : ''),
+  );
+  say(pictureSlots.length === PICTURE_BOOKS.length, `${pictureSlots.length} picture-book slots for the ${PICTURE_BOOKS.length} picture books`);
+  say(CHAPTER_BOOKS.length <= chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
+  if (CHAPTER_BOOKS.length < chapterSlots.length) {
+    note(
+      `${chapterSlots.length - CHAPTER_BOOKS.length} of the ${chapterSlots.length} big readers' slots wait for their chapter books — ` +
+        `BOOKS (${BOOKS.length}) and LIBRARY_READABLE_SLOTS (${LIBRARY_READABLE_SLOTS.length}) must be equal before track A's shelf books are paired with them`,
+    );
+  }
   const shelves = libraryBookcaseSize('wall').shelfTops;
   say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
 

@@ -100,7 +100,7 @@ import type { OpenAreaPoint } from '../dismount';
  *
  * ## What later PRs add (#714 parts 3-5)
  *
- * The twelve readable books stand in `LIBRARY_READABLE_SLOTS` (#718: a gap is
+ * The readable books stand in `LIBRARY_READABLE_SLOTS` (#718: a gap is
  * already left on each shelf), the owl librarian behind the desk at
  * `LIBRARY_LIBRARIAN_SPOT`, and the secret den behind `LIBRARY_SECRET_BOOKCASE`
  * (#719). Their stand spots are kept clear today.

@@ -41,6 +41,7 @@
  */
 import { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, PLAYER_RADIUS } from '../../core/constants';
 import { LIBRARY_EXTERIOR_PLAN, LIBRARY_SHELF_FOOTPRINT } from '../../art/models/libraryKit';
+import type { BookKind } from './bookKinds';
 
 export { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z };
 
@@ -509,11 +510,17 @@ for (const spot of [LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DRAGON_STAND, { what: "th
 }
 
 /**
- * **The twelve readable books' slots** (#718): each names the case it stands
- * in, which shelf (0 the bottom) and how far along the shelf from the case's
+ * **The readable books' slots** (#718): each names the case it stands in,
+ * which shelf (0 the bottom) and how far along the shelf from the case's
  * middle (metres, along the case's right-hand side as you face it), and where
  * she stands to take it down. Books #718 fills them; this PR only keeps their
  * stand spots clear and leaves the gap on the shelf.
+ *
+ * **Slot `i` holds `BOOKS[i]`**: the picture books' twelve first, in
+ * `books.ts`'s order, then the big readers' shelf, one slot per chapter book in
+ * `chapterBooks/index.ts`'s shelf order. Each slot names the kind of book it is
+ * for ({@link ReadableSlot.kind}), so a check can hold every book to a slot of
+ * its own kind, whichever list grows.
  *
  * **Only the two bottom shelves**: the drawn shelf's third board stands above
  * `KID_REACH_HEIGHT` (#715's contract: "only rows 1-2 are under it"), and a
@@ -523,13 +530,15 @@ for (const spot of [LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DRAGON_STAND, { what: "th
  */
 export interface ReadableSlot {
   readonly index: number;
+  /** The kind of book this slot is for: a picture book's, or the big readers' shelf's chapter book. */
+  readonly kind: BookKind;
   readonly bookcase: string;
   readonly shelf: number;
   readonly along: number;
   readonly stand: StandSpot;
 }
 
-function slotStand(bookcase: string, along: number, index: number): StandSpot {
+function slotStand(bookcase: string, along: number, index: number, kind: BookKind, ofKind: number): StandSpot {
   const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === bookcase);
   if (!spec) throw new Error(`library layout: readable slot ${index} names no bookcase '${bookcase}'`);
   const yaw = (spec.facing * Math.PI) / 180;
@@ -541,14 +550,15 @@ function slotStand(bookcase: string, along: number, index: number): StandSpot {
   const rightZ = outX;
   const out = bookcaseFrontOut(spec) + LIBRARY_CASE_STAND_OUT;
   return {
-    what: `readable book ${index + 1}'s stand (${bookcase})`,
+    what: kind === 'picture' ? `readable book ${index + 1}'s stand (${bookcase})` : `big reader ${ofKind + 1}'s stand (${bookcase})`,
     x: spec.at.x + outX * out - rightX * along,
     z: spec.at.z + outZ * out - rightZ * along,
     facing: (spec.facing + 180) % 360,
   };
 }
 
-const READABLE: readonly (readonly [string, number, number])[] = [
+/** The picture books' twelve, spread round the room, in `books.ts`'s order. */
+const PICTURE_SHELF: readonly (readonly [string, number, number])[] = [
   ['north-2', 1, 0.6],
   ['north-3', 0, -0.8],
   ['north-6', 1, 0.6],
@@ -563,12 +573,39 @@ const READABLE: readonly (readonly [string, number, number])[] = [
   ['stack-1-5', 0, -0.5],
 ];
 
-export const LIBRARY_READABLE_SLOTS: readonly ReadableSlot[] = READABLE.map(([bookcase, shelf, along], index) => ({
+/**
+ * **The big readers' shelf** (track D of #714): the chapter books, in
+ * `chapterBooks/index.ts`'s shelf order, together on one tall case —
+ * `west-4`, the west wall's south-middle case, at the end of the entrance
+ * hall's aisle and under `sconce-west-2`'s pool of light. Chosen because it is
+ * the quiet end of the room: nothing else she can press stands near it, no
+ * child's walk (Steps 7–8: the cushions, Juno's, Lark's and Fenn's routes)
+ * passes it, and it is four metres south of the secret shelf (`west-2`) and of
+ * the gap the den's doorway is cut through (Step 11), with `west-3` between.
+ *
+ * Read left to right as she faces the case, zig-zagging between the two shelves
+ * she can reach (1, then 0) so each book has its own `along`, 0.6 m from the
+ * next, and therefore its own stand spot.
+ */
+const BIG_READERS_SHELF: readonly (readonly [string, number, number])[] = [
+  ['west-4', 1, -1.5],
+  ['west-4', 0, -0.9],
+  ['west-4', 1, -0.3],
+  ['west-4', 0, 0.3],
+  ['west-4', 1, 0.9],
+  ['west-4', 0, 1.5],
+];
+
+export const LIBRARY_READABLE_SLOTS: readonly ReadableSlot[] = [
+  ...PICTURE_SHELF.map(([bookcase, shelf, along], ofKind) => ({ kind: 'picture' as const, bookcase, shelf, along, ofKind })),
+  ...BIG_READERS_SHELF.map(([bookcase, shelf, along], ofKind) => ({ kind: 'chapter' as const, bookcase, shelf, along, ofKind })),
+].map(({ kind, bookcase, shelf, along, ofKind }, index) => ({
   index,
+  kind,
   bookcase,
   shelf,
   along,
-  stand: slotStand(bookcase, along, index),
+  stand: slotStand(bookcase, along, index, kind, ofKind),
 }));
 
 /**
@@ -611,11 +648,13 @@ export const LIBRARY_SEAT_FRONT = 1.5;
  * **Every spot a child must be able to stand on, room-local** — the arrival,
  * the doorway, the desk's front, the librarian's spot, the rug, every seat's
  * front, every story cushion's seat, the secret shelf's stand, the secret
- * den's two (tagged `den`), the readable books' stands, and every aisle node.
- * `props.ts`'s `libraryKeepOuts` turns these into keep-out discs and refuses
- * any collider inside one; `check:library` floods the floor from the arrival
- * and asserts every one is reached — and, while the secret shelf is shut, that
- * every `den` one is not: the den is the one pocket the room is meant to have.
+ * den's two (tagged `den`), every readable book's stand (the picture books'
+ * twelve and the big readers' shelf, {@link LIBRARY_READABLE_SLOTS}), and
+ * every aisle node. `props.ts`'s `libraryKeepOuts` turns these into keep-out
+ * discs and refuses any collider inside one; `check:library` floods the floor
+ * from the arrival and asserts every one is reached — and, while the secret
+ * shelf is shut, that every `den` one is not: the den is the one pocket the
+ * room is meant to have.
  */
 export function libraryStandSpots(): StandSpot[] {
   const spots: StandSpot[] = [

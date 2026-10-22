@@ -5122,6 +5122,68 @@ kbd {
   transform: translateY(0.125rem);
 }
 
+/* A chapter book on a screen too short for its paragraphs — a phone held on
+   its side (`BookReader`'s "A chapter book on a short screen"): the book dims
+   under a card asking her to turn the phone upright, instead of words drawn
+   smaller than the TEXT RULE's floor. The ✕ stays above it, and the very next
+   layout (turning the phone is a resize) takes it away. */
+.book-upright {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(74, 58, 82, 0.62);
+}
+
+.book-reader[data-fits='false'] .book-upright {
+  display: grid;
+}
+
+.book-upright-card {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  max-width: 22rem;
+  padding: 1.2rem 1.6rem;
+  border: 0.25rem solid #fff;
+  border-radius: 1.4rem;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  color: var(--lgp-ink);
+  text-align: center;
+}
+
+.book-upright-phone {
+  font-size: 3rem;
+  line-height: 1;
+  animation: book-upright-turn 2.4s ease-in-out infinite;
+}
+
+.book-upright-words {
+  font-size: var(--lgp-text-lg);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+/* The phone lies on its side, then stands up: the turn she is asked for. */
+@keyframes book-upright-turn {
+  0%,
+  20% {
+    transform: rotate(-90deg);
+  }
+  55%,
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .book-upright-phone {
+    animation: none;
+  }
+}
+
 /* A Cute-o-dex bookmark: a ribbon in the book's own cover colour with a
    notched tail and a cream stripe. */
 .dex-bookmark {

@@ -1,4 +1,5 @@
 import {
+  Box3,
   Color,
   DirectionalLight,
   Group,
@@ -17,7 +18,7 @@ import { PALETTE } from '../../../core/palette';
 import { ART } from '../../../art/style/artPalette';
 import { blob, type AssetHandle, type CreatureHandle } from '../../../art/style/asset';
 import { disposeTree, isShared, solid, toonMaterial } from '../../../art/style/materials';
-import { visiblePoints } from '../../../art/style/measure';
+import { visibleBounds, visiblePoints } from '../../../art/style/measure';
 import { createPet } from '../../../art/models/pets';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createKid, type KidHandle } from '../../../art/models/kid';
@@ -27,9 +28,17 @@ import { createRipikaStatue } from '../../../art/models/ripikaStatue';
 import { createBalloon, type BalloonKind } from '../../../art/models/balloons';
 import { createKeychain, KEYCHAIN_KINDS, type KeychainKind } from '../../../art/models/keychains';
 import { createBreakfastBowl, createPetBed, type BreakfastKind } from '../../../art/models/hotelAssets';
-import { createStarToy } from '../../../art/models/shopItems';
+import { createCandyFloss, createStarToy, createSurpriseEgg, type FlossFlavour } from '../../../art/models/shopItems';
 import { duckBarAssetGeometry } from '../../../art/models/duckBarAsset';
-import { createStoryBook, createStoryDragon } from './readerAssets';
+import { createMini, type MiniHandle } from '../../../art/models/mini';
+import { createLollipopTree, createPinkWall, type TreeVariant } from '../../../art/models/props';
+import { createTortoise } from '../../../art/models/reptiles';
+import { createLibraryOwl } from '../../../art/models/libraryCreatures';
+import { createJetpack } from '../../../art/models/jetpack';
+import { createDiscoBall } from '../../../art/models/hotelAssets';
+import { createAlienSaucer } from '../../../minigames/ferrisWheel/friends';
+import { createStoryBook, createStoryCloud, createStoryDragon } from './readerAssets';
+import { buildPictureProp, WARM_PROP_PARTS } from './pictureProps';
 import { hazardTapeTexture } from '../../../core/textures';
 import { createCatBus } from '../../entrance/catBus';
 import { createCart, SEAT_HEIGHT } from '../../railRace/cart';
@@ -38,6 +47,7 @@ import { poseRailRaceRider, riderLegsShow, SEATED, setRiderLegsVisible } from '.
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../../railRace/hazards';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../../../state';
 import { BOOKS, PICTURE_MODELS, type PagePicture, type PictureActor } from '../books';
+import { PICTURE_HEIGHT, PICTURE_WIDTH } from './pageGeometry';
 
 /**
  * **A page's picture: the park's own models, rendered to a texture** (#717).
@@ -92,9 +102,8 @@ import { BOOKS, PICTURE_MODELS, type PagePicture, type PictureActor } from '../b
  * pins one material per program so three never destroys them.
  */
 
-/** Width and height of a rendered picture, in pixels. 7:6 — the shape of the picture box on a page. */
-export const PICTURE_WIDTH = 672;
-export const PICTURE_HEIGHT = 576;
+/** Width and height of a rendered picture, in pixels — `pageGeometry.ts`'s, the picture box on a page. */
+export { PICTURE_HEIGHT, PICTURE_WIDTH };
 
 /**
  * How the reader's girl looks — `gameStore`'s player, reduced to what the kid
@@ -180,6 +189,22 @@ function isCreature(handle: AssetHandle): handle is CreatureHandle {
 }
 
 /**
+ * Everything a picture asks of a model once it is built: its face and pose,
+ * then what only some models have — the mini's grab (after the pose, which
+ * would otherwise set its arms), the tortoise's head and eyes, and a pet's
+ * jet pack (the reader wears hers from {@link buildReaderKid}).
+ */
+function dressActor(handle: AssetHandle, actor: PictureActor): void {
+  if (isCreature(handle)) {
+    handle.setExpression(actor.mood ?? 'happy');
+    applyPose(handle, actor.pose);
+  }
+  if (actor.model === 'mini') (handle as MiniHandle).setGrab(Math.min(1, Math.max(0, actor.grab ?? 0)));
+  if (actor.model === 'tortoise') poseTortoise(handle.root, actor);
+  if (actor.jetpack && actor.model !== 'kid' && actor.model !== 'jetpack') strapJetpack(handle, actor.jetpack === 'on');
+}
+
+/**
  * The duck bar from the Rail Race, as one standalone gate: two posts and the
  * striped bar, at **park scale** — the scale a `raceCart` seats its rider at.
  *
@@ -219,7 +244,7 @@ function createDuckBarGate(): AssetHandle {
 }
 
 /** The reader herself, dressed as she is today: `kid` is whoever holds the book. */
-function buildReaderKid(look: ReaderLook): KidHandle {
+function buildReaderKid(look: ReaderLook, actor?: PictureActor): KidHandle {
   const kid: KidHandle = createKid({
     skin: look.skin,
     hair: look.hair,
@@ -232,8 +257,58 @@ function buildReaderKid(look: ReaderLook): KidHandle {
     shoeKind: look.shoeKind,
     shoe: look.shoe,
   });
-  dressKid(kid, { facePaint: look.facePaint, hatId: look.hatId, glasses: look.glasses, keychainId: look.keychainId });
+  // A page may take the keyring off her bag (a story about a lost one).
+  const keychainId = actor?.keyring === false ? '' : look.keychainId;
+  dressKid(kid, { facePaint: look.facePaint, hatId: look.hatId, glasses: look.glasses, keychainId });
+  if (actor?.jetpack) {
+    // On her own anchor, the middle of her back, exactly as she wears one in
+    // the park (`entities/WornJetpack.ts`).
+    const pack = createJetpack();
+    pack.setThrust(actor.jetpack === 'on' ? 1 : 0);
+    kid.jetpackAnchor.add(pack.root);
+  }
   return kid;
+}
+
+/** A jet pack on a pet's back: a smaller one, on the middle of the back it measures. */
+function strapJetpack(handle: AssetHandle, firing: boolean): void {
+  let back = Infinity;
+  let low = Infinity;
+  let high = -Infinity;
+  visiblePoints(handle.root, (point) => {
+    back = Math.min(back, point.z);
+    low = Math.min(low, point.y);
+    high = Math.max(high, point.y);
+  });
+  if (!Number.isFinite(back)) return;
+  const pack = createJetpack(PET_JETPACK_SCALE);
+  pack.setThrust(firing ? 1 : 0);
+  pack.root.position.set(0, low + (high - low) * 0.42, back + 0.04);
+  handle.root.add(pack.root);
+}
+
+/** A pet's jet pack against the reader's — Trilla's in *Catch That Chicken!*. */
+const PET_JETPACK_SCALE = 0.6;
+
+/** The seed of the tortoise in a picture, so Grandpa Tock is the same tortoise on every page. */
+const PICTURE_TORTOISE_SEED = 0x70c4;
+
+/**
+ * Grandpa Tock's pose and face (`createTortoise` has no expression of its own):
+ * his head mesh and the face group it carries, posed by hand.
+ */
+function poseTortoise(root: Object3D, actor: PictureActor): void {
+  const head = root.getObjectByName('rr-tortoise-head');
+  const face = head?.children.find((child) => child.type === 'Group');
+  if (!head || !face) throw new Error("pagePictures: the tortoise has no 'rr-tortoise-head' carrying a face to pose");
+  if (actor.pose === 'tuck') {
+    // Into his shell: back by his head's own length, the face hidden.
+    const box = new Box3().setFromObject(head);
+    head.position.z -= (box.max.z - box.min.z) * 0.85;
+    face.visible = false;
+    return;
+  }
+  face.scale.y = actor.mood === 'blink' ? 0.2 : actor.mood === 'neutral' ? 0.55 : 1;
 }
 
 /** Builds one actor's model. Every branch is a factory the park itself uses. */
@@ -241,7 +316,7 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
   const colour = actor.colour ? PALETTE[actor.colour] : undefined;
   switch (actor.model) {
     case 'kid':
-      return buildReaderKid(look);
+      return buildReaderKid(look, actor);
     case 'ripika':
       return createPet('ripika');
     case 'trilla':
@@ -307,8 +382,63 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
       return createStoryBook(colour ?? PALETTE.markerPink);
     case 'duckBar':
       return createDuckBarGate();
+    case 'mini':
+      return createMini();
+    case 'pinkWall':
+      return createPinkWall({ length: 2 });
+    case 'tortoise': {
+      const tortoise = createTortoise(PICTURE_TORTOISE_SEED);
+      // Settled at rest (his head bobs and blinks on a clock) — or, for
+      // `stretch`, his poke at its fullest reach.
+      if (actor.pose === 'stretch') tortoise.poke();
+      tortoise.update?.(actor.pose === 'stretch' ? 1 : 0, 0);
+      return tortoise;
+    }
+    case 'owl':
+      return createLibraryOwl();
+    case 'candyFloss':
+      return createCandyFloss((actor.variant as FlossFlavour | undefined) ?? 'pink');
+    case 'jetpack': {
+      const pack = createJetpack();
+      pack.setThrust(actor.jetpack === 'off' ? 0 : 1);
+      return pack;
+    }
+    case 'discoBall': {
+      // It hangs from its chain in the hotel; in a picture it stands on its
+      // lowest point, like every other model here.
+      const ball = createDiscoBall();
+      const root = new Group();
+      ball.root.position.y = -visibleBounds(ball.root).bottom;
+      root.add(ball.root);
+      return { root, height: ball.height, ...(ball.dispose ? { dispose: ball.dispose } : {}) };
+    }
+    case 'lollipopTree':
+      return createLollipopTree({ variant: (actor.variant as TreeVariant | undefined) ?? 'plain', seed: PICTURE_TREE_SEED });
+    case 'surpriseEgg':
+      return createSurpriseEgg(colour ?? PALETTE.blossomPink, actor.accent ? PALETTE[actor.accent] : PALETTE.markerSky);
+    case 'alienSaucer': {
+      // Fully arrived (it pops in from nothing in the sky), its pilot's near
+      // arm up in a wave, and its tap target — a big sphere that draws
+      // nothing — out of the picture's framing. Stood on its lowest point.
+      const friend = createAlienSaucer();
+      friend.setPresence(1);
+      friend.update(0, 0);
+      friend.hitTarget.visible = false;
+      const root = new Group();
+      const { bottom, top } = visibleBounds(friend.root);
+      friend.root.position.y = -bottom;
+      root.add(friend.root);
+      return { root, height: top - bottom, dispose: () => friend.dispose() };
+    }
+    case 'stormCloud':
+      return createStoryCloud(colour ?? PALETTE.stoneGreyMid);
+    case 'prop':
+      return buildPictureProp(actor.parts ?? []);
   }
 }
+
+/** The seed of a picture's tree, so a page's tree is the same tree every time it is drawn. */
+const PICTURE_TREE_SEED = 0x7ee5;
 
 /** Degrees to radians. */
 const DEG = Math.PI / 180;
@@ -428,6 +558,15 @@ function addLights(scene: Scene, picture: PagePicture): void {
 export function pictureWarmSteps(renderer: WebGLRenderer, look: ReaderLook, pins: Material[]): (() => void)[] {
   const actors = new Map<string, PictureActor>();
   for (const model of PICTURE_MODELS) actors.set(model, { model });
+  // What a bare model does not show: a prop's every kind of piece, a firing
+  // jet pack (its flames are hidden while it is off, and a hidden mesh is not
+  // compiled) on the reader and on a pet, and every flavour of floss.
+  actors.set('prop', { model: 'prop', parts: WARM_PROP_PARTS });
+  actors.set('kid:jetpack', { model: 'kid', jetpack: 'on' });
+  actors.set('trilla:jetpack', { model: 'trilla', jetpack: 'on' });
+  for (const flavour of ['pink', 'blue', 'rainbow'] as const satisfies readonly FlossFlavour[]) {
+    actors.set(`candyFloss:${flavour}`, { model: 'candyFloss', variant: flavour });
+  }
   for (const book of BOOKS) {
     for (const picture of [book.titlePicture, ...book.pages.map((page) => page.picture)]) {
       for (const actor of picture.cast) {
@@ -444,7 +583,11 @@ export function pictureWarmSteps(renderer: WebGLRenderer, look: ReaderLook, pins
   });
   const steps: (() => void)[] = [];
   for (const actor of actors.values()) {
-    steps.push(() => built.push(buildActor(actor, look).root));
+    steps.push(() => {
+      const handle = buildActor(actor, look);
+      dressActor(handle, actor);
+      built.push(handle.root);
+    });
   }
   // The hill under every grounded picture: a plain toon dome.
   steps.push(() => built.push(blob(6, toonMaterial(PALETTE.grass), [1, 0.15, 1], 64)));
@@ -546,10 +689,7 @@ export function renderPicture(renderer: WebGLRenderer, picture: PagePicture, loo
     root.position.set(x, y, z);
     root.rotation.y = (actor.turn ?? 0) * DEG;
     if (actor.size !== undefined) root.scale.setScalar(actor.size);
-    if (isCreature(handle)) {
-      handle.setExpression(actor.mood ?? 'happy');
-      applyPose(handle, actor.pose);
-    }
+    dressActor(handle, actor);
     scene.add(root);
     cast.push(root);
   }

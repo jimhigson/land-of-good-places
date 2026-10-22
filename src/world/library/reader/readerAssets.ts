@@ -271,3 +271,76 @@ export function createStoryDragon(): CreatureHandle {
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.5, 0.06),
   };
 }
+
+/**
+ * **A cloud with a face** — Nimbus, the storm cloud in *Biscuit and the
+ * Storm* (track D of #714), and any other weather a chapter book needs: a
+ * page illustration like {@link createStoryDragon}, built the mini's way
+ * (squashed spheres and a baked face), never a model of the park's sky.
+ *
+ * `colour` is the whole cloud's, so one model is both a grey storm and the
+ * white cloud it turns into. It floats: its lowest puff is on the ground plane
+ * at the origin like every picture model, and a page lifts it with `at`. Its
+ * moods are the house five (`setExpression`); it has no limbs.
+ */
+export function createStoryCloud(colour: number): CreatureHandle {
+  const root = new Group();
+  root.name = 'library.storyCloud';
+  const body = new Group();
+  root.add(body);
+  const fluff = toonMaterial(colour);
+
+  // The puffs round the face: a lumpy, friendly outline, wider than tall.
+  const puffs: readonly [number, number, number, number][] = [
+    [-0.62, 0.32, -0.05, 0.3],
+    [0.62, 0.3, -0.05, 0.32],
+    [-0.36, 0.62, -0.1, 0.32],
+    [0.34, 0.66, -0.1, 0.34],
+    [0, 0.82, -0.15, 0.3],
+    [-0.88, 0.2, -0.12, 0.22],
+    [0.9, 0.18, -0.12, 0.22],
+  ];
+  for (const [x, y, z, r] of puffs) {
+    const puff = blob(r, fluff, [1.1, 0.92, 0.95], 22);
+    puff.position.set(x, y + 0.02, z);
+    body.add(puff);
+    addOutline(puff, 0.014);
+  }
+
+  // The middle puff carries the face, in the cloud's own colour.
+  const head = new Group();
+  head.position.set(0, 0.42, 0.06);
+  body.add(head);
+  const middle = blob(0.42, fluff, [1.12, 0.95, 0.9], 32);
+  head.add(middle);
+  addOutline(middle, 0.016);
+  const face = createBakedFace({
+    fill: colour,
+    spreadX: 1.8,
+    spreadY: 1.7,
+    tilt: 0.06,
+    size: 256,
+    eyeY: 0.46,
+    eyeGap: 0.36,
+    eyeW: 0.1,
+    eyeH: 0.13,
+    iris: PALETTE.iris,
+    mouth: 'smile',
+    mouthW: 0.1,
+    mouthDrop: 0.17,
+    blush: ART.blush,
+    blushStyle: 'soft',
+    blushR: 0.07,
+  });
+  face.applyTo(middle);
+
+  return {
+    root,
+    body,
+    head,
+    limbs: null,
+    height: 0.42 + 0.42 * 0.95,
+    setExpression: (name: Expression) => face.setExpression(name),
+    setWalkPhase: () => {},
+  };
+}
