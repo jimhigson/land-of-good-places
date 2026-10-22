@@ -755,16 +755,19 @@ console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every 
   // it does, no higher and no lower.
   const wallX = OX - LIBRARY_HALF_X;
   const westSpans = library.roomWalls.filter((wall) => Math.abs(wall.x1 - wallX) < 1e-6 && Math.abs(wall.x2 - wallX) < 1e-6);
+  /** The west wall's own top — the reference every height below is taken from, so a lintel built wrong cannot move the ruler it is measured with. */
+  const wallTop = westSpans.length > 0 && westSpans.every((span) => Number.isFinite(span.topHeight)) ? westSpans[0]!.topHeight : Number.NaN;
   say(
-    westSpans.length === 2 && westSpans.every((span) => Math.abs(span.topHeight - library.lintel.topHeight) < 1e-9),
+    westSpans.length === 2 && Number.isFinite(wallTop) && westSpans.every((span) => Math.abs(span.topHeight - library.lintel.topHeight) < 1e-9),
     `the lintel's top is the west wall's own: ${library.lintel.topHeight.toFixed(2)} m, against the wall's ${westSpans.length} spans at ` +
-      `${westSpans.map((span) => span.topHeight.toFixed(2)).join(', ')} m (two spans wanted, either side of the doorway)`,
+      `${westSpans.map((span) => span.topHeight.toFixed(2)).join(', ')} m (two spans wanted, either side of the doorway, each with a real top)`,
   );
+  if (!Number.isFinite(wallTop)) throw new Error("LINTEL: the west wall has no finite top to measure the lintel against — the room's walls lost their real tops");
   // Every height the wall itself holds a flier at — the floor up to where her
   // feet plus the jump grace reach the wall's top: the shut shelf holds
   // whoever is below its top less the grace, the lintel whoever is above its
   // base, and the two bands overlap — no height slips between them.
-  const held = library.lintel.topHeight - LIBRARY_FLOOR_Y - JUMP_CLEARANCE_GRACE - 0.05;
+  const held = wallTop - LIBRARY_FLOOR_Y - JUMP_CLEARANCE_GRACE - 0.05;
   const heights = Math.floor(held / 0.05);
   let furthest = { x: Infinity, feet: 0 };
   let swept = 0;
@@ -780,13 +783,13 @@ console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every 
     heights >= 60 && furthest.x >= atLintel,
     `${swept} marches at every height from the floor to ${(heights * 0.05).toFixed(2)} m (the highest the wall's top holds a flier), 5 cm apart, both strides: ` +
       `the furthest west any got is x ${furthest.x.toFixed(2)} (at ${furthest.feet.toFixed(2)} m), at least ${atLintel.toFixed(2)} — ` +
-      `the shut shelf holds her below ${(caseTop - JUMP_CLEARANCE_GRACE).toFixed(2)} m, the lintel from ${library.lintel.baseHeight.toFixed(2)} m up to the wall's top at ${library.lintel.topHeight.toFixed(2)} m`,
+      `the shut shelf holds her below ${(caseTop - JUMP_CLEARANCE_GRACE).toFixed(2)} m, the lintel from ${library.lintel.baseHeight.toFixed(2)} m up to the wall's top at ${wallTop.toFixed(2)} m`,
   );
   // CONTROL — over the wall's top: a flier whose feet clear the top by the
   // grace passes the lintel and the plain west wall alike, so the lintel's
   // ceiling is the wall's, not a hole of its own. The plain wall is marched
   // at the south span, well clear of the doorway.
-  const over = library.lintel.topHeight - LIBRARY_FLOOR_Y - JUMP_CLEARANCE_GRACE + 0.05;
+  const over = wallTop - LIBRARY_FLOOR_Y - JUMP_CLEARANCE_GRACE + 0.05;
   const plainZ = (LIBRARY_SECRET_BOOKCASE.at.z + LIBRARY_DEN_DOOR_HALF + LIBRARY_HALF_Z) / 2;
   const overLintel = westAt(over, 0.05);
   const overWall = marchAt(new Vector3(OX - 16, LIBRARY_FLOOR_Y + over, OZ + plainZ), -1, 0, 0.05, over).x - OX;
