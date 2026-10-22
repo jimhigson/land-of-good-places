@@ -2363,6 +2363,40 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     };
     const seatDistance = (kid: (typeof kids)[number]): number => Math.hypot(kid.body.position.x - kid.driver.seat.x, kid.body.position.z - kid.driver.seat.z);
 
+    // CONTROL for the furniture clause below, run now, while the children stroll their aisles far
+    // from the rug: with nobody on it, the real child walking at the first child's cushion steps up
+    // onto it (a low solid, climbed while walking into it) — so what holds her off it later is the
+    // child sitting there, not the cushion's side.
+    const sitter = kids[0]!;
+    const sitterSeat = sitter.driver.seat;
+    const approach = { x: sitterSeat.x - OX - 1.6, z: sitterSeat.z - OZ };
+    const approachClear = collision.isClearCircle(OX + approach.x, OZ + approach.z, PLAYER_RADIUS);
+    const playerFeet = (): number => child.player.position.y - LIBRARY_FLOOR_Y; // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere; her height above its one floor
+    /** A moderate push of the stick: her damped height lags under a full-tilt stride, and a seat is somewhere she slows down. */
+    const SEAT_WALK = 0.6;
+    const walkAtTheSeat = (): { highest: number; closest: number; nearestKid: number } => {
+      child.stand(approach.x, approach.z, 90);
+      let highest = -Infinity;
+      let closest = Infinity;
+      let nearestKid = Infinity;
+      for (let frame = 0; frame < Math.round(1.5 / CHILD_DT); frame += 1) {
+        child.step(child.towards(1, 0, false, SEAT_WALK));
+        highest = Math.max(highest, playerFeet());
+        closest = Math.min(closest, Math.hypot(child.player.position.x - sitterSeat.x, child.player.position.z - sitterSeat.z));
+        for (const kid of kids) nearestKid = Math.min(nearestKid, kid.body.position.distanceTo(child.player.position));
+      }
+      child.run(1, child.towards(-1, 0));
+      child.stand(desk.x, desk.z, desk.facing);
+      return { highest, closest, nearestKid };
+    };
+    const empty = walkAtTheSeat();
+    say(
+      approachClear && empty.highest >= cushionTop - 0.05 && empty.nearestKid > PLAYER_SEPARATION,
+      `CONTROL: from (${approach.x.toFixed(2)}, ${approach.z.toFixed(2)}) (clear floor: ${approachClear}) the real child walks at ${sitter.plan.name}'s empty ${sitter.plan.seat} ` +
+        `and steps up onto it: her feet rise to ${empty.highest.toFixed(3)} m (its top ${cushionTop.toFixed(3)}, within 0.05: the damped height lags at a walk), ` +
+        `${empty.closest.toFixed(2)} m from its middle at nearest, with the nearest child ${empty.nearestKid.toFixed(1)} m away the whole time (more than PLAYER_SEPARATION ${PLAYER_SEPARATION.toFixed(2)})`,
+    );
+
     // Summoned: everybody to the edge of her cushion.
     for (const kid of kids) kid.driver.summon();
     const arrivedAt = kids.map(() => Number.NaN);
@@ -2393,39 +2427,6 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     child.run(1.5);
     const turned = kids.map((kid) => turnError(kid));
     say(turned.every((error) => error <= 0.05), `waiting, each has turned to the storyteller's chair: ${kids.map((kid, i) => `${kid.plan.name} ${turned[i]!.toFixed(3)} rad off`).join(', ')} (0.05 allowed)`);
-
-    // CONTROL for the furniture clause below: with nobody on it, the real child walking at the first
-    // child's cushion steps up onto it (a low solid, climbed while walking into it) — so what holds
-    // her off it later is the child sitting there, not the cushion's side.
-    const sitter = kids[0]!;
-    const sitterSeat = sitter.driver.seat;
-    const approach = { x: sitterSeat.x - OX - 1.6, z: sitterSeat.z - OZ };
-    const approachClear = collision.isClearCircle(OX + approach.x, OZ + approach.z, PLAYER_RADIUS);
-    const playerFeet = (): number => child.player.position.y - LIBRARY_FLOOR_Y; // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere; her height above its one floor
-    const walkAtTheSeat = (): { highest: number; closest: number } => {
-      child.stand(approach.x, approach.z, 90);
-      let highest = -Infinity;
-      let closest = Infinity;
-      for (let frame = 0; frame < Math.round(1.5 / CHILD_DT); frame += 1) {
-        child.step(child.towards(1, 0));
-        highest = Math.max(highest, playerFeet());
-        closest = Math.min(closest, Math.hypot(child.player.position.x - sitterSeat.x, child.player.position.z - sitterSeat.z));
-      }
-      child.run(1, child.towards(-1, 0));
-      child.stand(desk.x, desk.z, desk.facing);
-      return { highest, closest };
-    };
-    const empty = walkAtTheSeat();
-    say(
-      approachClear && empty.highest >= cushionTop - FEET_TOLERANCE,
-      `CONTROL: from (${approach.x.toFixed(2)}, ${approach.z.toFixed(2)}) (clear floor: ${approachClear}) the real child walks at ${sitter.plan.name}'s empty ${sitter.plan.seat} ` +
-        `and steps up onto it: her feet reach ${empty.highest.toFixed(3)} m (its top ${cushionTop.toFixed(3)}), ${empty.closest.toFixed(2)} m from its middle at nearest`,
-    );
-    const nearestOf = kids.map((kid) => kid.body.position.distanceTo(child.player.position));
-    say(
-      Math.min(...nearestOf) > PLAYER_SEPARATION,
-      `the children were elsewhere for the control: the nearest ${Math.min(...nearestOf).toFixed(1)} m from her (more than PLAYER_SEPARATION ${PLAYER_SEPARATION.toFixed(2)})`,
-    );
 
     // Sat, as story time sits them: root on the floor at the cushion's middle, facing the chair, her own phase.
     kids.forEach((kid, i) => {
@@ -2470,7 +2471,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         sitterMoved <= 1e-3 && occupied.highest <= 0.02 && occupied.closest >= side - RESOLVER_SLACK && occupied.closest <= side + 0.1,
         `a seated child is furniture: the same walk at ${sitter.plan.name} on ${sitter.plan.seat} for 1.5 s moves her ${(sitterMoved * 1000).toFixed(2)} mm (1 allowed), ` +
           `while the player is held at the cushion's side, ${occupied.closest.toFixed(2)} m from its middle (its ${cushionRadius.toFixed(2)} plus her ${PLAYER_RADIUS.toFixed(2)} = ${side.toFixed(2)}, ` +
-          `less ${RESOLVER_SLACK} m of resolver slack), her feet ${occupied.highest.toFixed(3)} m up at most (0.02: never on an occupied cushion; CONTROL above stepped on at ${empty.highest.toFixed(3)})`,
+          `less ${RESOLVER_SLACK} m of resolver slack), her feet ${occupied.highest.toFixed(3)} m up at most (0.02: never onto an occupied cushion; the CONTROL stepped onto the empty one to ${empty.highest.toFixed(3)})`,
       );
     }
 
