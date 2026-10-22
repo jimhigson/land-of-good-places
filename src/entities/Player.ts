@@ -1842,6 +1842,7 @@ export class Player implements GameSystem {
     if (this.airborne && !this.flying) {
       this.landedFor = 0;
       const p = this.position;
+      // flat-ok: the same body a moment later, with its plan drift tested first — at one column a y difference is a height difference
       if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(p.y - this.hoverAt.y) > HOVER_SPAN) {
         this.hoverAt.copy(p);
         this.hoverFor = dt;

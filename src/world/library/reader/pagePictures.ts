@@ -317,7 +317,7 @@ function strapJetpack(handle: AssetHandle, firing: boolean): void {
   if (!Number.isFinite(back)) return;
   const pack = createJetpack(PET_JETPACK_SCALE);
   pack.setThrust(firing ? 1 : 0);
-  pack.root.position.set(0, low + (high - low) * 0.42, back + 0.04);
+  pack.root.position.set(0, low + (high - low) * 0.42, back + 0.04); // flat-ok: a pet's own local bounds on the picture's flat stage
   handle.root.add(pack.root);
 }
 
@@ -574,7 +574,7 @@ function buildStoryWheel(actor: PictureActor, colour: number | undefined): Asset
   const box = new Box3();
   visiblePoints(star.root, (point) => box.expandByPoint(point));
   const bracket = wheel.bracketBox.getSize(new Vector3());
-  const span = Math.max(box.max.x - box.min.x, box.max.y - box.min.y);
+  const span = Math.max(box.max.x - box.min.x, box.max.y - box.min.y); // flat-ok: the star toy's own local bounds on the picture's flat stage
   const fit = (Math.max(bracket.x, bracket.y) * STAR_IN_BRACKET) / span;
   const middle = box.getCenter(new Vector3());
   star.root.scale.setScalar(fit);
