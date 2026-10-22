@@ -149,8 +149,8 @@ seed; logs `npc-*.log`, `ride-*.log`, `tap-spacing-1.log`):
 | `check:climb-wave` | 0 | 38 trees × 4 approaches; OK |
 | `check:slide-rider` | 0 | 611 frames ridden, 0 with a vertex inside the trough; ok |
 | `check:tap-spacing` | 0 | 10 spaces, **145 zones** (unchanged: Step 8 adds no zone), 27 portal bands; 245 zone-band and 20 close zone-zone pairs; 20 same-action overlaps (warnings); OK |
-| `pnpm run test:procgen` | see below | the parkFacts exclusion |
-| `check:coplanar` (+ its control at 33bcc361) | see below | the sweep ignores `visible`, so the children's models are swept on the first seed |
+| `pnpm run test:procgen` | 0 | **48 files, 2166 tests passed** (the restamped parks: the canonical seed and the sweep seeds hydrate); the `kidsRoot` drawn-reach exclusion holds on every seed |
+| `check:coplanar` | 0 | `check:coplanar OK — 186 same-facing coplanar seam(s) across 16 seed(s) and 10 space(s): 65 fighting at 0.1 mm, 121 more held apart by a stand-off under 1 cm`; **the control at 33bcc361 with the same parks reads the identical 186** (`control-coplanar-33bcc361.log`) — the sweep ignores `visible`, so the three children's models were swept on the first seed and added no seam |
 
 ## Red transcripts (each with the geometry it was proved against)
 
