@@ -857,6 +857,19 @@ export class NpcCharacter {
       // decides what each one means. Her own phase rides on `elapsed`, so a
       // row of sitters does not sway in lockstep.
       applyRidePose(rig, 0, elapsed + this.seatedPhase, posture);
+      // **Her facing is written again, after the pose.** Every posture rights
+      // its rig with `root.rotation.x = 0` ("upright, in case the last ride
+      // laid her down"), as an Euler component. The player's posed root sits
+      // inside her oriented `group`, so for her that line is harmless; this
+      // body's root IS the oriented object (`faceOnGround` writes its
+      // quaternion), and three.js keeps that root's Euler in the (±π, θ, ±π)
+      // branch for any facing past a right angle — so zeroing `x` there rolls
+      // her onto her head. Measured on a library child sat facing 2.6 rad: hip
+      // at y −0.36, head at −1.36; and on a train rider carried facing 2.6, the
+      // same. The one owner of an NPC's orientation is this body, so it says
+      // again what it said before the pose. (No NPC is ever reclined, so there
+      // is no recline here for this to undo.)
+      faceOnGround(rig.root, this.facing);
       if (this.intent.expression !== this.expression) {
         this.expression = this.intent.expression;
         this.avatar.setExpression(this.expression);
