@@ -37,7 +37,7 @@ packGlbAsset({
   constantName: 'STORY_PROPS_GLB_BASE64',
   label: 'pack:story-props',
   /**
-   * 480 KB: thirty-one picture props, 17 152 triangles and 447 KB on the day
+   * 480 KB: thirty-one picture props, 17 232 triangles and 449 KB on the day
    * it landed (the library's whole building plus furniture plus three
    * creatures is 450 KB for 18 568). The heavy ones are the forty-one-sandwich
    * heap, the sixteen-sandwich tower, the six rainbow bands and the toy ferris

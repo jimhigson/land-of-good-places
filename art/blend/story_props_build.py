@@ -262,7 +262,8 @@ FLOWER_HEIGHT = 0.80
 PETAL_COUNT = 6
 PETAL_LENGTH = 0.12
 BLANKET_WIDTH, BLANKET_DEPTH = 1.80, 1.40
-BLANKET_CHECK = 0.20
+BLANKET_CHECK = 0.28
+BLANKET_CHECKS = 15      # of a 6 × 5 board, every other square
 SANDWICH_LEG = 0.34
 SANDWICH_THICK = 0.07
 TOWER_COUNT = 16
@@ -310,15 +311,15 @@ CONTRACT = {
     "loose-page": {"width": (EXACT, LOOSE_PAGE_WIDTH), "height": (AT_MOST, 0.08), "depth": (AT_MOST, 0.3)},
     "closed-book": {"width": (EXACT, CLOSED_BOOK_WIDTH), "depth": (AT_MOST, CLOSED_BOOK_DEPTH + 0.02),
                     "height": (EXACT, CLOSED_BOOK_THICK)},
-    "flower": {"height": (EXACT, FLOWER_HEIGHT), "width": (AT_MOST, 0.5), "depth": (AT_MOST, 0.5),
+    "flower": {"height": (EXACT, FLOWER_HEIGHT), "width": (AT_MOST, 0.56), "depth": (AT_MOST, 0.56),
                "petals": (EXACT, float(PETAL_COUNT))},
     "petal": {"depth": (EXACT, PETAL_LENGTH), "height": (AT_MOST, 0.03), "width": (AT_MOST, 0.1)},
     "picnic-blanket": {"width": (EXACT, BLANKET_WIDTH), "depth": (EXACT, BLANKET_DEPTH), "height": (AT_MOST, 0.05),
-                       "checks": (EXACT, 32.0)},
+                       "checks": (EXACT, float(BLANKET_CHECKS))},
     "sandwich": {"height": (EXACT, SANDWICH_THICK), "width": (AT_MOST, 0.42), "depth": (AT_MOST, 0.42)},
     "sandwich-tower": {"sandwiches": (EXACT, float(TOWER_COUNT)), "height": (EXACT, TOWER_COUNT * SANDWICH_THICK),
                        "width": (AT_MOST, 0.8), "depth": (AT_MOST, 0.8)},
-    "sandwich-heap": {"sandwiches": (EXACT, float(HEAP_COUNT)), "height": (EXACT, 4 * SANDWICH_THICK),
+    "sandwich-heap": {"sandwiches": (EXACT, float(HEAP_COUNT)), "height": (EXACT, 5 * SANDWICH_THICK),
                       "width": (AT_MOST, 1.8), "depth": (AT_MOST, 1.5)},
     "jam-tart": {"width": (EXACT, TART_WIDTH), "height": (AT_MOST, 0.09), "depth": (AT_MOST, 0.24)},
     "cake": {"height": (EXACT, CAKE_HEIGHT), "width": (AT_MOST, 0.6), "depth": (AT_MOST, 0.6)},
@@ -360,8 +361,13 @@ def build_storm_cloud() -> None:
     for c, r in (
         ((0.66, 0.12, 0.46), (0.38, 0.34, 0.34)),     # left big (+X, the creature's own left)
         ((-0.72, 0.10, 0.52), (0.42, 0.36, 0.38)),    # right big — a little bigger: the asymmetric feature
-        ((0.30, 0.08, 0.98), (0.26, 0.24, 0.24)),     # top left
-        ((-0.26, 0.12, 1.00), (0.22, 0.21, 0.21)),    # top right
+        # The crown: three uneven puffs, the biggest set back behind the face
+        # puff's top, so from the front it is a bumpy cloud-top. The first cut
+        # was two matched puffs either side, and with a face below them the
+        # whole thing read as a grey mouse with ears.
+        ((0.36, 0.10, 0.94), (0.24, 0.22, 0.22)),
+        ((-0.44, 0.16, 0.90), (0.27, 0.24, 0.25)),
+        ((-0.02, 0.36, 1.02), (0.30, 0.26, 0.26)),
         ((0.26, 0.02, 0.18), (0.34, 0.36, 0.18)),     # underside, flat
         ((-0.30, 0.02, 0.17), (0.36, 0.36, 0.17)),
         ((0.96, 0.14, 0.20), (0.22, 0.24, 0.16)),
@@ -415,7 +421,7 @@ def build_rainbow_arch() -> None:
         band = a.part(f"band{i + 1}")
         r = ARCH_INNER_RADIUS + i * ARCH_BAND
         pts = [(-r, 0.0, tube_r), (-r, 0.0, ARCH_LEG)]
-        arc_steps = 30
+        arc_steps = 24
         for k in range(1, arc_steps):
             ang = math.pi - math.pi * k / arc_steps
             pts.append((r * math.cos(ang), 0.0, ARCH_LEG + r * math.sin(ang)))
@@ -650,9 +656,11 @@ def build_flower() -> None:
     head = Matrix.Translation((top[0], top[1] - 0.02, top[2] + 0.05)) @ rot(x=tilt)
     for k in range(PETAL_COUNT):
         ang = TAU * k / PETAL_COUNT + deg(15.0)
-        petals.add(*ellipsoid(0.065, 0.10, 0.026, 2),
-                   matrix=head @ Matrix.Translation((0.14 * math.cos(ang), 0.14 * math.sin(ang), 0.0)) @ rot(z=math.degrees(ang) + 90.0))
-    centre.add(*ellipsoid(0.085, 0.085, 0.05, 2), matrix=head @ Matrix.Translation((0.0, 0.0, 0.012)))
+        # Plump petals that overlap their neighbours (the first cut's narrow
+        # ones spread like a propeller), round a centre nearly as wide as one.
+        petals.add(*ellipsoid(0.085, 0.115, 0.03, 2),
+                   matrix=head @ Matrix.Translation((0.125 * math.cos(ang), 0.125 * math.sin(ang), 0.0)) @ rot(z=math.degrees(ang) + 90.0))
+    centre.add(*ellipsoid(0.10, 0.10, 0.055, 2), matrix=head @ Matrix.Translation((0.0, 0.0, 0.02)))
     a.normalise(height=FLOWER_HEIGHT)
 
 
@@ -677,7 +685,7 @@ def build_picnic_blanket() -> None:
     checks = a.part("checks")
     cloth_t = 0.035
     cloth.at(*rounded_box(BLANKET_WIDTH, BLANKET_DEPTH, cloth_t, 0.015, 1), z=cloth_t * 0.5)
-    cols, rows = 9, 7
+    cols, rows = 6, 5
     sq = BLANKET_CHECK
     for i in range(cols):
         for j in range(rows):
@@ -689,12 +697,17 @@ def build_picnic_blanket() -> None:
     a.normalise()
 
 
-def sandwich_into(bread, filling, matrix: Matrix, z0: float = 0.0) -> None:
-    """One sandwich — two bevelled bread wedges and a filling peeping past
-    them — placed by ``matrix``, standing from ``z0``."""
+def sandwich_into(bread, filling, matrix: Matrix, z0: float = 0.0, bevel: bool = True) -> None:
+    """One sandwich — two bread wedges and a filling peeping past them —
+    placed by ``matrix``, standing from ``z0``. The lone sandwich's bread is
+    bevelled (the chunky-toy edge); in a stack the edges are buried against
+    their neighbours, and a bevelled wedge costs 28 shipped vertices against
+    a crisp one's 18, fifty-seven times over."""
     slice_t = 0.028
-    bread.add(*soft(*wedge(SANDWICH_LEG, slice_t, z0), 0.011), matrix=matrix)
-    bread.add(*soft(*wedge(SANDWICH_LEG, slice_t, z0 + SANDWICH_THICK - slice_t), 0.011), matrix=matrix)
+    top = wedge(SANDWICH_LEG, slice_t, z0)
+    bottom = wedge(SANDWICH_LEG, slice_t, z0 + SANDWICH_THICK - slice_t)
+    bread.add(*(soft(*top, 0.011) if bevel else top), matrix=matrix)
+    bread.add(*(soft(*bottom, 0.011) if bevel else bottom), matrix=matrix)
     filling.add(*wedge(SANDWICH_LEG, SANDWICH_THICK - 2.0 * slice_t + 0.004, z0 + slice_t - 0.002, grow=0.012), matrix=matrix)
 
 
@@ -719,27 +732,31 @@ def build_sandwich_tower() -> None:
     a = register(Asset("sandwich-tower"))
     bread, filling = a.part("bread"), a.part("filling")
     for i, (yaw, dx, dy) in enumerate(TOWER_LAYOUT):
-        sandwich_into(bread, filling, place(dx, dy, 0.0, rz=yaw), z0=i * SANDWICH_THICK)
+        sandwich_into(bread, filling, place(dx, dy, 0.0, rz=yaw), z0=i * SANDWICH_THICK, bevel=False)
     a.normalise()
 
 
 def build_sandwich_heap() -> None:
-    """Nimbus's forty-one, as a mountain: 4×3 squares of two, then 3×2, then
-    2×1, then one wedge on the summit — 24 + 12 + 4 + 1."""
+    """Nimbus's forty-one, as a mountain: 4×2 squares of two, then 3×2, 2×2
+    and 1×2, then one wedge on the summit — 16 + 12 + 8 + 4 + 1. Every
+    sandwich is turned and nudged by a fixed pattern (no randomness), so the
+    pile reads as a heap and not as tiling: the first cut's four flat layers
+    of neat squares looked like a roof."""
     a = register(Asset("sandwich-heap"))
     bread, filling = a.part("bread"), a.part("filling")
     pitch = SANDWICH_LEG + 0.06
     count = 0
-    for layer, (cols, rows) in enumerate(((4, 3), (3, 2), (2, 1))):
+    for layer, (cols, rows) in enumerate(((4, 2), (3, 2), (2, 2), (1, 2))):
         for i in range(cols):
             for j in range(rows):
-                x = (i - (cols - 1) * 0.5) * pitch
-                y = (j - (rows - 1) * 0.5) * pitch
-                wobble = ((i * 3 + j * 5 + layer) % 7 - 3) * 1.5
+                k = i * 7 + j * 11 + layer * 5
+                x = (i - (cols - 1) * 0.5) * pitch + ((k * 3) % 5 - 2) * 0.02
+                y = (j - (rows - 1) * 0.5) * pitch + ((k * 2) % 5 - 2) * 0.02
+                wobble = (k % 9 - 4) * 5.0
                 for half in (0.0, 180.0):
-                    sandwich_into(bread, filling, place(x, y, 0.0, rz=half + wobble), z0=layer * SANDWICH_THICK)
+                    sandwich_into(bread, filling, place(x, y, 0.0, rz=half + wobble), z0=layer * SANDWICH_THICK, bevel=False)
                     count += 1
-    sandwich_into(bread, filling, place(0.0, 0.0, 0.0, rz=12.0), z0=3 * SANDWICH_THICK)
+    sandwich_into(bread, filling, place(0.02, -0.03, 0.0, rz=24.0), z0=4 * SANDWICH_THICK, bevel=False)
     count += 1
     assert count == HEAP_COUNT, count
     a.normalise()
@@ -863,7 +880,7 @@ def build_story_wheel() -> None:
         tip = (R * math.cos(ang), 0.0, hz + R * math.sin(ang))
         spokes.add(*tapered_sweep([(0.0, 0.0, hz), tip], [0.05, 0.045], 8))
         cars.at(*box(0.08, 0.08, 0.12), tip[0], 0.0, tip[2] - 0.08)
-        cars.at(*rounded_box(0.52, 0.50, 0.44, 0.06, 2), tip[0], 0.0, tip[2] - 0.12 - 0.22)
+        cars.at(*rounded_box(0.52, 0.50, 0.44, 0.06, 1), tip[0], 0.0, tip[2] - 0.12 - 0.22)
     for k in range(WHEEL_LIGHTS):
         ang = TAU * k / WHEEL_LIGHTS
         lights.at(*icosphere(WHEEL_LIGHT_R, 1), R * math.cos(ang), -0.08, hz + R * math.sin(ang))
@@ -906,11 +923,13 @@ def build_twig_nest() -> None:
     for k in range(NEST_TWIGS):
         ang = TAU * k / NEST_TWIGS + deg(7.0 * (k % 3))
         base = Vector((r * 0.9 * math.cos(ang), r * 0.9 * math.sin(ang), 0.26 + 0.03 * (k % 2)))
-        out = Vector((math.cos(ang + deg(35.0 * (1 if k % 2 else -1))), math.sin(ang + deg(35.0 * (1 if k % 2 else -1))), 0.35 + 0.15 * (k % 3)))
+        # Short, nearly level twigs woven out of the rim: the first cut's long
+        # upward ones made the nest a sea urchin.
+        out = Vector((math.cos(ang + deg(35.0 * (1 if k % 2 else -1))), math.sin(ang + deg(35.0 * (1 if k % 2 else -1))), 0.10 + 0.08 * (k % 3)))
         out.normalize()
-        length = 0.34 + 0.05 * (k % 4)
+        length = 0.20 + 0.04 * (k % 4)
         twigs.add(*tapered_sweep([tuple(base), tuple(base + out * length * 0.5), tuple(base + out * length)],
-                                 [0.036, 0.03, 0.022], 8))
+                                 [0.038, 0.032, 0.026], 8))
     a.normalise()
 
 

@@ -182,6 +182,7 @@ only question asked is whether the bytes still match.
 | `reptileNoodle.glb` | `pnpm run blend:reptile-noodle` | 112 KB | Noodle the python and her rock — 8 nodes, 4 982 triangles |
 | `reptileStall.glb` | `pnpm run blend:reptile-stall` | 73 KB | Scales & Tails' dressing and the Noodle-o-meter — 17 nodes, 2 449 triangles |
 | `library.glb` | `pnpm run blend:library` | 439 KB | the Library kit (#715): building, furniture, books, owl, dragon, cat — 65 nodes, 18 568 triangles |
+| `storyProps.glb` | `pnpm run blend:story-props` | 449 KB | the story-props kit: every prop the six chapter books' pictures need that the park had no model for — 31 assets, 61 nodes, 17 232 triangles |
 
 **Two shapes of kit, and the difference matters.** Some are *models* a placer
 puts down whole (the castle's furniture, the hotel's fittings); some are **kits
@@ -608,3 +609,74 @@ the day is in `libraryGlb.ts`'s header. Shape only: no colour, no material.
   every node. The CONTRACT is the
   build's to assert; the Engineer's `check:library` (#716) re-measures what the
   game builds against with `visibleBounds()`.
+
+### 42 — The story-props kit (the chapter books' pictures; branch `art/story-props`)
+
+Jim, 22 October 2026: *"model in Blender as much as is needed, in preference
+to coding geometric primitives to create items in the world."* The six chapter
+books (`docs/library-build/chapter-books/final.json` on
+`feat/library-714-books2`) name, page by page, the props their pictures are
+drawn with. Every one the park had no model for — and the one picture-book
+primitive the chapter books reuse, the closed storybook — is in this kit.
+Thirty-one assets in one file, each its own collection with its own base-centred
+origin (HANDOFF-art-story-props.md lists the pages each one serves):
+
+`storm-cloud` (Nimbus — a round face puff carrying the face, a ring of puffs
+behind; grey or white is the loader's), `fluffy-cloud` (faceless, long and low,
+so nobody takes it for Nimbus), `rainbow-arch` (the Rail Race finish, one node
+per band, as many bands as `ART.rainbow` has colours — read, not typed),
+`queue-posts`, `rubber-duck` (a round head carrying a face, a separate beak),
+`park-bench` (seat at `KID_HIP_HEIGHT`, open underneath), `magnifying-glass`,
+`pancake-footprint` and `giant-footprint`, `spoon`, `flat-stone`, `stick`,
+`open-book`, `loose-page`, `closed-book`, `flower` (the nibbled yellow one is
+its stem node alone) and `petal`, `picnic-blanket` (gingham checks a second
+node), `sandwich`, `sandwich-tower` (sixteen) and `sandwich-heap` (Nimbus's
+forty-one), `jam-tart`, `cake`, `puddle`, `window-frame`, `umbrella-inside-out`,
+`battlement` (merlons at `CASTLE_MERLON_HEIGHT`), `story-wheel` (a toy stand-in
+for the Space Ferris Wheel, not the ride: rim, spokes, cars, legs, an **empty**
+star bracket and a ring of lights the loader hides or lights), `feather`,
+`twig-nest` and `biscuit-treat`. Node names are hyphenated, `<asset>-<part>` or
+just `<asset>`.
+
+`art/blend/story_props_build.py` → `art/blend/story_props.blend` →
+`story_props_export.py` → `src/art/assets/storyProps.glb` →
+`scripts/pack-story-props-asset.mts` → `storyPropsGlb.ts`; `pnpm run
+blend:story-props` runs all three, and `pnpm run render:story-props` writes
+`art/renders/story-props/*.png` (one per asset beside a child-height post, the
+two faces with eye dots at the shipped anchors, the picnic cross and saved, the
+finish line, the library floor, the footprint trail, the hotel-roof nest, the
+castle roof in the storm, the wheel lit and dark, and a lineup against the hip
+rule), clearing the folder first and writing each picture through a checked
+part-file. Budget 480 KB, a hard gate in the pack step. Shape only: no colour,
+no material.
+
+- **Every CONTRACT figure is asserted against the emitted vertices on every
+  build** — every size; the bench's seat; the merlon height (off the node's
+  flat tops); the band count and every band's foot on the ground; the counts
+  of toes, petals, checks, sandwiches (16 and 41), cars, lights, twigs and
+  chips (connected pieces of the node); the rope's sag; the duck's head over
+  its body; the face puff over the widest puff; the wheel's socket open by
+  rays (with a control at a star point). The build also asserts every origin
+  is on the floor, centred and inside its footprint, every closed piece faces
+  outward, and no asset was stretched more than 8% to meet its brief.
+- **No pivots**: these are picture props and nothing turns in a still picture.
+- **Faces in the node's own UVs**: `storm-cloud-face` and `rubber-duck-head`
+  carry `library_build.py`'s face windows (imported, one owner of the
+  convention), built **round** so the painter's square canvas lands
+  undistorted. The figures travel as node extras (`face_eyes_uv`,
+  `face_window_m`), copied by the packer into the typed `STORY_FACES`; the
+  build also casts a ray at Nimbus's mouth row and asserts it lands on the face
+  puff, not a puff below.
+- **The loader** is `src/world/library/reader/storyProps.ts`: one decode on
+  first use, the `STORY_PROPS_STYLES` table (every node dressed; the render
+  reads its colour keys), and a factory per asset — `createStoryCloud` (the
+  house expression set through `createBakedFace(...).applyTo(mesh, {
+  uvsAuthored: true })`, colour a parameter), `createRainbowArch`,
+  `createRubberDuck`, …, `createStoryWheel({ lit })`. Every height is
+  `visibleBounds(root).top`; `check:assets` measures all 32 subjects (the
+  nibbled flower too) and found no drift.
+- **`pnpm run check:story-props-glb`** (in the gate, beside `check:library-glb`)
+  runs the same four questions through the shared `scripts/lib/check-glb-kit.mts`:
+  the module is the file, the export's rules hold, texcoords appear exactly where
+  face figures do, `STORY_FACES` is exactly the file's extras, `v` climbs with
+  height on both faces, and both readers agree on every node.
