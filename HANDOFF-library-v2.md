@@ -17,7 +17,13 @@ built.
 | **`feat/library-v2`** | **this integration branch**: engine + the four tracks + the API adaptation. Tracks A–D cut their branches from its head. |
 | `feat/library-v2-pr` | the draft Library v2 PR's head; moved only at milestones by a fast-forward push (`git push origin feat/library-v2:feat/library-v2-pr`), never force |
 
-PR: see "The PR" below (filled in when raised). Raise no other.
+**The PR: #733** (draft), head `feat/library-v2-pr` @ b438b695, base `feat/engine-solids-pr`
+(#722's head, 8e8d318a). Body: stacked on #722, what is in, what is still being built, the six
+decisions, the question for Jim, "What to look at", the checks; `Closes #718` / `Closes #719`.
+Raise no other. **`origin/feat/engine-solids` has moved on** (8a48066b at the time of writing;
+this branch's base is 2aa9da02): merge it in at the next milestone with
+`git -c rerere.enabled=false merge --no-ff origin/feat/engine-solids`, rebuilding any
+`package.json` resolution from parsed step sets.
 
 ## What was merged, in order (each `git -c rerere.enabled=false merge --no-ff`)
 
@@ -112,7 +118,7 @@ worktree `.claude/worktrees/library-v2-snap` (see "Parks" below).
 | `check:served-book-reader` (port 6411, its own dev server, stopped by pid) | 0 | **1054 ok, 0 FAIL**, "check:book-reader passed"; item 9b: the model sheet "opens without linking a shader program — 0 program link(s)", "11 pictures, the thinnest covering 19.0% of its pixels"; item 10: `/library?at=-9.4,-11.1&facing=180&seed=5` selects `library-book:ripikaBalloon`, its chip opens that book, `frameContext.dt = 0`, `.hud-menu` display none |
 | `check:served-deep-links` (port 6419) | 0 | **20 OK of 20** (10 links × 2 starts); `/library`, `/library?at=-16.1,-4&facing=270`, `/library?at=6,8.7&facing=180`, `/library-door` all 0.00 m off their spots |
 | the honest seed-5 solve (snapshot at 81ef26e5 = this tree's closure) | 0 | `build:parks` 484 s: restart 0 rejected by check:coplanar (213 s), **restart 1 accepted as shipped (134 measures, 477 s), digest d6721090fb3f1d3a**, proven; control (cruiser +0.5 m) 7a4f8585bc0a4707 differs. Against the engine's seed-5 file: `features`, `measures`, `planOrder`, `restart` byte-identical; only `acceptance` and `digest` moved — **the Library moves nothing in the park** |
-| final `check:library` on the honest park (`.parks/` from the snapshot) | see the task log | |
+| **final `check:library` on the honest park** (`.parks/` from the snapshot, at b438b695) | 0 | **101 ✓, 0 ✗**, "All clauses passed."; 77 keep-outs: 75 in the reading room (arrival, doorway, desk, librarian, rug, seats, secret shelf, 18 readable slots, every aisle node) and 2 in the secret den; stderr: "6 slot(s) WAIT for their books … slot 13 (west-4, shelf 1, -1.5 m along) … slot 18"; LINTEL: the lintel's top 5.20 m against the wall's 2 spans at 5.20; 202 marches to 5.00 m, furthest west x −17.08 (at 3.10 m); the 5.10 m flier passes lintel and wall alike to x −28.00 |
 
 ## Reds (each with the geometry it was proved against; seed 5 restart 1 hydrated, the reading room at (−600, −600))
 
@@ -201,7 +207,7 @@ as on every library branch before; **restart 1 accepted (134 measures), digest d
 `features`/`measures`/`planOrder` identical to the engine's seed 5 (its CI parks, hash 8d1da000…).
 The live tree's `.parks/` now holds that honest seed 5 (manifest: seed 5 only, hash 8644cfac…);
 the restamped 16-seed set is kept at `wf/parks-restamped-engine/` for checks that want another
-seed (copy it back and restamp). The snapshot worktree is removed once this handoff is pushed.
+seed (copy it back and restamp). The snapshot worktree has been removed (`git worktree remove`).
 
 ## Taking over at zero notice
 
