@@ -38,8 +38,12 @@ vocabulary, `src/world/library/reader/pagePictures.ts` + `readerAssets.ts` +
 - [x] `scripts/check-story-props-glb.mts` + the shared body `scripts/lib/check-glb-kit.mts`
       (`check-library-glb.mts` now calls it too; its output is unchanged), proved red twice
 - [x] `check:assets`: 32 story subjects added to `collect` — all measured, zero drift
-- [x] `story_props_render.py` → `art/renders/story-props/*.png` (48 pictures), every one
-      opened and judged; four shapes reworked on what they showed (Decision 7)
+- [x] `story_props_render.py` → `art/renders/story-props/*.png` (45 pictures: one per
+      asset, four face shots, ten compositions), every one opened and judged; four
+      shapes reworked on what they showed, one of them twice (Decision 7)
+- [x] rebased onto `origin/feat/engine-solids` at 7ce1deae (three commits, none touching
+      this branch's files; conflict-free with `rerere.enabled=false`; shard-1 step set
+      re-compared on the new base: 26 → 27, missing none)
 - [x] ASSET_MANIFEST.md row + §42
 - [x] tsc 0, typecheck:test 0, check:story-props-glb 0, check:library-glb 0,
       check:assets 0 (167 assets), check:png-integrity — see the final section
