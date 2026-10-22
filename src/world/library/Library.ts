@@ -1,4 +1,4 @@
-import { Group, Vector3, type Object3D } from 'three';
+import { Group, Vector3, type MeshToonMaterial, type Object3D } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -27,6 +27,7 @@ import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
 import {
+  buildLibraryDenShell,
   buildReadingRoomShell,
   libraryEntryBand,
   libraryExitBand,
@@ -103,6 +104,17 @@ import type { OpenAreaPoint } from '../dismount';
  * already left on each shelf), the owl librarian behind the desk at
  * `LIBRARY_LIBRARIAN_SPOT`, and the secret den behind `LIBRARY_SECRET_BOOKCASE`
  * (#719). Their stand spots are kept clear today.
+ *
+ * ## The secret den (#719)
+ *
+ * A walled pocket of the reading room behind its west wall — no space of its
+ * own (plan Decision 20). The west wall has a doorway the secret shelf's
+ * width, a lintel over it from the shelf's top to the wall's, and the den's
+ * floor and three walls beyond ({@link denRoot}, `shell.ts`'s
+ * `buildLibraryDenShell`). The shelf is still an ordinary case with its own
+ * collider, so the doorway is shut and the den is the one sealed pocket the
+ * room has, hidden; the shelf swings open onto it in plan Step 12.
+ * `layout.ts`'s `libraryDenContains` is the one owner of "she is in the den".
  */
 export interface LibraryDeps {
   /** The park's plot for the building. */
@@ -177,8 +189,23 @@ export class Library implements GameSystem {
   readonly skirtDepth: number;
   /** "The Library", over the door. */
   readonly nameLabel: NameLabel;
-  /** The reading room's own four walls' colliders. */
+  /** The reading room's own four walls' colliders (the west wall's two spans either side of the den's doorway among them). */
   readonly roomWalls: readonly WallCollider[];
+  /**
+   * **The secret den** (#719): its floor and three walls, in the reading
+   * room's frame — a child of {@link roomRoot}, so it shows and hides with the
+   * room and stays out of the park's drawn reach with it. Hidden while the
+   * secret shelf is shut, so nothing of the den shows over the west wall.
+   */
+  readonly denRoot = new Group();
+  /** The den's three walls' colliders: west, north, south (`den wall (…)` in {@link solids}). */
+  readonly denWalls: readonly WallCollider[];
+  /** The banded collider of the lintel over the den's doorway — solid only above the secret shelf's top, less the jump grace. */
+  readonly lintel: WallCollider;
+  /** The west wall's two spans and the lintel, one group, so they can fade while she is in the den (plan Step 12). */
+  readonly westWall: Group;
+  /** Their one material, the walls' green cloned, so fading it fades no other wall. */
+  readonly westMaterial: MeshToonMaterial;
   /** Every free-standing stack and its fade. */
   readonly stacks: readonly StackFader[];
   /** How many decorative books the shelves hold. */
@@ -226,8 +253,18 @@ export class Library implements GameSystem {
     this.roomRoot.name = 'the-library-inside';
     this.roomRoot.position.set(LIBRARY_ORIGIN_X, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z);
     this.roomRoot.visible = false;
-    this.roomWalls = buildReadingRoomShell(this.roomRoot, collision, surfaces);
+    const shell = buildReadingRoomShell(this.roomRoot, collision, surfaces);
+    this.roomWalls = shell.walls;
+    this.westWall = shell.westWall;
+    this.westMaterial = shell.westMaterial;
+    this.lintel = shell.lintel;
     this.props = new LibraryProps(collision, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z);
+    // The den (#719) before the furniture, its walls through the same props,
+    // so every one is held clear of every stand spot like any bookcase.
+    this.denRoot.name = 'the-library-den';
+    this.denRoot.visible = false;
+    this.roomRoot.add(this.denRoot);
+    this.denWalls = buildLibraryDenShell(this.denRoot, this.props, surfaces, shell.fabric).walls;
     const furnished = furnishReadingRoom(this.roomRoot, this.props);
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;

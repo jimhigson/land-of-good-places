@@ -342,7 +342,10 @@ export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
   { id: 'sconce-north-1', kind: 'sconce', at: { x: -8, z: -LIBRARY_INNER_Z }, facing: 0, pool: true },
   { id: 'sconce-north-2', kind: 'sconce', at: { x: 0, z: -LIBRARY_INNER_Z }, facing: 0 },
   { id: 'sconce-north-3', kind: 'sconce', at: { x: 8, z: -LIBRARY_INNER_Z }, facing: 0, pool: true },
-  { id: 'sconce-west-1', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: -6 }, facing: 90 },
+  // West-1 sits over its own case, not between it and the secret shelf: at
+  // z −6 it hung on the den doorway's north jamb (#719), half over the gap.
+  // It is no pool, so the light rig is unchanged.
+  { id: 'sconce-west-1', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: -8 }, facing: 90 },
   { id: 'sconce-west-2', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: 6 }, facing: 90, pool: true },
 ];
 
@@ -420,6 +423,90 @@ export const LIBRARY_SECRET_STAND: StandSpot = {
   z: LIBRARY_SECRET_BOOKCASE.at.z,
   facing: 270,
 };
+
+// ===========================================================================
+// The secret den (#719) — a walled pocket behind the west wall
+// ===========================================================================
+
+/**
+ * **How deep the secret den runs west of the reading room's west wall** —
+ * from the wall's outer face to the den's own west wall's inner face. Room
+ * for a baby dragon's nest of books in the far corner and a child beside it,
+ * and for the secret shelf to swing in and lie flat against the den's south
+ * wall (#719, plan Step 12) with the doorway still clear.
+ */
+export const LIBRARY_DEN_DEPTH = 5.6;
+
+/**
+ * **Half the den's doorway** — the gap in the west wall is exactly as wide as
+ * the secret shelf, so the shut shelf fills it: the art contract's case length
+ * (`art/blend/library_build.py`, 4 m), halved. Typed here because the den's
+ * walls are laid out from it; `shell.ts`'s `libraryDenGap` measures the drawn
+ * case and throws unless the two agree within 2 cm, so a case of another width
+ * stops the build rather than leaving a slit beside the shut shelf.
+ */
+export const LIBRARY_DEN_DOOR_HALF = 2;
+
+/**
+ * How far the den runs on north past its doorway's north edge: the far
+ * corner the baby dragon's nest is tucked into ({@link LIBRARY_DRAGON_NEST}).
+ */
+const DEN_NORTH_PAST_DOOR = 1.6;
+
+/**
+ * **The den's three inner wall faces**, room-local. The south face is flush
+ * with the doorway's south edge (the swung-open shelf lies along it); the
+ * north runs {@link DEN_NORTH_PAST_DOOR} on past the doorway's north edge.
+ * Its far corner, walls included — (−24.5, −8.2) — stands 25.8 m from the
+ * room's middle, inside {@link LIBRARY_PLAY_RADIUS} (28), which was reserved
+ * for it: the den's walls stop her, and the boundary is only the backstop.
+ */
+export const LIBRARY_DEN_INNER: { readonly west: number; readonly north: number; readonly south: number } = {
+  west: -(LIBRARY_HALF_X + LIBRARY_WALL_HALF + LIBRARY_DEN_DEPTH),
+  north: LIBRARY_SECRET_BOOKCASE.at.z - LIBRARY_DEN_DOOR_HALF - DEN_NORTH_PAST_DOOR,
+  south: LIBRARY_SECRET_BOOKCASE.at.z + LIBRARY_DEN_DOOR_HALF,
+};
+
+/**
+ * **The one owner of "she is in the den"**, room-local: west of the reading
+ * room's inner wall face — so the doorway, the wall's own thickness at the
+ * gap, already counts as the den — and inside the centre lines of the den's
+ * three walls. Every question about the den asks this, never a rectangle of
+ * its own: the guard that opens the secret shelf if she is ever found in the
+ * den with it shut, entering and restoring, the fades and the owl's shush
+ * (#719, plan Steps 12-14), and `check:library`'s fill and marches.
+ */
+export function libraryDenContains(x: number, z: number): boolean {
+  return (
+    x < -LIBRARY_INNER_X &&
+    x >= LIBRARY_DEN_INNER.west - LIBRARY_WALL_HALF &&
+    z >= LIBRARY_DEN_INNER.north - LIBRARY_WALL_HALF &&
+    z <= LIBRARY_DEN_INNER.south + LIBRARY_WALL_HALF
+  );
+}
+
+/** Just inside the den, through its doorway, looking in (#719) — where `/library-den` stands her. */
+export const LIBRARY_DEN_DOORWAY_STAND: StandSpot = { what: "inside the secret den's doorway", x: -19.6, z: -4.3, facing: 270, den: true };
+
+/** Beside the baby dragon's nest, facing it (#719) — where she stands to say hi. */
+export const LIBRARY_DRAGON_STAND: StandSpot = { what: 'beside the baby dragon', x: -21.3, z: -5.0, facing: 225, den: true };
+
+/** The baby dragon's nest of books (#719): in the den's far corner, facing the doorway and the camera. */
+export const LIBRARY_DRAGON_NEST: LocalPoint & { readonly facing: number } = { x: -22.6, z: -6.3, facing: 45 };
+
+/**
+ * The secret shelf's pull book (#719): the second shelf up — inside her
+ * reach, like every book she is meant to take hold of — and centred on it,
+ * where {@link LIBRARY_SECRET_STAND} already faces.
+ */
+export const LIBRARY_SECRET_BOOK: { readonly shelf: number; readonly along: number } = { shelf: 1, along: 0 };
+
+// Typed spots, so they are held to the den's one owner as the module loads:
+// a stand or the nest moved outside the walls is a build failure, not a
+// child standing in the reading room's wall.
+for (const spot of [LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DRAGON_STAND, { what: "the dragon's nest", ...LIBRARY_DRAGON_NEST }]) {
+  if (!libraryDenContains(spot.x, spot.z)) throw new Error(`library layout: ${spot.what} at (${spot.x}, ${spot.z}) is not inside the secret den (libraryDenContains)`);
+}
 
 /**
  * **The twelve readable books' slots** (#718): each names the case it stands
@@ -523,11 +610,12 @@ export const LIBRARY_SEAT_FRONT = 1.5;
 /**
  * **Every spot a child must be able to stand on, room-local** — the arrival,
  * the doorway, the desk's front, the librarian's spot, the rug, every seat's
- * front, every story cushion's seat, the secret shelf's stand, the twelve
- * readable books' stands, and every aisle node. `props.ts`'s
- * `libraryKeepOuts` turns these into keep-out discs and refuses any collider
- * inside one; `check:library` floods the floor from the arrival and asserts
- * every one is reached.
+ * front, every story cushion's seat, the secret shelf's stand, the secret
+ * den's two (tagged `den`), the readable books' stands, and every aisle node.
+ * `props.ts`'s `libraryKeepOuts` turns these into keep-out discs and refuses
+ * any collider inside one; `check:library` floods the floor from the arrival
+ * and asserts every one is reached — and, while the secret shelf is shut, that
+ * every `den` one is not: the den is the one pocket the room is meant to have.
  */
 export function libraryStandSpots(): StandSpot[] {
   const spots: StandSpot[] = [
@@ -537,6 +625,8 @@ export function libraryStandSpots(): StandSpot[] {
     LIBRARY_LIBRARIAN_SPOT,
     { what: 'the story rug', x: LIBRARY_STORY_RUG.x, z: LIBRARY_STORY_RUG.z, facing: 180 },
     LIBRARY_SECRET_STAND,
+    LIBRARY_DEN_DOORWAY_STAND,
+    LIBRARY_DRAGON_STAND,
   ];
   for (const piece of LIBRARY_FURNITURE) {
     if (piece.kind !== 'armchair' && piece.kind !== 'storyChair') continue;
