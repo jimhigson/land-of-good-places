@@ -498,6 +498,40 @@ export function libraryDenGap(): readonly [number, number] {
   return [z - half, z + half];
 }
 
+/**
+ * The pull zone's id (#719) — the one chip allowed to sit over the den's
+ * doorway. `Library.ts` offers the zone under it and {@link libraryDenDoorway}
+ * names it as the band's own, so the two can never drift apart.
+ */
+export const LIBRARY_SECRET_BOOK_ZONE = 'library-secret-book';
+
+/**
+ * **The secret den's doorway, as a `PortalBand` that fires nothing** (#719,
+ * plan Decision 36): the gap in the west wall, the wall's own thickness deep,
+ * from the doorway's north edge to where the swung-open secret shelf lies
+ * along the den's south wall — the leaf's measured depth short of the south
+ * edge, so the band is the clear doorway and nothing else. Third in
+ * `Library.doorBands()`, after the front door and the way out, so
+ * `check:tap-spacing` holds every other chip clear of the doorway exactly as
+ * it does for a door that changes space; the pull book's own zone is the one
+ * allowed over it. Nothing asks `bandCrossed` of it: walking into the den is
+ * walking, not a change of space. World metres.
+ */
+export function libraryDenDoorway(): PortalBand {
+  const [gapNorth, gapSouth] = libraryDenGap();
+  const leafDepth = libraryBookcaseSize(LIBRARY_SECRET_BOOKCASE.kind).depth;
+  return {
+    what: "the secret den's doorway",
+    centreX: LIBRARY_ORIGIN_X - LIBRARY_HALF_X,
+    centreZ: LIBRARY_ORIGIN_Z + (gapNorth + gapSouth - leafDepth) / 2,
+    halfAlong: LIBRARY_WALL_HALF,
+    halfAcross: (gapSouth - leafDepth - gapNorth) / 2,
+    yaw: Math.PI / 2,
+    y: LIBRARY_FLOOR_Y,
+    ownZoneId: LIBRARY_SECRET_BOOK_ZONE,
+  };
+}
+
 /** The reading room's own paint, for anything built of the same stuff — the secret den (#719). */
 export interface ReadingRoomFabric {
   /** The floor's boards. */

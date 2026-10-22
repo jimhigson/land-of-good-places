@@ -579,23 +579,84 @@ export function createLibraryBookcase(kind: BookcaseKind): AssetHandle {
   return { root, height: visibleBounds(root).top };
 }
 
+/** The kit's secret-shelf twin of the wall case: the same case vertex for vertex, its origin on one vertical edge. */
+const SECRET_SHELF_NODES = ['secretShelf-carcass', 'secretShelf-shelves'] as const;
+
+/** How far the drawn leaf's own measured size may stand from the wall case's and still be the same case. */
+const SECRET_LEAF_TOLERANCE = 0.005;
+
+/** The secret shelf's swinging leaf (#719), dressed, with the figures the hinge is built from. */
+export interface LibrarySecretLeaf {
+  /**
+   * The leaf: its origin on its **back-left** vertical edge (left as a child
+   * facing its books sees it), spanning x 0..`size.length`, z 0..`size.depth`,
+   * its books' front on z = `size.depth`.
+   */
+  readonly root: Group;
+  /** The wall case's measured size — the leaf's own, asserted equal within {@link SECRET_LEAF_TOLERANCE}. */
+  readonly size: BookcaseSize;
+  /** Its materials, its own (the baked body's and its outline's), so it can fade without fading the forty cases drawn from the same source. */
+  readonly materials: readonly Material[];
+}
+
 /**
- * **The secret shelf** (#719): the drawn bookcase vertex for vertex, but with
- * its origin on its hinge — the vertical line through its front-left corner —
- * so swinging it open is `door.rotation.y` 0 → -π/2 and nothing else.
- * `offset` is where the hinge stands in an ordinary case's frame, measured, so
- * the closed secret shelf stands exactly where an ordinary one would.
+ * **The secret shelf's leaf** (#719): the wall case, drawn from the kit's
+ * `secretShelf-*` twin of it — the same case the four cases beside it are
+ * instanced from, so a child sees five of a kind — re-originated on its
+ * **back-left** vertical edge, where the game hinges it (plan Decision 21: it
+ * swings into the den behind the wall, not out into the room the Artist's
+ * front-left origin was cut for; the shift is the carcass's measured depth,
+ * never typed). Baked like a stack, so it is two draw calls with two materials
+ * of its own: the leaf fades when it stands between the camera and her, and a
+ * shared paint would fade every case in the room with it.
+ *
+ * Throws unless the leaf's own measured bounds are the wall case's
+ * ({@link libraryBookcaseSize}) within 5 mm, with its origin on that edge: the
+ * den's doorway, the leaf's two collider states and the books on it are all
+ * laid out from the wall case's figures, and a twin of another size would leave
+ * a slit beside the shut leaf or a leaf drawn through the wall.
  */
-export function createLibrarySecretBookcase(): { readonly root: Group; readonly door: Group; readonly offset: Vector3 } {
+export function createLibrarySecretLeaf(): LibrarySecretLeaf {
+  const size = libraryBookcaseSize('wall');
+  const bounds = kitBounds(SECRET_SHELF_NODES);
+  const parts = assemble('library.secretLeaf.parts', SECRET_SHELF_NODES);
+  parts.position.set(-bounds.minX, -bounds.minY, -bounds.minZ);
+  const source = new Group();
+  source.add(parts);
+  const baked = bakeModel(source);
+  if (baked.glows.length > 0) throw new Error('libraryAssets: the secret leaf has a glowing part, whose shared paint its fader could not own');
   const root = new Group();
-  root.name = 'library.secretShelf';
-  const door = assemble('library.secretShelf.door', ['secretShelf-carcass', 'secretShelf-shelves']);
-  const ordinary = kitBounds(['shelf-carcass', 'shelf-shelves']);
-  const secret = kitBounds(['secretShelf-carcass', 'secretShelf-shelves']);
-  const offset = new Vector3(ordinary.minX - secret.minX, 0, ordinary.maxZ - secret.maxZ);
-  door.position.copy(offset);
-  root.add(door);
-  return { root, door, offset };
+  root.name = 'library.secretLeaf';
+  const body = bakedBodyMaterial();
+  const bodyMesh = solid(new Mesh(baked.body, body));
+  bodyMesh.name = 'library.secretLeaf.body';
+  root.add(bodyMesh);
+  const materials: Material[] = [body];
+  if (baked.outline) {
+    const outline = bakedOutlineMaterial();
+    const shell = new Mesh(baked.outline, outline);
+    shell.name = 'library.secretLeaf.outline';
+    shell.renderOrder = -1;
+    root.add(shell);
+    materials.push(outline);
+  }
+  const plan = measurePlan(root);
+  const off = Math.max(
+    Math.abs(plan.minX),
+    Math.abs(plan.minY),
+    Math.abs(plan.minZ),
+    Math.abs(plan.maxX - size.length),
+    Math.abs(plan.maxY - size.height),
+    Math.abs(plan.maxZ - size.depth),
+  );
+  if (off > SECRET_LEAF_TOLERANCE) {
+    throw new Error(
+      `libraryAssets: the secret leaf measures x ${plan.minX.toFixed(3)}..${plan.maxX.toFixed(3)}, y ${plan.minY.toFixed(3)}..${plan.maxY.toFixed(3)}, ` +
+        `z ${plan.minZ.toFixed(3)}..${plan.maxZ.toFixed(3)} on its back-left edge, against the wall case's ${size.length.toFixed(3)} x ${size.height.toFixed(3)} x ` +
+        `${size.depth.toFixed(3)} (${(off * 1000).toFixed(1)} mm off, ${(SECRET_LEAF_TOLERANCE * 1000).toFixed(0)} allowed): secretShelf-* is not the wall case any more`,
+    );
+  }
+  return { root, size, materials };
 }
 
 // ---------------------------------------------------------------------------

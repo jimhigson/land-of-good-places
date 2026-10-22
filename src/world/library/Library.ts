@@ -23,29 +23,39 @@ import { KID_HIP_HEIGHT } from '../../art/models/kid';
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
 import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
-import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './furnish';
+import { furnishReadingRoom, StackFader, type FurnishedShelfBook } from './furnish';
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
+import { SecretLeaf } from './secretShelf';
 import {
   buildLibraryDenShell,
   buildReadingRoomShell,
+  libraryDenDoorway,
   libraryEntryBand,
   libraryExitBand,
   LibraryFrame,
+  LIBRARY_SECRET_BOOK_ZONE,
   registerLibraryRoofCollision,
   registerLibraryShellCollision,
   registerLibrarySteps,
   type LibraryShellSolids,
 } from './shell';
 import {
+  libraryDenContains,
   LIBRARY_ARRIVAL,
   LIBRARY_BOUNDING_RADIUS,
+  LIBRARY_DEN_DOORWAY_STAND,
   LIBRARY_EXTERIOR_PLAN,
   LIBRARY_FLOOR_Y,
+  LIBRARY_HALF_X,
+  LIBRARY_HALF_Z,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAY_RADIUS,
   LIBRARY_PLAYER_SEATS,
+  LIBRARY_SECRET_STAND,
+  LIBRARY_WALL_HALF,
+  LIBRARY_WALL_HEIGHT,
   libraryCushion,
   libraryFacingStoryChair,
   libraryStandSpots,
@@ -104,9 +114,9 @@ import type { OpenAreaPoint } from '../dismount';
  * the twelve picture books, then the big readers' shelf, whose slots wait as
  * gaps until their chapter books land), and her two story cushions offer a
  * seat. Still to come on their own tracks: the owl librarian behind the desk
- * at `LIBRARY_LIBRARIAN_SPOT` and story time (#718), and the secret shelf
- * swinging open onto the den below, with its dragon and the cat (#719). Every
- * one of their stand spots is a keep-out already.
+ * at `LIBRARY_LIBRARIAN_SPOT` and story time (#718), and the den's baby dragon
+ * and the sleeping cat (#719, plan Step 13). Every one of their stand spots is
+ * a keep-out already.
  *
  * ## The secret den (#719)
  *
@@ -114,10 +124,15 @@ import type { OpenAreaPoint } from '../dismount';
  * own (plan Decision 20). The west wall has a doorway the secret shelf's
  * width, a lintel over it from the shelf's top to the wall's, and the den's
  * floor and three walls beyond ({@link denRoot}, `shell.ts`'s
- * `buildLibraryDenShell`). The shelf is still an ordinary case with its own
- * collider, so the doorway is shut and the den is the one sealed pocket the
- * room has, hidden; the shelf swings open onto it in plan Step 12.
- * `layout.ts`'s `libraryDenContains` is the one owner of "she is in the den".
+ * `buildLibraryDenShell`). The shelf is {@link secretShelf}, a leaf on a
+ * hinge (`secretShelf.ts`): shut, it fills the doorway and the den is the one
+ * sealed pocket the room has, hidden; **Pull the book!** on the gold book
+ * swings it slowly away into the den, and it lies open along the den's south
+ * wall until she leaves the library. Found in the den with it shut — a jet
+ * pack over the wall, a hand-typed link — a guard opens it at once (plan
+ * Decision 24): never sealed in, never swept through. `layout.ts`'s
+ * `libraryDenContains` is the one owner of "she is in the den"; the west wall
+ * and the open leaf fade while she is there.
  */
 export interface LibraryDeps {
   /** The park's plot for the building. */
@@ -160,6 +175,13 @@ const SHELF_BOOK_PICK_RADIUS = 0.7;
  */
 const SIT_PICK_RADIUS = 0.8;
 const SIT_STAND_RADIUS = 1.6;
+
+/**
+ * The secret shelf's Pull zone (#719): standing within this of its stand, in
+ * front of the case, offers **Pull the book!** — a stride either way along the
+ * wall, so a child who stops short of the exact spot is still offered it.
+ */
+const PULL_STAND_RADIUS = 2;
 
 /**
  * How far a story cushion's measured top may stand from `KID_HIP_HEIGHT` and
@@ -205,12 +227,30 @@ export class Library implements GameSystem {
   readonly denWalls: readonly WallCollider[];
   /** The banded collider of the lintel over the den's doorway — solid from the secret shelf's top, less the jump grace, up to the wall's own top. */
   readonly lintel: WallCollider;
-  /** The west wall's two spans and the lintel, one group, so they can fade while she is in the den (plan Step 12). */
+  /** The west wall's two spans and the lintel, one group, so they fade together while she is in the den. */
   readonly westWall: Group;
   /** Their one material, the walls' green cloned, so fading it fades no other wall. */
   readonly westMaterial: MeshToonMaterial;
   /** Every free-standing stack and its fade. */
   readonly stacks: readonly StackFader[];
+  /**
+   * **The secret shelf** (#719): the leaf on its hinge, its gold pull book,
+   * and its two collider states — shut (`bookcase west-2`) and open (along
+   * the den's south wall). Built after the furniture and before the keep-out
+   * assertion, so both footprints are held clear of every stand spot.
+   */
+  readonly secretShelf: SecretLeaf;
+  /**
+   * The west wall's fade: its two spans and the lintel, through their one
+   * material, translucent while she is in the den — driven by where she is,
+   * never by a sightline, because from the den the wall is always between
+   * her and the camera.
+   */
+  private readonly westWallFader: StackFader;
+  /** Every sightline fade: the stacks, and the open leaf (whose fader is built on its open footprint). */
+  private readonly faders: readonly StackFader[];
+  /** The one Pull zone, built once: the gold book's shut position never moves. */
+  private readonly pullZone: InteractZone;
   /** How many decorative books the shelves hold. */
   readonly bookCount: number;
   /**
@@ -281,6 +321,19 @@ export class Library implements GameSystem {
     this.bookCount = furnished.bookCount;
     this.shelfBooks = furnished.shelfBooks;
     this.bookZones = this.shelfBooks.map((placed) => this.shelfBookZone(placed));
+    // The secret shelf (#719): the leaf on its hinge, with the row the
+    // furnisher drew for it; both of its collider states go through the props.
+    this.secretShelf = new SecretLeaf(this.props, this.roomRoot, furnished.secret.books);
+    this.faders = [...this.stacks, this.secretShelf.fader];
+    this.westWallFader = new StackFader(
+      'west-wall',
+      this.westWall,
+      { x: -LIBRARY_HALF_X, z: 0 },
+      90,
+      { length: 2 * LIBRARY_HALF_Z, depth: 2 * LIBRARY_WALL_HALF, height: LIBRARY_WALL_HEIGHT },
+      [this.westMaterial],
+    );
+    this.pullZone = this.secretBookZone();
     this.lighting = new LibraryLighting(furnished.pools);
     this.roomRoot.add(this.lighting.group);
     // Her two story cushions (#718): seats only if cut to her hip height.
@@ -380,9 +433,24 @@ export class Library implements GameSystem {
     return this.props.solids;
   }
 
-  /** Every solid top in the reading room, with its drawn footprint — so a check can land a jump on each. */
+  /**
+   * Every solid top in the reading room **that is in the world right now**,
+   * with its drawn footprint — so a check can land a jump on each. The secret
+   * shelf registers two tops and only ever has one of them in the world
+   * (`LibraryProps.isPresent`); the other is not somewhere to land.
+   */
   get standables(): readonly LibraryStandable[] {
-    return this.props.standables;
+    return this.props.standables.filter((standable) => this.props.isPresent(standable.handle));
+  }
+
+  /** The secret shelf has landed open: the den's doorway is clear (#719). */
+  get denOpen(): boolean {
+    return this.secretShelf.open;
+  }
+
+  /** The secret shelf's turn from shut, radians: 0 shut, π/2 open, in between mid-swing. */
+  get secretShelfAngle(): number {
+    return this.secretShelf.angle;
   }
 
   /** The building's name over its door (the owl's bubbles arrive with #714 part 4). */
@@ -418,6 +486,8 @@ export class Library implements GameSystem {
     this.roomRoot.visible = true;
     this.boundToRoom();
     this.spaces.holdOff();
+    // The leaf as she was left: open if the save put her in the den, shut otherwise.
+    this.setLeafFor(player.position.x - LIBRARY_ORIGIN_X, player.position.z - LIBRARY_ORIGIN_Z);
   }
 
   // --------------------------------------------------------------- doors
@@ -444,20 +514,57 @@ export class Library implements GameSystem {
     return true;
   }
 
-  /** The front door's band and the room's exit, for the tap-spacing check and the invariants. */
-  doorBands(): PortalBand[] {
-    return [libraryEntryBand(this.frame, this.plan), libraryExitBand()];
+  /**
+   * `/library-den` (its deep link, plan Step 14): into the reading room, just
+   * inside the secret den's doorway, looking in — the leaf open, because she is
+   * in the den. A road for a developer's link, not a child's: a child finds the
+   * den by pulling the book.
+   */
+  requestEnterDen(): boolean {
+    return this.requestEnter(LIBRARY_DEN_DOORWAY_STAND);
   }
 
   /**
-   * Inside, one list (#718): a "Read it!" zone on every readable book — unless
-   * she is riding (sitting, Step 7), when the room offers her nothing to walk
-   * to — and a Sit zone on each of her two story cushions, always on (the one
-   * she sits on offers 'Get up'). Outside, the building's entrance.
+   * The front door's band, the room's exit, and the secret den's doorway (which
+   * fires nothing: it tells `check:tap-spacing` no other chip may sit in the
+   * doorway), for the checks and the invariants. Consumers that take index 0
+   * or 1 are unaffected by the third (plan Decision 36).
+   */
+  doorBands(): PortalBand[] {
+    return [libraryEntryBand(this.frame, this.plan), libraryExitBand(), libraryDenDoorway()];
+  }
+
+  /**
+   * Inside, one list (#718, #719): a "Read it!" zone on every readable book
+   * and the Pull zone on the secret shelf's gold book — unless she is riding
+   * (sitting, Step 7), when the room offers her nothing to walk to — and a Sit
+   * zone on each of her two story cushions, always on (the one she sits on
+   * offers 'Get up'). Outside, the building's entrance.
    */
   interactZones(): InteractZone[] {
     if (!this.inside) return [this.exteriorEntranceZone()];
-    return [...(this.player?.riding ? [] : this.bookZones), ...this.sitZones()];
+    return [...(this.player?.riding ? [] : [...this.bookZones, this.pullZone]), ...this.sitZones()];
+  }
+
+  /**
+   * **Pull the book!** — the gold book on the secret shelf slides out with a
+   * creak and the whole case swings away into the den (`SecretLeaf.pull`).
+   * Only from inside, on her feet; false when nothing started (already open, or
+   * mid-swing).
+   */
+  pullSecretBook(): boolean {
+    if (!this.inside || this.player?.riding || this.spaces.isChanging) return false;
+    return this.secretShelf.pull();
+  }
+
+  /**
+   * **The leaf open, now, silently** — for the checks and the label scenes that
+   * want the den without the pull (`check:labels`'s dragon visit, plan Step
+   * 13), and the guard's road. The den shows from this frame.
+   */
+  openDenInstantly(): void {
+    this.secretShelf.openInstantly();
+    this.syncDen(this.player);
   }
 
   /**
@@ -492,7 +599,10 @@ export class Library implements GameSystem {
     const player = this.player;
     if (!player) return;
     if (this.seatedOn !== null) this.updateSeated(player, context);
-    if (this.inside) this.fadeStacks(player, dt);
+    if (this.inside) {
+      this.updateSecretLeaf(player, dt, context.elapsed);
+      this.fadeStacks(player, dt);
+    }
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
     // Nobody falls out of the world: a slipped trigger lands her back at the arrival.
@@ -595,14 +705,57 @@ export class Library implements GameSystem {
     if (context.input.justPressed('jump')) this.standUp();
   }
 
-  /** A stack between the camera and her eases translucent; one that is not, back to solid. */
+  /**
+   * **The secret shelf, every frame inside** (#719): its own clock (the
+   * twinkle, the slide, the swing), then **the guard** (plan Decision 24) — if
+   * she is in the den with the leaf shut and not swinging, it opens at once,
+   * silently: a jet pack over the west wall or a hand-typed `/library?at=`
+   * into the den must never leave her sealed in, and the leaf is never swung
+   * through her. Then the den's visibility and the west wall's fade, both
+   * asked of `libraryDenContains`, the one owner of "she is in the den".
+   */
+  private updateSecretLeaf(player: Player, dt: number, elapsed: number): void {
+    const leaf = this.secretShelf;
+    leaf.update(dt, elapsed);
+    const inDen = this.playerInDen(player);
+    if (inDen && !leaf.open && !leaf.swinging) {
+      leaf.openInstantly();
+      console.warn('Library: she was in the secret den with the shelf shut — the guard opened it (nobody is ever sealed in)');
+    }
+    this.syncDen(player);
+    this.westWallFader.fadeTowards(inDen ? STACK_FADED_ALPHA : 1, dt);
+  }
+
+  /** Is she in the secret den? `libraryDenContains`, asked of her room-local feet. */
+  private playerInDen(player: Player): boolean {
+    return libraryDenContains(player.position.x - LIBRARY_ORIGIN_X, player.position.z - LIBRARY_ORIGIN_Z);
+  }
+
+  /**
+   * **The den shows only when there is a way to see it** (plan Decision 25):
+   * while the leaf has moved off shut, or she is in there. Shut, the dragon's
+   * horns and the den's walls would otherwise stand over the 5.2 m west wall
+   * for the camera to see, and give the secret away.
+   */
+  private syncDen(player: Player | null): void {
+    this.denRoot.visible = this.secretShelf.angle > 0 || (player !== null && this.playerInDen(player));
+  }
+
+  /** The leaf for a spot she is being put at: open if the spot is in the den, shut otherwise. */
+  private setLeafFor(localX: number, localZ: number): void {
+    if (libraryDenContains(localX, localZ)) this.secretShelf.openInstantly();
+    else this.secretShelf.closeInstantly();
+    this.syncDen(this.player);
+  }
+
+  /** A stack (or the open leaf) between the camera and her eases translucent; one that is not, back to solid. */
   private fadeStacks(player: Player, dt: number): void {
     const camera = this.deps.camera.camera.position;
     this.cameraLocal.set(camera.x - LIBRARY_ORIGIN_X, camera.y - LIBRARY_FLOOR_Y, camera.z - LIBRARY_ORIGIN_Z);
     const localX = player.position.x - LIBRARY_ORIGIN_X;
     const localZ = player.position.z - LIBRARY_ORIGIN_Z;
     const feet = player.position.y - LIBRARY_FLOOR_Y; // flat-ok: height above the reading room's own flat floor, in its own space off the sphere
-    for (const stack of this.stacks) {
+    for (const stack of this.faders) {
       let hides = false;
       for (const up of [0.3, 1, 1.7]) {
         this.from.set(localX, feet + up, localZ);
@@ -647,8 +800,12 @@ export class Library implements GameSystem {
     const spot: LocalPoint = at ?? LIBRARY_ARRIVAL;
     const facing = ((at?.facing ?? LIBRARY_ARRIVAL.facing) * Math.PI) / 180;
     player.teleportTo(LIBRARY_ORIGIN_X + spot.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + spot.z, facing);
-    // A fresh visit starts with every stack solid.
-    for (const stack of this.stacks) stack.setAlpha(1);
+    // The leaf is open exactly when she is put down in the den (a link, a
+    // restore); from the door it is shut, so the trick is there to find.
+    this.setLeafFor(spot.x, spot.z);
+    // A fresh visit starts with every stack, the leaf and the west wall solid.
+    for (const fader of this.faders) fader.setAlpha(1);
+    this.westWallFader.setAlpha(1);
   }
 
   /**
@@ -671,6 +828,9 @@ export class Library implements GameSystem {
     if (!this.inside) return;
     this.inside = false;
     this.roomRoot.visible = false;
+    // Every visit starts shut (a restore into the den opens it again).
+    this.secretShelf.closeInstantly();
+    this.syncDen(null);
   }
 
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */
@@ -680,6 +840,9 @@ export class Library implements GameSystem {
     this.standUp();
     this.inside = false;
     this.roomRoot.visible = false;
+    // Every visit from the park starts with the leaf shut, so the trick is there to find again.
+    this.secretShelf.closeInstantly();
+    this.syncDen(null);
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
     const mat = this.doormat;
     player.teleportTo(mat.x, this.surfaces.sample(mat.x, mat.z, terrainHeight(mat.x, mat.z) + 3), mat.z, facing);
@@ -717,6 +880,34 @@ export class Library implements GameSystem {
           },
           '📖',
         ),
+    };
+  }
+
+  /**
+   * **The secret shelf's Pull zone** (#719): on the gold book where it stands
+   * while the leaf is shut, a metre over the floor; stood at
+   * `LIBRARY_SECRET_STAND`, in front of the case, facing it; the rainbow round
+   * the book itself; and one chip, **Pull the book!** — offered only while the
+   * leaf is shut and not swinging. Otherwise it offers nothing at all, which
+   * makes it unselectable (`world/Selection.ts`), so the selection's cached box
+   * for a book that has swung away is never consulted (plan Decision 35).
+   */
+  private secretBookZone(): InteractZone {
+    const leaf = this.secretShelf;
+    const at = leaf.shutBookRoom;
+    return {
+      id: LIBRARY_SECRET_BOOK_ZONE,
+      label: 'the special book',
+      x: LIBRARY_ORIGIN_X + at.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + at.z,
+      pickRadius: SHELF_BOOK_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + LIBRARY_SECRET_STAND.x,
+      standZ: LIBRARY_ORIGIN_Z + LIBRARY_SECRET_STAND.z,
+      standRadius: PULL_STAND_RADIUS,
+      verb: 'Pull',
+      highlight: highlightObject(leaf.pullBook),
+      actions: () => (leaf.open || leaf.swinging ? [] : pressAction(LIBRARY_CHIPS.pull, () => this.pullSecretBook(), '📕')),
     };
   }
 

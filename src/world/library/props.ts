@@ -99,7 +99,10 @@ export interface LibrarySolid {
  * A solid's top and the drawn footprint it covers, room-local, as it was
  * registered — so a check can land on every one of them and see it hold her.
  * Not a floor: a record of a solid's shape, made by the same call that
- * registered the solid.
+ * registered the solid. `handle` is that solid's collider, so a check can ask
+ * {@link LibraryProps.isPresent} whether the top is in the world right now:
+ * the secret shelf's two states (#719) are both registered, and only one of
+ * them is ever somewhere to land.
  */
 export interface LibraryStandable {
   readonly what: string;
@@ -107,6 +110,8 @@ export interface LibraryStandable {
   readonly top: number;
   /** The drawn footprint the plate covers: a turned box, or a disc. */
   readonly footprint: BoxFootprint | { readonly x: number; readonly z: number; readonly radius: number };
+  /** The solid's collider — the same object {@link LibrarySolid.handle} holds. */
+  readonly handle: number | WallCollider | BoxCollider;
 }
 
 /** A box's footprint, room-local: centre, half-length along its yaw, half-depth across it. */
@@ -145,6 +150,8 @@ export class LibraryProps {
   private readonly originX: number;
   private readonly originZ: number;
   private readonly keepOuts: readonly KeepOut[];
+  /** The colliders {@link detach} has taken out and {@link attach} has not yet put back. */
+  private readonly away = new Set<WallCollider | BoxCollider>();
 
   constructor(collision: CollisionWorld, originX: number, originZ: number) {
     this.collision = collision;
@@ -163,7 +170,7 @@ export class LibraryProps {
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
     const handle = this.collision.toppedNarrow(topHalf, () => this.collision.addCircle(worldX, worldZ, radius, top, false, true));
-    if (Number.isNaN(topHalf) || topHalf >= FOOT_HALF_WIDTH) this.standables.push({ what, top, footprint: { x, z, radius } });
+    if (Number.isNaN(topHalf) || topHalf >= FOOT_HALF_WIDTH) this.standables.push({ what, top, footprint: { x, z, radius }, handle });
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
@@ -222,7 +229,7 @@ export class LibraryProps {
     // drawn (a chair's rolled arm, `libraryArmchairParts`) — the width rule
     // (`CollisionWorld.toppedNarrow`) decides, never a flag. Omitted, all of it.
     const handle = this.collision.toppedNarrow(topHalf, () => this.collision.addBox(worldX, worldZ, halfLength, halfDepth, -yaw, 0, top, false, true));
-    if (Number.isNaN(topHalf) || topHalf >= FOOT_HALF_WIDTH) this.standables.push({ what, top, footprint });
+    if (Number.isNaN(topHalf) || topHalf >= FOOT_HALF_WIDTH) this.standables.push({ what, top, footprint, handle });
     this.solids.push({ what, shape: 'box', top, points: corners, radius: 0, handle });
     return [handle];
   }
@@ -236,12 +243,13 @@ export class LibraryProps {
    * re-asking either.
    *
    * Its top goes with it: a solid's top is only somewhere to land while the
-   * solid is there.
+   * solid is there ({@link isPresent} says which tops are).
    */
   detach(solids: readonly (WallCollider | BoxCollider)[]): void {
     for (const solid of solids) {
       if ('halfX' in solid) this.collision.removeBox(solid);
       else this.collision.removeWall(solid);
+      this.away.add(solid);
     }
   }
 
@@ -254,7 +262,18 @@ export class LibraryProps {
     for (const solid of solids) {
       if ('halfX' in solid) this.collision.restoreBox(solid);
       else this.collision.restoreWall(solid);
+      this.away.delete(solid);
     }
+  }
+
+  /**
+   * **Is this registered solid in the world right now** — never {@link detach}ed,
+   * or {@link attach}ed since? A disc always is: nothing takes a disc out but
+   * a check, and a check puts nothing back. What a jump can land on this frame
+   * is the {@link standables} this says yes to.
+   */
+  isPresent(handle: number | WallCollider | BoxCollider): boolean {
+    return typeof handle === 'number' || !this.away.has(handle);
   }
 
   /** Throws with every solid found inside a keep-out — call once, after everything is placed. */
