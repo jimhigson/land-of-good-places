@@ -652,7 +652,10 @@ def build_flower() -> None:
     for sx, z, yaw in ((1.0, 0.20, 20.0), (-1.0, 0.31, -30.0)):
         stem.add(*tapered_ellipsoid(0.13, 0.055, 0.02, 0, 0.55),
                  matrix=place(sx * 0.10, 0.0, z, ry=-28.0, rz=yaw + (0.0 if sx > 0 else 180.0)))
-    tilt = -38.0  # the head faces −Y and up
+    # The head faces −Y (the reader) and up: a rotation of +38° about X takes
+    # the petal plane's normal (0, 0, 1) to (0, −sin 38°, cos 38°). The first
+    # cut used −38° and the head faced the back wall, edge-on to every camera.
+    tilt = 38.0
     head = Matrix.Translation((top[0], top[1] - 0.02, top[2] + 0.05)) @ rot(x=tilt)
     for k in range(PETAL_COUNT):
         ang = TAU * k / PETAL_COUNT + deg(15.0)

@@ -158,9 +158,12 @@ base, facing +Z, `height = visibleBounds(root).top`, `root.scale` untouched):
    puffs, the biggest set back; the heap's four tidy layers read as a tiled roof — now
    five layers (16/12/8/4/1 = 41) each sandwich turned and nudged by a fixed pattern;
    the flower's narrow petals spread like a propeller — now plump and overlapping round
-   a bigger centre; the nest's long upward twigs made a sea urchin — now short and
-   nearly level. The renders' dull cast is the shared Workbench pipeline (the library's
-   `cat.png` has it too), not the kit's colours.
+   a bigger centre, and the second render showed the head still edge-on: its tilt was
+   `rot(x=-38)`, whose normal is (0, +0.616, 0.788), facing the back wall — `+38` faces
+   the reader (the bounds are identical either way, so only a picture could catch it);
+   the nest's long upward twigs made a sea urchin — now short and nearly level. The
+   renders' dull cast is the shared Workbench pipeline (the library's `cat.png` has it
+   too), not the kit's colours.
 8. **Bytes**: the first export was 538 KB. Crisp (unbevelled) wedges in the tower and
    heap (a bevelled wedge is 28 shipped vertices, a crisp one 18, fifty-seven times
    over; the lone `sandwich` keeps its bevel), 15 bigger gingham checks instead of 32,
