@@ -27,10 +27,19 @@ export interface TrainStop {
    * **Where a child waits for the train**: on the platform, back from its edge
    * — never where a carriage will pass, since the train stops for anybody in
    * its way (`ParkTrain.wayAhead`), and a child waiting in its way would hold
-   * the very train she is waiting for.
+   * the very train she is waiting for. The first of {@link waits}.
    */
   readonly waitX: number;
   readonly waitZ: number;
+  /**
+   * **Every place to wait on this platform**, a child's width apart, the one
+   * furthest from where the player's chip stands her first. A child takes one
+   * for the whole wait ({@link TrainService.claimWait}) and nobody else is sent
+   * to it: two children sent to one spot pushed each other, and the first
+   * there — a metre across the platform in a second, and off its edge onto the
+   * track within a minute — held the train she was waiting for.
+   */
+  readonly waits: readonly { readonly x: number; readonly z: number }[];
 }
 
 /**
@@ -65,6 +74,16 @@ export interface TrainService {
 
   /** Gives the seat up. Safe to call twice. */
   leaveSeat(seat: number): void;
+
+  /**
+   * Takes a place to wait at `stop` ({@link TrainStop.waits}), for the walk
+   * there and the wait: its index, or `null` when every one is taken — then
+   * there is no trip, and the child wonders again later.
+   */
+  claimWait(stop: number): number | null;
+
+  /** Gives a place to wait back. Safe to call twice. */
+  releaseWait(stop: number, wait: number): void;
 
   /** Is a body standing here on the line? — the train's own answer (`ParkTrain.onTheLine`). */
   onTheLine(x: number, y: number, z: number, radius: number): boolean;

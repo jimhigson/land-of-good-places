@@ -22,7 +22,7 @@ import { applyRidePose, type RidePosture } from './ridePose';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
-import { terrainHeight } from '../world/terrain';
+import { altitudeAt, terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
 import { STEP_DOWN_ASKED, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, nearestFit, riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep, wedgeDepth } from '../world/standing';
 import { faceOnGround } from '../world/up';
@@ -1842,7 +1842,9 @@ export class Player implements GameSystem {
     if (this.airborne && !this.flying) {
       this.landedFor = 0;
       const p = this.position;
-      if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(p.y - this.hoverAt.y) > HOVER_SPAN) {
+      // Her height is her altitude over the ground in her own column, never a
+      // world-y difference between two columns (mostly planet, not height).
+      if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(altitudeAt(p.x, p.y, p.z) - altitudeAt(this.hoverAt.x, this.hoverAt.y, this.hoverAt.z)) > HOVER_SPAN) {
         this.hoverAt.copy(p);
         this.hoverFor = dt;
       } else {

@@ -178,13 +178,14 @@ function buildGraph(): PoiGraph {
 // spot is the stop itself — as the walk's target was before — and a stop
 // without one would never be arrived at: a `NaN` target, and no trip ever.
 const STOPS: readonly TrainStop[] = [
-  { index: 0, name: 'Bluebell Halt', x: -26, z: 4, waitX: -26, waitZ: 4 },
-  { index: 1, name: 'Sunny Side', x: 26, z: -4, waitX: 26, waitZ: -4 },
+  { index: 0, name: 'Bluebell Halt', x: -26, z: 4, waitX: -26, waitZ: 4, waits: [{ x: -26, z: 4 }, { x: -26, z: 6 }] },
+  { index: 1, name: 'Sunny Side', x: 26, z: -4, waitX: 26, waitZ: -4, waits: [{ x: 26, z: -4 }, { x: 26, z: -6 }] },
 ];
 
-/** Trundles between the two stops on a fixed clock, with four seats. */
+/** Trundles between the two stops on a fixed clock, with four seats, and two places to wait at each stop. */
 function installTrain(): () => void {
   const seats: (number | null)[] = [null, null, null, null];
+  const waitsTaken = STOPS.map((stop) => stop.waits.map(() => false));
   let clock = 0;
   const service: TrainService = {
     stops: STOPS,
@@ -217,6 +218,17 @@ function installTrain(): () => void {
     },
     leaveSeat: (seat) => {
       seats[seat] = null;
+    },
+    claimWait: (stop) => {
+      const taken = waitsTaken[stop];
+      const free = taken ? taken.indexOf(false) : -1;
+      if (!taken || free < 0) return null;
+      taken[free] = true;
+      return free;
+    },
+    releaseWait: (stop, wait) => {
+      const taken = waitsTaken[stop];
+      if (taken && wait >= 0 && wait < taken.length) taken[wait] = false;
     },
     // No line in this park: nobody is ever on it, and off it is where they stand.
     onTheLine: () => false,

@@ -280,6 +280,8 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly route: TrainRoute;
   readonly stations: Station[] = [];
   readonly stops: TrainStop[] = [];
+  /** Which of each stop's places to wait a child of the crowd holds — see {@link claimWait}. */
+  private readonly waitsTaken: boolean[][] = [];
   /** The level crossings — exported so `check:park` knows where feet may cross. */
   readonly crossings: readonly LevelCrossing[] = [];
   /** The bridge built at every crossing (issue #116, Decision 8) — exported
@@ -410,7 +412,9 @@ export class ParkTrain implements GameSystem, TrainService {
         z: station.standZ,
         waitX: station.waitX,
         waitZ: station.waitZ,
+        waits: station.waits,
       });
+      this.waitsTaken.push(station.waits.map(() => false));
     }
 
     // A bridge at every crossing (issue #116, Decision 8) — built before the
@@ -929,6 +933,20 @@ export class ParkTrain implements GameSystem, TrainService {
   leaveSeat(seat: number): void {
     const entry = this.seats[seat];
     if (entry && entry.taken === 'npc') entry.taken = null;
+  }
+
+  claimWait(stop: number): number | null {
+    const taken = this.waitsTaken[stop];
+    if (!taken) return null;
+    const free = taken.indexOf(false);
+    if (free < 0) return null;
+    taken[free] = true;
+    return free;
+  }
+
+  releaseWait(stop: number, wait: number): void {
+    const taken = this.waitsTaken[stop];
+    if (taken && wait >= 0 && wait < taken.length) taken[wait] = false;
   }
 
   wayOff(x: number, z: number, radius: number): { readonly x: number; readonly z: number } {

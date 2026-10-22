@@ -500,7 +500,66 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
   (commit 9b3a0b2f). PR body updated (/tmp/es-pr-body4.md); comment issuecomment-6265606013.
 - Sixteen parks at 8adc1ea3: 12 green; red 6 (awning), 9 (walk-off squeeze), 11 (awning + walk-off squeeze), 15 (bench).
 
-## PAUSED 19 Oct 2026 (Jim: token usage at 92%) — resume here
+## Round four finished (22–23 Oct 2026, Fable 5.1) — resume here
+State: work branch feat/engine-solids; PR head feat/engine-solids-pr = @@PR_HEAD@@; CI @@CI@@; preview @@PREVIEW@@.
+Local parks: `.parks` hydrated with CI's seed 0–15 parks, restamped to the tree's hash by `/tmp/es-restamp-current.sh <worktree>`
+(a stale manifest makes every harness hang at 0% CPU — restamp after ANY src edit). Gate runner: `/tmp/es-shards5.sh <tag> 1..9`
+runs the nine shards in parallel in the detached snapshot worktree `.claude/worktrees/engine-solids-snap` (never edited; checkout
+--detach the commit, copy .parks, restamp). Proof batch: `/tmp/es-proofs10/run.sh solids|exits` (logs alongside, head.txt).
+Done this round (each its own commit, pushed):
+- 5edb5b81 the census (lib/solidReach.mts) leaves the train's 15 moving bodies out (neither aimed at nor hopped over);
+  clauses 5, 9, 10 and the jet-pack report too; the stderr note names every clause they are out of. Clause 8 asks EVERY
+  station: on the line 2.2 m past the nose it stays; then up on the platform at the chip's spot it leaves within 20 s. Proof
+  `platform-holds-train` (her platform counted as the line). The "her line on the line" case hops out square across the line
+  (the old "away from the middle" was the position vector, which on a radial stretch walked her along the track). Clause 13
+  lets go of its holder NPC when it finds nowhere to stand on the train (its own bookkeeping had failed the later cases).
+- 8a48066b DECISION (Jim away; question for him in the PR body): a player standing still is furniture to the crowd —
+  `Player.isStandingStill` (one owner), `NpcSystem.separateFromPlayer`: the child takes the whole correction. Reason: at a
+  platform the crowd walking to its waiting spots (1.28 m from the stand spot, inside the 1.52 m separation) pushed her a
+  metre across the platform in 10 s to within 1.18 m of the line; the train, which stops for anybody in its way, stood
+  1.5 m short of the station for her, then she was pushed off the platform's edge onto the track. Found by clause 13
+  "put down beside it" — green on one run, red on the next (phase of the lap), so flaky = failing, fixed at the root.
+- 7ce1deae clause 13 asks the put-down spot AS CHOSEN (the rule's own answer must be clear of the train), not a second later
+  when the resolver/wedge rescue may have mended it — proof `put-down-ignores-train` was red at Bluebell Halt and green at
+  Sunny Side before. `scripts/trace-npc-driver.mts` (check:crowd, shard 1): its stub `TrainStop`s had no waitX/waitZ since
+  3443b9e8 → every walk aimed at NaN → "NOT EXERCISED: trips" (CI shard 1 would have been RED). Fixed; trips=76.
+- (this commit) `Player.ts` hover rescue: `p.y - this.hoverAt.y` was a new flat primitive (check:flat-primitives RED in
+  shard 1, from 97444d7f) → `altitudeAt` difference. check:jitter RED (shard 3, pre-existing since 3443b9e8/4715101a): a
+  waiting child (Theo, Sunny Side) was shoved off the platform onto the track by children walking to the SAME waiting spot
+  (PLATFORM_ARRIVE 0.6 → two cannot both arrive; the first there got half the overlap a frame: 2.6 → 1.17 m from the line
+  in 1 s, off the edge at f1910), then after 3 s `offTheLine` set him down 2.74 m away in one frame — an "own step" of
+  2.743 (bound 1). Fixes: (a) each platform has TWO places to wait (`TrainStop.waits`, a child's width apart on the open
+  end, far one first; `Station.WAIT_ALONGS` 2.55 and 0.75), one child to a place (`TrainService.claimWait/releaseWait`;
+  the trip claims at commitment, releases on boarding/abandon; full → no trip this time); (b) a waiting child holds her
+  ground (`GroundHolder.holdsGround` on the driver, `NpcCharacter.holdsGround`; furniture in `separateFrom` and to the
+  walking player); (c) the set-down is a declared write `NpcCharacter.setDown` (via stepThroughDoor), hooked by
+  check:jitter like stepThroughDoor. check:labels RED (shard 4) after 8a48066b: a crowd path change surfaced a label
+  flicker — Jasper's name pill came up 3 px below Wren's (older incumbent), drifted into it at 1 px/frame, went down 11
+  frames later (D). Fix in `LabelManager`: `LABEL_ENTRY_CUSHION_PX` 24 — a label comes up only with that much room beyond
+  the margin, stays up to the margin (rule 3's hysteresis on the way up); check:labels' C clause asks the same room for a
+  label that was down. Sanity: with the standing-still rule disabled check:labels was green, so the flicker is path-
+  sensitive, not a manager regression — the cushion fixes the class.
+Local gate at 7ce1deae (snapshot, /tmp/es-sh-r4-*.log): shards 2,5,6,7,8,9 exit 0; 1 (flat-primitives), 3 (jitter), 4
+(labels) red as above → fixed in the next commit; re-run recorded below. test:procgen exit 0 (46 files, 2154 tests); build
+exit 0; tsc exit 0; check:exits/pet-slide/solids core+park (census) exit 0 at 8a48066b.
+Red proofs at 8a48066b (/tmp/es-proofs10, SOLIDS_SKIP_CENSUS=1 LGP_SEED=5; the two census-skipped clause-9/11 "0 walks"
+lines are red in every skip-census run and are not the proof):
+- platform-holds-train: ✗ at every station: … it leaves — Sunny Side: with her on its platform at (-20.7, 14.2) it never
+  left in 20 s (3 of her line on the line); Bluebell Halt: it never came to stand there (its nose at 40.8 m round)
+- train-ignores-her: ✗ at every station (2 of 2): Sunny Side 1.08 m short, Bluebell Halt 0.99 m short (1.24 asked);
+  ✗ on the loop 1.03 m; ✗ in a tunnel (209.5–2.2 m round) 1.00 m
+- train-ignores-pets: ✗ her line on the line: … stops -39.23 m short of the nearest; train-ignores-npcs: ✗ -23.07 m
+- train-ignores-on-top: ✗ standing on it: carriage 2 at Sunny Side, it moved 1.38 m in 30 s
+- pets-count-aboard / pets-stay-out: ✗ the ride … it left in never, went 0 of its 212 m lap
+- ghost-train / frozen-train: ✗ walking into it standing at Sunny Side … carriage 34.6 m round: through to its far side
+- put-down-ignores-train (at 7ce1deae): ✗ put down beside it … slot beyond the carriage 34.6 m round: put down 0.76 m
+  inside it, wedged 0.76; 31.6 m round: 0.31 / 0.31
+- exits: pets-count-aboard ✗ the train never left the platform (15 s allowed); pets-stay-in 18 FAILED exits (companions
+  missing); pets-stay-out ✗ her companions on the Rail Race/coaster/ferris/slide/lift: 3 of 3 out, 0 in a seat
+Questions for Jim (also in the PR body): (1) a child standing still is not shoved by the crowd — keep? (2) two places to
+wait per platform, one child each (a third wonders again later) — keep? (3) the label entry cushion (24 px) — keep?
+
+## PAUSED 19 Oct 2026 (Jim: token usage at 92%) — superseded by the section above
 - The engineer was stopped mid-task; the worktree was clean and everything is pushed (feat/engine-solids @ 23680ecf).
   PR #722's head (feat/engine-solids-pr) is still 8e8d318a, which predates round four. The tunnel commits and all
   of round four are unverified by QA.

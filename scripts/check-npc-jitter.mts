@@ -121,12 +121,25 @@ function nearStation(x: number, z: number): string {
 // `stepThroughDoor` is actually called. A child who jumped six hundred metres
 // any other way still fails, which is the whole point — the exemption is tied
 // to the declaration, not to the distance or to the child.
+//
+// `setDown` is the third declared write (22 Oct 2026): a child of the crowd
+// found down on the railway is set down off it, where the train says is clear
+// (`NpcSystem.offTheLine`) — a jump of a few metres, declared the same way, and
+// re-baselined the same way. `setDown` is written in terms of `stepThroughDoor`
+// today; it is hooked by its own name so that it stays declared if that ever
+// changes.
 for (let i = 0; i < characters.length; i += 1) {
   const character = characters[i]!;
   const step = character.stepThroughDoor.bind(character);
+  const setDown = character.setDown.bind(character);
   const index = i;
   character.stepThroughDoor = (x: number, y: number, z: number, facing: number) => {
     step(x, y, z, facing);
+    carriedX[index] = character.position.x;
+    carriedZ[index] = character.position.z;
+  };
+  character.setDown = (x: number, y: number, z: number) => {
+    setDown(x, y, z);
     carriedX[index] = character.position.x;
     carriedZ[index] = character.position.z;
   };

@@ -11,6 +11,7 @@ import { PALETTE } from '../../core/palette';
 import { woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
+import { CHILD_FOOTPRINT } from '../../art/models/kid';
 import { solidInFrame, standOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
@@ -69,14 +70,23 @@ const ROOF_TOP = PLATFORM_HEIGHT + CANOPY_HEIGHT + ROOF_THICKNESS / 2 + (ROOF_WI
 
 /** The bench at the back of the sheltered end: its seat and its back, in from the platform's back edge. */
 /**
- * The waiting spot ({@link Station.waitX}): 0.45 m behind the platform's middle
- * line and 1.2 m along it, towards the open end — the canopy's posts stand at
- * −2.6 and −0.2 along and the bench from −2.4 to −0.4. With the crowd's arrival
- * radius (0.6 m, `trainTrip.ts`) a child waits at least 2.0 m from the line's
- * middle: her body a metre clear of the engine's eaves.
+ * The waiting spots ({@link Station.waits}): 0.45 m behind the platform's
+ * middle line, along it towards the open end — the canopy's posts stand at
+ * −2.6 and −0.2 along and the bench from −2.4 to −0.4, so the open end is the
+ * only clear stretch. With the crowd's arrival radius (0.6 m, `trainTrip.ts`)
+ * a child waits at least 2.0 m from the line's middle: her body a metre clear
+ * of the engine's eaves.
+ *
+ * Two of them, a child's width ({@link CHILD_FOOTPRINT}) apart, the far one
+ * first: the nearer stands 0.95 m clear of the post at −0.2, the far one's body
+ * ends 0.15 m inside the platform's end. One child to a spot
+ * (`TrainService.claimWait`): two sent to one spot pushed each other, and the
+ * first there was shoved a metre across the platform and off its edge onto the
+ * track, where the train she was waiting for stood for her.
  */
 const WAIT_ACROSS = 0.45;
-const WAIT_ALONG = 1.2;
+const WAIT_ALONG = 2.55;
+const WAIT_ALONGS: readonly number[] = [WAIT_ALONG, WAIT_ALONG - CHILD_FOOTPRINT];
 
 const BENCH_LENGTH = 2.0;
 const BENCH_ALONG = -1.4;
@@ -121,10 +131,17 @@ export class Station {
    * end and back half — {@link WAIT_ACROSS} behind its middle line and
    * {@link WAIT_ALONG} along from its middle, clear of the canopy's posts and
    * the bench — so a child waiting is never in the way of the train she is
-   * waiting for (it stops for anybody in its way: `ParkTrain.wayAhead`).
+   * waiting for (it stops for anybody in its way: `ParkTrain.wayAhead`). The
+   * first of {@link waits}.
    */
   readonly waitX: number;
   readonly waitZ: number;
+  /**
+   * **Every place to wait**, a child's width apart along the open end, the far
+   * one first (`TrainStop.waits`): one child to a place, so no two are sent to
+   * the same spot to push each other across the platform.
+   */
+  readonly waits: readonly { readonly x: number; readonly z: number }[];
 
   /** Lamp materials, brightened after dark. */
   readonly lamps: MeshBasicMaterial[] = [];
@@ -165,7 +182,8 @@ export class Station {
     const yaw = Math.atan2(tangent.x, tangent.z);
     this.cosYaw = Math.cos(yaw);
     this.sinYaw = Math.sin(yaw);
-    const wait = this.local(-trackSide * WAIT_ACROSS, WAIT_ALONG);
+    this.waits = WAIT_ALONGS.map((along) => this.local(-trackSide * WAIT_ACROSS, along));
+    const wait = this.waits[0]!;
     this.waitX = wait.x;
     this.waitZ = wait.z;
 

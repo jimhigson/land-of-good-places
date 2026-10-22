@@ -1131,6 +1131,11 @@ export class NpcSystem implements GameSystem {
       // Two pieces of furniture: nobody can step aside, so nobody is moved.
       const childSeated = character.seated || onTheTrain(character);
       if (childSeated && playerRiding) continue;
+      // A child standing at her place to wait for the train
+      // (`NpcCharacter.holdsGround`) is furniture to the walking player, who
+      // goes round her — but she steps aside for a player standing still (a
+      // link that stood them on one spot), and for one a ride is placing.
+      const childHolding = character.holdsGround && !playerRiding && !playerStill;
       // One above the other — she is stood on a wall or a table — and so not
       // in each other's way at all. See `separatedByHeight`.
       const at = player.position;
@@ -1145,16 +1150,17 @@ export class NpcSystem implements GameSystem {
       );
       if (!push) continue;
 
-      if (childSeated || playerRiding || playerStill) {
+      if (childSeated || childHolding || playerRiding || playerStill) {
         // One side is furniture, so the other takes the whole correction —
         // both halves `circleSeparation` split between them — at the same cap.
         // A seated child first: she cannot step aside at all, so a player
-        // standing against her cushion is the one moved.
+        // standing against her cushion is the one moved; then a child at her
+        // place to wait, whom a walking player goes round.
         const wholeX = push.dx * 2;
         const wholeZ = push.dz * 2;
         const whole = Math.hypot(wholeX, wholeZ);
         const cap = whole > maxPush ? maxPush / whole : 1;
-        if (childSeated) {
+        if (childSeated || childHolding) {
           player.nudge(wholeX * cap, wholeZ * cap);
         } else {
           character.position.x -= wholeX * cap;
@@ -1203,7 +1209,10 @@ export class NpcSystem implements GameSystem {
       }
       this.onLineFor.delete(character);
       const off = service.wayOff(at.x, at.z, NPC_RADIUS);
-      at.set(off.x, terrainHeight(off.x, off.z), off.z);
+      // A declared jump (`NpcCharacter.setDown`), never a bare write to her
+      // position: `check:jitter` knows it, and her own movement does not read
+      // it back as speed.
+      character.setDown(off.x, terrainHeight(off.x, off.z), off.z);
     }
   }
 

@@ -90,6 +90,7 @@ import { Player } from '../src/entities/Player.ts';
 import { Selection } from '../src/world/Selection.ts';
 import { ActionChips } from '../src/ui/ActionChips.ts';
 import {
+  LABEL_ENTRY_CUSHION_PX,
   LABEL_HOLD_SECONDS,
   LABEL_MARGIN_PX,
   LABEL_PRECEDENCE,
@@ -419,10 +420,13 @@ function audit(): void {
     for (const label of wanted) {
       if (prec(label) !== top || isDrawn(label)) continue;
       // A wanted, top-of-its-item label that is not drawn: something at least
-      // as important must be in its way, now or within the hold.
+      // as important must be in its way, now or within the hold — at the
+      // margin if it was up last frame, or within the room it needs to come
+      // up if it was not (`LABEL_ENTRY_CUSHION_PX`: rule 3 on the way up).
       const track = tracks.get(label);
       const mine = rects.get(label)!;
-      const blocker = drawn.find((other) => prec(other) >= prec(label) && rectsTouch(mine, rects.get(other)!, LABEL_MARGIN_PX));
+      const room = track?.drawn ? LABEL_MARGIN_PX : LABEL_MARGIN_PX + LABEL_ENTRY_CUSHION_PX;
+      const blocker = drawn.find((other) => prec(other) >= prec(label) && rectsTouch(mine, rects.get(other)!, room));
       if (blocker) {
         coverage.overlapsPrevented += 1;
         if (track) track.lastBlocked = frame;
