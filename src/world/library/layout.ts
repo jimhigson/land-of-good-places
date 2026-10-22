@@ -637,6 +637,143 @@ export const LIBRARY_AISLES: readonly Aisle[] = [
   { id: 'east', points: [{ x: 14.5, z: 4 }, { x: 14.5, z: -0.5 }, { x: 14.5, z: -3.9 }, { x: 14.5, z: -7 }, { x: 11, z: -7.4 }] },
 ];
 
+/** A node of a named aisle, by index — throws naming both, so a renumbered aisle stops the build rather than moving a child's walk. */
+export function aisleNode(aisleId: string, index: number): LocalPoint {
+  const aisle = LIBRARY_AISLES.find((candidate) => candidate.id === aisleId);
+  if (!aisle) throw new Error(`library layout: no aisle '${aisleId}' in LIBRARY_AISLES`);
+  const point = aisle.points[index];
+  if (!point) throw new Error(`library layout: aisle '${aisleId}' has ${aisle.points.length} nodes, so there is no node ${index}`);
+  return point;
+}
+
+// ===========================================================================
+// The library's children — who strolls where, and how each gets to the rug (#718)
+// ===========================================================================
+
+/**
+ * **One of the library's three children** (#718, plan Step 8): where she
+ * strolls, which story cushion is hers, and the way from the one to the other.
+ *
+ * Every point here is read off {@link LIBRARY_AISLES} by aisle id and node
+ * index ({@link aisleNode}) or typed once, and nothing retypes it: her driver
+ * (`libraryKidDriver.ts`) walks these points and `check:library`'s KIDS
+ * sweeps a child-sized disc along every leg of them against the real
+ * collision world, so a bookcase moved onto a route is found by the check and
+ * never by a child leaning on it through a whole story.
+ *
+ * - `circuit`: node indices on **one** aisle, strolled in order and round
+ *   again. Written as a ping-pong (`[3, 2, 1, 2]`) so the wrap from the last
+ *   node to the first is a leg she already walks, never a cut across the
+ *   stacks. **The first node is the exit node**: where her way to the rug
+ *   leaves the aisle, and where she rejoins it afterwards — so every circuit
+ *   starts there and a fresh stroll can begin from it.
+ * - `toSeat`: the points between the exit node and her cushion, neither
+ *   included. Drawn to keep `PLAYER_SEPARATION` from the two cushions the
+ *   player is offered (`LIBRARY_PLAYER_SEATS`) and `SEPARATION` from the other
+ *   children's seats; `LibraryKids.ts` asserts the seats apart at load, KIDS
+ *   measures the legs.
+ */
+export interface LibraryKidPlan {
+  readonly name: string;
+  /** The aisle she strolls: an id in {@link LIBRARY_AISLES}. */
+  readonly aisle: string;
+  /** Node indices on that aisle, in stroll order; the first is the exit node. */
+  readonly circuit: readonly number[];
+  /** Her story cushion, an id in {@link LIBRARY_FURNITURE} — never one of {@link LIBRARY_PLAYER_SEATS}. */
+  readonly seat: string;
+  /** From the exit node to the cushion, both excluded. */
+  readonly toSeat: readonly LocalPoint[];
+}
+
+/**
+ * The three children, their aisles and their cushions (plan Decision 13: the
+ * children take cushions 2, 4 and 5; the player is offered 1 and 3).
+ *
+ * - Lark's circuit stops at `north[2]` (−4, −7.4): `north[3]` (2, −7.4) is
+ *   0.61 m from cushion 1, and a child pausing there would shove a seated
+ *   player.
+ * - Juno's (0.5, −8.3) passes the west story armchair's corner by a hand's
+ *   breadth at a child's radius; KIDS measures it, and the lever is to move it
+ *   east in 5 cm steps.
+ */
+export const LIBRARY_KID_PLANS: readonly LibraryKidPlan[] = [
+  {
+    name: 'Juno',
+    aisle: 'west-aisle-1',
+    circuit: [3, 2, 1, 2],
+    seat: 'cushion-4',
+    toSeat: [aisleNode('central', 4), { x: 0.5, z: -8.3 }, { x: 1.0, z: -9.9 }],
+  },
+  {
+    name: 'Lark',
+    aisle: 'north',
+    circuit: [2, 1, 0, 1],
+    seat: 'cushion-2',
+    toSeat: [aisleNode('central', 4), { x: 3.0, z: -6.6 }],
+  },
+  {
+    name: 'Fenn',
+    aisle: 'east-aisle-2',
+    circuit: [2, 1, 0, 1],
+    seat: 'cushion-5',
+    toSeat: [aisleNode('east', 1), aisleNode('east', 2), aisleNode('east', 3), aisleNode('east', 4), { x: 7.8, z: -7.3 }, { x: 7.0, z: -10.0 }],
+  },
+];
+
+/** A child's circuit as room-local points, in stroll order — the exit node first. */
+export function libraryKidCircuit(plan: LibraryKidPlan): LocalPoint[] {
+  return plan.circuit.map((index) => aisleNode(plan.aisle, index));
+}
+
+/** Where a child's way to the rug leaves her aisle: the circuit's first node. */
+export function libraryKidExitNode(plan: LibraryKidPlan): LocalPoint {
+  return aisleNode(plan.aisle, plan.circuit[0]!);
+}
+
+/**
+ * **The aisle a child is somewhere along, as a polyline from its far end to
+ * the exit node**: the circuit's distinct nodes, so a driver can find the
+ * nodes between where she stands and the exit without retyping the circuit.
+ * For `[3, 2, 1, 2]` that is nodes 1, 2, 3.
+ */
+export function libraryKidAisle(plan: LibraryKidPlan): LocalPoint[] {
+  const distinct: number[] = [];
+  for (const index of plan.circuit) if (!distinct.includes(index)) distinct.push(index);
+  return distinct.reverse().map((index) => aisleNode(plan.aisle, index));
+}
+
+/**
+ * **A child's way between her aisle and her cushion**, room-local: the exit
+ * node, then `toSeat`, then the cushion's middle. The summons walks it
+ * forward; the dismissal walks it back to the exit node, where the stroll
+ * begins again. One list, read by the driver and swept by KIDS.
+ */
+export function libraryKidRugRoute(plan: LibraryKidPlan): LocalPoint[] {
+  return [libraryKidExitNode(plan), ...plan.toSeat, libraryCushion(plan.seat).at];
+}
+
+// Held as the module loads, so a plan that names a missing aisle node, a
+// chair that is not a cushion, a cushion the player is offered, or two
+// children on one cushion is a build failure rather than a child walking into
+// a wall or sitting on the player.
+{
+  const seats = new Set<string>();
+  const names = new Set<string>();
+  for (const plan of LIBRARY_KID_PLANS) {
+    if (names.has(plan.name)) throw new Error(`library layout: two children are called '${plan.name}'`);
+    names.add(plan.name);
+    if (plan.circuit.length < 2) throw new Error(`library layout: ${plan.name}'s circuit has ${plan.circuit.length} node(s); a stroll needs two`);
+    libraryKidCircuit(plan);
+    if (plan.toSeat.length === 0) throw new Error(`library layout: ${plan.name}'s way to the rug has no points between the exit node and the cushion`);
+    const seat = libraryCushion(plan.seat);
+    if ((LIBRARY_PLAYER_SEATS as readonly string[]).includes(seat.id)) {
+      throw new Error(`library layout: ${plan.name}'s seat ${seat.id} is one of the player's two cushions (LIBRARY_PLAYER_SEATS)`);
+    }
+    if (seats.has(seat.id)) throw new Error(`library layout: two children sit on ${seat.id}`);
+    seats.add(seat.id);
+  }
+}
+
 /**
  * Where she stands to sit in a chair: this far out along its facing from its
  * middle — a metre clear of the seat's front edge, so the stand spot's keep-out

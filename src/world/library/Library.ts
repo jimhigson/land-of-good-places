@@ -12,6 +12,8 @@ import type { PlacedEntry } from '../parkLayout';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { terrainHeight } from '../terrain';
 import type { Player, RideHolder } from '../../entities/Player';
+import type { CharacterModel } from '../../entities/CharacterModel';
+import type { NpcCharacter, ResidentSpec } from '../../entities/npc';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { BUILDING_STEP_UP } from '../../core/constants';
@@ -26,6 +28,8 @@ import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props'
 import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './furnish';
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
+import { libraryResidents, type LibraryResident } from './LibraryKids';
+import type { LibraryKidDriver } from './libraryKidDriver';
 import {
   buildLibraryDenShell,
   buildReadingRoomShell,
@@ -50,6 +54,7 @@ import {
   libraryFacingStoryChair,
   libraryStandSpots,
   type LibraryExteriorPlan,
+  type LibraryKidPlan,
   type LibraryPlayerSeat,
   type LocalPoint,
 } from './layout';
@@ -177,10 +182,33 @@ interface PlayerSeat {
   readonly piece: Object3D;
 }
 
+/**
+ * **One of the library's three children, met again in the crowd** (#718):
+ * her plan (`LIBRARY_KID_PLANS`), the driver the Library handed in, the body
+ * `NpcSystem` built round it, and the model she is drawn with — for story
+ * time (plan Step 9), which sits her and stands her up, and for the checks.
+ */
+export interface LibraryKid {
+  readonly plan: LibraryKidPlan;
+  readonly driver: LibraryKidDriver;
+  readonly body: NpcCharacter;
+  readonly model: CharacterModel;
+}
+
 export class Library implements GameSystem {
   readonly name = 'library';
   /** The reading room, at its own origin, hidden unless she is inside. */
   readonly roomRoot = new Group();
+  /**
+   * **The library's children's models** (#718, `LibraryKids.ts`) — a root of
+   * its own at an **identity transform**, because an `NpcCharacter` writes
+   * world positions straight onto its model's root and the room's root stands
+   * at (−600, −600). In the scene beside {@link roomRoot} (World adds it),
+   * shown and hidden with the room ({@link showRoom}), and excluded from the
+   * park's drawn reach with it (`test/procgen/parkFacts.ts`), or every seed
+   * would measure three children 850 m from the park's middle.
+   */
+  readonly kidsRoot = new Group();
   /** The building in the park, inside `anchor:library`. */
   readonly parkRoot = new Group();
   /** The building's frame and the plan measured off its model — for the checks. */
@@ -235,6 +263,10 @@ export class Library implements GameSystem {
    * hotel's breakfast chairs and the castle's banquet.
    */
   private readonly cushionHolder: RideHolder = { holding: 'a story cushion', letGo: () => this.standUp(), companion: 'not a ride' };
+  /** The children as built (`libraryResidents`): their specs go to `NpcSystem`, their drivers come back through it. */
+  private readonly kids: readonly LibraryResident[];
+  /** The children met again in the crowd ({@link attachNpcs}); empty until World introduces them. */
+  private kidsAttached: readonly LibraryKid[] = [];
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -292,6 +324,11 @@ export class Library implements GameSystem {
       return { id, at: cushion.at, facing: libraryFacingStoryChair(cushion.at), piece };
     });
     this.props.assertClear();
+    // The library's children (#718): built here, run by `NpcSystem` (World
+    // hands it {@link residents}), and met again in {@link attachNpcs}.
+    this.kidsRoot.name = 'the-library-children';
+    this.kidsRoot.visible = false;
+    this.kids = libraryResidents(this.kidsRoot);
 
     // ------------------------------------------------------- the building
     const plot = deps.plot;
@@ -390,8 +427,48 @@ export class Library implements GameSystem {
     return [this.nameLabel];
   }
 
+  /**
+   * **The library's children, as residents for `NpcSystem` to run** (#718) —
+   * read once, by `World`, when it builds the crowd, which is why the Library
+   * is constructed before `NpcSystem` there. Each spec hands in its own
+   * `LibraryKidDriver`; see `LibraryKids.ts` and `NpcSystem`'s `ResidentSpec`.
+   */
+  get residents(): readonly ResidentSpec[] {
+    return this.kids.map((kid) => kid.spec);
+  }
+
+  /**
+   * **The children, met again in the crowd** — one {@link LibraryKid} per plan,
+   * once `World` has called {@link attachNpcs}; empty before. Story time (plan
+   * Step 9) summons, sits and dismisses them through these; the checks measure
+   * them.
+   */
+  get children(): readonly LibraryKid[] {
+    return this.kidsAttached;
+  }
+
   attachPlayer(player: Player): void {
     this.player = player;
+  }
+
+  /**
+   * **Introduces the crowd's bodies to the Library** (#718): of every character
+   * `NpcSystem` built, the ones driven by one of this Library's own drivers are
+   * its children. `World` calls this once the crowd exists — the same
+   * late-binding `Entrance.attachNpcs` uses, for the same reason: the crowd
+   * needs the finished collision world, and the Library is built before it.
+   * Throws if a child has no body, which means `World` never handed
+   * {@link residents} to `NpcSystem`.
+   */
+  attachNpcs(all: readonly NpcCharacter[]): void {
+    this.kidsAttached = this.kids.map((kid): LibraryKid => {
+      const driver = kid.driver;
+      const body = driver ? all.find((candidate) => candidate.driver === driver) : undefined;
+      if (!driver || !body) {
+        throw new Error(`Library: ${kid.plan.name} has no body in the crowd — World must hand library.residents to NpcSystem before library.attachNpcs`);
+      }
+      return { plan: kid.plan, driver, body, model: kid.model };
+    });
   }
 
   /**
@@ -415,7 +492,7 @@ export class Library implements GameSystem {
     if (!player) return;
     if (spaceAt(player.position.x, player.position.z) !== SPACE_LIBRARY) return;
     this.inside = true;
-    this.roomRoot.visible = true;
+    this.showRoom(true);
     this.boundToRoom();
     this.spaces.holdOff();
   }
@@ -642,7 +719,7 @@ export class Library implements GameSystem {
     // somewhere new still sitting on a cushion she has left.
     this.standUp();
     this.inside = true;
-    this.roomRoot.visible = true;
+    this.showRoom(true);
     this.boundToRoom();
     const spot: LocalPoint = at ?? LIBRARY_ARRIVAL;
     const facing = ((at?.facing ?? LIBRARY_ARRIVAL.facing) * Math.PI) / 180;
@@ -670,7 +747,7 @@ export class Library implements GameSystem {
   releasePlayer(): void {
     if (!this.inside) return;
     this.inside = false;
-    this.roomRoot.visible = false;
+    this.showRoom(false);
   }
 
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */
@@ -679,7 +756,7 @@ export class Library implements GameSystem {
     if (!player) return;
     this.standUp();
     this.inside = false;
-    this.roomRoot.visible = false;
+    this.showRoom(false);
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
     const mat = this.doormat;
     player.teleportTo(mat.x, this.surfaces.sample(mat.x, mat.z, terrainHeight(mat.x, mat.z) + 3), mat.z, facing);
@@ -687,6 +764,17 @@ export class Library implements GameSystem {
 
   private boundToRoom(): void {
     this.collision.setPlayBounds(circleBoundary(LIBRARY_PLAY_RADIUS, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z));
+  }
+
+  /**
+   * **The reading room and its children appear and vanish together.** The
+   * children's models hang under {@link kidsRoot}, not {@link roomRoot} (its
+   * transform is not the identity), so whoever shows or hides the room goes
+   * through here — the one place both are written.
+   */
+  private showRoom(visible: boolean): void {
+    this.roomRoot.visible = visible;
+    this.kidsRoot.visible = visible;
   }
 
   /**
