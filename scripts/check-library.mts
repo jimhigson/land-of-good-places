@@ -99,7 +99,7 @@ import { saveFlags } from '../src/state/flags.ts';
 import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { standingAt, walkableAt } from './lib/standable.mts';
-import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP } from '../src/core/constants.ts';
+import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
@@ -113,7 +113,7 @@ import { LIBRARY_CHIPS } from '../src/world/library/libraryLines.ts';
 import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
 import { buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
-import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
+import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
 import {
   createLibraryBookPile,
   createLibraryCat,
@@ -145,11 +145,17 @@ import {
   LIBRARY_INNER_Z,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
+  LIBRARY_PLAYER_SEATS,
   LIBRARY_READABLE_SLOTS,
+  libraryCushion,
+  libraryFacingStoryChair,
   type FurnitureSpec,
   type LocalPoint,
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
+import { LIBRARY_CHIPS } from '../src/world/library/libraryLines.ts';
+import { PRIMARY_ACTION, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
+import { FLOOR_TOLERANCE, SEAT_TOLERANCE, seatedErrors } from './lib/seatedPose.mts';
 
 const OX = LIBRARY_ORIGIN_X;
 const OZ = LIBRARY_ORIGIN_Z;
@@ -1528,6 +1534,219 @@ console.log('\nWITH A REAL CHILD — a real Player, from the arrival, walks up t
 // ── Track A (#718: the readable shelves and the owl, plan Steps 5-6) adds its WITH A REAL CHILD clauses below this line. ──
 
 // ── Track B (#718: the story cushions and the library's children, plan Steps 7-8) adds its clauses below this line. ──
+
+/**
+ * **SIT** (#718, plan Step 7) — the real child walks onto one of her story
+ * cushions on the stick, presses its Sit chip and sits down to listen:
+ * riding, posture `'listening'`, on the cushion's middle with her root on the
+ * floor, facing the storyteller's chair. Then, measured on her drawn body on
+ * every frame of two seconds' sitting (the pose sways, so one frame could pass
+ * by luck of phase): her lowest drawn point and each of her soles on the
+ * floor, and her hip pivot on the cushion's top, to the tolerances of
+ * `scripts/lib/seatedPose.mts`. While she sits no Read chip is offered, her
+ * cushion offers 'Get up' and the other offers nothing. 'Get up' stands her on
+ * clear floor and she walks off; sat down again, a jump stands her up, with no
+ * hop in it.
+ *
+ * Proved red by hand: a leg rotated in `applyListeningPose` — one leg (its
+ * sole, `seatedErrors`' `soles`) or both (her lowest point too). The whole
+ * child's lowest point alone could not see one leg lifted: the other sole
+ * still touches the floor (`seatedPose.mts` has the numbers).
+ */
+console.log('\nSIT — the real child walks onto a story cushion, sits down to listen, and gets up again:');
+{
+  const player = child.player;
+  const seatId = LIBRARY_PLAYER_SEATS[0];
+  const cushion = libraryCushion(seatId);
+  const cushionTop = libraryCushionSize().top;
+  const sitId = `library-sit:${seatId}`;
+  const otherId = `library-sit:${LIBRARY_PLAYER_SEATS[1]}`;
+  const zones = (): InteractZone[] => library.interactZones();
+  const zone = (id: string): InteractZone | undefined => zones().find((candidate) => candidate.id === id);
+  const actions = (id: string): readonly ZoneAction[] => zone(id)?.actions?.() ?? [];
+  /** The Read chips offered right now (Step 5's `library-book:<id>` zones). */
+  const readChips = (): number => zones().filter((candidate) => candidate.id.startsWith('library-book:')).length;
+  /** The readable books drawn on the shelves (Step 5's `library.book.<id>` meshes): what arms the Read-chip half below. */
+  let drawnReadable = 0;
+  library.roomRoot.traverse((node) => {
+    if (node.name.startsWith('library.book.')) drawnReadable += 1;
+  });
+  /** How far she coasts from a full-stick walk once the stick is let go: her own top speed and braking. */
+  const coast = (PLAYER_MAX_SPEED * PLAYER_MAX_SPEED) / (2 * PLAYER_DECELERATION);
+  /** Walk her onto room-local (x, z) on the stick, let go a stopping distance short, and let her come to rest. */
+  const walkOnto = (x: number, z: number): void => {
+    for (let frame = 0; frame < Math.round(6 / CHILD_DT); frame += 1) {
+      const here = child.room();
+      if (Math.hypot(x - here.x, z - here.z) <= coast) break;
+      child.step(child.towards(x - here.x, z - here.z));
+    }
+    child.run(1);
+  };
+  const offCentre = (): number => Math.hypot(child.room().x - cushion.at.x, child.room().z - cushion.at.z);
+  const feet = (): number => player.position.y - LIBRARY_FLOOR_Y; // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere; her height above its one floor
+  const facingChair = (libraryFacingStoryChair(cushion.at) * Math.PI) / 180;
+  /** Where she comes from: out from the cushion, away from the storyteller, into the room. */
+  const away = facingChair + Math.PI;
+
+  // Her two cushions carry a Sit chip, and no others: the library's children take the other three.
+  const sitZones = zones()
+    .filter((candidate) => candidate.id.startsWith('library-sit:'))
+    .map((candidate) => candidate.id)
+    .sort();
+  const wanted = LIBRARY_PLAYER_SEATS.map((id) => `library-sit:${id}`).sort();
+  say(sitZones.join(' ') === wanted.join(' '), `Sit chips on ${sitZones.join(', ') || 'no cushion'} (wanted ${wanted.join(', ')}: her two cushions, never a child's)`);
+
+  // She walks onto the cushion from 2.5 m out, on the stick: a soft top she steps up onto.
+  const start = { x: cushion.at.x + Math.sin(away) * 2.5, z: cushion.at.z + Math.cos(away) * 2.5 };
+  const startClear = collision.isClearCircle(OX + start.x, OZ + start.z, PLAYER_RADIUS);
+  child.stand(start.x, start.z, libraryFacingStoryChair(cushion.at));
+  walkOnto(cushion.at.x, cushion.at.z);
+  say(
+    startClear && offCentre() <= 0.3 && Math.abs(feet() - cushionTop) <= FEET_TOLERANCE,
+    `from (${start.x.toFixed(2)}, ${start.z.toFixed(2)}) (clear floor: ${startClear}) she walks onto ${seatId} and comes to rest ` +
+      `${offCentre().toFixed(2)} m from its middle (0.3 allowed), her feet ${feet().toFixed(3)} m up on its soft top (${cushionTop.toFixed(3)})`,
+  );
+
+  // The chip she is offered standing there — and, for the control below, the Read chips while she stands.
+  const sitZone = zone(sitId);
+  const press = actions(sitId).find((action) => action.id === PRIMARY_ACTION);
+  const reach = sitZone ? Math.hypot(player.position.x - sitZone.standX, player.position.z - sitZone.standZ) : Infinity;
+  say(
+    !!sitZone && press?.label === LIBRARY_CHIPS.sit && reach <= standRadiusOf(sitZone),
+    `standing on it, ${sitId} offers '${press?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.sit}'), ` +
+      `${reach.toFixed(2)} m from its stand, inside its ${sitZone ? standRadiusOf(sitZone) : '?'} m reach`,
+  );
+  const readStanding = readChips();
+
+  // Sit, then two seconds sitting, measured on every frame and the worst kept.
+  press?.run();
+  const seatedFrames = Math.round(2 / CHILD_DT);
+  let ridingHeld = true;
+  let postureHeld = true;
+  let worstSlide = 0;
+  let worstRoot = 0;
+  let worstFloor = 0;
+  let worstSoles = 0;
+  let worstSeat = 0;
+  let lowestAtWorst = Number.NaN;
+  let solesAtWorst = { left: Number.NaN, right: Number.NaN };
+  let hipAtWorst = Number.NaN;
+  for (let i = 0; i < seatedFrames; i += 1) {
+    child.step();
+    ridingHeld &&= player.riding;
+    postureHeld &&= player.ridePosture === 'listening';
+    worstSlide = Math.max(worstSlide, offCentre());
+    worstRoot = Math.max(worstRoot, Math.abs(feet()));
+    const errors = seatedErrors(player.model, LIBRARY_FLOOR_Y, LIBRARY_FLOOR_Y + cushionTop);
+    // `!(a <= b)` rather than `a > b`, so a NaN measure is kept as the worst and fails.
+    if (!(errors.floor <= worstFloor)) {
+      worstFloor = errors.floor;
+      lowestAtWorst = errors.lowestY;
+    }
+    if (!(errors.soles <= worstSoles)) {
+      worstSoles = errors.soles;
+      solesAtWorst = errors.soleY;
+    }
+    if (!(errors.seat <= worstSeat)) {
+      worstSeat = errors.seat;
+      hipAtWorst = errors.hipY;
+    }
+  }
+  const turn = Math.abs(Math.atan2(Math.sin(player.facing - facingChair), Math.cos(player.facing - facingChair)));
+  say(
+    ridingHeld && postureHeld,
+    `pressing '${LIBRARY_CHIPS.sit}' sits her down: riding and posture 'listening' on all ${seatedFrames} frames (now riding ${player.riding}, '${player.ridePosture}')`,
+  );
+  say(
+    worstSlide <= 1e-3 && worstRoot <= 1e-6,
+    `on the cushion's middle with her root on the floor: ${(worstSlide * 1000).toFixed(2)} mm off its centre at worst (1 mm allowed), her root ${(worstRoot * 1000).toFixed(3)} mm off the floor`,
+  );
+  say(turn <= 0.01, `facing the storyteller's chair: ${player.facing.toFixed(3)} rad, the chair's bearing ${facingChair.toFixed(3)} (${turn.toFixed(4)} rad round)`);
+  say(
+    worstFloor <= FLOOR_TOLERANCE && worstSoles <= FLOOR_TOLERANCE,
+    `her feet on the floor: her lowest drawn point at worst ${(worstFloor * 1000).toFixed(1)} mm off it, and the worse sole ` +
+      `${(worstSoles * 1000).toFixed(1)} mm (left y ${solesAtWorst.left.toFixed(4)}, right y ${solesAtWorst.right.toFixed(4)}), over ${seatedFrames} frames ` +
+      `(y ${lowestAtWorst.toFixed(4)}; ${(FLOOR_TOLERANCE * 1000).toFixed(0)} mm allowed, each)`,
+  );
+  say(
+    worstSeat <= SEAT_TOLERANCE,
+    `her hips on the cushion: her hip pivot at worst ${(worstSeat * 1000).toFixed(1)} mm off its top over ${seatedFrames} frames ` +
+      `(y ${hipAtWorst.toFixed(4)} against ${cushionTop.toFixed(4)}; ${(SEAT_TOLERANCE * 1000).toFixed(0)} mm allowed)`,
+  );
+
+  // While she sits: no Read chip, 'Get up' on her cushion, nothing on the other.
+  const readSeated = readChips();
+  if (drawnReadable > 0 || readStanding > 0) {
+    // Armed by either sign that the shelves are readable: books drawn, or Read chips offered. Drawn
+    // books with no chip while she stands is a red too — the control could not have said no.
+    say(
+      readStanding > 0 && readSeated === 0 && (drawnReadable === 0 || readStanding === drawnReadable),
+      `no Read chip while she sits: ${readSeated} offered (CONTROL: standing, ${readStanding} were, ` +
+        `for ${drawnReadable} readable books drawn as 'library.book.*')`,
+    );
+  } else {
+    note(
+      `SIT asserts nothing about Read chips in this build: no readable book is drawn (0 'library.book.*' meshes; ${readStanding} standing / ${readSeated} seated ` +
+        `'library-book:' zones). Track A's Step 5 draws them; this half arms itself when they land`,
+    );
+  }
+  const seatedOffer = actions(sitId);
+  say(
+    zone(sitId)?.selectableWhileRiding === true && seatedOffer.length === 1 && seatedOffer[0]?.id === 'get-up' && seatedOffer[0].label === LIBRARY_CHIPS.getUp,
+    `sitting, ${sitId} offers ${seatedOffer.map((action) => `'${action.label}'`).join(', ') || 'nothing'} (wanted '${LIBRARY_CHIPS.getUp}' alone), ` +
+      `and stays selectable while she rides: ${zone(sitId)?.selectableWhileRiding === true}`,
+  );
+  const otherOffer = actions(otherId);
+  say(
+    otherOffer.length === 0 && library.playerIsSeated,
+    `${otherId} offers ${otherOffer.map((action) => `'${action.label}'`).join(', ') || 'nothing'} while she sits on ${seatId} (a chip there could only refuse); ` +
+      `playerIsSeated ${library.playerIsSeated}`,
+  );
+
+  // 'Get up': up at once, on clear floor, and she walks off.
+  seatedOffer[0]?.run();
+  const upByChip = !player.riding && !library.playerIsSeated;
+  const clearWhereShe = collision.isClearCircle(player.position.x, player.position.z, PLAYER_RADIUS);
+  child.run(0.5);
+  say(
+    upByChip && clearWhereShe,
+    `'${LIBRARY_CHIPS.getUp}' stands her up (riding ${player.riding}, seated ${library.playerIsSeated}) where a body of her size is clear: ${clearWhereShe}; ` +
+      `half a second on she stands at (${child.room().x.toFixed(2)}, ${child.room().z.toFixed(2)}), her feet ${feet().toFixed(3)} m up`,
+  );
+  const leaving = child.room();
+  child.run(0.6, child.towards(Math.sin(away), Math.cos(away)));
+  const walked = Math.hypot(child.room().x - leaving.x, child.room().z - leaving.z);
+  say(
+    walked >= 1 && Math.abs(feet()) <= FEET_TOLERANCE && !player.riding,
+    `and walks off it: ${walked.toFixed(2)} m in 0.6 s on the stick (at least 1), back on the floor (her feet ${feet().toFixed(3)} m up)`,
+  );
+
+  // Sat down again, a jump stands her up — one press, one frame — and is no hop.
+  walkOnto(cushion.at.x, cushion.at.z);
+  actions(sitId)
+    .find((action) => action.id === PRIMARY_ACTION)
+    ?.run();
+  child.step();
+  const satAgain = player.riding && library.playerIsSeated;
+  child.input.pressVirtual('jump');
+  child.step();
+  const upByJump = !player.riding && !library.playerIsSeated;
+  let highest = -Infinity;
+  for (let i = 0; i < 30; i += 1) {
+    child.step();
+    highest = Math.max(highest, feet());
+  }
+  say(
+    satAgain && upByJump && highest <= cushionTop + FEET_TOLERANCE && !player.riding,
+    `sat down again (${satAgain}), a press of jump and one frame stand her up (${upByJump}), with no hop: ` +
+      `her feet at most ${highest.toFixed(3)} m up over the next 30 frames (the cushion's top ${cushionTop.toFixed(3)})`,
+  );
+  note(
+    `SIT on ${seatId} at (${cushion.at.x}, ${cushion.at.z}), top ${cushionTop.toFixed(3)}; ${seatedFrames} seated frames measured; ` +
+      `worst lowest point ${(worstFloor * 1000).toFixed(1)} mm, worst sole ${(worstSoles * 1000).toFixed(1)} mm, worst hip ${(worstSeat * 1000).toFixed(1)} mm; ` +
+      `${child.frames} frames stepped so far`,
+  );
+}
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──
 

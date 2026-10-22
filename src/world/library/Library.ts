@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Group, Vector3, type Object3D } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -18,7 +18,8 @@ import { BUILDING_STEP_UP } from '../../core/constants';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { NameLabel } from '../../ui/NameLabel';
 import { ANCHORS_BY_ID } from '../anchors';
-import { createLibraryExterior, createLibrarySkirt, dressedReach, type LibraryExterior } from '../../art/models/libraryAssets';
+import { createLibraryExterior, createLibrarySkirt, dressedReach, libraryCushionSize, type LibraryExterior } from '../../art/models/libraryAssets';
+import { KID_HIP_HEIGHT } from '../../art/models/kid';
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
 import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
@@ -43,8 +44,12 @@ import {
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAY_RADIUS,
+  LIBRARY_PLAYER_SEATS,
+  libraryCushion,
+  libraryFacingStoryChair,
   libraryStandSpots,
   type LibraryExteriorPlan,
+  type LibraryPlayerSeat,
   type LocalPoint,
 } from './layout';
 import type { OpenAreaPoint } from '../dismount';
@@ -133,6 +138,30 @@ const STACK_FADED_ALPHA = 0.28;
  */
 const SHELF_BOOK_PICK_RADIUS = 0.7;
 
+/**
+ * A story cushion's Sit zone (#718): a tap within this of the cushion's
+ * middle lands on it (the drawn cushion is 0.45 m round), and standing within
+ * {@link SIT_STAND_RADIUS} of it — on it, or a stride off it — offers the chip.
+ */
+const SIT_PICK_RADIUS = 0.8;
+const SIT_STAND_RADIUS = 1.6;
+
+/**
+ * How far a story cushion's measured top may stand from `KID_HIP_HEIGHT` and
+ * still be a seat — see {@link assertCushionsAreSeats}.
+ */
+const CUSHION_SEAT_TOLERANCE = 0.02;
+
+/** One of her two story cushions: where it is, which way she faces on it, and its drawn piece. */
+interface PlayerSeat {
+  readonly id: LibraryPlayerSeat;
+  readonly at: LocalPoint;
+  /** `Player.facing` degrees: at the storyteller's chair (`libraryFacingStoryChair`). */
+  readonly facing: number;
+  /** The cushion as drawn — what the rainbow hugs while its chip is up. */
+  readonly piece: Object3D;
+}
+
 export class Library implements GameSystem {
   readonly name = 'library';
   /** The reading room, at its own origin, hidden unless she is inside. */
@@ -164,6 +193,10 @@ export class Library implements GameSystem {
   readonly lighting: LibraryLighting;
   /** How far the building is moved along its up from the ground at its centre (`libraryBaseSink`). */
   readonly baseSink: number;
+  /** Her two story cushions (`LIBRARY_PLAYER_SEATS`), each with its drawn piece. */
+  private readonly playerSeats: readonly PlayerSeat[];
+  /** The cushion she is sitting on, or null when she is not. */
+  private seatedOn: LibraryPlayerSeat | null = null;
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -202,6 +235,14 @@ export class Library implements GameSystem {
     this.bookZones = this.shelfBooks.map((placed) => this.shelfBookZone(placed));
     this.lighting = new LibraryLighting(furnished.pools);
     this.roomRoot.add(this.lighting.group);
+    // Her two story cushions (#718): seats only if cut to her hip height.
+    assertCushionsAreSeats();
+    this.playerSeats = LIBRARY_PLAYER_SEATS.map((id) => {
+      const cushion = libraryCushion(id);
+      const piece = furnished.pieces.get(id);
+      if (!piece) throw new Error(`Library: ${id} was never furnished, so there is no cushion to offer her`);
+      return { id, at: cushion.at, facing: libraryFacingStoryChair(cushion.at), piece };
+    });
     this.props.assertClear();
 
     // ------------------------------------------------------- the building
@@ -270,6 +311,15 @@ export class Library implements GameSystem {
   /** In the reading room: the sky's lights go off and the room lights itself. */
   get playerIsInside(): boolean {
     return this.inside;
+  }
+
+  /**
+   * Sitting on one of her story cushions (#718) — for `Game`'s "a tap anywhere
+   * gets her up" and for the checks. True only while the cushion still has
+   * her: a ride ended by anything else is not a seat.
+   */
+  get playerIsSeated(): boolean {
+    return this.seatedOn !== null && (this.player?.riding ?? false);
   }
 
   /** Where she stands outside: the plot's doormat, the one the paths are routed to. */
@@ -352,13 +402,33 @@ export class Library implements GameSystem {
   }
 
   /**
-   * Inside, a "Read it!" zone on every readable book — unless she is riding
-   * (sitting, #718 Step 7), when the room offers her nothing to walk to.
-   * Outside, the building's entrance.
+   * Inside, one list (#718): a "Read it!" zone on every readable book — unless
+   * she is riding (sitting, Step 7), when the room offers her nothing to walk
+   * to — and a Sit zone on each of her two story cushions, always on (the one
+   * she sits on offers 'Get up'). Outside, the building's entrance.
    */
   interactZones(): InteractZone[] {
-    if (this.inside) return this.player?.riding ? [] : [...this.bookZones];
-    return [this.exteriorEntranceZone()];
+    if (!this.inside) return [this.exteriorEntranceZone()];
+    return [...(this.player?.riding ? [] : this.bookZones), ...this.sitZones()];
+  }
+
+  /**
+   * **Up off her story cushion** (#718) — the 'Get up' chip, a jump
+   * ({@link update}), or a tap anywhere (`Game.ts`'s `onTap`: Jim's nap rule,
+   * *"tapping anywhere, clicking anywhere … wakes them"*). A safe no-op when
+   * she is not sitting, so `Game` can call it unasked — `Hotel.wakeNap`'s
+   * shape.
+   *
+   * `endRide` hands her back airborne at the floor, inside the cushion's soft
+   * plate, which catches her at its top; she walks off it. Cushions are soft
+   * (`props.soft`: a plate, no collider), so nothing has to step her back off
+   * a seat the way the castle's bench must.
+   */
+  standUp(): void {
+    if (this.seatedOn === null) return;
+    this.seatedOn = null;
+    const player = this.player;
+    if (player?.riding) player.endRide();
   }
 
   update(context: FrameContext): void {
@@ -367,6 +437,7 @@ export class Library implements GameSystem {
     this.updateNameLabel();
     const player = this.player;
     if (!player) return;
+    if (this.seatedOn !== null) this.updateSeated(player, context);
     if (this.inside) this.fadeStacks(player, dt);
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
@@ -392,6 +463,82 @@ export class Library implements GameSystem {
     const camera = this.deps.camera;
     const at = this.nameLabel.sprite.getWorldPosition(this.from);
     this.nameLabel.updateScreenSize(camera.worldUnitsPerPixel, at.distanceTo(camera.focusPoint));
+  }
+
+  /**
+   * **A Sit chip on each of her two story cushions** (#718) — always on while
+   * she is inside, story or no story. The library's children take the other
+   * three cushions at story time, so these two never have to refuse her.
+   *
+   * The breakfast chair's shape (`Hotel.ts`), down to the two details that are
+   * easy to leave out and expensive to leave out:
+   *
+   * - **`selectableWhileRiding`.** Sitting is a ride as far as the engine
+   *   cares, and a zone is not offered while riding unless it says so: without
+   *   it, sitting down would eat every chip, the way back up included.
+   * - **No chip that refuses.** Sitting on one cushion, the other offers
+   *   nothing (a tap anywhere gets her up first); `sit` would refuse a child
+   *   who is already sitting, and a chip that appears and then does nothing
+   *   teaches a six-year-old that chips sometimes lie.
+   *
+   * The seat is the stand: she walks onto the cushion and sits where she
+   * stands, so the stand spot is the cushion's own middle.
+   */
+  private sitZones(): InteractZone[] {
+    return this.playerSeats.map((seat): InteractZone => ({
+      id: `library-sit:${seat.id}`,
+      label: 'a story cushion',
+      x: LIBRARY_ORIGIN_X + seat.at.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + seat.at.z,
+      pickRadius: SIT_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + seat.at.x,
+      standZ: LIBRARY_ORIGIN_Z + seat.at.z,
+      standRadius: SIT_STAND_RADIUS,
+      selectableWhileRiding: true,
+      verb: 'Sit',
+      highlight: highlightObject(seat.piece),
+      actions: () => {
+        if (this.seatedOn === seat.id) return [{ id: 'get-up', label: LIBRARY_CHIPS.getUp, run: () => this.standUp() }];
+        if (this.player?.riding) return [];
+        return pressAction(LIBRARY_CHIPS.sit, () => this.sit(seat.id), '🧘');
+      },
+    }));
+  }
+
+  /**
+   * **Down onto a story cushion** (#718): the breakfast chair's shape
+   * (`beginRide`, then `setRidePose`) and the castle banquet's rule for where
+   * her root goes — **the floor**, never the cushion's top. The cushion is cut
+   * to `KID_HIP_HEIGHT` ({@link assertCushionsAreSeats}), so with her legs
+   * hanging straight down (`ridePose.ts`'s `'listening'`; the rig has no knee)
+   * her feet land on the floor and her hips on the cushion. She faces the
+   * storyteller's chair. The posture is set **after** `beginRide`, which
+   * resets it to `'seated'`.
+   */
+  private sit(id: LibraryPlayerSeat): void {
+    const player = this.player;
+    const seat = this.playerSeats.find((candidate) => candidate.id === id);
+    if (!player || !seat || !this.inside || player.riding || this.spaces.isChanging) return;
+    player.beginRide();
+    player.setRidePose(LIBRARY_ORIGIN_X + seat.at.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + seat.at.z, (seat.facing * Math.PI) / 180);
+    player.ridePosture = 'listening';
+    this.seatedOn = id;
+  }
+
+  /**
+   * While she sits: a jump gets her up. Read here, not in `Player`, because
+   * `Player.update` returns early for the whole time she rides and never
+   * reaches its own jump (`Hotel.update`'s nap, the same reason). And a ride
+   * that something else ended leaves no seat behind it — or every later tap
+   * would try to stand up a child who is already standing.
+   */
+  private updateSeated(player: Player, context: FrameContext): void {
+    if (!player.riding) {
+      this.seatedOn = null;
+      return;
+    }
+    if (context.input.justPressed('jump')) this.standUp();
   }
 
   /** A stack between the camera and her eases translucent; one that is not, back to solid. */
@@ -437,6 +584,9 @@ export class Library implements GameSystem {
   private enterRoom(at?: { readonly x: number; readonly z: number; readonly facing?: number }): void {
     const player = this.player;
     if (!player) return;
+    // Every road in refuses a sitting child, so this is a belt: nobody is put
+    // somewhere new still sitting on a cushion she has left.
+    this.standUp();
     this.inside = true;
     this.roomRoot.visible = true;
     this.boundToRoom();
@@ -473,6 +623,7 @@ export class Library implements GameSystem {
   private standOutside(facing: number): void {
     const player = this.player;
     if (!player) return;
+    this.standUp();
     this.inside = false;
     this.roomRoot.visible = false;
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
@@ -534,6 +685,25 @@ export class Library implements GameSystem {
       standX: band.centreX,
       standZ: band.centreZ,
     };
+  }
+}
+
+/**
+ * **The story cushions are seats, or the build stops** (#718). A sitter's
+ * root is on the floor and her legs hang straight down — the rig has no knee
+ * (`ridePose.ts`'s `'listening'`) — so her hips land on the cushion only if
+ * its top is `KID_HIP_HEIGHT`. A taller cushion buries her hips in it, a
+ * lower one leaves her sitting on air, and both look fine until she sits.
+ * `library.glb`'s cushion is cut to it today; this is what keeps it cut.
+ */
+function assertCushionsAreSeats(): void {
+  const top = libraryCushionSize().top;
+  if (Math.abs(top - KID_HIP_HEIGHT) > CUSHION_SEAT_TOLERANCE) {
+    throw new Error(
+      `Library: the story cushion's top is ${top.toFixed(3)} m, but a seat must be KID_HIP_HEIGHT (${KID_HIP_HEIGHT} m) to within ${CUSHION_SEAT_TOLERANCE} m, ` +
+        `or a listener's hips sit ${(Math.abs(top - KID_HIP_HEIGHT) * 1000).toFixed(0)} mm ${top > KID_HIP_HEIGHT ? 'inside' : 'above'} it: ` +
+        `cut library.glb's cushion-body (or createLibraryCushion) to KID_HIP_HEIGHT`,
+    );
   }
 }
 
