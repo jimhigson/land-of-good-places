@@ -16,6 +16,8 @@
  * LIBRARY_CHECK_REMOVE='den wall (west)' pnpm run check:library  # a wall of the secret den out: DEN WALLS must go red
  * LIBRARY_CHECK_REMOVE='bookcase west-2' pnpm run check:library  # the shut secret shelf out: the den is reachable, must go red
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
+ * LIBRARY_CHECK_REMOVE='the owl' pnpm run check:library       # the owl's solid out: OWL must go red (her middle is reachable)
+ * LIBRARY_CHECK_MUTATE=card-twice pnpm run check:library      # a second card given through the non-idempotent door: CARD must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -94,6 +96,17 @@
  * 14. WITH A REAL CHILD — from here on a real `Player`, stepped the game's way
  *     and steered by the stick ({@link RealChild}): from the arrival, she walks
  *     into the room on the floor. Parts 4 and 5 add their clauses to it.
+ * 15. OWL, CARD, RECOMMEND, SHUSH — the owl librarian (#718, plan Step 6), on
+ *     the real child: her solid is a disc of her measured reach the fill does
+ *     not get into and a body marched at her does not get into; coming in
+ *     without a card she is invited over; quiet at the desk the owl blinks and
+ *     never holds a blink; stood either side of her the head turns to face
+ *     her, measured off the head's own axis. The card is hers on the press,
+ *     once, through four lines and a wing flap; pressed again the owl names
+ *     the first unread book of her one seeded order, which glows on its shelf
+ *     until read and says "Read me!"; a sprint held gets a "Shhh!" with no
+ *     penalty, a walk never does (the control), a jump does, and mid-script
+ *     only her wing answers.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -117,11 +130,17 @@ import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
-import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS } from '../src/world/library/books.ts';
+import { BLINK_DURATION } from '../src/art/style/faceLife.ts';
+import { gameStore } from '../src/state/index.ts';
+import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, type LibraryBook } from '../src/world/library/books.ts';
+import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
+import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
+import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
+import { HEAD_TURN_LIMIT, OWL_LOOK_RANGE, OWL_ZONE_ID, SHUSH_COOLDOWN_SECONDS, SHUSH_RUN_SECONDS, SHUSH_WING_X } from '../src/world/library/LibraryOwl.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
-import { END_HALF, LibraryProps, libraryKeepOuts, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
+import { END_HALF, LibraryProps, libraryKeepOuts, segmentDistance, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
 import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/library/furnish.ts';
 import { SHELF_BOOK_ZONE_PREFIX, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
 import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
@@ -160,6 +179,7 @@ import {
   LIBRARY_HALF_Z,
   LIBRARY_INNER_X,
   LIBRARY_INNER_Z,
+  LIBRARY_LIBRARIAN_SPOT,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAYER_SEATS,
@@ -172,7 +192,7 @@ import {
   type LocalPoint,
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
-import { LIBRARY_CHIPS } from '../src/world/library/libraryLines.ts';
+import { LIBRARY_CHIPS, LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
 import { PRIMARY_ACTION, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
 import { FLOOR_TOLERANCE, SEAT_TOLERANCE, seatedErrors } from './lib/seatedPose.mts';
 
@@ -583,7 +603,7 @@ console.log(`\nREACHABILITY — ${library.solids.length} solids registered by th
       `the other ${seen.clear.size - pockets.length} clear cells are all reached`,
   );
   note(
-    `${keepOuts.length} keep-outs: ${roomSpots.length} in the reading room (arrival, doorway, desk, librarian, rug, seats, secret shelf, ` +
+    `${keepOuts.length} keep-outs: ${roomSpots.length} in the reading room (arrival, doorway, desk, rug, seats, secret shelf, ` +
       `${LIBRARY_READABLE_SLOTS.length} readable slots, every aisle node) and ${denSpots.length} in the secret den (${denSpots.map((spot) => spot.what).join(', ')})`,
   );
 }
@@ -1154,10 +1174,16 @@ console.log('\nSTEPS — up the steps across the whole front, feet on the stone:
 
 console.log('\nDOORS — both ways, on the real building:');
 {
+  // The owl (#718) reads a frame's input and her child's run and jump flags
+  // every frame she is inside: a probe that has none of them is a probe she
+  // reads `undefined` off, so it carries the stillness it stands for.
   const probe = {
     position: new Vector3(0, 0, 0),
     previousPosition: new Vector3(0, 0, 0),
     riding: false,
+    isRunning: false,
+    isAirborne: false,
+    verticalSpeed: 0,
     model: { height: 2.12 },
     topHeight: 2.12,
     teleportTo(x: number, y: number, z: number) {
@@ -1167,7 +1193,7 @@ console.log('\nDOORS — both ways, on the real building:');
   };
   library.attachPlayer(probe as never);
   collision.setPlayBounds(bounds);
-  const context = { dt: 1 / 60, elapsed: 1, playerPosition: probe.position, frame: 1 } as unknown as FrameContext;
+  const context = { dt: 1 / 60, elapsed: 1, input: new InputSystem(), playerPosition: probe.position, frame: 1 } as unknown as FrameContext;
   const settle = (): void => {
     for (let i = 0; i < 70; i += 1) library.update(context);
   };
@@ -1840,6 +1866,363 @@ console.log('\nWITH A REAL CHILD — a real Player, from the arrival, walks up t
 
 // ── Track A (#718: the readable shelves and the owl, plan Steps 5-6) adds its WITH A REAL CHILD clauses below this line. ──
 
+/**
+ * **OWL, CARD, RECOMMEND, SHUSH** (#718, plan Step 6) — the owl librarian at
+ * her desk (`LibraryOwl.ts`), on the real child.
+ *
+ * Every threshold is the game's own: the owl's radius and height are read off
+ * her registered solid, the shush's run and cooldown off `LibraryOwl.ts`, a
+ * blink's length off `faceLife.ts`, the recommendation's order off
+ * `recommendation.ts` and restated here as "the first unread in it". The label
+ * manager is given a landscape-phone screen (`camera.resize`) so a bubble can
+ * be measured and granted the way the game grants it; the stick's basis is the
+ * camera's and does not change with its frame, so the SIT clause after this
+ * walks exactly as before.
+ *
+ * Proved red by `LIBRARY_CHECK_REMOVE='the owl'` (her middle is reachable and
+ * a body marches into her disc), `LIBRARY_CHECK_MUTATE=card-twice` (the check
+ * hands her a second card through the non-idempotent `catchWildPet`), and by
+ * hand: `Player.isRunning` without its speed (the walking CONTROL shushes) and
+ * `LibraryOwl.glow` without its `isBookRead` reset (RECOMMEND: a read book
+ * still glows).
+ */
+const owl = library.owl;
+const owlSpot = LIBRARY_LIBRARIAN_SPOT;
+/** The owl's Talk zone as the room offers it this frame, or undefined. */
+const owlZone = (): InteractZone | undefined => library.interactZones().find((zone) => zone.id === OWL_ZONE_ID);
+const owlOffer = (): readonly ZoneAction[] => owlZone()?.actions?.() ?? [];
+/** How many library cards her inventory holds — the inventory is the one owner of "has she got the card" (`libraryCard.ts`). */
+const cardsHeld = (): number => gameStore.get().inventory.filter((item) => item.id === LIBRARY_CARD.id).length;
+/** Steps until the owl falls quiet, or `seconds` have passed, and hands back every line she said meanwhile. */
+const untilQuiet = (seconds: number): Set<string> => {
+  const said = new Set<string>();
+  if (owl.lastSaid !== null && owl.speaking) said.add(owl.lastSaid);
+  for (let i = 0; i < Math.round(seconds / CHILD_DT) && owl.speaking; i += 1) {
+    child.step();
+    if (owl.lastSaid !== null) said.add(owl.lastSaid);
+  }
+  return said;
+};
+/** The screen the label manager lays labels out on from here: a landscape phone. */
+const SCREEN = { width: 1280, height: 720 } as const;
+camera.resize(SCREEN.width, SCREEN.height);
+const view = { camera: camera.camera, width: SCREEN.width, height: SCREEN.height };
+/** What a sprint mid-card-script measured — CARD runs it (the script is only ever running then), SHUSH reports it. */
+let midCard: { ran: boolean; shushed: number; wingLow: number; stayedOnScript: boolean; stillSpeaking: boolean; travelled: number } | null = null;
+
+console.log('\nOWL — the librarian at her desk: solid, and alive:');
+{
+  const player = child.player;
+  const solid = library.solids.find((candidate) => candidate.what === 'the owl');
+  say(
+    !!solid &&
+      solid.shape === 'wall' &&
+      solid.points.length === 2 &&
+      solid.points.every((point) => point.x === owlSpot.x && point.z === owlSpot.z) &&
+      solid.radius === owl.radius &&
+      solid.top === owl.handle.height,
+    `'the owl' is registered as a zero-length capsule at (${owlSpot.x}, ${owlSpot.z}): a disc of r ${owl.radius.toFixed(3)} (her measured plan reach, head and glasses included), ` +
+      `top ${owl.handle.height.toFixed(3)} m (her measured height)${solid ? '' : ' — NOT REGISTERED'}`,
+  );
+  say(owl.radius > 0.5 && owl.radius < 0.9, `her reach is a round owl's: ${owl.radius.toFixed(3)} m (0.5..0.9 wanted; the Artist's body alone is ±0.40, her head and glasses reach further)`);
+  say(!libraryKeepOuts().some((spot) => spot.what === owlSpot.what), `${owlSpot.what} is no longer a keep-out (${libraryKeepOuts().length} keep-outs, none of them hers)`);
+  const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  say(!reachedAt(seen, OX + owlSpot.x, OZ + owlSpot.z), `the fill does not reach her middle at (${owlSpot.x}, ${owlSpot.z}) — she is solid (${seen.reached.size} cells reached from the arrival)`);
+  // Marched at her from sixteen bearings, as MARCHED marches at every box: a body's edge never gets into her drawn disc.
+  let marches = 0;
+  let skipped = 0;
+  let deepest = -Infinity;
+  const reach = owl.radius + 2.2;
+  for (let b = 0; b < 16; b += 1) {
+    const angle = (b / 16) * Math.PI * 2;
+    const start = new Vector3(OX + owlSpot.x + Math.cos(angle) * reach, 0, OZ + owlSpot.z + Math.sin(angle) * reach);
+    if (!onPlate(start.x - OX, start.z - OZ) || !collision.isClearCircle(start.x, start.z, PLAYER_RADIUS)) {
+      skipped += 1;
+      continue;
+    }
+    for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+      marches += 1;
+      const end = march(collision, start, new Vector3(OX + owlSpot.x, 0, OZ + owlSpot.z), step, reach + 1);
+      deepest = Math.max(deepest, PLAYER_RADIUS - (Math.hypot(end.x - OX - owlSpot.x, end.z - OZ - owlSpot.z) - owl.radius));
+    }
+  }
+  say(
+    marches >= 16 && deepest <= RESOLVER_SLACK,
+    `${marches} marches at her from ${16 - skipped} bearings (${skipped} starts skipped: off the plate or inside a solid — the desk stands in front of her): ` +
+      `the deepest a body's edge got into her drawn disc is ${deepest.toFixed(3)} m (allowance ${RESOLVER_SLACK})`,
+  );
+  let nearestAisle = { id: '', clearance: Infinity };
+  for (const aisle of LIBRARY_AISLES) {
+    for (let i = 0; i + 1 < aisle.points.length; i += 1) {
+      const clearance = segmentDistance(aisle.points[i]!, aisle.points[i + 1]!, owlSpot) - owl.radius - PLAYER_RADIUS;
+      if (clearance < nearestAisle.clearance) nearestAisle = { id: aisle.id, clearance };
+    }
+  }
+  say(nearestAisle.clearance >= 0, `AISLES above swept every aisle with her in the world; the nearest, '${nearestAisle.id}', passes ${nearestAisle.clearance.toFixed(3)} m clear of her disc at a player's radius`);
+
+  // Out of the door and back in to the desk's front: a visit — which is when she is invited over.
+  if (!quietly(() => library.requestEnterDoor())) throw new Error('OWL: /library-door refused her (riding, or a change of space already running)');
+  camera.snapTo(player.position);
+  child.run(0.2);
+  if (library.playerIsInside) throw new Error('OWL: she is still inside after /library-door, so nothing below would be a fresh visit');
+  child.enter({ x: LIBRARY_DESK_STAND.x, z: LIBRARY_DESK_STAND.z, facing: LIBRARY_DESK_STAND.facing });
+  child.step();
+  say(
+    owl.speaking && owl.lastSaid === LIBRARY_LINES.owl.welcome && cardsHeld() === 0,
+    `coming in without her card (${cardsHeld()} held), the owl invites her over: "${owl.lastSaid ?? ''}" (wanted "${LIBRARY_LINES.owl.welcome}")`,
+  );
+
+  // Blink: quiet at the desk for 15 s, her face changes (she blinks) and is never held changed longer than a blink.
+  untilQuiet(6);
+  const resting = owl.handle.headMaterial.map;
+  const restingFace = owl.handle.face;
+  let changes = 0;
+  let run = 0;
+  let longest = 0;
+  let spoke = false;
+  for (let i = 0; i < Math.round(15 / CHILD_DT); i += 1) {
+    child.step();
+    spoke ||= owl.speaking;
+    if (owl.handle.headMaterial.map !== resting) {
+      if (run === 0) changes += 1;
+      run += 1;
+      longest = Math.max(longest, run);
+    } else {
+      run = 0;
+    }
+  }
+  const blinkFrames = Math.ceil(BLINK_DURATION * 60) + 2;
+  say(
+    !spoke && restingFace === 'neutral' && changes >= 1 && longest <= blinkFrames,
+    `quiet at the desk for 15 s (resting face '${restingFace}'; spoke meanwhile: ${spoke}), her face changed ${changes} time(s) — she blinks — ` +
+      `and was never held changed longer than ${longest} frame(s) (a blink: at most ${blinkFrames}, from BLINK_DURATION ${BLINK_DURATION} s)`,
+  );
+
+  // Head-turn: 3 m to either side of her for 2 s each. The direction her face
+  // points is measured off the head's own +Z axis in the world, never assumed
+  // from a sign; the sign is then reported as found.
+  const look = (side: number): { rot: number; dot: number; clear: boolean } => {
+    const at = { x: owlSpot.x + side * 3, z: owlSpot.z };
+    const clear = collision.isClearCircle(OX + at.x, OZ + at.z, PLAYER_RADIUS);
+    child.stand(at.x, at.z, side > 0 ? 270 : 90);
+    child.run(2);
+    const dir = owl.handle.head.getWorldDirection(new Vector3());
+    dir.y = 0;
+    dir.normalize();
+    const toward = new Vector3(player.position.x - (OX + owlSpot.x), 0, player.position.z - (OZ + owlSpot.z)).normalize();
+    return { rot: owl.handle.head.rotation.y, dot: dir.dot(toward), clear };
+  };
+  const left = look(1);
+  const right = look(-1);
+  const canTurnTo = ((Math.PI / 2 - HEAD_TURN_LIMIT) * 180) / Math.PI;
+  say(
+    left.clear && right.clear && Math.abs(left.rot) > 0.4 && Math.abs(right.rot) > 0.4 && Math.sign(left.rot) !== Math.sign(right.rot),
+    `stood 3 m to either side of her for 2 s each (both spots clear floor: ${left.clear && right.clear}), her head turns: rotation.y ${left.rot.toFixed(3)} with the child at +X, ` +
+      `${right.rot.toFixed(3)} at −X — opposite signs, each beyond 0.4 rad (the turn is clamped at ±${HEAD_TURN_LIMIT})`,
+  );
+  say(
+    left.dot >= 0.8 && right.dot >= 0.8,
+    `and it turns TOWARD her, measured off the head's own axis: within ${((Math.acos(Math.min(1, Math.min(left.dot, right.dot))) * 180) / Math.PI).toFixed(0)}° of the child on both sides ` +
+      `(cos ≥ 0.8 wanted; a head that turns at most ${HEAD_TURN_LIMIT} rad to a child 90° round can get within ${canTurnTo.toFixed(0)}°)`,
+  );
+  // CONTROL: beyond her look range, straight ahead.
+  const far = { x: owlSpot.x - (OWL_LOOK_RANGE + 3), z: owlSpot.z + 2 };
+  const farClear = collision.isClearCircle(OX + far.x, OZ + far.z, PLAYER_RADIUS);
+  child.stand(far.x, far.z, 90);
+  child.run(2);
+  say(farClear && Math.abs(owl.handle.head.rotation.y) < 0.05, `CONTROL: stood ${Math.hypot(far.x - owlSpot.x, far.z - owlSpot.z).toFixed(1)} m away (clear: ${farClear}; her look range ${OWL_LOOK_RANGE}), her head comes back to straight ahead: ${owl.handle.head.rotation.y.toFixed(3)} rad`);
+  note(`OWL: r ${owl.radius.toFixed(3)}, top ${owl.handle.height.toFixed(3)}; blink changes ${changes}, longest ${longest} frame(s); head ${left.rot.toFixed(2)} / ${right.rot.toFixed(2)}; ${child.frames} frames stepped so far`);
+}
+
+console.log('\nCARD — her library card, on the first press at the desk:');
+{
+  const player = child.player;
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  child.run(0.3);
+  say(!hasLibraryCard(gameStore.get()) && cardsHeld() === 0, `on a fresh store she has no library card (${cardsHeld()} held; hasLibraryCard ${hasLibraryCard(gameStore.get())})`);
+  const zone = owlZone();
+  const offer = owlOffer();
+  const reach = zone ? Math.hypot(player.position.x - zone.standX, player.position.z - zone.standZ) : Infinity;
+  say(
+    !!zone && offer.length === 1 && offer[0]?.id === PRIMARY_ACTION && offer[0].label === LIBRARY_CHIPS.getCard && reach <= standRadiusOf(zone),
+    `at the desk's front (${reach.toFixed(2)} m from her zone's stand, reach ${zone ? standRadiusOf(zone) : '?'}) the owl offers '${offer[0]?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.getCard}'), verb '${zone?.verb ?? '?'}'`,
+  );
+  const shushesBefore = owl.shushes;
+  offer[0]?.run();
+  const atOnce = hasLibraryCard(gameStore.get());
+  if (mutating('card-twice')) {
+    gameStore.catchWildPet(LIBRARY_CARD);
+    note('GAVE her a second card through the non-idempotent catchWildPet on purpose — this run must go red');
+  }
+  say(atOnce && cardsHeld() === 1, `pressing it gives her the card at once (${atOnce}): ${cardsHeld()} '${LIBRARY_CARD.id}' in her inventory (exactly one wanted)`);
+  say(owl.midScript && owl.lastSaid === LIBRARY_LINES.owl.card[0], `and starts her script: "${owl.lastSaid ?? ''}" (wanted "${LIBRARY_LINES.owl.card[0]}")`);
+
+  // Mid-script, a sprint — measured here, where the script is running; reported under SHUSH.
+  child.run(0.4);
+  const from = child.room();
+  let ran = false;
+  let wingLow = 0;
+  let stayedOnScript = true;
+  for (let i = 0; i < Math.round(1.2 / CHILD_DT); i += 1) {
+    child.step(child.towards(-1, 0, true));
+    ran ||= player.isRunning;
+    wingLow = Math.min(wingLow, owl.handle.wingL.rotation.x);
+    stayedOnScript &&= owl.lastSaid !== null && (LIBRARY_LINES.owl.card as readonly string[]).includes(owl.lastSaid);
+  }
+  const to = child.room();
+  midCard = { ran, shushed: owl.shushes - shushesBefore, wingLow, stayedOnScript, stillSpeaking: owl.midScript, travelled: Math.hypot(to.x - from.x, to.z - from.z) };
+
+  // Back to the desk for the rest of the ceremony: every line in turn, and the flap on the hand-over.
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  const said = new Set<string>(owl.lastSaid === null ? [] : [owl.lastSaid]);
+  let flapLow = 0;
+  for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
+    child.step();
+    if (owl.lastSaid !== null) said.add(owl.lastSaid);
+    flapLow = Math.min(flapLow, owl.handle.wingR.rotation.z);
+  }
+  const lines = LIBRARY_LINES.owl.card;
+  say(
+    lines.every((line) => said.has(line)) && !owl.speaking,
+    `her ${lines.length} card lines were said in turn and the bubble went away: ${[...said].map((line) => `"${line}"`).join(', ')}`,
+  );
+  say(flapLow <= -0.3, `on the hand-over line (#${LIBRARY_LINES.owl.cardCheerAt + 1}) she flapped the wing that holds her book: rotation.z down to ${flapLow.toFixed(2)}`);
+  const again = owlOffer();
+  say(
+    again.length === 1 && again[0]?.label === LIBRARY_CHIPS.hello && cardsHeld() === 1,
+    `with the card she offers '${again[0]?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.hello}'), and the count is still ${cardsHeld()}`,
+  );
+  note(`CARD: ${cardsHeld()} card(s); ${said.size} distinct line(s) said; flap ${flapLow.toFixed(2)}; ${child.frames} frames stepped so far`);
+}
+
+console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl's order, and it glows until it is read:");
+{
+  /** The rule, restated: the first book in RECOMMENDATION_ORDER she has not read. */
+  const firstUnread = (): LibraryBook | undefined => RECOMMENDATION_ORDER.find((book) => !isBookRead(gameStore.get(), book.id));
+  const first = firstUnread();
+  if (!first) throw new Error('RECOMMEND: every book is already read on this store, so there is nothing to recommend and nothing to measure');
+  const onceId = recommendFor(gameStore.get())?.id;
+  const twiceId = recommendFor(gameStore.get())?.id;
+  const emissiveOf = (id: string): number => library.shelfBooks.find((placed) => placed.book.id === id)?.material.emissiveIntensity ?? Number.NaN;
+  const chipFor = (id: string): string | undefined =>
+    library
+      .interactZones()
+      .find((zone) => zone.id === shelfBookZoneId(id))
+      ?.actions?.()[0]?.label;
+  const glowing = (): string[] => library.shelfBooks.filter((placed) => placed.material.emissiveIntensity > 0.2).map((placed) => placed.book.id);
+  say(glowing().length === 0 && owl.recommendedBookId === null, `before the press no book glows (${glowing().length} over 0.2) and nothing is recommended`);
+  owlOffer()[0]?.run();
+  let lit = -1;
+  for (let i = 0; i < 60; i += 1) {
+    child.step();
+    if (emissiveOf(first.id) > 0.2) {
+      lit = i + 1;
+      break;
+    }
+  }
+  const others = library.shelfBooks.filter((placed) => placed.book.id !== first.id);
+  const dark = others.filter((placed) => placed.material.emissiveIntensity === 0).length;
+  say(lit > 0, `within 1 s of the press '${first.id}' glows: emissive ${emissiveOf(first.id).toFixed(3)} after ${lit} frame(s) (over 0.2 wanted; recommended: '${owl.recommendedBookId ?? 'none'}')`);
+  say(dark === others.length && others.length === BOOKS.length - 1, `the other ${others.length} read exactly 0 (${dark} do; BOOKS.length − 1 = ${BOOKS.length - 1} wanted)`);
+  const otherId = others[0]?.book.id ?? '';
+  say(
+    chipFor(first.id) === LIBRARY_CHIPS.readGlowing && chipFor(otherId) === LIBRARY_CHIPS.read,
+    `its Read chip says '${chipFor(first.id) ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.readGlowing}'); another book's ('${otherId}') says '${chipFor(otherId) ?? 'nothing'}' ('${LIBRARY_CHIPS.read}')`,
+  );
+  const said = untilQuiet(20);
+  say(
+    said.has(LIBRARY_LINES.owl.recommend(first.title)) && said.has(LIBRARY_LINES.owl.recommendGlow) && !owl.speaking,
+    `she said "${LIBRARY_LINES.owl.recommend(first.title)}" — the first unread title in RECOMMENDATION_ORDER — and "${LIBRARY_LINES.owl.recommendGlow}" (${said.size} lines, then quiet)`,
+  );
+  // Read to the end: the glow goes on the next frames, the recommendation clears, the chip is plain again.
+  markBookRead(first);
+  child.step();
+  child.step();
+  const stillLit = library.shelfBooks.filter((placed) => placed.material.emissiveIntensity !== 0).map((placed) => placed.book.id);
+  say(
+    isBookRead(gameStore.get(), first.id) && stillLit.length === 0 && owl.recommendedBookId === null && chipFor(first.id) === LIBRARY_CHIPS.read,
+    `read to the end (markBookRead) and two frames on, every book reads 0 (${stillLit.length === 0 ? 'none lit' : `still lit: ${stillLit.join(', ')}`}), ` +
+      `the recommendation is cleared ('${owl.recommendedBookId ?? 'none'}') and its chip says '${chipFor(first.id) ?? 'nothing'}' again`,
+  );
+  const next = firstUnread();
+  owlOffer()[0]?.run();
+  const saidNext = untilQuiet(20);
+  say(
+    !!next && next.id !== first.id && saidNext.has(LIBRARY_LINES.owl.recommend(next.title)),
+    `the next press names a different title: "${next ? LIBRARY_LINES.owl.recommend(next.title) : '?'}" (said: ${next ? saidNext.has(LIBRARY_LINES.owl.recommend(next.title)) : false}; before: '${first.id}', now: '${next?.id ?? 'none'}')`,
+  );
+  say(onceId === first.id && twiceId === first.id, `recommendFor, asked twice on the same state, answered '${onceId ?? 'none'}' and '${twiceId ?? 'none'}' (the rule's own '${first.id}')`);
+  note(`RECOMMEND: the order ${RECOMMENDATION_ORDER.map((book) => book.id).join(' → ')}; '${first.id}' was marked read on this run's store; '${next?.id ?? 'none'}' glows now`);
+}
+
+console.log('\nSHUSH — a sprint through the room gets a "Shhh!", and nothing else:');
+{
+  const player = child.player;
+  // The cooldown from the mid-card shush and the owl's last script run out first.
+  child.run(SHUSH_COOLDOWN_SECONDS + 0.5);
+  untilQuiet(10);
+  const startAt = { x: 0, z: 4 };
+  const startClear = collision.isClearCircle(OX + startAt.x, OZ + startAt.z, PLAYER_RADIUS);
+  child.stand(startAt.x, startAt.z, 270);
+  const before = owl.shushes;
+  let runningFrames = 0;
+  let rode = false;
+  let granted = false;
+  let firedAt = -1;
+  const frames = Math.round(3 / CHILD_DT);
+  for (let i = 0; i < frames; i += 1) {
+    child.step(child.towards(-1, 0, true));
+    world.labels.resolve(view, CHILD_DT);
+    if (player.isRunning) runningFrames += 1;
+    rode ||= player.riding;
+    granted ||= owl.bubble.sprite.visible;
+    if (firedAt < 0 && owl.shushes > before) firedAt = i + 1;
+  }
+  const end = child.room();
+  const travelled = Math.hypot(end.x - startAt.x, end.z - startAt.z);
+  say(startClear && runningFrames > 0, `from (${startAt.x}, ${startAt.z}) (clear floor: ${startClear}) she sprinted west for 3 s and got up to a run: isRunning on ${runningFrames} of ${frames} frames (none would measure nothing)`);
+  say(
+    owl.shushes === before + 1 && owl.lastSaid === LIBRARY_LINES.owl.shush,
+    `the owl shushed once (${owl.shushes - before}), on frame ${firedAt} (a run of ${SHUSH_RUN_SECONDS} s wanted first): "${owl.lastSaid ?? ''}"`,
+  );
+  say(!rode && travelled >= 5 && library.playerIsInside, `and nothing else: never taken (riding ${rode}), she travelled ${travelled.toFixed(2)} m (at least 5) and is still in the room (${library.playerIsInside})`);
+  say(granted, `her bubble was drawn: the label manager granted its sprite a frame (visible on some frame: ${granted})`);
+
+  // CONTROL: after the cooldown, 3 s of walking the same way never shushes.
+  child.run(SHUSH_COOLDOWN_SECONDS + 0.2);
+  child.stand(startAt.x, startAt.z, 270);
+  const beforeWalk = owl.shushes;
+  let walkedRunning = false;
+  for (let i = 0; i < frames; i += 1) {
+    child.step(child.towards(-1, 0, false));
+    walkedRunning ||= player.isRunning;
+  }
+  const walked = Math.hypot(child.room().x - startAt.x, child.room().z - startAt.z);
+  say(
+    owl.shushes === beforeWalk && !walkedRunning && walked >= 3,
+    `CONTROL: 3 s of walking the same way, no sprint, never shushes (${owl.shushes - beforeWalk}; isRunning ever true: ${walkedRunning}); she walked ${walked.toFixed(2)} m (at least 3)`,
+  );
+
+  // A jump shushes.
+  child.run(0.5);
+  const beforeJump = owl.shushes;
+  let tookOff = false;
+  child.input.pressVirtual('jump');
+  for (let i = 0; i < 30; i += 1) {
+    child.step();
+    tookOff ||= player.isAirborne;
+  }
+  say(tookOff && owl.shushes === beforeJump + 1 && owl.lastSaid === LIBRARY_LINES.owl.shush, `a jump (took off: ${tookOff}) shushes her: ${owl.shushes - beforeJump} more, "${owl.lastSaid ?? ''}"`);
+
+  // Mid-script, measured during CARD: her wing and face answer, her words do not.
+  say(
+    !!midCard && midCard.ran && midCard.shushed === 1 && midCard.stayedOnScript && midCard.stillSpeaking && midCard.wingLow <= SHUSH_WING_X * 0.5,
+    `mid-card-script (measured in CARD): a ${midCard?.travelled.toFixed(1) ?? '?'} m sprint (running: ${midCard?.ran ?? false}) shushed her ${midCard?.shushed ?? '?'} time(s) with her free wing ` +
+      `(rotation.x down to ${midCard?.wingLow.toFixed(2) ?? '?'}; the full lift is ${SHUSH_WING_X}) — her words stayed on the card's lines (${midCard?.stayedOnScript ?? false}) and the script went on (${midCard?.stillSpeaking ?? false})`,
+  );
+  note(`SHUSH: a run of ${SHUSH_RUN_SECONDS} s, cooldown ${SHUSH_COOLDOWN_SECONDS} s (LibraryOwl.ts); ${owl.shushes} shushes in all; the screen ${SCREEN.width}×${SCREEN.height}; ${child.frames} frames stepped so far`);
+}
+
 // ── Track B (#718: the story cushions and the library's children, plan Steps 7-8) adds its clauses below this line. ──
 
 /**
@@ -2083,6 +2466,15 @@ console.log('\nHOUSEKEEPING:');
   say(library.bookCount >= 300, `${library.bookCount} decorative books on the shelves`);
   say(library.stacks.length === LIBRARY_BOOKCASES.filter((spec) => spec.kind === 'stack').length, `${library.stacks.length} stacks, each able to fade`);
   say(library.screenLabels.includes(library.nameLabel), `the building names itself over its door ('${library.nameLabel.identity.id}')`);
+  say(
+    library.screenLabels.includes(library.owl.bubble) && library.owl.bubble.identity.item === OWL_ZONE_ID && library.owl.bubble.identity.kind === 'actionFeedback',
+    `the owl's bubble is among the room's labels, as '${library.owl.bubble.identity.kind}' for item '${library.owl.bubble.identity.item}' (so it is drawn over her chip, never under it)`,
+  );
+  const owlSolid = library.solids.find((candidate) => candidate.what === 'the owl');
+  note(
+    `the librarian's spot is a solid, not a keep-out: 'the owl' at (${LIBRARY_LIBRARIAN_SPOT.x}, ${LIBRARY_LIBRARIAN_SPOT.z}), ` +
+      `a disc of r ${owlSolid?.radius.toFixed(3) ?? '?'} with its top at ${owlSolid?.top.toFixed(3) ?? '?'} m — a jump off the desk's top (${libraryDeskSize().top.toFixed(2)} m) can land on her head`,
+  );
   say(
     library.denRoot.parent === library.roomRoot && !library.denRoot.visible,
     `the secret den is built in the reading room ('${library.denRoot.parent?.name ?? 'nowhere'}'), so it leaves the park's drawn reach with it, and is hidden while the shelf is shut`,
