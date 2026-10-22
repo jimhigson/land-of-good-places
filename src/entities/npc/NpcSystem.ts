@@ -1103,6 +1103,16 @@ export class NpcSystem implements GameSystem {
    * - **a child riding the train is furniture** like one on a cushion: the
    *   train places her in her seat every frame, so a player who has jumped up
    *   onto the carriage beside her takes the whole correction.
+   * - **a player standing still is furniture** (`Player.isStandingStill`): a
+   *   child walking past her goes round her, and she is not shoved. Waiting
+   *   on a platform for the train, the children walking up to their own
+   *   waiting spots (`TrainStop.waitX`, 1.28 m from where the chip stands
+   *   her, inside the 1.52 m the two keep apart) used to push her half the
+   *   overlap a frame, a metre across the platform in ten seconds, into the
+   *   train's way — and the train, which stops for anybody in its way, stood
+   *   short of the station for her, then she was pushed on off the platform's
+   *   edge onto the track (22 Oct 2026, check:solids clause 13). Walking, she
+   *   takes her half as before: she is in charge of where she goes.
    */
   private separateFromPlayer(dt: number): void {
     const player = this.player;
@@ -1110,6 +1120,7 @@ export class NpcSystem implements GameSystem {
 
     const maxPush = MAX_DEPENETRATION_SPEED * dt;
     const playerRiding = player.riding;
+    const playerStill = player.isStandingStill;
 
     for (const character of this.characters) {
       // A climbing child's (x, z) is the tree it is up, not somewhere it is
@@ -1134,18 +1145,20 @@ export class NpcSystem implements GameSystem {
       );
       if (!push) continue;
 
-      if (childSeated || playerRiding) {
+      if (childSeated || playerRiding || playerStill) {
         // One side is furniture, so the other takes the whole correction —
         // both halves `circleSeparation` split between them — at the same cap.
+        // A seated child first: she cannot step aside at all, so a player
+        // standing against her cushion is the one moved.
         const wholeX = push.dx * 2;
         const wholeZ = push.dz * 2;
         const whole = Math.hypot(wholeX, wholeZ);
         const cap = whole > maxPush ? maxPush / whole : 1;
-        if (playerRiding) {
+        if (childSeated) {
+          player.nudge(wholeX * cap, wholeZ * cap);
+        } else {
           character.position.x -= wholeX * cap;
           character.position.z -= wholeZ * cap;
-        } else {
-          player.nudge(wholeX * cap, wholeZ * cap);
         }
         continue;
       }

@@ -2468,6 +2468,11 @@ if (inPart('park')) {
         // at its side, it does not carry her.
         const CONTACT = (PLAYER_MAX_SPEED + 4) / 60;
         say(movingBy && deepest <= CONTACT && !through, `walking into it moving: from ${coming.name} as its carriages come by her${movingBy ? '' : ' (it never came by moving — NOTHING ASKED)'}, she is never inside it beyond contact (${deepest.toFixed(2)} m at the deepest, ${CONTACT.toFixed(2)} allowed) and never through it (pressed to it ${wedged.toFixed(2)} m at the most); it slid ${slidPast.toFixed(2)} m past her side`);
+        // Back on the platform where its chip stands her, and she waits there
+        // for it to come round: standing still, the crowd walking up to its
+        // waiting spots goes round her (`NpcSystem.separateFromPlayer`) — it
+        // used to push her a metre across the platform into the train's way,
+        // and the train stood short of the station for her.
         player.teleportTo(coming.standX, sample(coming.standX, coming.standZ, 50), coming.standZ);
         play(15, STILL_INPUT, 1 / 30);
       }
