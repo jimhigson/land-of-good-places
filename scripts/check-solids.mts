@@ -40,12 +40,13 @@
  * 7. **The boundary at height.** The park's edge holds a body pushed at it at
  *    every height from the grass to ten metres up.
  * 8. **The train.** Through `Game`'s own wiring — a real `Player` and her
- *    real `Parade` with three pets out — standing on the line ahead of it, at a
- *    station, on the loop and in a tunnel, her line left on the track behind
- *    her, and a child of the crowd: the train stops at least her own width
- *    short of each, waits, and goes on once they have gone. And she rides it a
- *    whole lap with her pets out — one beside her, the rest in her backpack —
- *    and gets off at a stop.
+ *    real `Parade` with three pets out — standing on the line ahead of it at
+ *    every station, on the loop and in a tunnel, her line left on the track
+ *    behind her, and a child of the crowd: the train stops at least her own
+ *    width short of each, waits, and goes on once they have gone — and at
+ *    every station, once she is up on the platform where its chip stands her,
+ *    it leaves. And she rides it a whole lap with her pets out — one beside
+ *    her, the rest in her backpack — and gets off at a stop.
  * 9. **Along the tops.** She walks every wall top and rim she reaches end to
  *    end without the auto-hop throwing her off, and walks up every hoppable
  *    wall where it stands a step high instead of hopping it.
@@ -159,6 +160,11 @@ import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeigh
  *   train no longer looking out for her, for her line (her parade never
  *   introduced to it — the review's M5), or for the crowd — clause 8 must find
  *   it run into each.
+ * - `platform-holds-train` (park): her platform counted as the line — standing
+ *   on one, she reads as on the line's middle, so the train waits for her
+ *   where its chip stands her, as it once waited for a child of the crowd
+ *   idling at a platform's edge — clause 8's every-station case must find it
+ *   never leaving a station she stands at.
  * - `pets-count-aboard` (park): her companion counted as standing while it
  *   rides beside her — clause 8's ride must find the train never leaving.
  * - `pets-stay-out` (park): no backpack — every ride taken as no ride, so her
@@ -182,7 +188,7 @@ const PROVE = process.env['SOLIDS_PROVE'] ?? '';
 const PROOFS = [
   'infinite', 'tall-top', 'too-tall', 'low-roof', 'low-exhibit', 'trap', 'ghost', 'stranded', 'no-headroom', 'no-bounds',
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
-  'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
+  'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'platform-holds-train', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
   'pets-count-aboard', 'pets-stay-out', 'ghost-train', 'frozen-train', 'train-ignores-on-top', 'put-down-ignores-train',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
@@ -420,11 +426,13 @@ const solids: SolidView[] = [];
 let movingBodies = 0;
 collision.forEachSolid((solid) => {
   // A body that moves (the train) is never where the census would find it:
-  // clause 13 asks it, standing and moving.
+  // clause 13 asks it, standing and moving. The census's own search
+  // (`lib/solidReach.mts`) leaves them out too — neither aimed at nor hopped
+  // over — so no clause over what it reached (2, 6) can meet one.
   if (solid.moving) movingBodies += 1;
   else solids.push(solid);
 });
-note(`${movingBodies} moving bodies (the train's engine and carriages) are not in the census or clauses 1, 2, 5 and 6 — they move; clause 13 asks them`);
+note(`${movingBodies} moving bodies (the train's engine and carriages) are not in the census (4, and 2 and 6 over what it reached), clauses 1, 5, 9 and 10, or the jet pack's report — they move; clause 13 asks them, standing and moving`);
 
 // ---------------------------------------------------------------------------
 // 1. Real tops
@@ -1037,8 +1045,8 @@ console.log('\n5. MARCHES — walked at from sixteen bearings, at 5 cm and at a 
     'treasure chest',
     'fireside bench',
   ];
-  const all: SolidView[] = [];
-  collision.forEachSolid((s) => all.push(s));
+  // Every solid that stands still: the train's pieces are clause 13's.
+  const all: SolidView[] = [...solids];
   if (PROVE === 'ghost') {
     // A station bench drawn and never registered: the march must walk into it.
     const bench = all.find((s) => s.kind === 'station bench');
@@ -1202,8 +1210,9 @@ if (inPart('core') && !(ONLY_SPACES.length && !ONLY_SPACES.some((word) => 'the p
       if (main(x, z, y)) continue;
       let on = 'the ground';
       if (y > ground + 0.02) {
+        // Named after a solid that stands still; the train is wherever it is now.
         collision.forEachSolid((solid) => {
-          if (on === 'the ground' && solid.standsAt(x, z) && Math.abs(solid.topAt(x, z) - y) < 1e-6) on = solid.kind || solid.owner || 'a solid';
+          if (on === 'the ground' && !solid.moving && solid.standsAt(x, z) && Math.abs(solid.topAt(x, z) - y) < 1e-6) on = solid.kind || solid.owner || 'a solid';
         });
       }
       cells.set(keyOf(Math.round(x / STEP), Math.round(z / STEP)), { x, z, y, on });
@@ -1364,7 +1373,7 @@ if (spacesInPart.length) {
           // off is a hop with nothing of the kind ahead of her.
           let taller = false;
           collision.forEachSolid((other) => {
-            if (taller || other === wall) return;
+            if (taller || other === wall || other.moving) return;
             const reach = PLAYER_RADIUS + AUTO_HOP_LOOKAHEAD + 0.1;
             if (other.depthAt(sim.position.x, sim.position.z) < -reach) return;
             const step = other.topAt(sim.position.x, sim.position.z) - wall.topAt(sim.position.x, sim.position.z);
@@ -1417,7 +1426,7 @@ if (spacesInPart.length) {
   let noRoomAt = '';
   const hoppable: SolidView[] = [];
   collision.forEachSolid((solid) => {
-    if (!solid.autoHoppable || !solid.topIsAbsolute) return;
+    if (!solid.autoHoppable || !solid.topIsAbsolute || solid.moving) return;
     if (!spacesInPart.some((run) => spaceAt(solid.centreX, solid.centreZ) === spaceAt(run.start.x, run.start.z))) return;
     hoppable.push(solid);
   });
@@ -1549,7 +1558,7 @@ if (spacesInPart.length) {
               let overStep = false;
               if (at) {
                 collision.forEachSolid((other) => {
-                  if (overStep || other === solid || !other.autoHoppable || other.depthAt(at.px, at.pz) <= -PLAYER_RADIUS) return;
+                  if (overStep || other === solid || other.moving || !other.autoHoppable || other.depthAt(at.px, at.pz) <= -PLAYER_RADIUS) return;
                   if (riseBetween(at.fx, at.fy, at.fz, at.px, other.topAt(at.px, at.pz), at.pz) > BUILDING_STEP_UP) overStep = true;
                 });
               }
@@ -1596,7 +1605,7 @@ if (inPart('park')) {
   const firstOn: string[] = [];
   const roofsAsked = new Set<string>();
   collision.forEachSolid((roof) => {
-    if (!(roof.kind in ROOF_KINDS || roof.kind in CANOPY_KINDS) || spaceAt(roof.centreX, roof.centreZ) !== SPACE_GARDEN) return;
+    if (roof.moving || !(roof.kind in ROOF_KINDS || roof.kind in CANOPY_KINDS) || spaceAt(roof.centreX, roof.centreZ) !== SPACE_GARDEN) return;
     roofsAsked.add(roof.kind);
     for (let x = roof.centreX - roof.reach; x <= roof.centreX + roof.reach; x += 0.5) {
       for (let z = roof.centreZ - roof.reach; z <= roof.centreZ + roof.reach; z += 0.5) {
@@ -1866,6 +1875,17 @@ if (inPart('park')) {
   }
   // M5, as the review named it: her line never introduced to the train.
   if (PROVE === 'train-ignores-pets') (train as unknown as { parade: unknown }).parade = null;
+  if (PROVE === 'platform-holds-train') {
+    // Her platform counted as the line: wherever she stands on one, she reads
+    // as standing on the line's middle, and the train waits for her there.
+    const looking = train as unknown as { nearLine(x: number, y: number, z: number): { at: number; lateral: number; onPlatform: boolean } | null };
+    const nearLine = looking.nearLine.bind(train);
+    looking.nearLine = (x, y, z) => {
+      const near = nearLine(x, y, z);
+      if (near && near.onPlatform && x === player.position.x && z === player.position.z) near.lateral = 0;
+      return near;
+    };
+  }
   if (PROVE === 'train-ignores-npcs') world.npcs.onTheLine = function* () {};
   if (PROVE === 'pets-count-aboard') {
     // Her companion counted as standing while it rides beside her.
@@ -1922,10 +1942,51 @@ if (inPart('park')) {
     });
     return { nearest, stood, moved };
   };
-  // At the station it starts at, standing just past its nose while it waits.
-  standOnLine(train.noseDistance() + 2.2 + PLAYER_RADIUS);
-  const waiting = drive(14);
-  say(waiting.nearest >= MARGIN && waiting.stood > 10, `at a station: on the line 2.2 m past its nose as it waits, the train stays ${waiting.nearest.toFixed(2)} m short of her (her own width, ${MARGIN.toFixed(2)} m, asked) and stands ${waiting.stood.toFixed(1)} s of 14`);
+  // **At every station**, the one it starts at first and then each in turn:
+  // standing on the line just past its nose while it waits, it stays; then up
+  // on the platform where its chip stands her ("Get on"'s own spot), with her
+  // line formed up round her, it leaves. Each platform is its own geometry —
+  // its canopy, its open end, which side of the line it stands — and the
+  // train's reach beside a platform (`PLATFORM_AHEAD`, `PLATFORM_BESIDE`) is
+  // what says a child on the platform is not in its way: a child of the crowd
+  // idling at a platform's edge once held it there for minutes.
+  {
+    const stations = train.stations;
+    const first = train.stoppedAt();
+    const stayed: string[] = [];
+    const held: string[] = [];
+    let asked = 0;
+    for (let k = 0; k < stations.length; k += 1) {
+      const index = ((first ?? 0) + k) % stations.length;
+      const station = stations[index]!;
+      // Until it stands at this one (the first: now, in its first dwell).
+      play(300, STILL_INPUT, 1 / 30, () => train.stoppedAt() === index && train.runningSpeed === 0);
+      if (train.stoppedAt() !== index) {
+        held.push(`${station.name}: it never came to stand there (its nose at ${train.noseDistance().toFixed(1)} m round, moving ${train.runningSpeed.toFixed(2)})`);
+        continue;
+      }
+      asked += 1;
+      standOnLine(train.noseDistance() + 2.2 + PLAYER_RADIUS);
+      const waiting = drive(14);
+      if (!(waiting.nearest >= MARGIN && waiting.stood > 10)) stayed.push(`${station.name}: it stays ${waiting.nearest.toFixed(2)} m short of her and stands ${waiting.stood.toFixed(1)} s of 14`);
+      // Up onto the platform where the chip stands her; her line catches her up.
+      player.teleportTo(station.standX, sample(station.standX, station.standZ, 50), station.standZ);
+      let leftIn = -1;
+      let t = 0;
+      const from = train.noseDistance();
+      play(20, STILL_INPUT, 1 / 30, () => {
+        t += 1 / 30;
+        if (route.forwardGap(from, train.noseDistance()) > 1) leftIn = t;
+        return leftIn >= 0;
+      });
+      if (leftIn < 0) {
+        const near = [...parade.standing()].filter((p) => train.onTheLine(p.x, p.y, p.z, PARADE_MEMBER_RADIUS)).length;
+        held.push(`${station.name}: with her on its platform at (${station.standX.toFixed(1)}, ${station.standZ.toFixed(1)}) it never left in 20 s (${near} of her line on the line)`);
+      }
+    }
+    say(asked === stations.length && stayed.length === 0, `at every station (${asked} of ${stations.length}): on the line 2.2 m past its nose as it waits, the train stays at least her own width (${MARGIN.toFixed(2)} m) short of her and stands the 14 s${stayed.length ? ` — ${stayed.join('; ')}` : ''}`);
+    say(asked === stations.length && held.length === 0, `at every station: up on the platform where its chip stands her, with her line about her, it leaves${held.length ? ` — ${held.join('; ')}` : ''}`);
+  }
   // Out on the loop, well ahead of it: it brakes, stands, waits.
   standOnLine(train.noseDistance() + 20 + PLAYER_RADIUS);
   const spot = route.distanceNear(player.position.x, player.position.z);
@@ -1959,12 +2020,17 @@ if (inPart('park')) {
     standOnLine(start);
     route.tangentAt(start, at);
     play(0.6, walkAlong(camera, at.x, at.z));
-    // Out over the fence on the side away from the park's middle, with a hop.
+    // Out over the fence on the side away from the park's middle, with a hop:
+    // square across the line (its normal there — on a stretch running out from
+    // the middle, "away from the middle" would be along the track), on the side
+    // the park's middle is not.
     const d = route.distanceNear(player.position.x, player.position.z);
     route.pointAt(d, at);
-    const outX = at.x;
-    const outZ = at.z;
-    const out = Math.hypot(outX, outZ) || 1;
+    const here = { x: at.x, z: at.z };
+    route.tangentAt(d, at);
+    const side = Math.sign(at.z * here.x - at.x * here.z) || 1;
+    const outX = at.z * side;
+    const outZ = -at.x * side;
     const hop = { ...walkAlong(camera, outX, outZ), justPressed: (key: string) => key === 'jump', isDown: (key: string) => key === 'jump' };
     play(1 / 60, hop);
     play(0.45, walkAlong(camera, outX, outZ));
@@ -1972,7 +2038,6 @@ if (inPart('park')) {
     route.pointAt(route.distanceNear(player.position.x, player.position.z), at);
     const beyond = Math.hypot(player.position.x - at.x, player.position.z - at.z);
     const onLine = herLine().filter((p) => train.onTheLine(p.x, p.y, p.z, PARADE_MEMBER_RADIUS));
-    void out;
     if (beyond < FENCE_OFFSET + 0.4) say(false, `her line on the line: she did not get out over the fence (${beyond.toFixed(2)} m from the line's middle), so the case asks nothing of her line`);
     else if (onLine.length === 0) say(false, `her line on the line: none of her ${herLine().length} companions was left on the line behind her, so the case asserts nothing`);
     else {
@@ -2338,8 +2403,11 @@ if (inPart('park')) {
         spot = spotAt(stop);
       }
       const passed = passedBy.length ? ` (at ${passedBy.join(', then ')}, nowhere beside the platform with room for her and no child of the crowd in it)` : '';
-      if (!spot) say(false, `standing on it: in ${passedBy.length} stops, nowhere on it beside a platform with room for her and no child of the crowd in it — NOTHING ASKED`);
-      else {
+      if (!spot) {
+        // Nobody left holding it: the cases below need it running.
+        hold(false);
+        say(false, `standing on it: in ${passedBy.length} stops, nowhere on it beside a platform with room for her and no child of the crowd in it — NOTHING ASKED`);
+      } else {
         route.pointAt(route.wrap(spot.d), at);
         // Up on it by a hand, as a jump from its platform puts her (the
         // put-down rule never stands her on a train: the router knows
