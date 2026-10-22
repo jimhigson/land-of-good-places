@@ -1,4 +1,4 @@
-import { Group, Mesh, Vector3, type BufferAttribute, type Material, type MeshToonMaterial } from 'three';
+import { Box3, Group, Mesh, Vector3, type BufferAttribute, type Material, type MeshToonMaterial } from 'three';
 import { PALETTE } from '../../../core/palette';
 import { ART } from '../../../art/style/artPalette';
 import { STORY_FACES, STORY_PROPS_GLB_BASE64, type StoryFaceFigures } from '../../../art/assets/storyPropsGlb';
@@ -525,6 +525,12 @@ export interface StoryWheelHandle extends AssetHandle {
   readonly lights: Mesh;
   /** The middle of the empty star bracket on the hub's face, in the root's frame — where the `star` goes on page 9. */
   readonly bracketCentre: Vector3;
+  /**
+   * The empty bracket's own box round its vertices, in the root's frame —
+   * what a star put back in it is fitted to and stood in front of
+   * (`pagePictures.ts`). Measured off the node, never typed.
+   */
+  readonly bracketBox: Box3;
 }
 
 export interface StoryWheelOptions {
@@ -532,19 +538,17 @@ export interface StoryWheelOptions {
   readonly lit?: boolean;
 }
 
-/** The middle of a node's vertices, in the asset's frame. */
-function centreOf(name: string): Vector3 {
+/** The box round a node's vertices, in the asset's frame. */
+function boundsOf(name: string): Box3 {
   const part = storyPropPart(name);
   const position = part.geometry.getAttribute('position') as BufferAttribute;
-  const min = new Vector3(Infinity, Infinity, Infinity);
-  const max = new Vector3(-Infinity, -Infinity, -Infinity);
+  const box = new Box3();
   const p = new Vector3();
   for (let i = 0; i < position.count; i += 1) {
     p.fromBufferAttribute(position, i).multiply(part.scale).applyQuaternion(part.quaternion).add(part.position);
-    min.min(p);
-    max.max(p);
+    box.expandByPoint(p);
   }
-  return min.add(max).multiplyScalar(0.5);
+  return box;
 }
 
 /**
@@ -562,7 +566,8 @@ export function createStoryWheel(options: StoryWheelOptions = {}): StoryWheelHan
   const lights = storyPropMesh('story-wheel-lights');
   lights.visible = options.lit === true;
   root.add(lights);
-  return { root, height: visibleBounds(root).top, lights, bracketCentre: centreOf('story-wheel-bracket') };
+  const bracketBox = boundsOf('story-wheel-bracket');
+  return { root, height: visibleBounds(root).top, lights, bracketCentre: bracketBox.getCenter(new Vector3()), bracketBox };
 }
 
 /** A feather lying on the grass. White by default; Chicken-looter's red one is `ART.chickenComb`. */

@@ -78,9 +78,18 @@ export type { BookKind } from './bookKinds';
  * it**, both at park scale exactly as the race seats a rider, under duck bars
  * (`duckBar`) hung at the race's own height for them.
  *
- * **The chapter books' additions** (track D of #714, the editor's list for
- * the six), each one of the park's own factories, at its park size, standing
- * on the ground at the origin like every model here:
+ * **Nothing in a picture is built from three.js primitives.** Jim, 22 October
+ * 2026: *"model in Blender as much as is needed, in preference to coding
+ * geometric primitives to create items in the world"*. A page names a model
+ * from this list — the park's own factories, or the 3D Artist's story-props
+ * kit below — and a thing neither has is a request to the Artist, never a
+ * shape typed into a page (the one-time `prop` actor built of primitive
+ * `parts` went for that reason). A sprite is not a model: confetti, raindrops
+ * and drips are {@link PictureDecor}.
+ *
+ * **The chapter books' park models** (track D of #714), each one of the park's
+ * own factories, at its park size, standing on the ground at the origin like
+ * every model here:
  *
  * - `mini` — the lilac mini (`createMini`); {@link PictureActor.grab} lifts its
  *   grabby arms;
@@ -92,6 +101,7 @@ export type { BookKind } from './bookKinds';
  * - `owl` — the owl librarian (`createLibraryOwl`): her faces are neutral,
  *   blink, happy and her shush, which mood `surprised` shows;
  * - `candyFloss` — on its stick (`createCandyFloss`), `variant` its flavour;
+ *   `flossStick` — the bare stick once the floss is eaten (`createFlossStick`);
  * - `jetpack` — a jet pack on its own (`createJetpack`); to put one on the
  *   reader or a pet, give that actor {@link PictureActor.jetpack} instead;
  * - `discoBall` — the hotel's (`createDiscoBall`), set down to stand on its
@@ -101,11 +111,57 @@ export type { BookKind } from './bookKinds';
  *   {@link PictureActor.accent} its spots;
  * - `alienSaucer` — the friendly alien from the Space Ferris Wheel's sky
  *   (`createAlienSaucer`), fully arrived; it is 5 m across, so give it a `size`;
- * - `stormCloud` — a book-only cloud with a face (`reader/readerAssets.ts`'s
- *   `createStoryCloud`), in `colour` (grey for a storm, white for a fair
- *   weather cloud), its moods the house five;
- * - `prop` — anything no factory builds, made of primitive shapes: give its
- *   {@link PictureActor.parts}.
+ * - `libraryDesk`, `readingLamp`, `bookcase` — the library's own desk and
+ *   reading lamp, and a wall case full of spines (`art/models/libraryAssets.ts`;
+ *   the spines stocked by the reading room's own rule, `furnish.ts`'s
+ *   `shelveFace`), for the pages set in the library.
+ *
+ * **The story-props kit** (`reader/storyProps.ts`, the Artist's
+ * `src/art/assets/storyProps.glb`, ASSET_MANIFEST.md §42): everything the six
+ * chapter books' pictures need that the park had no model for, each at the
+ * kit's own size, standing on the ground at the origin; a page lifts it with
+ * `at` and scales it with `size`. The editor's page notes
+ * (`docs/library-build/chapter-books/final.json`) call these "prop: …"; this
+ * is what each of those lines names:
+ *
+ * - `stormCloud` — Nimbus, the storm cloud of *Biscuit and the Storm*: a face
+ *   puff in a ring of puffs, its moods the house five (`frown` cross, `sad`
+ *   hungry, `surprised` the burp, `happy` fed), grey unless `colour` says
+ *   otherwise (`blossomWhite` once she is fed); `fluffyCloud` — long, low and
+ *   faceless (*Catch That Chicken!* p5), so nobody takes it for Nimbus;
+ * - `rainbowArch` — the Rail Race's finish, its bands `ART.rainbow`'s colours
+ *   (*Hopsalot* p7–9, *Footprints* p10, *Storm* p8);
+ * - `queuePosts` — two gold posts and a red rope (*Hopsalot* p2, p10);
+ *   `rubberDuck` — the yellow duck Sir Hopsalot says sorry with (p10);
+ * - `parkBench` — a plank seat on two end boards, open underneath, its seat at
+ *   `KID_HIP_HEIGHT` (*Detective* p1, *Footprints* p4);
+ * - `magnifyingGlass` — standing on its handle; a page turns it up to an eye
+ *   (*Detective* p2, p3, p7);
+ * - `pancakeFootprint` — the mini's flat wide print, three toes; a page
+ *   scatters eight (*Detective* p3, p4); `giantFootprint` — a dinner-plate
+ *   print with four stubby toes (*Footprints* p1–p6);
+ * - `spoon`, `flatStone`, `stick` — the hidey-hole's small things (*Detective*
+ *   p8; the spoons again in the nest, *Chicken* p6);
+ * - `openBook` — lying open, pages curving up, `colour` its cover (*Shush* p2,
+ *   p4); `loosePage` — one page fluttering free (p4); and the closed `book`
+ *   above is the kit's too, `colour` its cover — Mrs Crumpet's pile is three
+ *   at `size` 3, as the picture books draw a pile (*Shush*, *Storm* p4);
+ * - `flower` — a storybook flower, `colour` its petals (`blossomPink`,
+ *   `flowerBlue`), {@link PictureActor.nibbled} the bare stalk (*Footprints*
+ *   p3); `petal` — one petal, `colour`, the yellow one on Grandpa Tock's nose
+ *   (p6);
+ * - `picnicBlanket`, `sandwich`, `sandwichTower` (sixteen, taller than
+ *   Biscuit), `sandwichHeap` (Nimbus's forty-one, every one of them),
+ *   `jamTart`, `cake` — the Grand Fountain Picnic (*Storm* p1–p3, p9, p10);
+ * - `puddle` (*Storm* p4), `windowFrame` (p5), `umbrellaInsideOut` (p7),
+ *   `battlement` — a run of the castle roof's wall at `CASTLE_MERLON_HEIGHT`
+ *   (p8);
+ * - `storyWheel` — the Space Ferris Wheel as a toy, dark with its star bracket
+ *   plainly empty; {@link PictureActor.lit} puts the golden star back in the
+ *   bracket and lights the rim (*Chicken* p1, p9);
+ * - `feather` — lying on the grass, white, or `colour` (`flowerRed`) for
+ *   Chicken-looter's (*Chicken* p2); `twigNest` — the hoard on the hotel roof
+ *   (p6–p8); `biscuitTreat` — a biscuit to eat, not Biscuit the bear (p6, p8).
  */
 export const PICTURE_MODELS = [
   'kid',
@@ -132,13 +188,45 @@ export const PICTURE_MODELS = [
   'tortoise',
   'owl',
   'candyFloss',
+  'flossStick',
   'jetpack',
   'discoBall',
   'lollipopTree',
   'surpriseEgg',
   'alienSaucer',
+  'libraryDesk',
+  'readingLamp',
+  'bookcase',
   'stormCloud',
-  'prop',
+  'fluffyCloud',
+  'rainbowArch',
+  'queuePosts',
+  'rubberDuck',
+  'parkBench',
+  'magnifyingGlass',
+  'pancakeFootprint',
+  'giantFootprint',
+  'spoon',
+  'flatStone',
+  'stick',
+  'openBook',
+  'loosePage',
+  'flower',
+  'petal',
+  'picnicBlanket',
+  'sandwich',
+  'sandwichTower',
+  'sandwichHeap',
+  'jamTart',
+  'cake',
+  'puddle',
+  'windowFrame',
+  'umbrellaInsideOut',
+  'battlement',
+  'storyWheel',
+  'feather',
+  'twigNest',
+  'biscuitTreat',
 ] as const;
 
 /** A model the reader knows how to build for a picture — see {@link PICTURE_MODELS}. */
@@ -153,47 +241,6 @@ export type PictureModel = (typeof PICTURE_MODELS)[number];
  */
 export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit' | 'duck' | 'stretch' | 'tuck';
 
-/** A primitive's shape, for a {@link PropPart}. */
-export type PropShape = 'box' | 'ball' | 'cylinder' | 'cone' | 'ring';
-
-/**
- * **One primitive piece of a `prop`** — a picnic blanket is one `box`, a
- * magnifying glass a `ring`, a flat `cylinder` for its lens and another for
- * its handle. Built by `reader/pictureProps.ts` in the house toon look with
- * an ink outline, so a prop sits in a picture like the park's own models.
- */
-export interface PropPart {
-  readonly shape: PropShape;
-  /**
-   * Its size in metres, before it is turned or tilted:
-   * - `box` — width, height, depth;
-   * - `ball` — the box it fills: a sphere squashed or stretched to it (a cloud
-   *   puff, a pancake footprint, a feather);
-   * - `cylinder` — width and depth are its diameters, height its height
-   *   ({@link PropPart.sides} `3` makes it a wedge, a sandwich);
-   * - `cone` — its base's diameters, and its height, point up;
-   * - `ring` — its outer diameter, the thickness of its tube, and (unused) a
-   *   third number: a torus standing upright facing the reader, tilt it to lay
-   *   it down; {@link PropPart.arc} draws part of it (180 is an arch).
-   */
-  readonly size: readonly [number, number, number];
-  /** Where its middle is, in the prop's own metres. Default the origin. */
-  readonly at?: readonly [number, number, number];
-  /** Degrees about the vertical. */
-  readonly turn?: number;
-  /** Degrees about x (tipping it towards the reader), then about z (leaning it right). */
-  readonly tilt?: readonly [number, number];
-  readonly colour: PaletteKey;
-  /** `ring` only: how much of it, in degrees, from its right-hand side round over the top. Default 360. */
-  readonly arc?: number;
-  /** `cylinder` and `cone` only: how many sides. Default round. */
-  readonly sides?: number;
-  /** Glowing, as if lit from inside — a fairground bulb. */
-  readonly glow?: boolean;
-  /** `false` for no ink outline: confetti, raindrops, anything too small to carry one. */
-  readonly outline?: boolean;
-}
-
 /** One model on a page, and how it stands. Everything optional has a sensible default. */
 export interface PictureActor {
   readonly model: PictureModel;
@@ -207,7 +254,11 @@ export interface PictureActor {
   readonly pose?: PicturePose;
   /** Which balloon, keychain, breakfast, candy floss or tree — only read for those models. */
   readonly variant?: BalloonKind | KeychainKind | BreakfastKind | FlossFlavour | TreeVariant;
-  /** A colour for models that take one (the cart, the star, a book, the egg's shell, the cloud). */
+  /**
+   * A colour for models that take one: the cart, the star, a `book`'s or an
+   * `openBook`'s cover, the egg's shell, the cloud, a `flower`'s petals, a
+   * `petal`, a `feather`, and the star a lit `storyWheel` carries.
+   */
   readonly colour?: PaletteKey;
   /** A second colour, for a model that takes two: the surprise egg's spots. */
   readonly accent?: PaletteKey;
@@ -221,11 +272,24 @@ export interface PictureActor {
   readonly jetpack?: 'on' | 'off';
   /** `false` takes the keyring off the reader's bag for this picture (she wears whatever she has on today otherwise). Only read for `kid`. */
   readonly keyring?: false;
-  /** A `prop`'s pieces. Only read for `prop`. */
-  readonly parts?: readonly PropPart[];
+  /** `flower` only: nibbled down to its bare stalk — *The Giant Footprints*' yellow ones. */
+  readonly nibbled?: true;
+  /**
+   * `storyWheel` only: `true` puts the golden star back in the bracket on the
+   * hub (in `colour`, yellow by default) and turns the ring of lights on.
+   * Omitted, the wheel is dark and the bracket plainly empty — the star is
+   * missing, which is the whole of *Catch That Chicken!*.
+   */
+  readonly lit?: true;
 }
 
-/** Little things painted over the picture, the way an illustrator would. */
+/**
+ * Little things painted over the picture, the way an illustrator would — in
+ * 2D on the page, never built (a particle is not a model). `confetti` is a
+ * shower of flat squares in the park's marker colours (the Rail Race finish);
+ * `rain` is streaks of falling rain over everything; `splash` is a few drops
+ * low in the picture (a fountain, or the drips off a soaked bear).
+ */
 export type PictureDecor =
   | 'stars'
   | 'moon'
@@ -237,7 +301,9 @@ export type PictureDecor =
   | 'zzz'
   | 'speed'
   | 'splash'
-  | 'notes';
+  | 'notes'
+  | 'confetti'
+  | 'rain';
 
 export interface PagePicture {
   readonly cast: readonly PictureActor[];

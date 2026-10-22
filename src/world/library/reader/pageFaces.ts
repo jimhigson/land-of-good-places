@@ -630,6 +630,9 @@ function paintLines(
 /** Behind the models. */
 const BACK_DECOR: ReadonlySet<PictureDecor> = new Set(['sun', 'moon', 'stars', 'clouds', 'speed']);
 
+/** Confetti's colours: the marker pens', the brightest the palette has. */
+const CONFETTI_COLOURS: readonly number[] = [PALETTE.markerPink, PALETTE.markerSky, PALETTE.markerLemon, PALETTE.markerMint, PALETTE.markerLilac];
+
 /** The picture box: backdrop, back decor, the rendered models, front decor, a frame. */
 function paintPicture(
   ctx: CanvasRenderingContext2D,
@@ -795,6 +798,34 @@ function paintDecor(
     case 'notes':
       for (let i = 0; i < 4; i += 1) {
         drawNote(ctx, x + rng.range(0.08, 0.92) * w, y + rng.range(0.1, 0.4) * h, rng.range(16, 22) * u);
+      }
+      break;
+    case 'confetti':
+      // A shower of little flat squares in the park's marker colours, each
+      // turned its own way as it falls.
+      for (let i = 0; i < 28; i += 1) {
+        const side = rng.range(10, 18) * u;
+        ctx.save();
+        ctx.translate(x + rng.range(0.04, 0.96) * w, y + rng.range(0.04, 0.9) * h);
+        ctx.rotate(rng.range(0, Math.PI));
+        ctx.fillStyle = hexToCss(CONFETTI_COLOURS[i % CONFETTI_COLOURS.length] ?? PALETTE.markerPink);
+        ctx.fillRect(-side / 2, -side * 0.35, side, side * 0.7);
+        ctx.restore();
+      }
+      break;
+    case 'rain':
+      // Streaks slanting down across the whole picture, pale and a little see-through.
+      ctx.strokeStyle = cssAlpha(PALETTE.waterFoam, 0.75);
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 5 * u;
+      for (let i = 0; i < 40; i += 1) {
+        const rx = x + rng.range(0.02, 0.98) * w;
+        const ry = y + rng.range(0.02, 0.88) * h;
+        const length = rng.range(28, 56) * u;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx - length * 0.25, ry + length);
+        ctx.stroke();
       }
       break;
   }

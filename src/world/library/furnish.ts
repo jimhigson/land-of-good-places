@@ -154,7 +154,7 @@ export function assertReadableSlotsInReach(): void {
 }
 
 /** One book: its shape, colour and transform in its case's own frame. */
-interface PlacedBook {
+export interface PlacedBook {
   readonly shape: number;
   readonly colour: number;
   readonly matrix: Matrix4;
@@ -162,9 +162,12 @@ interface PlacedBook {
 
 /**
  * The books on one face of one case, in the case's own frame (front +Z).
- * `back` puts them on the far face, spines out the other way.
+ * `back` puts them on the far face, spines out the other way. Exported, with
+ * {@link bookInstances}, for the reader's picture bookcase
+ * (`reader/pagePictures.ts`), so a shelf in a storybook is stocked by the
+ * room's one rule rather than a copy of it.
  */
-function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonly BookShape[]): PlacedBook[] {
+export function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonly BookShape[]): PlacedBook[] {
   const size = libraryBookcaseSize(spec.kind);
   const books: PlacedBook[] = [];
   const spineZ = size.boardFront - SPINE_INSET;
@@ -285,7 +288,7 @@ function shelfBookMesh(entry: ShelfBook, spec: BookcaseSpec): Mesh {
  * book's geometry scaled to its own measured size, so one case is one draw
  * call — the stacks fade and the secret shelf swings, so each owns its books.
  */
-function bookInstances(books: readonly PlacedBook[], shapes: readonly BookShape[], material: Material): InstancedMesh {
+export function bookInstances(books: readonly PlacedBook[], shapes: readonly BookShape[], material: Material): InstancedMesh {
   const base = shapes[0]!;
   const instanced = new InstancedMesh(base.geometry, material, books.length);
   const scaled = new Matrix4();
