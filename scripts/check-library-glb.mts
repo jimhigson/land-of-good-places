@@ -163,7 +163,16 @@ async function checkKit(kit: Kit): Promise<void> {
 
   // ------------------------------------------------- 2. the export's own rules
 
-  const json = jsonChunk(label, shipped);
+  // A module whose bytes are not even a readable glb (one character of the
+  // base64 changed inside the JSON chunk) is reported, not thrown through:
+  // the failure above already names the byte, and this names the symptom.
+  let json: GltfJson;
+  try {
+    json = jsonChunk(label, shipped);
+  } catch (error) {
+    check(false, `the shipped bytes are not a readable glb: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
   const nodes = json.nodes ?? [];
   check(nodes.length > 0, 'has no nodes');
   check(!json.materials?.length, `carries ${json.materials?.length} material(s); it is shape only`);

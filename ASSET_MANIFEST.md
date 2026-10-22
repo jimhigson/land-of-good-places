@@ -182,6 +182,7 @@ only question asked is whether the bytes still match.
 | `reptileNoodle.glb` | `pnpm run blend:reptile-noodle` | 112 KB | Noodle the python and her rock — 8 nodes, 4 982 triangles |
 | `reptileStall.glb` | `pnpm run blend:reptile-stall` | 73 KB | Scales & Tails' dressing and the Noodle-o-meter — 17 nodes, 2 449 triangles |
 | `library.glb` | `pnpm run blend:library` | 439 KB | the Library kit (#715): building, furniture, books, owl, dragon, cat — 65 nodes, 18 568 triangles |
+| `libraryDen.glb` | `pnpm run blend:library-den` | 80 KB | the Library's secret den kit (#719, Library v2): the den's room, a wall lantern, the pull book — 14 nodes, 2 748 triangles |
 
 **Two shapes of kit, and the difference matters.** Some are *models* a placer
 puts down whole (the castle's furniture, the hotel's fittings); some are **kits
@@ -608,3 +609,86 @@ the day is in `libraryGlb.ts`'s header. Shape only: no colour, no material.
   every node. The CONTRACT is the
   build's to assert; the Engineer's `check:library` (#716) re-measures what the
   game builds against with `visibleBounds()`.
+
+### 42 — The Library den kit (Library v2, epic #714 part 5, #719)
+
+Three assets in one file, `libraryDen.glb` (80 KB, 14 nodes, 2 748
+triangles; budget 100 KB, a hard gate in `pack-library-den-asset.mts`) — **a
+kit of its own** because `library.glb` ships 11 KB under its 450 KB budget.
+Jim, 22 October 2026: *"model in Blender as much as is needed, in preference
+to coding geometric primitives to create items in the world"* — so every
+visible thing the den track drew, or would have drawn, from three.js
+primitives is authored here: the den's floor, its three walls, the lintel
+over its doorway, and the pull book, plus the dressing that makes the den a
+room of its own.
+
+- **`den`** — the secret room behind the reading room's west wall, nine
+  nodes: `den-floor` (the slab, 6.8 × 5.9 × 0.5 m, its top the floor she
+  walks on), `den-wallWest` and `den-wallNorth` (the far walls, 0.6 m thick
+  and 5.2 m tall, each cut with **three book niches** 1.5 m wide between
+  0.275 m piers, 0.34 m deep, five rows at the library kit's own shelf
+  heights — 0.180, 0.756, 1.332, 1.908 and 2.484 m above the floor, 0.516 m
+  clear each, the figures `library_build.py` owns), `den-wallSouth` (plain:
+  the camera's near side, which the game draws hidden), `den-lintel` (over
+  the doorway, 4.0 × 0.6 × 2.0 m, from the shut shelf's top at 3.2 m to the
+  wall's top), `den-shelves` (thirty boards), `den-nicheBacks`, `den-stars`
+  (nine) and `den-moon`, reliefs 25 mm off the far walls above the niches.
+  **Origin: the middle of the doorway on the wall's centre line, at the
+  bottom of the floor slab** — the slab is the den's plinth, the way the
+  exterior's plinth stands under its door; the doorway faces +Z, the den runs
+  to −Z, its longer run past the doorway on +X. Inner plan 5.6 × 5.6 m, read
+  from `layout.ts` at build time (`LIBRARY_DEN_DEPTH`,
+  `LIBRARY_DEN_DOOR_HALF`, `DEN_NORTH_PAST_DOOR`, `LIBRARY_WALL_HALF`,
+  `LIBRARY_WALL_HEIGHT`) and from `library_build.py` (`SHELF_LENGTH` for
+  the doorway, `SHELF_HEIGHT` for the lintel's base), and measured back by
+  `libraryDenKit.ts`'s `LIBRARY_DEN_PLAN` (floor top and plan, wall half and
+  height, door half, lintel base and top, depth, the far walls' inner faces,
+  every niche's rows in a case's own terms). In the room it stands at
+  `(-LIBRARY_HALF_X, 0, LIBRARY_SECRET_BOOKCASE.at.z)`, `rotation.y = +π/2`.
+- **`denLantern`** — a glowing paper lantern (`denLantern-glow`, the part the
+  Engineer lights) on a brass bracket (`denLantern-bracket`): 0.62 m tall,
+  0.28 m wide, standing 0.415 m off its wall. Back on z 0, bottom at 0,
+  facing +Z. No `PointLight`: the ball glows on its own.
+- **`secretBook`** — the pull book on the secret shelf: 0.46 m tall (taller
+  than any kit book, `TALL_BOOK` 0.42, and under a row's 0.516 m clear height
+  with `BOOK_PULL_MARGIN` to spare, asserted), 0.11 m thick, its boards
+  `BOOK_DEPTH` (0.26 m) deep, the spine 1 cm proud with a raised star
+  (`secretBook-star`, 12 mm proud, its own node so the twinkle can drive its
+  glow). Base-centred, thickness along X, spine on +Z, like the kit's six
+  blocks. 184 triangles.
+
+`art/blend/library_den_build.py` → `art/blend/libraryDen.blend` →
+`library_den_export.py` → `src/art/assets/libraryDen.glb` →
+`scripts/pack-library-den-asset.mts` → `libraryDenGlb.ts`; `pnpm run
+blend:library-den` runs all three, and `pnpm run render:library-den` writes
+`art/renders/library-den/*.png` (eight pictures: each asset beside a
+child-height post; the den as she finds it, 405 of the kit's books shelved in
+its niches with the nest, the dragon, the swung-open shelf and two lanterns
+placed as the game will; a plan of the same; the doorway from the reading room
+with the lintel over the shut shelf between its neighbours and the pull book
+proud on its second row; that row close up; and the lantern and the book in
+elevation against the rig's hip and reach lines). Shape only: no colour, no
+material, no UV, no pivot, no face. Colours are `LIBRARY_DEN_GLB_STYLES` in
+`src/art/models/libraryDenAssets.ts`, read back by the render script.
+
+- **Every CONTRACT figure is asserted against the emitted vertices on every
+  build**: the inner depth and the runs past the doorway (by rays off the far
+  walls' piers), the doorway's width and the lintel's base, the wall height
+  and thickness, the floor's top, the niche count, rows per niche and every
+  row's clear height (by rays, `library_build.m_shelf_rows`'s way), the
+  niches' usable depth, the reliefs' stand-off and their lowest point, the
+  lantern's back on its wall, the book's boards' depth; and the pieces that
+  must meet — the floor's apron edge, the side walls abutting the room wall
+  and the far wall, the lintel's span — are measured off the emitted nodes.
+- **`pnpm run check:library-glb`** walks this kit beside `library.glb`: the
+  module is the file, the export's rules hold, **no node carries texcoords or
+  extras** (asserted of all 14, not passed over an empty list), and
+  `readGlbParts` and `GLTFLoader` agree on every node. `check:assets`
+  measures all three assets' height, origin and scale.
+- **Nothing drawn here is a collider.** The den's walls, the lintel's band
+  and the nest's disc are the game's (`shell.ts`, `props.ts`), built from
+  `LIBRARY_DEN_PLAN` and `layout.ts`; the niches recess into the walls'
+  thickness, so no collider moves and no keep-out is touched; the reliefs
+  stand 25 mm off a wall, inside an ink outline's own thickness, above every
+  reach. The south wall and the lintel are hidden or faded by the game's own
+  rules, not shortened.
