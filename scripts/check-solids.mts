@@ -2512,12 +2512,20 @@ if (inPart('park')) {
         const x = exit.at.x;
         const z = exit.at.z;
         player.endRide({ x, y: terrainHeight(x, z), z });
+        // The spot the rule chose, as chosen: the rule's own answer must be
+        // clear of the train, not made clear by the resolver's push or the
+        // wedge rescue in the second after (which, at a platform's far side,
+        // can lift her out of a slot the rule should never have put her in —
+        // and did not, at the other station).
+        const putAt = insideTrain(player.position);
+        const putWedged = wedgeDepth(collision, player.position, sample(player.position.x, player.position.z, player.position.y));
         play(1);
         const inside = insideTrain(player.position);
         const wedged = wedgeDepth(collision, player.position, sample(player.position.x, player.position.z, player.position.y));
-        if (inside > 0.03 || wedged > WEDGE_DEPTH) badPuts.push(`${exit.what}: ${inside.toFixed(2)} m inside it, wedged ${wedged.toFixed(2)}`);
+        if (putAt > 0.03 || putWedged > WEDGE_DEPTH) badPuts.push(`${exit.what}: put down ${putAt.toFixed(2)} m inside it, wedged ${putWedged.toFixed(2)}`);
+        else if (inside > 0.03 || wedged > WEDGE_DEPTH) badPuts.push(`${exit.what}: a second later ${inside.toFixed(2)} m inside it, wedged ${wedged.toFixed(2)}`);
       }
-      say(badPuts.length === 0, `put down beside it: ${exits.length} exits asked inside it, in the slot beyond it and between its cars at ${standing.name} — none leaves her inside it or wedged${badPuts.length ? ` — ${badPuts.join('; ')}` : ''}`);
+      say(badPuts.length === 0, `put down beside it: ${exits.length} exits asked inside it, in the slot beyond it and between its cars at ${standing.name} — none puts her inside it or wedged, as put down or a second later${badPuts.length ? ` — ${badPuts.join('; ')}` : ''}`);
       hold(false);
       const badDrops: string[] = [];
       // Each asked of the train standing where it stands now: a fresh stop
