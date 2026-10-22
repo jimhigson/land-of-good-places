@@ -26,6 +26,9 @@ import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props'
 import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './furnish';
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
+import { LibraryOwl, OWL_ZONE_ID } from './LibraryOwl';
+import { hasLibraryCard } from './libraryCard';
+import { gameStore } from '../../state';
 import {
   buildLibraryDenShell,
   buildReadingRoomShell,
@@ -40,8 +43,10 @@ import {
 import {
   LIBRARY_ARRIVAL,
   LIBRARY_BOUNDING_RADIUS,
+  LIBRARY_DESK_STAND,
   LIBRARY_EXTERIOR_PLAN,
   LIBRARY_FLOOR_Y,
+  LIBRARY_LIBRARIAN_SPOT,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAY_RADIUS,
@@ -102,11 +107,12 @@ import type { OpenAreaPoint } from '../dismount';
  *
  * The readable books stand in `LIBRARY_READABLE_SLOTS` (#718, `shelfBooks.ts`:
  * the twelve picture books, then the big readers' shelf, whose slots wait as
- * gaps until their chapter books land), and her two story cushions offer a
- * seat. Still to come on their own tracks: the owl librarian behind the desk
- * at `LIBRARY_LIBRARIAN_SPOT` and story time (#718), and the secret shelf
- * swinging open onto the den below, with its dragon and the cat (#719). Every
- * one of their stand spots is a keep-out already.
+ * gaps until their chapter books land), her two story cushions offer a seat,
+ * and the owl librarian stands behind her desk at `LIBRARY_LIBRARIAN_SPOT`
+ * ({@link owl}, `LibraryOwl.ts`: solid, alive, the card, the recommendation,
+ * the shush). Still to come on their own tracks: story time (#718), and the
+ * secret shelf swinging open onto the den below, with its dragon and the cat
+ * (#719). Every one of their stand spots is a keep-out already.
  *
  * ## The secret den (#719)
  *
@@ -152,6 +158,14 @@ const STACK_FADED_ALPHA = 0.28;
  * near any two picks come.
  */
 const SHELF_BOOK_PICK_RADIUS = 0.7;
+
+/**
+ * How close (XZ metres) a tap must land to the owl to count as her (#718):
+ * her own plan reach is about 0.65 m, and a finger aiming at a round owl
+ * lands on her rather than beside her. `check:tap-spacing` measures how near
+ * any other pick comes.
+ */
+const OWL_PICK_RADIUS = 1.2;
 
 /**
  * A story cushion's Sit zone (#718): a tap within this of the cushion's
@@ -219,6 +233,14 @@ export class Library implements GameSystem {
    * spot — for their zones, the checks, and the recommendation's glow (Step 6).
    */
   readonly shelfBooks: readonly FurnishedShelfBook[];
+  /**
+   * **The owl librarian** (#718, plan Step 6), behind her desk: solid, alive,
+   * the library card, the recommendation, the shush — `LibraryOwl.ts`. Built
+   * after the furniture (her glow lights the shelf books) and before
+   * `props.assertClear()`, so her solid is held to every keep-out like a
+   * bookcase's.
+   */
+  readonly owl: LibraryOwl;
   /** The room's light rig — for the checks (no black light, the darkest floor). */
   readonly lighting: LibraryLighting;
   /** How far the building is moved along its up from the ground at its centre (`libraryBaseSink`). */
@@ -250,6 +272,8 @@ export class Library implements GameSystem {
   private readonly cameraLocal = new Vector3();
   /** One "Read it!" zone per readable book, built once: the books never move. */
   private readonly bookZones: readonly InteractZone[];
+  /** The owl's Talk zone, built once: offered only while she is at her desk (`Selection` caches her box there). */
+  private readonly owlZone: InteractZone;
   /** What a Read chip opens a book with ({@link attachBookReader}); null until `Game` attaches it, and headless. */
   private bookOpener: LibraryBookOpener | null = null;
 
@@ -280,6 +304,10 @@ export class Library implements GameSystem {
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;
     this.shelfBooks = furnished.shelfBooks;
+    // The owl (#718): after the furniture, whose shelf books her glow lights,
+    // and before `assertClear`, so her solid is checked against every keep-out.
+    this.owl = new LibraryOwl(this.roomRoot, this.props, this.shelfBooks, controls);
+    this.owlZone = this.buildOwlZone();
     this.bookZones = this.shelfBooks.map((placed) => this.shelfBookZone(placed));
     this.lighting = new LibraryLighting(furnished.pools);
     this.roomRoot.add(this.lighting.group);
@@ -385,9 +413,9 @@ export class Library implements GameSystem {
     return this.props.standables;
   }
 
-  /** The building's name over its door (the owl's bubbles arrive with #714 part 4). */
+  /** The building's name over its door, and the owl's speech bubble (#718). */
   get screenLabels(): readonly ManagedLabel[] {
-    return [this.nameLabel];
+    return [this.nameLabel, this.owl.bubble];
   }
 
   attachPlayer(player: Player): void {
@@ -418,6 +446,7 @@ export class Library implements GameSystem {
     this.roomRoot.visible = true;
     this.boundToRoom();
     this.spaces.holdOff();
+    this.owl.enter();
   }
 
   // --------------------------------------------------------------- doors
@@ -450,14 +479,16 @@ export class Library implements GameSystem {
   }
 
   /**
-   * Inside, one list (#718): a "Read it!" zone on every readable book — unless
-   * she is riding (sitting, Step 7), when the room offers her nothing to walk
-   * to — and a Sit zone on each of her two story cushions, always on (the one
-   * she sits on offers 'Get up'). Outside, the building's entrance.
+   * Inside, one list (#718): the owl's Talk zone while she is at her desk, and
+   * a "Read it!" zone on every readable book — neither while she is riding
+   * (sitting, Step 7), when the room offers her nothing to walk to — and a Sit
+   * zone on each of her two story cushions, always on (the one she sits on
+   * offers 'Get up'). Outside, the building's entrance.
    */
   interactZones(): InteractZone[] {
     if (!this.inside) return [this.exteriorEntranceZone()];
-    return [...(this.player?.riding ? [] : this.bookZones), ...this.sitZones()];
+    const standing = this.player?.riding ? [] : [...(this.owl.atDesk ? [this.owlZone] : []), ...this.bookZones];
+    return [...standing, ...this.sitZones()];
   }
 
   /**
@@ -491,6 +522,9 @@ export class Library implements GameSystem {
     this.updateNameLabel();
     const player = this.player;
     if (!player) return;
+    // The owl before the seat (the plan's order: story → owl → glow → seated
+    // jump): her words, her shush, her life and the recommended book's glow.
+    if (this.inside) this.owl.update(dt, context.elapsed, player, this.spaces.isChanging, this.deps.camera);
     if (this.seatedOn !== null) this.updateSeated(player, context);
     if (this.inside) this.fadeStacks(player, dt);
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
@@ -641,6 +675,10 @@ export class Library implements GameSystem {
     // Every road in refuses a sitting child, so this is a belt: nobody is put
     // somewhere new still sitting on a cushion she has left.
     this.standUp();
+    // Coming in from the park (or a link): a visit. Already inside — a link
+    // typed from the room, or the fall rescue below — it is not, and the owl
+    // does not greet her twice.
+    const arriving = !this.inside;
     this.inside = true;
     this.roomRoot.visible = true;
     this.boundToRoom();
@@ -649,6 +687,7 @@ export class Library implements GameSystem {
     player.teleportTo(LIBRARY_ORIGIN_X + spot.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + spot.z, facing);
     // A fresh visit starts with every stack solid.
     for (const stack of this.stacks) stack.setAlpha(1);
+    if (arriving) this.owl.enter();
   }
 
   /**
@@ -671,6 +710,7 @@ export class Library implements GameSystem {
     if (!this.inside) return;
     this.inside = false;
     this.roomRoot.visible = false;
+    this.owl.leave();
   }
 
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */
@@ -680,6 +720,7 @@ export class Library implements GameSystem {
     this.standUp();
     this.inside = false;
     this.roomRoot.visible = false;
+    this.owl.leave();
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
     const mat = this.doormat;
     player.teleportTo(mat.x, this.surfaces.sample(mat.x, mat.z, terrainHeight(mat.x, mat.z) + 3), mat.z, facing);
@@ -694,7 +735,8 @@ export class Library implements GameSystem {
    * floor (where a tap on a book on a low shelf lands); stood at its slot's
    * stand, in front of the case, facing it; the rainbow round the book's own
    * mesh; and one chip, "Read it!", which opens that book through the attached
-   * opener — the paper book over the paused park.
+   * opener — the paper book over the paused park. The book the owl is
+   * recommending — the one glowing on its shelf — says "Read me!" instead.
    */
   private shelfBookZone(placed: FurnishedShelfBook): InteractZone {
     const { book, slot, mesh, local } = placed;
@@ -711,12 +753,42 @@ export class Library implements GameSystem {
       highlight: highlightObject(mesh),
       actions: () =>
         pressAction(
-          LIBRARY_CHIPS.read,
+          this.owl.recommendedBookId === book.id ? LIBRARY_CHIPS.readGlowing : LIBRARY_CHIPS.read,
           () => {
             this.bookOpener?.open(book.id);
           },
           '📖',
         ),
+    };
+  }
+
+  /**
+   * **The owl's Talk zone** (#718): on the owl, a metre over the floor, picked
+   * within {@link OWL_PICK_RADIUS}; stood at the desk's front
+   * (`LIBRARY_DESK_STAND`), facing her across the desk; the rainbow round the
+   * owl herself. One chip: "Get a library card!" until she has one, then "Say
+   * hello!" — both the one press, `LibraryOwl.talk`, which knows which it is.
+   * Offered only while the owl is at her desk ({@link interactZones}): the
+   * selection caches her box where it first finds her, so a zone that
+   * followed her flight would ring the desk while she sat on the story chair.
+   */
+  private buildOwlZone(): InteractZone {
+    const spot = LIBRARY_LIBRARIAN_SPOT;
+    const talk = (): void => {
+      if (this.player) this.owl.talk(this.player);
+    };
+    return {
+      id: OWL_ZONE_ID,
+      label: 'the librarian',
+      x: LIBRARY_ORIGIN_X + spot.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + spot.z,
+      pickRadius: OWL_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + LIBRARY_DESK_STAND.x,
+      standZ: LIBRARY_ORIGIN_Z + LIBRARY_DESK_STAND.z,
+      verb: 'Talk',
+      highlight: highlightObject(this.owl.handle.root),
+      actions: () => (hasLibraryCard(gameStore.get()) ? pressAction(LIBRARY_CHIPS.hello, talk, '🦉') : pressAction(LIBRARY_CHIPS.getCard, talk, '🪪')),
     };
   }
 
