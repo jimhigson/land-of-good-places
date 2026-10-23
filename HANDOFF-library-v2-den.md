@@ -29,7 +29,7 @@ here, and was killed by PID.
 - [x] Looked at in headless Chrome (playwright-core, `channel: 'chrome'`, a throwaway profile; my dev server on 5873, killed by PID, the dev park cache seeded with the hydrated seed 5 for the new source hash): `den13/look-cat.png`, `look-cat-petted.png` (the purr bubble), `look-dragon.png` (the OLD stand: the dragon hidden behind her), `look2-stand.png` (the new stand: side by side, "Oh, a visitor for me!"), `look2-doorway.png` (from the doorway: Say hi! offered); 0 page errors.
 - [ ] Step 14 (not this step).
 
-The park source hash at 3014933b is **c86ef951b9f8ead2…** (`node -e "import('./scripts/lib/park-source-hash.mjs').then(m=>console.log(m.parkSourceHash(process.cwd())))"`)
+The park source hash at 3014933b is **c86ef951b9f8ead2a0afdb99c4b5f1a21d0ca5008fb7650e2ad7c321ca474ed1**
 (every src file here is in the closure). No park was re-solved: `.parks/5.json` is the integration
 branch's honest seed 5 (digest d6721090fb3f1d3a), hydrated whatever the hash with `LGP_PARK_FILE`. The
 creatures change nothing the park plan reads (`parkManifest.ts` takes the library's footprint from
