@@ -138,7 +138,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Box3, Color, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshToonMaterial, Sprite, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
+import { BackSide, Box3, Color, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshToonMaterial, Sprite, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -2292,7 +2292,8 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
   const bookLocal = { x: bookWorld.x - OX, z: bookWorld.z - OZ };
   const shelfTop = size.shelfTops[LIBRARY_SECRET_BOOK.shelf] ?? Number.NaN;
   const bookBase = bookWorld.y - LIBRARY_FLOOR_Y; // flat-ok: height over the reading room's own flat floor, off the sphere
-  const gold = (leaf.pullBook.material as MeshToonMaterial).color.equals(new Color(ART.helmetGold));
+  const cover = leaf.pullBook.getObjectByName('secretBook-cover');
+  const gold = cover instanceof Mesh && (cover.material as MeshToonMaterial).color.equals(new Color(ART.helmetGold));
   say(
     outsideBox(shut, bookLocal.x, bookLocal.z) < 0 && Math.abs(bookBase - shelfTop) <= 0.02 && gold && leaf.pullBook.name === 'library.secretBook',
     `the gold book '${leaf.pullBook.name}' stands ${(-outsideBox(shut, bookLocal.x, bookLocal.z)).toFixed(3)} m inside the shut case's drawn box at (${bookLocal.x.toFixed(2)}, ${bookLocal.z.toFixed(2)}), ` +
@@ -2304,15 +2305,19 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
   // `pullBookGap`); nothing else would notice it gone — the row's books and the
   // gold one are drawn by different owners, and both draw happily through each
   // other. Measured in the leaf's own frame, off the drawn geometry: every row
-  // book whose height range meets the gold book's is on its shelf.
+  // book whose height range meets the gold book's is on its shelf. And the
+  // whole drawn book stands inside the leaf's own box — the box both of its
+  // colliders are — so drawn is solid, shut and open.
   {
     leaf.leaf.updateMatrixWorld(true);
     const toLeaf = new Matrix4().copy(leaf.leaf.matrixWorld).invert();
-    /** The leaf-frame box round an object's drawn bodies (its ink outlines left out: they are a line, not the book). */
+    /** An ink outline — an inverted hull, drawn back-faced — is a line round a shape, not the shape. */
+    const isOutline = (mesh: Mesh): boolean => mesh.material instanceof MeshBasicMaterial && mesh.material.side === BackSide;
+    /** The leaf-frame box round an object's drawn bodies, its ink outlines left out. */
     const boxInLeaf = (object: Object3D): Box3 => {
       const box = new Box3();
       object.traverse((part) => {
-        if (!(part instanceof Mesh) || part instanceof InstancedMesh || part.name.endsWith('.outline')) return;
+        if (!(part instanceof Mesh) || part instanceof InstancedMesh || isOutline(part)) return;
         part.geometry.computeBoundingBox();
         box.union(part.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(toLeaf, part.matrixWorld)));
       });
@@ -2338,6 +2343,15 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
       !goldBox.isEmpty() && sameShelf.length >= 10 && through.length === 0 && nearest >= 0,
       `the gold book stands alone in its gap: ${sameShelf.length} book(s) of its row on shelf ${LIBRARY_SECRET_BOOK.shelf} (at least 10 wanted), ` +
         `${through.length} pass(es) through it (x ${goldBox.min.x.toFixed(3)}..${goldBox.max.x.toFixed(3)} in the leaf's frame); the nearest stands ${nearest.toFixed(3)} m beside it`,
+    );
+    // Inside the leaf's own box: x along its length, y up its height, z
+    // through its depth to the front its colliders stop at.
+    const inside = Math.min(goldBox.min.x, size.length - goldBox.max.x, goldBox.min.y, size.height - goldBox.max.y, goldBox.min.z, size.depth - goldBox.max.z);
+    say(
+      !goldBox.isEmpty() && inside >= 0,
+      `the whole drawn gold book stands inside the leaf's own ${size.length.toFixed(2)} x ${size.height.toFixed(2)} x ${size.depth.toFixed(2)} box, the box its shut and open colliders are: ` +
+        `y ${goldBox.min.y.toFixed(3)}..${goldBox.max.y.toFixed(3)}, z ${goldBox.min.z.toFixed(3)}..${goldBox.max.z.toFixed(3)} (its front ${(size.depth - goldBox.max.z).toFixed(3)} m inside the case's), ` +
+        `${inside.toFixed(3)} m clear of the box at its nearest`,
     );
   }
 

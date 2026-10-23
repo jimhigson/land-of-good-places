@@ -1,9 +1,11 @@
-import { Group, Sprite, SpriteMaterial, Vector3, type Material, type Mesh } from 'three';
+import { Group, Mesh, Sprite, SpriteMaterial, Vector3, type Material, type MeshToonMaterial } from 'three';
 import { damp } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import { glowTexture } from '../../core/textures';
-import { ART } from '../../art/style/artPalette';
-import { createLibrarySecretLeaf, createShelfBook, libraryBookMaterial, libraryBookShapes, libraryShelfBookShape } from '../../art/models/libraryAssets';
+import { createLibrarySecretLeaf, libraryBookMaterial, libraryBookShapes } from '../../art/models/libraryAssets';
+import { createLibrarySecretBook, librarySecretBookSize } from '../../art/models/libraryDenAssets';
+import { denKitBounds } from '../../art/models/libraryDenKit';
+import { isShared } from '../../art/style/materials';
 import { playSecretDoor, playSecretThunk } from '../../ui/chime';
 import { bookcaseCentre, bookInstances, bookSpot, READABLE_PROUD, StackFader, type PlacedBook } from './furnish';
 import { LIBRARY_SECRET_BOOK, LIBRARY_SECRET_BOOKCASE, type LocalPoint } from './layout';
@@ -41,10 +43,13 @@ import type { BoxFootprint, BoxWalls, LibraryProps } from './props';
  *
  * ## What she sees
  *
- * The gold book twinkles now and then while the leaf is shut. Pulled, it
- * slides {@link SLIDE} out over {@link SLIDE_SECONDS} with a creak, then the
- * whole case swings {@link SWING_SECONDS} on an ease-out cubic — quick off the
- * wall, slowing to the thunk — and the book eases home.
+ * The gold book — the Artist's (`libraryDen.glb`'s `secretBook`: a fat gold
+ * tome taller than any book in the room, a raised star on its spine) —
+ * twinkles now and then while the leaf is shut: a warm wink in front of its
+ * star, and the star itself brightening with it. Pulled, it slides
+ * {@link SLIDE} out over {@link SLIDE_SECONDS} with a creak, then the whole
+ * case swings {@link SWING_SECONDS} on an ease-out cubic — quick off the wall,
+ * slowing to the thunk — and the book eases home.
  */
 
 /** The open leaf's solid, by name: the shut one keeps its case's (`bookcase west-2`). */
@@ -66,9 +71,11 @@ export const SWING_END = Math.PI / 2;
 const BOOK_HOME_HALF_LIFE = 0.08;
 /** The twinkle on the gold book: one wink every this many seconds while shut. */
 export const TWINKLE_PERIOD = 4.5;
-/** The twinkle's sprite: its size, and how far in front of the book's spine it floats. */
+/** The twinkle's sprite: its size, and how far in front of the star on the book's spine it floats. */
 const TWINKLE_SIZE = 0.3;
 const TWINKLE_OUT = 0.06;
+/** How much brighter than at rest the spine's star glows at the top of a wink: its emissive is the kit's rest glow plus this times the wink. */
+const STAR_WINK_GLOW = 1.2;
 
 /**
  * **A footprint turned `angle` about the hinge**, room-local, `angle` in the
@@ -95,8 +102,8 @@ export class SecretLeaf {
   readonly hinge = new Group();
   /** The swinging part: the case, its row of books, the pull book and its twinkle. `rotation.y` is {@link angle}. */
   readonly leaf = new Group();
-  /** The gold book she pulls (`library.secretBook`), in the leaf's frame. */
-  readonly pullBook: Mesh;
+  /** The gold book she pulls (`library.secretBook`, the Artist's), in the leaf's frame: its origin the middle of its base, its spine to the leaf's +Z. */
+  readonly pullBook: Group;
   /** The twinkle over the pull book — shut only. */
   readonly twinkle: Sprite;
   /** Where the pull book stands in the room while the leaf is shut — its zone sits here, and never moves (Decision 35). */
@@ -117,6 +124,9 @@ export class SecretLeaf {
   private readonly props: LibraryProps;
   private readonly bookHome: Vector3;
   private readonly twinkleMaterial: SpriteMaterial;
+  /** The star on the pull book's spine, its own paint, and its glow at rest (the kit's). */
+  private readonly starMaterial: MeshToonMaterial;
+  private readonly starRest: number;
   private state: 'shut' | 'swinging' | 'open' = 'shut';
   /** Seconds since the pull. */
   private tau = 0;
@@ -151,24 +161,38 @@ export class SecretLeaf {
     row.name = 'library.secretShelf.books';
     this.leaf.add(row);
 
-    // The pull book: the readable books' shape, in gold, standing proud of its
-    // row like a readable book does — the one book on this case that does
-    // something, drawn as the one book a child's eye goes to.
-    const shape = libraryShelfBookShape();
-    this.pullBook = createShelfBook(ART.helmetGold);
-    this.pullBook.name = 'library.secretBook';
-    const outline = this.pullBook.children[0];
-    if (outline) outline.name = `${this.pullBook.name}.outline`;
-    this.bookHome = bookSpot(spec.kind, LIBRARY_SECRET_BOOK.shelf, LIBRARY_SECRET_BOOK.along, shape.depth, READABLE_PROUD).add(toLeaf);
+    // The pull book: the Artist's gold tome, standing proud of its row the way
+    // a readable book does — the one book on this case that does something,
+    // drawn as the one book a child's eye goes to. Every paint on it is its
+    // own — a paint from the kit's shared cache is cloned — so the open leaf
+    // fades the book and nothing else painted the same.
+    const book = createLibrarySecretBook();
+    this.pullBook = book.root;
+    this.starMaterial = book.starMaterial;
+    this.starRest = book.starMaterial.emissiveIntensity;
+    const ownPaint: Material[] = [];
+    this.pullBook.traverse((part) => {
+      if (!(part instanceof Mesh)) return;
+      if (isShared(part.material as Material)) part.material = (part.material as Material).clone();
+      ownPaint.push(part.material as Material);
+    });
+    // `bookSpot` stands a book's front `proud` past the row's spines, reading
+    // its front as half its depth from its middle; this book's front is its
+    // spine and star, standing `proud` past its boards' half-depth — so it is
+    // handed twice that reach as its depth.
+    const size = librarySecretBookSize();
+    const spineReach = size.depth / 2 + size.proud;
+    this.bookHome = bookSpot(spec.kind, LIBRARY_SECRET_BOOK.shelf, LIBRARY_SECRET_BOOK.along, 2 * spineReach, READABLE_PROUD).add(toLeaf);
     this.pullBook.position.copy(this.bookHome);
     this.leaf.add(this.pullBook);
 
-    // The twinkle: one warm wink in front of the spine, shut only.
+    // The twinkle: one warm wink in front of the star on its spine, shut only.
+    const star = denKitBounds(['secretBook-star']);
     this.twinkleMaterial = new SpriteMaterial({ map: glowTexture(PALETTE.fairyWarm), transparent: true, depthWrite: false, opacity: 0 });
     this.twinkle = new Sprite(this.twinkleMaterial);
     this.twinkle.name = 'library.secretBook.twinkle';
     this.twinkle.scale.setScalar(TWINKLE_SIZE);
-    this.twinkle.position.copy(this.bookHome).add(new Vector3(0, shape.height * 0.6, shape.depth / 2 + TWINKLE_OUT));
+    this.twinkle.position.copy(this.bookHome).add(new Vector3((star.minX + star.maxX) / 2, (star.minY + star.maxY) / 2, star.maxZ + TWINKLE_OUT));
     this.twinkle.visible = false;
     this.leaf.add(this.twinkle);
     roomRoot.add(this.hinge);
@@ -190,8 +214,7 @@ export class SecretLeaf {
     this.openColliders = props.box(SECRET_LEAF_OPEN, this.openFootprint, height);
     props.detach(this.openColliders);
 
-    const fading: Material[] = [...model.materials, bookMaterial, this.pullBook.material as Material];
-    if (outline && 'material' in outline) fading.push((outline as Mesh).material as Material);
+    const fading: Material[] = [...model.materials, bookMaterial, ...ownPaint];
     this.fader = new StackFader(
       'secret-shelf-open',
       this.leaf,
@@ -240,6 +263,7 @@ export class SecretLeaf {
     const shut = this.state === 'shut';
     this.twinkleMaterial.opacity = shut ? Math.max(0, Math.sin((elapsed * 2 * Math.PI) / TWINKLE_PERIOD)) ** 8 : 0;
     this.twinkle.visible = this.twinkleMaterial.opacity > 0.001;
+    this.starMaterial.emissiveIntensity = this.starRest + STAR_WINK_GLOW * this.twinkleMaterial.opacity;
     if (this.state === 'swinging') {
       this.tau += dt;
       this.slide = SLIDE * Math.min(1, this.tau / SLIDE_SECONDS);
