@@ -13,6 +13,7 @@
  * LIBRARY_CHECK_MUTATE=shift-books pnpm run check:library   # expect slot i to hold BOOKS[i+1]: must go red, naming the books
  * LIBRARY_CHECK_REMOVE='bookcase north-2' pnpm run check:library  # a readable book's case not solid: REACHABILITY must go red
  * LIBRARY_CHECK_MUTATE=block-walk pnpm run check:library      # a wall across the real child's way in: must go red
+ * LIBRARY_CHECK_MUTATE=block-route pnpm run check:library     # a disc on Lark's way to the rug: KIDS must go red naming the leg
  * LIBRARY_CHECK_REMOVE='den wall (west)' pnpm run check:library  # a wall of the secret den out: DEN WALLS must go red
  * LIBRARY_CHECK_REMOVE='bookcase west-2' pnpm run check:library  # the shut secret shelf out: the den is reachable, must go red
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
@@ -107,6 +108,10 @@
  *     until read and says "Read me!"; a sprint held gets a "Shhh!" with no
  *     penalty, a walk never does (the control), a jump does, and mid-script
  *     only her wing answers.
+ * 16. SIT (#718, the story cushions) and KIDS (#718, the library's three
+ *     children: their routes swept, their stroll inside and freeze outside,
+ *     and the story-time rehearsal — summoned, sat, furniture to the player,
+ *     dismissed).
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -127,7 +132,7 @@ import { saveFlags } from '../src/state/flags.ts';
 import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { standingAt, walkableAt } from './lib/standable.mts';
-import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED } from '../src/core/constants.ts';
+import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED, NPC_RADIUS } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { BLINK_DURATION } from '../src/art/style/faceLife.ts';
@@ -137,6 +142,11 @@ import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import { HEAD_TURN_LIMIT, OWL_LOOK_RANGE, OWL_ZONE_ID, SHUSH_COOLDOWN_SECONDS, SHUSH_RUN_SECONDS, SHUSH_WING_X } from '../src/world/library/LibraryOwl.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
+import { PLAYER_SEPARATION, SEPARATION } from '../src/entities/npc/NpcSystem.ts';
+import { GUEST_PACE } from '../src/entities/npc/residentLooks.ts';
+import { KID_LEG_TIMEOUT, KID_ROUTE_ARRIVE, KID_SUMMON_PACE, libraryKidSeatArrive } from '../src/world/library/libraryKidDriver.ts';
+import { LIBRARY_KID_SEED, LIBRARY_KID_SEED_STRIDE } from '../src/world/library/LibraryKids.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
@@ -179,16 +189,21 @@ import {
   LIBRARY_HALF_Z,
   LIBRARY_INNER_X,
   LIBRARY_INNER_Z,
+  LIBRARY_KID_PLANS,
   LIBRARY_LIBRARIAN_SPOT,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAYER_SEATS,
   LIBRARY_READABLE_SLOTS,
   LIBRARY_SECRET_BOOKCASE,
+  LIBRARY_STORY_CHAIR,
   LIBRARY_WALL_HALF,
   libraryCushion,
   libraryFacingStoryChair,
+  libraryKidCircuit,
+  libraryKidRugRoute,
   type FurnitureSpec,
+  type LibraryKidPlan,
   type LocalPoint,
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -2451,6 +2466,438 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
     `SIT on ${seatId} at (${cushion.at.x}, ${cushion.at.z}), top ${cushionTop.toFixed(3)}; ${seatedFrames} seated frames measured; ` +
       `worst lowest point ${(worstFloor * 1000).toFixed(1)} mm, worst sole ${(worstSoles * 1000).toFixed(1)} mm, worst hip ${(worstSeat * 1000).toFixed(1)} mm; ` +
       `${child.frames} frames stepped so far`,
+  );
+}
+
+/**
+ * **KIDS** (#718, plan Step 8) — the library's three children, measured on the
+ * real crowd and the real collision world:
+ *
+ * 1. Three children, met in the crowd (`library.children`), each driven by her
+ *    own `LibraryKidDriver`, each model under `kidsRoot` (in the scene, an
+ *    identity transform, shown while she is inside).
+ * 2. The seats apart: every child's cushion ≥ `SEPARATION` from the others'
+ *    and ≥ `PLAYER_SEPARATION` from the player's two (the numbers behind
+ *    `LibraryKids.ts`'s load-time throw).
+ * 3. Every leg a child can walk — her circuit (the wrap included), her way to
+ *    the rug and the same way back — swept every 0.1 m with a body of
+ *    `NPC_RADIUS` + 0.05 against the real world; the last leg to the seat only
+ *    as far as her walk goes (`libraryKidSeatArrive`: the cushion is a solid).
+ *    Every leg keeps `PLAYER_SEPARATION` − 0.1 from the player's cushions (a
+ *    brush, never a block) and `SEPARATION` from the other children's seats.
+ * 4. At every route node a child-sized body is pushed ≤ 1 cm by the resolver.
+ * 5. With the real child inside for 60 s, every child strolls her own aisle:
+ *    metres walked, feet within 2 cm of the floor, no step over `NPC_RADIUS`·2
+ *    (`check:jitter`'s bound), never off her circuit by more than
+ *    `KID_ROUTE_ARRIVE` + 0.15, never marked elsewhere.
+ * 6. With the real child in the garden for 5 s, every child moves exactly 0
+ *    (marked elsewhere, #362) and their root is hidden.
+ * 7. **The story-time rehearsal**, the way `storyTime.ts` (Step 9) will do it:
+ *    `summon()` all three — every one reaches her cushion's edge, turned to the
+ *    storyteller's chair, none gives up; `beginSeated` + `markSeated` — hips
+ *    on the cushion, soles on the floor (`seatedPose.mts`), nobody drifts; the
+ *    real child walks at a seated one and the seated child is furniture (she
+ *    does not move, the player is held off); `endSeated` + `dismiss` — every
+ *    child is off her cushion and back on her own aisle, strolling.
+ *
+ * Proved red by `LIBRARY_CHECK_MUTATE=block-route` (a 0.8 m disc on the last
+ * point of Lark's way to the rug: the sweep and the node clause name the leg)
+ * and by hand (the handoff has the transcripts).
+ */
+console.log("\nKIDS — the library's three children: their aisles, their ways to the rug, and their seats:");
+{
+  const kids = library.children;
+  const plans = LIBRARY_KID_PLANS;
+  const SWEEP_STEP = 0.1;
+  const SWEEP_RADIUS = NPC_RADIUS + 0.05;
+  /** A brush against a seated player's separation disc, never a block: the plan's − 0.1. */
+  const PLAYER_SEAT_BRUSH = 0.1;
+  /** How far off her circuit a strolling child may wander: the stroll's own arrival radius and a resolver's nudge. */
+  const OFF_AISLE = KID_ROUTE_ARRIVE + 0.15;
+  /** The rehearsal's own bounds: a gathering, a sitting, a dismissal (Step 9 owns the game's `GATHER_TIMEOUT`). */
+  const GATHER_SECONDS = 40;
+  const DISMISS_SECONDS = 40;
+  const seatArrive = libraryKidSeatArrive();
+  const cushionRadius = libraryCushionSize().radius;
+  const cushionTop = libraryCushionSize().top;
+  const toWorld = (point: LocalPoint): LocalPoint => ({ x: OX + point.x, z: OZ + point.z });
+  const label = (point: LocalPoint): string => `(${point.x.toFixed(1)}, ${point.z.toFixed(1)})`;
+  const root = library.kidsRoot;
+
+  // 1. Three children, met in the crowd.
+  say(plans.length === 3 && kids.length === plans.length, `${kids.length} children met in the crowd for ${plans.length} plans (${plans.map((plan) => plan.name).join(', ')}; three wanted)`);
+  const underRoot = kids.filter((kid) => kid.model.root.parent === root).length;
+  const identity = root.position.lengthSq() === 0 && root.quaternion.w === 1 && root.scale.x === 1 && root.scale.y === 1 && root.scale.z === 1;
+  say(
+    underRoot === kids.length && scene.children.includes(root) && identity && root.visible === library.playerIsInside,
+    `every child's model hangs under '${root.name}' (${underRoot} of ${kids.length}), in the scene (${scene.children.includes(root)}), an identity transform (${identity}), ` +
+      `shown exactly while she is inside (visible ${root.visible}, inside ${library.playerIsInside})`,
+  );
+  say(
+    kids.length > 0 && kids.every((kid) => kid.body.driver === kid.driver && kid.driver.name === 'library-kid'),
+    `each body is driven by its own LibraryKidDriver: ${kids.map((kid) => `${kid.plan.name} by '${kid.body.driver.name}'`).join(', ') || 'nobody'} (never a wander or waypoint driver)`,
+  );
+
+  // 2. The seats apart.
+  const seatOf = (plan: LibraryKidPlan): LocalPoint => libraryCushion(plan.seat).at;
+  let kidPair = { apart: Infinity, who: '' };
+  let playerPair = { apart: Infinity, who: '' };
+  for (let i = 0; i < plans.length; i += 1) {
+    const a = plans[i]!;
+    for (let j = i + 1; j < plans.length; j += 1) {
+      const b = plans[j]!;
+      const apart = Math.hypot(seatOf(a).x - seatOf(b).x, seatOf(a).z - seatOf(b).z);
+      if (apart < kidPair.apart) kidPair = { apart, who: `${a.seat} and ${b.seat}` };
+    }
+    for (const id of LIBRARY_PLAYER_SEATS) {
+      const seat = libraryCushion(id).at;
+      const apart = Math.hypot(seatOf(a).x - seat.x, seatOf(a).z - seat.z);
+      if (apart < playerPair.apart) playerPair = { apart, who: `${a.seat} and the player's ${id}` };
+    }
+  }
+  say(
+    kidPair.apart >= SEPARATION && playerPair.apart >= PLAYER_SEPARATION,
+    `the seats are apart: the nearest two children's cushions ${kidPair.apart.toFixed(2)} m (${kidPair.who}; SEPARATION ${SEPARATION.toFixed(2)} wanted), ` +
+      `the nearest child's cushion to a player's ${playerPair.apart.toFixed(2)} m (${playerPair.who}; PLAYER_SEPARATION ${PLAYER_SEPARATION.toFixed(2)} wanted)`,
+  );
+
+  // `block-route`: a 0.8 m disc on the last point of Lark's way to the rug —
+  // her leg into it and her leg out of it are both shut to a child.
+  const lark = plans.find((plan) => plan.name === 'Lark');
+  const blockedPoint = lark?.toSeat[lark.toSeat.length - 1];
+  const blocker = mutating('block-route') && blockedPoint ? collision.addCircle(OX + blockedPoint.x, OZ + blockedPoint.z, 0.8) : null;
+  if (blocker && blockedPoint) note(`DROPPED a 0.8 m disc on Lark's ${label(blockedPoint)} on purpose — this run must go red naming that leg`);
+
+  // 3. Every leg, swept.
+  interface Leg {
+    readonly who: string;
+    readonly way: string;
+    readonly from: LocalPoint;
+    readonly to: LocalPoint;
+    /** The seat this leg ends at, so its own seat is not a seat it must keep away from. */
+    readonly ownSeat: string;
+    /** How far along the leg the sweep runs, 0..1: short of the seat, where her walk ends. */
+    readonly until: number;
+  }
+  const legs: Leg[] = [];
+  for (const plan of plans) {
+    const circuit = libraryKidCircuit(plan);
+    for (let i = 0; i < circuit.length; i += 1) {
+      legs.push({ who: plan.name, way: 'circuit', from: circuit[i]!, to: circuit[(i + 1) % circuit.length]!, ownSeat: plan.seat, until: 1 });
+    }
+    const rug = libraryKidRugRoute(plan);
+    for (let i = 0; i + 1 < rug.length; i += 1) {
+      const from = rug[i]!;
+      const to = rug[i + 1]!;
+      const last = i + 2 === rug.length;
+      const length = Math.hypot(to.x - from.x, to.z - from.z);
+      const until = last ? Math.max(0, 1 - seatArrive / length) : 1;
+      legs.push({ who: plan.name, way: 'way to the rug', from, to, ownSeat: plan.seat, until });
+      legs.push({ who: plan.name, way: 'way back', from: to, to: from, ownSeat: plan.seat, until: 1 });
+    }
+  }
+  let stations = 0;
+  let blockedLegs = 0;
+  let nearestPlayerSeat = { apart: Infinity, who: '' };
+  let nearestOtherSeat = { apart: Infinity, who: '' };
+  const circuitLegs = legs.filter((leg) => leg.way === 'circuit').length;
+  const rugLegs = legs.filter((leg) => leg.way === 'way to the rug').length;
+  for (const leg of legs) {
+    const length = Math.hypot(leg.to.x - leg.from.x, leg.to.z - leg.from.z);
+    // The way back's first leg starts where her walk ended: `seatArrive` out from the seat.
+    const start = leg.way === 'way back' && leg.from === libraryCushion(leg.ownSeat).at ? Math.min(1, seatArrive / length) : 0;
+    let blockedAt: LocalPoint | null = null;
+    for (let s = start * length; s <= leg.until * length + 1e-9; s += SWEEP_STEP) {
+      const t = length === 0 ? 0 : s / length;
+      const x = leg.from.x + (leg.to.x - leg.from.x) * t;
+      const z = leg.from.z + (leg.to.z - leg.from.z) * t;
+      stations += 1;
+      if (!collision.isClearCircle(OX + x, OZ + z, SWEEP_RADIUS) && !blockedAt) blockedAt = { x, z };
+      for (const id of LIBRARY_PLAYER_SEATS) {
+        const seat = libraryCushion(id).at;
+        const apart = Math.hypot(x - seat.x, z - seat.z);
+        if (apart < nearestPlayerSeat.apart) nearestPlayerSeat = { apart, who: `${leg.who}'s ${leg.way} ${label(leg.from)} → ${label(leg.to)} at ${label({ x, z })}, to ${id}` };
+      }
+      for (const other of plans) {
+        if (other.seat === leg.ownSeat) continue;
+        const seat = seatOf(other);
+        const apart = Math.hypot(x - seat.x, z - seat.z);
+        if (apart < nearestOtherSeat.apart) nearestOtherSeat = { apart, who: `${leg.who}'s ${leg.way} ${label(leg.from)} → ${label(leg.to)} at ${label({ x, z })}, to ${other.name}'s ${other.seat}` };
+      }
+    }
+    if (blockedAt) {
+      blockedLegs += 1;
+      say(false, `${leg.who}'s ${leg.way}: the leg ${label(leg.from)} → ${label(leg.to)} is blocked at (${blockedAt.x.toFixed(2)}, ${blockedAt.z.toFixed(2)}) for a body of ${SWEEP_RADIUS.toFixed(2)} m`);
+    }
+  }
+  say(
+    blockedLegs === 0 && stations > 0,
+    `${legs.length} legs (${circuitLegs} circuit legs, the wraps included; ${rugLegs} to the rug, the last of each only to ${seatArrive.toFixed(2)} m from the seat; ${rugLegs} back) ` +
+      `swept every ${SWEEP_STEP} m with a ${SWEEP_RADIUS.toFixed(2)} m body: ${stations} stations, ${blockedLegs} legs blocked`,
+  );
+  say(
+    nearestPlayerSeat.apart >= PLAYER_SEPARATION - PLAYER_SEAT_BRUSH,
+    `every leg keeps ${(PLAYER_SEPARATION - PLAYER_SEAT_BRUSH).toFixed(2)} m from the player's cushions (PLAYER_SEPARATION less a ${PLAYER_SEAT_BRUSH} m brush): the nearest is ${nearestPlayerSeat.apart.toFixed(2)} m, ${nearestPlayerSeat.who}`,
+  );
+  say(
+    nearestOtherSeat.apart >= SEPARATION,
+    `every leg keeps SEPARATION (${SEPARATION.toFixed(2)} m) from the other children's seats: the nearest is ${nearestOtherSeat.apart.toFixed(2)} m, ${nearestOtherSeat.who}`,
+  );
+
+  // 4. A child-sized body at every route node is pushed almost nowhere.
+  {
+    const probe = new Vector3();
+    let nodes = 0;
+    let worst = { push: 0, who: 'none' };
+    for (const plan of plans) {
+      const rug = libraryKidRugRoute(plan);
+      const points = [...libraryKidCircuit(plan), ...rug.slice(0, rug.length - 1)];
+      for (const point of points) {
+        nodes += 1;
+        probe.set(OX + point.x, LIBRARY_FLOOR_Y, OZ + point.z);
+        collision.resolve(probe, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT);
+        const push = Math.hypot(probe.x - (OX + point.x), probe.z - (OZ + point.z));
+        if (push > worst.push) worst = { push, who: `${plan.name}'s ${label(point)}` };
+      }
+    }
+    say(nodes > 0 && worst.push <= 0.01, `at every one of ${nodes} route nodes the resolver pushes a child-sized body at most ${(worst.push * 1000).toFixed(1)} mm (${worst.who}; 10 mm allowed)`);
+  }
+  if (blocker !== null) collision.removeCircle(blocker);
+
+  // The real child stands at the desk's front for the rest, out of every route and every aisle.
+  const desk = LIBRARY_DESK_STAND;
+  child.stand(desk.x, desk.z, desk.facing);
+  const circuitsWorld = kids.map((kid) => libraryKidCircuit(kid.plan).map(toWorld));
+  const offCircuit = (index: number, x: number, z: number): number => {
+    const circuit = circuitsWorld[index]!;
+    let nearest = Infinity;
+    for (let i = 0; i < circuit.length; i += 1) nearest = Math.min(nearest, segmentDistance(circuit[i]!, circuit[(i + 1) % circuit.length]!, { x, z }));
+    return nearest;
+  };
+  const stepOf = (kid: (typeof kids)[number], last: { x: number; z: number }): number => Math.hypot(kid.body.position.x - last.x, kid.body.position.z - last.z);
+  const feetOf = (kid: (typeof kids)[number]): number => Math.abs(kid.body.position.y - LIBRARY_FLOOR_Y); // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere; her height above its one floor
+  const marked = (kid: (typeof kids)[number]): boolean => world.npcs.markedElsewhere.includes(kid.body);
+
+  // 5. Sixty seconds of strolling, with her inside.
+  {
+    const seconds = 60;
+    const walked = kids.map(() => 0);
+    const maxStep = kids.map(() => 0);
+    const maxFeet = kids.map(() => 0);
+    const maxOff = kids.map(() => 0);
+    let markedFrames = 0;
+    let leftTheRoom = 0;
+    const last = kids.map((kid) => ({ x: kid.body.position.x, z: kid.body.position.z }));
+    for (let frame = 0; frame < Math.round(seconds / CHILD_DT); frame += 1) {
+      child.step();
+      kids.forEach((kid, i) => {
+        const step = stepOf(kid, last[i]!);
+        walked[i] = walked[i]! + step;
+        maxStep[i] = Math.max(maxStep[i]!, step);
+        maxFeet[i] = Math.max(maxFeet[i]!, feetOf(kid));
+        maxOff[i] = Math.max(maxOff[i]!, offCircuit(i, kid.body.position.x, kid.body.position.z));
+        last[i] = { x: kid.body.position.x, z: kid.body.position.z };
+        if (marked(kid)) markedFrames += 1;
+        if (spaceAt(kid.body.position.x, kid.body.position.z) !== SPACE_LIBRARY) leftTheRoom += 1;
+      });
+    }
+    const each = (values: readonly number[], unit: string, digits: number): string => kids.map((kid, i) => `${kid.plan.name} ${values[i]!.toFixed(digits)}${unit}`).join(', ');
+    say(
+      kids.length > 0 && walked.every((metres) => metres >= 2) && markedFrames === 0 && leftTheRoom === 0,
+      `with her inside for ${seconds} s every child strolled her aisle: ${each(walked, ' m', 1)} walked (at least 2 each), ` +
+        `none marked elsewhere (${markedFrames} child-frames), none left the room (${leftTheRoom})`,
+    );
+    say(
+      kids.length > 0 && maxFeet.every((feet) => feet <= 0.02) && maxStep.every((step) => step <= NPC_RADIUS * 2),
+      `their feet stayed within ${Math.max(...maxFeet, 0).toFixed(3)} m of the floor (0.02 allowed) and no step in any frame was over ${Math.max(...maxStep, 0).toFixed(3)} m ` +
+        `(${(NPC_RADIUS * 2).toFixed(2)} allowed, check:jitter's own bound)`,
+    );
+    say(
+      kids.length > 0 && maxOff.every((off) => off <= OFF_AISLE),
+      `each kept to her own aisle: at most ${each(maxOff, ' m', 2)} off her circuit (${OFF_AISLE.toFixed(2)} allowed: the stroll's arrival radius and a nudge)`,
+    );
+  }
+
+  // 6. Five seconds with her in the garden: frozen, hidden.
+  {
+    const left = quietly(() => library.requestEnterDoor());
+    child.step();
+    const outside = !library.playerIsInside && spaceAt(child.player.position.x, child.player.position.z) === SPACE_GARDEN;
+    const before = kids.map((kid) => kid.body.position.clone());
+    for (let frame = 0; frame < Math.round(5 / CHILD_DT); frame += 1) child.step();
+    const moved = Math.max(0, ...kids.map((kid, i) => kid.body.position.distanceTo(before[i]!)));
+    const frozen = kids.filter((kid) => marked(kid)).length;
+    say(
+      left && outside && moved === 0 && frozen === kids.length && !root.visible,
+      `with her in the garden (through the door link: ${left}, outside ${outside}) for 5 s, the children moved exactly ${moved} m ` +
+        `(marked elsewhere: ${frozen} of ${kids.length}) and their root is hidden (visible ${root.visible})`,
+    );
+    child.enter({ x: desk.x, z: desk.z, facing: desk.facing });
+    child.step();
+    say(library.playerIsInside && root.visible, `back inside at the desk's front, the children are shown again (visible ${root.visible})`);
+  }
+
+  // 7. The story-time rehearsal.
+  {
+    const chair = toWorld(LIBRARY_STORY_CHAIR.at);
+    const bearingTo = (kid: (typeof kids)[number]): number => Math.atan2(chair.x - kid.body.position.x, chair.z - kid.body.position.z);
+    const turnError = (kid: (typeof kids)[number]): number => {
+      const wanted = bearingTo(kid);
+      return Math.abs(Math.atan2(Math.sin(kid.body.facingAngle - wanted), Math.cos(kid.body.facingAngle - wanted)));
+    };
+    const seatDistance = (kid: (typeof kids)[number]): number => Math.hypot(kid.body.position.x - kid.driver.seat.x, kid.body.position.z - kid.driver.seat.z);
+
+    // CONTROL for the furniture clause below, run now, while the children stroll their aisles far
+    // from the rug: with nobody on it, the real child walking at the first child's cushion steps up
+    // onto it (a low solid, climbed while walking into it) — so what holds her off it later is the
+    // child sitting there, not the cushion's side.
+    const sitter = kids[0]!;
+    const sitterSeat = sitter.driver.seat;
+    const approach = { x: sitterSeat.x - OX - 1.6, z: sitterSeat.z - OZ };
+    const approachClear = collision.isClearCircle(OX + approach.x, OZ + approach.z, PLAYER_RADIUS);
+    const playerFeet = (): number => child.player.position.y - LIBRARY_FLOOR_Y; // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere; her height above its one floor
+    /** A moderate push of the stick: her damped height lags under a full-tilt stride, and a seat is somewhere she slows down. */
+    const SEAT_WALK = 0.6;
+    const walkAtTheSeat = (): { highest: number; closest: number; nearestKid: number } => {
+      child.stand(approach.x, approach.z, 90);
+      let highest = -Infinity;
+      let closest = Infinity;
+      let nearestKid = Infinity;
+      for (let frame = 0; frame < Math.round(1.5 / CHILD_DT); frame += 1) {
+        child.step(child.towards(1, 0, false, SEAT_WALK));
+        highest = Math.max(highest, playerFeet());
+        closest = Math.min(closest, Math.hypot(child.player.position.x - sitterSeat.x, child.player.position.z - sitterSeat.z));
+        for (const kid of kids) nearestKid = Math.min(nearestKid, kid.body.position.distanceTo(child.player.position));
+      }
+      child.run(1, child.towards(-1, 0));
+      child.stand(desk.x, desk.z, desk.facing);
+      return { highest, closest, nearestKid };
+    };
+    const empty = walkAtTheSeat();
+    say(
+      approachClear && empty.highest >= cushionTop - 0.05 && empty.nearestKid > PLAYER_SEPARATION,
+      `CONTROL: from (${approach.x.toFixed(2)}, ${approach.z.toFixed(2)}) (clear floor: ${approachClear}) the real child walks at ${sitter.plan.name}'s empty ${sitter.plan.seat} ` +
+        `and steps up onto it: her feet rise to ${empty.highest.toFixed(3)} m (its top ${cushionTop.toFixed(3)}, within 0.05: the damped height lags at a walk), ` +
+        `${empty.closest.toFixed(2)} m from its middle at nearest, with the nearest child ${empty.nearestKid.toFixed(1)} m away the whole time (more than PLAYER_SEPARATION ${PLAYER_SEPARATION.toFixed(2)})`,
+    );
+
+    // Summoned: everybody to the edge of her cushion.
+    for (const kid of kids) kid.driver.summon();
+    const arrivedAt = kids.map(() => Number.NaN);
+    let maxStep = 0;
+    let elapsed = 0;
+    const last = kids.map((kid) => ({ x: kid.body.position.x, z: kid.body.position.z }));
+    while (elapsed < GATHER_SECONDS && !kids.every((kid) => kid.driver.arrived || kid.driver.gaveUp)) {
+      child.step();
+      elapsed += CHILD_DT;
+      kids.forEach((kid, i) => {
+        maxStep = Math.max(maxStep, stepOf(kid, last[i]!));
+        last[i] = { x: kid.body.position.x, z: kid.body.position.z };
+        if (Number.isNaN(arrivedAt[i]) && (kid.driver.arrived || kid.driver.gaveUp)) arrivedAt[i] = elapsed;
+      });
+    }
+    const gaveUp = kids.filter((kid) => kid.driver.gaveUp).map((kid) => kid.plan.name);
+    say(
+      kids.length > 0 && kids.every((kid) => kid.driver.arrived),
+      `summoned, every child reaches her cushion's edge in ${elapsed.toFixed(1)} s (${kids.map((kid, i) => `${kid.plan.name} ${arrivedAt[i]!.toFixed(1)} s`).join(', ')}; ${GATHER_SECONDS} allowed), ` +
+        `${gaveUp.length === 0 ? 'none gave up' : `gave up: ${gaveUp.join(', ')}`}; no step over ${maxStep.toFixed(3)} m on the way`,
+    );
+    const standing = kids.map((kid) => seatDistance(kid));
+    say(
+      kids.every((kid, i) => standing[i]! >= cushionRadius + NPC_RADIUS - RESOLVER_SLACK && standing[i]! <= seatArrive + 0.1 && feetOf(kid) <= 0.02),
+      `each stands at her cushion's edge, on the floor: ${kids.map((kid, i) => `${kid.plan.name} ${standing[i]!.toFixed(2)} m from the middle`).join(', ')} ` +
+        `(the cushion's ${cushionRadius.toFixed(2)} plus her ${NPC_RADIUS.toFixed(2)} up to ${(seatArrive + 0.1).toFixed(2)}: the walk ends at ${seatArrive.toFixed(2)})`,
+    );
+    child.run(1.5);
+    const turned = kids.map((kid) => turnError(kid));
+    say(turned.every((error) => error <= 0.05), `waiting, each has turned to the storyteller's chair: ${kids.map((kid, i) => `${kid.plan.name} ${turned[i]!.toFixed(3)} rad off`).join(', ')} (0.05 allowed)`);
+
+    // Sat, as story time sits them: root on the floor at the cushion's middle, facing the chair, her own phase.
+    kids.forEach((kid, i) => {
+      kid.body.beginSeated(kid.driver.seat.x, LIBRARY_FLOOR_Y, kid.driver.seat.z, kid.driver.seatFacing, i * 1.7);
+      kid.driver.markSeated();
+    });
+    const seatedFrames = Math.round(2 / CHILD_DT);
+    let worstFloor = 0;
+    let worstSoles = 0;
+    let worstSeat = 0;
+    let worstDrift = 0;
+    let seatedHeld = true;
+    for (let frame = 0; frame < seatedFrames; frame += 1) {
+      child.step();
+      for (const kid of kids) {
+        const errors = seatedErrors(kid.model, LIBRARY_FLOOR_Y, LIBRARY_FLOOR_Y + cushionTop);
+        // `!(a <= b)`, so a NaN measure is kept as the worst and fails.
+        if (!(errors.floor <= worstFloor)) worstFloor = errors.floor;
+        if (!(errors.soles <= worstSoles)) worstSoles = errors.soles;
+        if (!(errors.seat <= worstSeat)) worstSeat = errors.seat;
+        worstDrift = Math.max(worstDrift, seatDistance(kid), Math.abs(kid.body.position.y - LIBRARY_FLOOR_Y)); // flat-ok: her root's height above the room's own flat floor, off the sphere
+        seatedHeld &&= kid.body.seated && kid.driver.seated;
+      }
+    }
+    say(
+      kids.length > 0 && worstFloor <= FLOOR_TOLERANCE && worstSoles <= FLOOR_TOLERANCE && worstSeat <= SEAT_TOLERANCE,
+      `sat on their cushions as story time sits them, over ${seatedFrames} frames: lowest drawn point at worst ${(worstFloor * 1000).toFixed(1)} mm off the floor, ` +
+        `the worse sole ${(worstSoles * 1000).toFixed(1)} mm (${(FLOOR_TOLERANCE * 1000).toFixed(0)} allowed, each), hip pivot ${(worstSeat * 1000).toFixed(1)} mm off the cushion's top (${(SEAT_TOLERANCE * 1000).toFixed(0)} allowed)`,
+    );
+    say(seatedHeld && worstDrift <= 1e-6, `every child stayed seated on her cushion's middle with her root on the floor: ${(worstDrift * 1000).toFixed(3)} mm of drift at worst, seated held ${seatedHeld}`);
+
+    // A seated child is furniture: the same walk, at the same cushion, with the child sitting on it.
+    // The push-apart (`NpcSystem.separateFromPlayer`) gives the whole correction to the player,
+    // through `Player.nudge`, which re-resolves her against the world with no step in it — so the
+    // occupied cushion is a wall to her, the sitter never moves, and nobody climbs onto a seated child.
+    {
+      const sitterBefore = sitter.body.position.clone();
+      const occupied = walkAtTheSeat();
+      const sitterMoved = sitter.body.position.distanceTo(sitterBefore);
+      const side = cushionRadius + PLAYER_RADIUS;
+      say(
+        sitterMoved <= 1e-3 && occupied.highest <= 0.02 && occupied.closest >= side - RESOLVER_SLACK && occupied.closest <= side + 0.1,
+        `a seated child is furniture: the same walk at ${sitter.plan.name} on ${sitter.plan.seat} for 1.5 s moves her ${(sitterMoved * 1000).toFixed(2)} mm (1 allowed), ` +
+          `while the player is held at the cushion's side, ${occupied.closest.toFixed(2)} m from its middle (its ${cushionRadius.toFixed(2)} plus her ${PLAYER_RADIUS.toFixed(2)} = ${side.toFixed(2)}, ` +
+          `less ${RESOLVER_SLACK} m of resolver slack), her feet ${occupied.highest.toFixed(3)} m up at most (0.02: never onto an occupied cushion; the CONTROL stepped onto the empty one to ${empty.highest.toFixed(3)})`,
+      );
+    }
+
+    // Dismissed: up, off the cushion, back to her aisle.
+    for (const kid of kids) {
+      kid.body.endSeated();
+      kid.driver.dismiss();
+    }
+    const offCushionAt = kids.map(() => Number.NaN);
+    const strollingAt = kids.map(() => Number.NaN);
+    let returnStep = 0;
+    let returned = 0;
+    const lastBack = kids.map((kid) => ({ x: kid.body.position.x, z: kid.body.position.z }));
+    while (returned < DISMISS_SECONDS && !kids.every((kid) => kid.driver.mode === 'stroll')) {
+      child.step();
+      returned += CHILD_DT;
+      kids.forEach((kid, i) => {
+        returnStep = Math.max(returnStep, stepOf(kid, lastBack[i]!));
+        lastBack[i] = { x: kid.body.position.x, z: kid.body.position.z };
+        if (Number.isNaN(offCushionAt[i]) && seatDistance(kid) >= 1) offCushionAt[i] = returned;
+        if (Number.isNaN(strollingAt[i]) && kid.driver.mode === 'stroll') strollingAt[i] = returned;
+      });
+    }
+    say(
+      kids.length > 0 && offCushionAt.every((at) => at <= 20) && kids.every((kid) => kid.driver.mode === 'stroll'),
+      `dismissed, every child is a metre off her cushion within ${Math.max(...offCushionAt).toFixed(1)} s (${kids.map((kid, i) => `${kid.plan.name} ${offCushionAt[i]!.toFixed(1)} s`).join(', ')}; 20 allowed) ` +
+        `and back to her stroll within ${returned.toFixed(1)} s (${kids.map((kid, i) => `${kid.plan.name} ${strollingAt[i]!.toFixed(1)} s`).join(', ')}; ${DISMISS_SECONDS} allowed); ` +
+        `no step over ${returnStep.toFixed(3)} m on the way back (${(NPC_RADIUS * 2).toFixed(2)} allowed)`,
+    );
+    say(returnStep <= NPC_RADIUS * 2, `the way back was walked, never jumped: the longest step ${returnStep.toFixed(3)} m`);
+    child.run(10);
+    const backOnAisle = kids.map((kid, i) => offCircuit(i, kid.body.position.x, kid.body.position.z));
+    say(
+      kids.every((kid, i) => backOnAisle[i]! <= OFF_AISLE && feetOf(kid) <= 0.02),
+      `ten seconds on, each is back on her own aisle: ${kids.map((kid, i) => `${kid.plan.name} ${backOnAisle[i]!.toFixed(2)} m off her circuit`).join(', ')} (${OFF_AISLE.toFixed(2)} allowed), feet on the floor`,
+    );
+  }
+
+  note(
+    `KIDS: ${kids.length} children, seeds 0x${LIBRARY_KID_SEED.toString(16)} + i·${LIBRARY_KID_SEED_STRIDE}; ${legs.length} legs swept at ${SWEEP_STEP} m with a ${SWEEP_RADIUS.toFixed(2)} m body; ` +
+      `the walk to a seat ends ${seatArrive.toFixed(2)} m from its middle (cushion ${cushionRadius.toFixed(2)} + NPC_RADIUS ${NPC_RADIUS} + slack) and the sit is a snap of that; ` +
+      `stroll pace ${GUEST_PACE}, summons pace ${KID_SUMMON_PACE}, route arrive ${KID_ROUTE_ARRIVE}, leg timeout ${KID_LEG_TIMEOUT} s; ${child.frames} frames stepped so far`,
   );
 }
 
