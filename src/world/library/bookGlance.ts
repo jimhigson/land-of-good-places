@@ -1,6 +1,6 @@
 import { Vector3, type Object3D } from 'three';
 import { CAMERA_ZOOM_MIN } from '../../core/constants';
-import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
+import type { IsoCamera } from '../../core/IsoCamera';
 import { bookById } from './books';
 import type { FurnishedShelfBook } from './furnish';
 import { LIBRARY_LINES } from './libraryLines';
@@ -80,7 +80,7 @@ export const GLANCE_MOVE_CANCEL = 0.25;
 /** One frame's glance: what the camera orbits, at what zoom, for which book. */
 export interface GlanceShot {
   readonly bookId: string;
-  /** The world point the camera orbits — the middle of the framed box, at the follow's own height over her feet. */
+  /** The world point the camera orbits — the middle of the framed box, at the height the camera orbited her at when the glance took it. */
   readonly focus: Vector3;
   readonly zoom: number;
   /** She, the owl and the book all fitted at {@link zoom}; false — the book and its beacon alone (see the module doc). */
@@ -114,6 +114,12 @@ export class BookGlance {
   /** It has written the zoom: the zoom she had is to be given back. */
   private engaged = false;
   private zoomBefore = 1;
+  /**
+   * The height the camera orbited her at when the glance took it: the glance's focus stays at it, so the
+   * camera only slides across and draws back, and comes home along the same level. Read off the camera,
+   * never re-derived — where the follow puts its height is the camera's business.
+   */
+  private focusHeight = 0;
   private readonly anchor = new Vector3();
   private current: GlanceShot | null = null;
   private readonly points: Vector3[] = Array.from({ length: 7 }, () => new Vector3());
@@ -207,6 +213,7 @@ export class BookGlance {
     if (!this.engaged) {
       this.engaged = true;
       this.zoomBefore = camera.targetZoom;
+      this.focusHeight = camera.focusPoint.y;
     }
     const { owl, roomRoot: room } = this.library;
     const [feet, head, owlHead, bubble, book, base, column] = this.points as [Vector3, Vector3, Vector3, Vector3, Vector3, Vector3, Vector3];
@@ -226,7 +233,7 @@ export class BookGlance {
     column.copy(base);
     column.y += GLANCE_BEACON_COLUMN;
 
-    const height = player.position.y + CAMERA_FOCUS_LIFT;
+    const height = this.focusHeight;
     const whole = this.frame(camera, this.points, height);
     if (whole && whole.zoom >= CAMERA_ZOOM_MIN) return { bookId: placed.book.id, focus: whole.focus, zoom: whole.zoom, whole: true };
     const alone = this.frame(camera, [book, base, column], height);

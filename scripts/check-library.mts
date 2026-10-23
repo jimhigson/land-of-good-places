@@ -155,7 +155,6 @@ import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, bookCollectionId, storyTimeMayRead
 import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
-import { CAMERA_FOCUS_LIFT } from '../src/core/IsoCamera.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import {
   BREATH_DEPTH,
@@ -2398,7 +2397,8 @@ const roomOccluders = (): Mesh[] => {
  * children, taken that frame); whether the owl's bubble can be drawn (its anchor in shot, the bubble's own
  * gate: `SpeechBubble.updateScreenSize`); and whether the child is on the screen, feet and head. After the
  * last line: how many frames until the glance has let go, the zoom she had is back, and the camera
- * orbits her again (within 0.25 m of where it follows her).
+ * orbits her again — within 0.25 m of the point it orbited her at on the last frame before the glance took
+ * it (she stands still throughout, so that is where its follow puts it — measured, not re-derived).
  */
 interface RecommendWatch {
   readonly lines: Set<string>;
@@ -2417,9 +2417,11 @@ interface RecommendWatch {
   /** Where the beacon's base was on the screen on the glow line's last frame. */
   beaconAt: { x: number; y: number; on: boolean } | null;
   zoomBefore: number;
+  /** Where the camera orbited her on the last frame before the glance took it (null: it never did). */
+  followedAt: Vector3 | null;
   /** Frames from the owl falling quiet until the camera is home (−1: not within 2 s). */
   homeAfter: number;
-  /** How far the camera's focus was from where it follows her, and its zoom, when the watch ended. */
+  /** How far the camera's focus was from {@link followedAt}, and its zoom, when the watch ended. */
   homeOff: number;
   zoomAfter: number;
 }
@@ -2443,6 +2445,7 @@ const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendW
     shot: null,
     beaconAt: null,
     zoomBefore: camera.targetZoom,
+    followedAt: null,
     homeAfter: -1,
     homeOff: Number.NaN,
     zoomAfter: Number.NaN,
@@ -2450,10 +2453,17 @@ const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendW
   const ray = new Raycaster();
   const eye = new Vector3();
   const player = child.player;
+  const followed = new Vector3();
+  let glanced = false;
   for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
+    if (!glanced) followed.copy(camera.focusPoint);
     child.step();
     if (owl.lastSaid !== null) watch.lines.add(owl.lastSaid);
-    if (bookGlance.active) watch.glanceFrames += 1;
+    if (bookGlance.active) {
+      watch.glanceFrames += 1;
+      if (!glanced) watch.followedAt = followed.clone();
+      glanced = true;
+    }
     if (!owl.speaking || owl.lastSaid !== LIBRARY_LINES.owl.recommendGlow) continue;
     watch.glowFrames += 1;
     watch.shot = bookGlance.shot;
@@ -2493,12 +2503,9 @@ const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendW
     }
     if (seenNow) watch.seenFrames += 1;
   }
-  const homeOff = (): number => {
-    const focus = camera.focusPoint;
-    return Math.hypot(focus.x - player.position.x, focus.z - player.position.z, focus.y - (player.position.y + CAMERA_FOCUS_LIFT));
-  };
+  const homeOff = (): number => (watch.followedAt ? camera.focusPoint.distanceTo(watch.followedAt) : Number.NaN);
   for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
-    if (!bookGlance.active && Math.abs(camera.zoom - watch.zoomBefore) < 0.01 && camera.targetZoom === watch.zoomBefore && homeOff() < 0.25) {
+    if (!bookGlance.active && Math.abs(camera.zoom - watch.zoomBefore) < 0.01 && camera.targetZoom === watch.zoomBefore && (!watch.followedAt || homeOff() < 0.25)) {
       watch.homeAfter = i;
       break;
     }
@@ -2576,9 +2583,9 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
       `and the owl's bubble's anchor in shot (so her words can be drawn) on ${watched.bubbleFrames} — every one wanted`,
   );
   say(
-    watched.homeAfter >= 0 && watched.homeAfter <= Math.round(1.5 / CHILD_DT),
+    watched.followedAt !== null && watched.homeAfter >= 0 && watched.homeAfter <= Math.round(1.5 / CHILD_DT),
     `and the camera comes home: ${watched.homeAfter >= 0 ? `${watched.homeAfter} frames` : 'NOT within 2 s'} after her last line the glance has let go, ` +
-      `the zoom is back at the ${watched.zoomBefore.toFixed(2)} she had (${watched.zoomAfter.toFixed(3)}) and the camera orbits her again (${watched.homeOff.toFixed(3)} m off where it follows her; 0.25 wanted, within 1.5 s)`,
+      `the zoom is back at the ${watched.zoomBefore.toFixed(2)} she had (${watched.zoomAfter.toFixed(3)}) and the camera orbits her again (${watched.homeOff.toFixed(3)} m off the point it orbited her at before the glance; 0.25 wanted, within 1.5 s)`,
   );
   // A step hands the camera straight back. Pressed again (the same book, unread), the glance takes the
   // camera as she names it; a nudge of the stick mid-glance and it is hers on that frame, the zoom she had
@@ -2612,8 +2619,8 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
       if (bookGlance.active) cameBack += 1;
     }
     say(
-      took && zoomIn < zoomHad && releasedAfter === 1 && zoomBack === zoomHad && cameBack === 0,
-      `a step hands the camera straight back: pressed again, the glance took the camera after ${waited} frames (${took}), drawing back to zoom ${zoomIn.toFixed(2)} from ${zoomHad.toFixed(2)}; ` +
+      took && releasedAfter === 1 && zoomBack === zoomHad && cameBack === 0,
+      `a step hands the camera straight back: pressed again, the glance took the camera after ${waited} frames (${took}; zoom ${zoomIn.toFixed(2)}, she had ${zoomHad.toFixed(2)}); ` +
         `a nudge of the stick (moving her at most ${GLANCE_MOVE_CANCEL} m wanted to count) and it let go ${releasedAfter >= 0 ? `on frame ${releasedAfter}` : 'NOT within 6 frames'} (1 wanted), ` +
         `the zoom target back at ${zoomBack.toFixed(2)}, and it took the camera again on ${cameBack} frames of the rest of her recommendation (0 wanted)`,
     );
@@ -5090,7 +5097,8 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
   restore();
   for (const { screen, book, watch, recommended } of rows) {
     say(
-      recommended === book.id && watch.glowFrames > 0 && watch.seenFrames >= watch.glowFrames * 0.8 && watch.childFrames === watch.glowFrames && watch.bubbleFrames === watch.glowFrames && watch.homeAfter >= 0,
+      recommended === book.id && watch.glowFrames > 0 && watch.seenFrames >= watch.glowFrames * 0.8 && watch.childFrames === watch.glowFrames && watch.bubbleFrames === watch.glowFrames &&
+        (watch.followedAt === null || watch.homeAfter >= 0),
       `${screen.what} (${screen.width}×${screen.height}): ${watchSays(book, watch)} — 80% wanted; she on the screen on ${watch.childFrames}, the owl's bubble's anchor in shot on ${watch.bubbleFrames} ` +
         `(all ${watch.glowFrames} wanted); the camera home ${watch.homeAfter >= 0 ? `${watch.homeAfter} frames after` : 'NOT within 2 s of'} her last line` +
         `${recommended === book.id ? '' : ` — SHE RECOMMENDED '${recommended ?? 'nothing'}', NOT '${book.id}': the store was not set as this clause meant`}`,
