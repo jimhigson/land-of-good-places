@@ -12,20 +12,19 @@ Do NOT merge. Do not touch the den/part-5 or engine-follow-up work.
 ## Status
 
 - [x] worktree + `pnpm install --frozen-lockfile` (pnpm 12.1.0, node 26.5.0)
-- [x] main's CI run 40024042181 read: **only `Checks shard 4` red** — `check:library` "1 clause(s) FAILED.",
-      the beacon clause. Shard 4 stopped there, so its 11 steps after check:library never ran on main (the
-      PR's CI runs them). Update adoption 40024042300: success. (Other jobs still finishing at 22:15 UTC.)
-- [x] the beacon: fixed (below), red without / green with; seen in headless Chrome on a local production build
+- [x] main's CI run 40024042181 read: **completed failure — 86 success, 1 skipped, 2 failed: `Checks shard 4`
+      (`check:library` "1 clause(s) FAILED.", the beacon clause) and the `Checks` aggregator**; Procgen
+      invariants success; Deploy success. Shard 4 stopped at check:library, so its 11 later steps never ran
+      on main (the PR's CI ran them: all green). Update adoption 40024042300: success.
+- [x] the beacon: fixed (below), reds re-proved on the final code, seen in headless Chrome locally
 - [x] local (16 parks = CI's `parks-752998c3…` artifact in `.parks/`): tsc 0, typecheck:test 0,
       check:library 0 (300 ✓), check:labels 0, check:tap-spacing 0, check:jitter 0, check:exits 0,
-      flat-primitives 0; **test:procgen exit 0, 271 s, 48 files, 2168 tests, 0 skipped** (at b6bef002;
-      ae2b08f9 differs from it only in check-library's flat-ok comment and bookGlance's doc)
-- [ ] full `pnpm run check` on ae2b08f9 (`run-check.sh full4`, running from 22:17 UTC)
-- [ ] the reds re-proved on the final code (no-glance, glance-stays, by hand: move-cancel, draw-back 0.4,
-      book-itself framed round everything)
-- [x] **PR #735** opened (head ae2b08f9); CI run 40032476645 + Update adoption 40032476641
-- [ ] every CI job green on the PR head
-- [ ] beacon seen on the PR's newest preview (headless Chrome, throwaway profile: `look/owl-glance.mjs <host> <dir>`)
+      flat-primitives 0; **test:procgen exit 0, 271 s, 48 files, 2168 tests, 0 skipped**
+- [x] **PR #735**; CI run 40032476645 on ae2b08f9: **25 success, 6 skipped (Deploy, the parks matrix on a
+      cache hit) — Checks pass, Procgen invariants pass**; Update adoption 40032476641 pass
+- [x] **check:served-walking red locally under load — root-caused and fixed** (section below)
+- [ ] full `pnpm run check` alone, clean, on the final head
+- [ ] every CI job green on the final head; the beacon seen on the newest preview
 
 ## The beacon — root cause and the fix (decided)
 
@@ -81,6 +80,30 @@ shows it, and works on every screen.
 
 **Question for Jim (not changed):** the owl's order is catBusDay → goodnightPark → then four chapter books
 (biscuitStorm, detectiveBiscuit, loudestShush, giantFootprints) for a six-year-old.
+
+## check:served-walking — a latent flake, found by my own mistake, fixed
+
+**How it was found.** My first "kill" of a stray full-check run killed only some of its processes (the zsh
+script survived SIGTERM; kill by **process group** — `kill -TERM -<pgid>` — and check the group is empty), so
+two full checks plus a test:procgen ran at once (load 22). In that run `check:served-walking` failed:
+*"after keychain view: KeyW moved her 0.190 m in 5000 ms … from -0.80,17.94 to -0.94,17.81"*. The same code
+passed idle 3/3 and on CI.
+
+**Root.** Not the keys: the case's premise. The eight presses chained end to start, so where each began
+depended on how far the last one carried her and coasted — frame-rate dependent. Under load `ArrowRight`
+coasted her to (−0.80, 17.94), against the keychain stall, and `KeyW` points into it (probe: every point on
+that line is inside the stall's clearance). Worse, even the spot the view hands her back on, (−2.46, 17.50),
+has no room to the right: with every press started there, `ArrowRight` and `KeyD` got **0.027 m in 5100 ms**.
+
+**Fix** (`scripts/check-walking.mts`): every case's presses start from the nearest spot with
+`SAVE_SPOT_CLEARANCE` (5 m) of clear ground to where the case left her (`clearHome`, the returning save's own
+ring search, now shared), and she is put back on it at rest before every press (`standAt`,
+`Player.teleport`). The hand-back each case exists for is asserted before she is moved. Homes on seed 5:
+spawn (3.13, −26.82), 27 m off (0, 0); keychain (3.58, 5.99), 13 m off; returning save unchanged.
+`CHECK_WALKING_MUTATE=coast-to-stall` leaves her at (−0.80, 17.94) after the keychain case's `ArrowRight`.
+- with the fix: plain exit 0 (27 OK), mutated exit 0 (27 OK)
+- **red**, the fix taken out by hand + the mutation: exit 1, *"KeyW FAILED: 0.190 m after 5100 ms held (from
+  -0.80,17.94 to -0.94,17.81)"* — the loaded run's numbers exactly. Logs `runs/walking-*.log`.
 
 ## Findings (not fixed here)
 
