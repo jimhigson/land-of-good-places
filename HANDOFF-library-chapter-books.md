@@ -1,5 +1,179 @@
 # HANDOFF — the six chapter books, as-is, stacked on part 4 (#733)
 
+## PAUSED 23 Oct 22:00 — how to pick this up
+
+Jim paused all work at 22:00 ("get all agents to write detailed handover so can be picked up later");
+the Mac was at load 50–127 and every check crawled. Nothing is running for this track: every process
+of mine was stopped by PID, and no dev server, browser or solve is left. **Nothing is lost**: every
+commit is pushed. **No `feat/chapter-books-main` branch or `.claude/worktrees/chapter-books-main`
+worktree was ever created** (the Overseer's books-onto-main plan arrived and was paused before step 2).
+
+### Where everything stands
+
+| what | where |
+|---|---|
+| this branch | `feat/library-chapter-books` @ the commit that adds this section (on top of 43069bf5), pushed; worktree `.claude/worktrees/library-chapter-books`, clean |
+| PR | **#734** "The Library: six chapter books for a big reader" — head `feat/library-chapter-books-pr` @ **e03200d5**, base `feat/library-v2-pr` @ 66549d88 (#733's head, which part 4 has not moved since); **open**. Its body (`.claude/library-build-scratch/chapter-books/pr-body.md`, applied with `gh pr edit 734 --body-file …`) still describes 83b72db; the round-2 version (the shelf fix section, the shelf walk to try) is written in that file but **not yet applied** |
+| part 4 (#733) | `origin/feat/library-v2` @ 4a72c49b when paused — **already inside e03200d5** (merged 4 times this round, each `-c rerere.enabled=false`, step sets proved). Part 4 failed browser QA round 1; its fixer was mid-change (check-library.mts, Collision.ts uncommitted in `.claude/worktrees/library-v2` — never write there) |
+| reviews | review round 1 of #734: **approved**. Review round 2 and QA round 2: **stopped unfinished** at the pause |
+
+### CI on e03200d5 — RED, on part 4's clause, not on the books
+
+Run **39995947413**: 89 jobs — **86 success, Deploy skipped, `Checks shard 4` failed**, so the
+required **`Checks` is red**; **`Procgen invariants` is green**; Update adoption **39995947169** green.
+Shard 4 (job 120589029762) stops in `check:library` on ONE clause, part 4's **RECOMMEND "found from
+the desk"** (added by part 4's a79c265f, the glowing book's beacon): *"over 180 frames at the desk's
+front, a sparkle of its glow stood in the open over the top of 'north-8' (3.20 m) … on 0 (0
+sparkle-frames; 0 hidden by the room; the lowest at — m) — 80% wanted"*. Locally, identical:
+`runs/final-park/check:library.log` exit 1, 257 ✓ 1 ✗ (every other clause green — SHELF WALK, NEVER
+INSIDE HER and the rest).
+
+**Diagnosis (measured, `beacon/beacon-from-desk.mts`, log `beacon/run-1.log`):**
+- **The clause does not hard-code north-8.** It measures the case of the book the owl actually
+  recommends (`recommendFor` → `library.shelfBooks.find(first.id).slot.bookcase`). On this tree the
+  owl recommends **catBusDay**, which stands on north-8.
+- **Why the pick changed:** `recommendation.ts`'s `RECOMMENDATION_ORDER` is a seeded Fisher–Yates
+  shuffle of *all* of `BOOKS` (`LIBRARY_RECOMMEND_SEED` 0x0b00c9), so six more books reshuffle it.
+  With the 18 books: **catBusDay → goodnightPark → biscuitStorm\* → detectiveBiscuit\* →
+  loudestShush\* → giantFootprints\*** → bookDragon → keychainStall → catchThatChicken\* → fireflies →
+  duckBars → sirHopsalot\* → trillaHigh → fountainWish → biscuitBreakfast → bigParade → ripikaBalloon →
+  foreverSlide (\* chapter book). **The owl's first pick is a picture book (catBusDay), her second too
+  (goodnightPark); picks 3–6 are chapter books** — Jim may want her to steer a six-year-old to picture
+  books first; nothing was changed. On part 4's twelve picture books the same shuffle gives
+  fountainWish → fireflies → catBusDay → goodnightPark → trillaHigh → keychainStall → …
+- **The beacon really is hidden from the desk — for 15 of 18 books.** Every book made the glowing
+  book in turn, RECOMMEND's exact question asked from the desk's front (1280×720, 180 frames): only
+  **fountainWish, keychainStall and goodnightPark pass (100%)**; trillaHigh 14%; the other 14 score 0
+  — their sparkles are **off the screen** (e.g. 0.6 m over north-8's top projects to (1522, 137);
+  west-4's chapter books to x 58–153, y −78…−124), never hidden by the room. So part 4's clause passes
+  on part 4's own tree only because its first pick is fountainWish; part 4's own third pick
+  (catBusDay) fails it too. **It is a defect in part 4's beacon promise ("seen across the room …
+  from the desk"), which the books' reshuffle exposed**: the owl's recommendation is unfindable from
+  the desk for most books, a real problem for a child. For part 4 to fix (a beacon the screen shows
+  wherever the book is, or a recommendation she can find, or a clause that asks "from the book's
+  aisle"); this PR changes none of it. If the books go onto main without part 4 (below), this clause
+  is not there; when part 4 later meets the books, it goes red again unless part 4 has fixed it.
+
+### The shelf blocker (QA round 2 on 83b72db) and its fix — done, pushed, green
+
+QA: walking along the big readers' shelf (six books 0.6 m apart on west-4) and pressing **Read it!**
+opened the book of the stand just left, at every stand 2–6; also link after link on one profile.
+- **3b461529 `src/world/Selection.ts`** — two general rules. (1) The proximity hysteresis band is
+  `min(0.6 m, 0.5 × the gap between the two zones' stands)` (`hysteresisBand`, `HYSTERESIS_SHARE`):
+  the old fixed 0.6 m never let go between zones ≤ 0.6 m apart (on the rival's own stand it is
+  exactly the gap nearer, never *more*); the middle half of a gap stays anti-flicker; pairs ≥ 1.2 m
+  apart unchanged. (2) A tapped pick survives until the proximity pick CHANGES (`tapBaseline`,
+  `tapOutlives`) — it used to be dropped whenever proximity held anything else, so a tap on a
+  neighbouring book snapped back. Hover unchanged. Outside the park closure.
+- **4d0dd06f `check:library` SHELF WALK** (header item 17): the real child, a real `Selection` wired as
+  `Game` wires it, E through the `InputSystem`'s keydown listener → `InteractRouter`; 21 arrivals
+  (north, south, from the aisle, link after link), 10 taps on a neighbour's book, a sway midway.
+  Mutations `fixed-hysteresis`, `no-hysteresis`, `tap-loses`. **Reds**: pre-fix Selection → exit 1,
+  223 ✓ 22 ✗ (11/21 arrivals, 0/10 taps); `fixed-hysteresis` 234 ✓ 11 ✗; `no-hysteresis` 244 ✓ 1 ✗ (the
+  sway changed 8 times); `tap-loses` 234 ✓ 11 ✗. Geometry: seed 5 restart 1, room at (−600, −600),
+  west-4 stands (−16.10, 5.50 … 2.50) every 0.60 m, facing 270, stand radius 3 m.
+- **0e0f9da7 `check:tap-spacing` rule 3**: every space, every pair of equal-rank selectable zones
+  within reach: the real `Selection` stood on one stand, then at 9 points within 5 cm of the other's —
+  the first must let go. Green: 62 pairs, 558 probes, 0 failing. **Red** on the pre-fix Selection:
+  exit 1, 10 problems — exactly the shelf's 10 neighbouring pairs. Rule 2's 12 "harmless" finger
+  warnings are a different thing (pick areas within 1.13 m) and stay warnings.
+- **Proved on the deployed preview too**: `look/preview-walk.mjs` (one page, F3 readout, arrow keys,
+  E, Escape; the opened book named by its cover colour, `look/identify-books.py`) — **control on the
+  old preview pr-734-83b72db: 1 of 11 presses right** (all 22 frames opened by eye). It was never run
+  on a fixed preview: e03200d5's preview exists but CI was red, then the pause. Next: run it on the
+  newest preview host, expect 11 of 11, open every frame.
+- Checks with the fix: full `pnpm run check` exit 0 (2467 s, all 88 leaves), `test:procgen` exit 0
+  (48 files, 2167 tests, 0 skipped) — both on the fix before part 4's QA-1 merges; on later trees the
+  targeted checks (see Round 2 log) all green except the beacon clause.
+
+### Jim's rulings that bind this
+
+1. 23 Oct: **"let's just merge those books as-is now"** — Trilla's hidden eyes (*Shush*, *Chicken*) and
+   Grandpa Tock's buried face (*Footprints* p6–p8) stay; no face fixes, nothing new.
+2. 23 Oct 22:00, on the books waiting for part 4: **"isn't adding more books quite simple using
+   existing book structures, shelves, etc?"** — the Overseer read it as: the books go onto main on
+   their own, independent of part 4. **That is the plan to resume** (below), unless Jim says otherwise.
+
+### The alternative plan — the six books straight onto main, without part 4
+
+Facts it rests on (all measured with git): the track-D base `origin/feat/library-714-books2` @
+d32a205a was cut from the foundation 5d524193, **which is on main**; `origin/art/story-props` @
+d431a47d is main (merge base 7ce1deae, in #722) + 9 kit commits; main's `check-library.mts` already has
+the WITH A REAL CHILD harness (d6486af8) SHELF WALK runs on. The file-by-file inventory of everything
+this branch differs from main in, by which side touched it (`git log --full-history` per file
+against the books' and part 4/5's commit sets), is
+**`.claude/library-build-scratch/chapter-books/inventory.tsv`** (class, books-commits, part-4/5-commits,
+file, first part-4/5 commits):
+- **BOOKS — take wholesale from this branch (90 files):** `src/world/library/chapterBooks/*` (7),
+  `docs/library-build/chapter-books/final.json`, `src/world/library/bookKinds.ts`, `books.ts`,
+  `readBooks.ts`, `reader/BookReader.ts`, `reader/pageFaces.ts`, `reader/pageGeometry.ts`,
+  `reader/readerAssets.ts`, `reader/readerWords.ts`, `reader/storyProps.ts`, `src/art/assets/storyProps.glb`,
+  `storyPropsGlb.ts`, `src/art/models/shopItems.ts`, `src/ui/CuteODex.ts`, `src/style.css`,
+  **`src/world/Selection.ts`**, `scripts/check-copy-brevity.mts`, `check-asset-contract.mts`,
+  `check-library-glb.mts`, `check-story-props-glb.mts`, `lib/check-glb-kit.mts`,
+  `pack-story-props-asset.mts`, `art/blend/{blendkit.py, hotel_render.py, story_props.blend,
+  story_props_{build,export,render}.py}`, `art/renders/story-props/*` (45), `ASSET_MANIFEST.md`,
+  `GAME_DESIGN.md`, **`package.json`** (adds `check:story-props-glb` to shard-1 after
+  `check:library-glb`, plus `pack:/blend:/render:story-props` — re-prove by parsing),
+  `test/library/big-reader.test.ts`, `test/procgenShards.ts`, and the books' handoffs.
+- **SHARED — take ONLY the books' hunks (12 files):** `scripts/check-library.mts` (track D's READABLE
+  kind clauses + a80be87c's `CHAPTER_BOOKS.length === chapterSlots` + SHELF WALK and its 3 mutations;
+  NOT the owl/card/recommend/shush/sit/kids/story/never-inside-her/den clauses),
+  `scripts/check-book-reader.mts` (chapter pages, 9/9b model sheet, section 8 `LAST` fix; NOT part 4's
+  item 11 / cbe0b608, 9a2fe385), `scripts/check-tap-spacing.mts` (rule 3; main lacks part 4's per-space
+  stderr lines (56ba141a) — keep rule 3's summary line, drop its per-space addition),
+  `src/main.ts` (track D's `/book` chapter-book hunk; NOT `/library?story=now`, 93a07cb7),
+  `src/state/secrets.ts` (the Big reader secret; NOT Story listener 1adbe142 nor the conditional
+  listing 745cb651 — with six books it is always listed), `src/world/library/Library.ts` (track D's
+  2-line change only), `furnish.ts` (the `PlacedBook`/`shelveFace`/`bookInstances` exports + track D's
+  line; NOT `pieceToRoom`, 93a07cb7), `layout.ts` (the big readers' shelf: six chapter slots on west-4,
+  stands as keep-outs, bb1fab30/93c01cf5; NOT den/cushions/owl/kids), `props.ts` (track D's 4 lines),
+  `shelfBooks.ts` (track D's kind pairing; NOT the API adaptation's `WAITING_SLOTS`, 81ef26e5 — with
+  all six books in, equality holds), `reader/pagePictures.ts` (the books' file; part 4's f19cd1fc was
+  the identical flat-ok line), `test/library/chapter-books.test.ts` (cases 1–4; NOT part 4's case 5).
+- **PART45 — leave out (30 files):** owl/kids/den/story time/cushions/labels scene 5:
+  `LibraryOwl.ts`, `LibraryKids.ts`, `libraryKidDriver.ts`, `recommendation.ts`, `storyTime.ts`,
+  `shell.ts`, `World.ts`, `Collision.ts`, `Game.ts`, `SpeechBubble.ts`, `InventoryDrawer.ts`,
+  `spritePuffs.ts`, `libraryAssets.ts`, `NpcCharacter.ts`, `residentLooks.ts`, `waypointDriver.ts`,
+  `ridePose.ts`, `HotelGuests.ts`, `seatedPose.mts`, `check-labels.mts`, `check-deep-links.mts`,
+  `test/procgen/parkFacts.ts`, `docs/design/LABELS.md`, part 4/5's handoffs.
+
+Steps: (1) `git worktree add .claude/worktrees/chapter-books-main -b feat/chapter-books-main
+origin/main`, `pnpm install --frozen-lockfile`, `git push -u origin feat/chapter-books-main`, a short
+`HANDOFF-chapter-books-main.md`. (2) `git checkout origin/feat/library-chapter-books -- <BOOKS files>`
+(the list above / inventory.tsv). (3) Port each SHARED file's books' hunks onto main's version by
+hand — main has the engine (#722), so match main's current API (numeric tops, `props.box`), never
+paste part 4's. (4) tsc, typecheck:test, brevity, story-props-glb, library-glb, assets,
+flat-primitives, cycle-tdz, vitests locally; package.json step sets by parsing. (5) New PR, base
+main, title "The Library: six chapter books for a big reader", body says it replaces #734 (reuse
+`pr-body.md`, minus the part-4 merges and the beacon); close #734 with a pointer. (6) Park-dependent
+checks (check:library, book-reader, tap-spacing) with CI's `parks-<hash>` artifact once CI has
+solved it — **do not solve locally while the Mac is loaded**. (7) Every CI job green, then the shelf
+walk on the newest preview (`look/preview-walk.mjs <host> <dir>`, expect 11 of 11) and one book read
+at each size; report PR, head, CI, preview host.
+
+### Where things are (`.claude/library-build-scratch/chapter-books/`)
+
+- `runs/<tag>/<check>.log` (each ends `exit=N seconds=S`): round 1 `static1`, `park1`, `served1`,
+  `vitest2`, `full/` (round 1's full check and test:procgen); round 2 `r2-*` (the fix: `r2-fix*`,
+  reds `r2-red-nofix`, `r2-tap-red-nofix2`, mutations `r2-mut-*`, `r2-wide`, `r2-served-*`, `r2-full/`
+  = the full check + test:procgen on the fix), `r2m-*` (after part 4's QA-1 merge), `final-park/`
+  (e03200d5: library red on the beacon clause; check:exits was killed by me at the pause — no failure
+  line, unmeasured there; green on a9729328).
+- parks: `runs/parks/build-parks-*.log`; the worktree's `.parks/` holds **CI's 16 parks for
+  2b2fe559** (= e03200d5's tree; `ci-parks-2b2fe559fb90/` is the download), older sets in
+  `.parks/r1-53dde20f/`, `.parks/all16/`, `.parks/seed5-only/`. `parks-fresh.sh` says FRESH/STALE.
+- the look: `look/shots/` (139 frames, round 1), `look/NOTES.txt`, `look/recheck/` (the chip-press
+  ghost), `look/preview-local/`, `look/preview-83b72db/`, `look/walk-83b72db/` (the control walk, 22
+  frames), `look/look.mjs`, `look/preview.mjs`, `look/preview-walk.mjs`, `look/identify-books.py`.
+- QA's evidence: `.claude/library-build-scratch/l734qa/` (comment.md, sheet-walk1.png, …).
+- the beacon diagnosis: `beacon/beacon-from-desk.mts`, `beacon/run-1.log`.
+- scripts: `run-checks.sh`, `merge-scripts-proof.mjs` (parsed step sets; `merge-scripts-proof-*.log`).
+- QA minor not acted on (as-is): *Duck, Sir Hopsalot!* (122,187,220) and *Biscuit and the Storm*
+  (114,165,208) covers are close blues in the reader.
+
+---
+
 Engineer, Claude Opus 5.5, 23 Oct 2026. Branch `feat/library-chapter-books` (worktree
 `.claude/worktrees/library-chapter-books`), cut from `origin/feat/library-v2` @ 9a269a31.
 PR head `feat/library-chapter-books-pr` (fast-forward pushes only), base `feat/library-v2-pr` (#733's head).
