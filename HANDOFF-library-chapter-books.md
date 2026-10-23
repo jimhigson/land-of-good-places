@@ -223,4 +223,45 @@ list above and carry on from the first unticked box. `.parks/` holds all 16 hone
 
 ## Round 2 log
 
-- started: reading `Selection` (`src/world/…`), `DEFAULT_STAND_RADIUS`, `HYSTERESIS_MARGIN`.
+- **Root causes (both in `src/world/Selection.ts`, both general):**
+  1. *Proximity:* the hysteresis band was a fixed `HYSTERESIS_MARGIN` 0.6 m: a held zone keeps the pick
+     until a rival's stand is MORE than 0.6 m nearer. On a rival's own stand the rival is exactly the
+     gap nearer, so any two zones 0.6 m apart or closer never let go of each other (the shelf's stands
+     are 0.6 m apart). Fix: `hysteresisBand(held, rival) = min(0.6, HYSTERESIS_SHARE 0.5 × gap)`. The
+     middle half of the gap stays anti-flicker; the quarter round each stand (0.15 m on the shelf) always
+     belongs to its own zone. Pairs ≥ 1.2 m apart keep 0.6 m — unchanged (every space but the library's
+     chapter shelf: nearest equal-rank stands elsewhere 1.79 m+).
+  2. *Tap:* `refreshSticky` dropped a tapped pick whenever proximity held anything ELSE, so standing at
+     one book she could never select another by tapping it. Fix: a tap records the proximity pick at
+     that moment (`tapBaseline`); the tapped pick is dropped when proximity CHANGES (she walked up to
+     something else — the file's own header's rule). Hover unchanged (never beats a different
+     proximity pick); hovering the thing just clicked keeps the tap's standing.
+  `Selection.ts` is OUTSIDE the park closure: hash still 53dde20f…, parks valid, CI parks cache hit.
+  Commit 3b461529.
+- **check:library SHELF WALK** (item 17; 4d0dd06f): real child, real Selection wired as Game, E through
+  `InputSystem`'s keydown listener → `takeInteractPress` → `InteractRouter`; stub opener with isOpen so
+  the selection is blocked/cleared while a book is open, exactly as `Game.selectionBlocked`.
+  21 arrivals (north 1→6 from stand 1, south 6→1, from the aisle 1.5 m out onto each next stand, link
+  after link = teleport k−1 then k), 10 taps on a neighbour's book (aim = the book mesh's bounds centre
+  projected through the game camera), a sway ±0.08 m midway between loudestShush/giantFootprints.
+  Geometry (from the run's note): seed 5 restart 1, room at (−600, −600); west-4 stands room-local
+  facing 270: sirHopsalot (−16.10, 5.50), detectiveBiscuit (−16.10, 4.90), loudestShush (−16.10, 4.30),
+  giantFootprints (−16.10, 3.70), biscuitStorm (−16.10, 3.10), catchThatChicken (−16.10, 2.50); gaps
+  0.600 m; band between neighbours 0.300 m (fixed) / none-0.6 (pre-fix); stand radius 3 m; light touch
+  0.249 (coast 0.05 m); every stop ≤ 0.016 m off its stand.
+  - with the fix: exit 0, **245 ✓ 0 ✗** (210 + 35): 21/21 arrivals, 10/10 taps, sway 0 changes
+  - **pre-fix Selection.ts (83b72db8's, swapped in, restored): exit 1, 223 ✓ 22 ✗** — 11/21 arrivals
+    (aisle 5/5 wrong; straight walks and links wrong or right on the exact-tie float), 0/10 taps
+  - `LIBRARY_CHECK_MUTATE=fixed-hysteresis`: exit 1, 234 ✓ 11 ✗ (11/21 arrivals; taps, sway green)
+  - `=no-hysteresis`: exit 1, 244 ✓ 1 ✗ (the sway changed 8 times; arrivals, taps green)
+  - `=tap-loses`: exit 1, 234 ✓ 11 ✗ (0/10 taps; arrivals, sway green)
+- **check:tap-spacing rule 3** (0e0f9da7): every space, every ordered pair of selectable equal-rank
+  zones within reach of each other, the real Selection stood on one stand, then at 9 points within 5 cm
+  of the other's: the held zone must let go (a zone sharing that stand may answer). The 12 rule-2
+  warnings are a finger's miss (pick areas within 1.13 m), not this bug, and stay warnings. With the
+  fix: exit 0, 62 pairs, 558 probes, 0 not letting go (library 40 pairs; keychain-rack opened 12;
+  hotel lobby 4, breakfast 4, suite 2; park/castle 0 — 60 selectable, nearest equal-rank stands 1.93 m,
+  beyond the flowers' 1.3 m reach). **Pre-fix: exit 1, 10 problems** — all 10 neighbouring shelf pairs
+  both ways (held at 7 or 9 of 9 points), nothing else. (First version probed only the exact stand:
+  2 of 10 on the pre-fix code — a float tie; hence the 5 cm ring.)
+- next: check:labels, check:exits, every Selection-driving check, full `check`, `test:procgen`.
