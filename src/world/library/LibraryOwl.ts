@@ -40,8 +40,9 @@ import { LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, type StandS
  * ## Solid
  *
  * Anything drawn is solid. Her solid is **a filled disc of her measured plan
- * reach, head and glasses included** ({@link radius}, `visibleReachXZ` on the
- * built model — never typed), registered through `props.wall(spot, spot, …)`
+ * reach, head and glasses included, across every pose she holds standing at
+ * her desk** ({@link radius}, {@link standingReach} on the built model — never
+ * typed), registered through `props.wall(spot, spot, …)`
  * as a zero-length capsule: the one round solid `CollisionWorld` can take out
  * and put back as the same object, which story time needs when she flies
  * (`props.detach` / `attach`, plan Step 9). Its top is her measured height,
@@ -113,18 +114,54 @@ export const GLOW_RATE = 2.4;
 export const TWINKLE_EVERY = 1.4;
 
 /** Breathing: `body.scale` sways by this share, at this rate (radians a second). */
-const BREATH_DEPTH = 0.02;
+export const BREATH_DEPTH = 0.02;
 const BREATH_RATE = 1.7;
 /** Her bubble's tail points this far over the top of her head. */
 const BUBBLE_OVER_HEAD = 0.42;
-/** The hand-over: sparkles over her, and two quick flaps of the wing that holds her book. */
+/**
+ * The hand-over: sparkles over her, and two quick flaps of the wing that holds
+ * her book — **forward**, over her desk (`wingR.rotation.x`, the shush wing's
+ * own axis), the book lifted toward the child across it. Forward rather than
+ * out to her side because her wings are drawn and her solid is not a wing: a
+ * sideways flap swings the wing 0.9 m from her middle, 0.24 m past her solid,
+ * at her west side, where a child can stand against her (measured); forward,
+ * every point past her solid is over the desk, where nobody can. `check:library`
+ * measures the drawn owl at her widest, live, on both wings.
+ */
 const CARD_SPARKLES = 6;
 const FLAP_SECONDS = 0.8;
-const FLAP_LIFT = 0.9;
+/** How far the book wing lifts forward at the top of each flap (radians about its pivot; negative is forward). */
+export const CARD_FLAP_LIFT = 0.9;
 /** How many sprites the one pool holds — enough for the card's six and a twinkle pair or two in flight. */
 const PUFF_POOL = 12;
 /** Sprites rise from a little over a book's base, so they come off the book rather than out of the board under it. */
 const TWINKLE_RISE = 0.25;
+
+/** How many head turns, from one limit to the other, {@link standingReach} measures her at. */
+const REACH_TURN_SAMPLES = 9;
+
+/**
+ * **Her plan reach across every pose she holds standing at her desk** — the
+ * radius her solid needs to cover her as drawn: `visibleReachXZ` with her head
+ * turned anywhere in ±{@link HEAD_TURN_LIMIT} and her breath at rest or at
+ * either extreme of {@link BREATH_DEPTH}, the largest of them. (Her glasses
+ * sit forward of her head's pivot, so a turned head reaches a little further
+ * than a straight one: 0.660 m against 0.655, measured.) The handle is left at
+ * rest.
+ */
+export function standingReach(handle: OwlHandle): number {
+  let reach = 0;
+  for (let i = 0; i < REACH_TURN_SAMPLES; i += 1) {
+    handle.head.rotation.y = -HEAD_TURN_LIMIT + (2 * HEAD_TURN_LIMIT * i) / (REACH_TURN_SAMPLES - 1);
+    for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
+      handle.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
+      reach = Math.max(reach, visibleReachXZ(handle.root));
+    }
+  }
+  handle.head.rotation.y = 0;
+  handle.body.scale.set(1, 1, 1);
+  return reach;
+}
 
 /** A run of lines being said: which is up, how long it has left, and which one carries the cheer. */
 interface Speech {
@@ -140,7 +177,13 @@ interface Speech {
 export class LibraryOwl {
   /** The Artist's owl, assembled: her root stands on {@link spot}, facing its bearing. */
   readonly handle: OwlHandle;
-  /** Her plan reach, head and glasses included, measured off the built model (`visibleReachXZ`): the radius of her solid. */
+  /**
+   * Her plan reach as she stands at her desk — head and glasses included,
+   * across every pose she holds there (her head turned to either limit, her
+   * breath at its widest), measured off the built model ({@link standingReach},
+   * `visibleReachXZ`): the radius of her solid. Her wings' quick gestures (the
+   * shush, the card flap) go forward over the desk, where no child can stand.
+   */
   readonly radius: number;
   /**
    * Her solid at the desk: a zero-length capsule (a filled disc of
@@ -186,7 +229,7 @@ export class LibraryOwl {
 
     this.handle = createLibraryOwl();
     // Measured before she is moved: her reach about her own origin, in her own frame.
-    this.radius = visibleReachXZ(this.handle.root);
+    this.radius = standingReach(this.handle);
     this.handle.root.position.set(this.spot.x, 0, this.spot.z);
     this.handle.root.rotation.y = (this.spot.facing * Math.PI) / 180;
     roomRoot.add(this.handle.root);
@@ -417,10 +460,10 @@ export class LibraryOwl {
     if (this.flapFor > 0) {
       this.flapFor = Math.max(0, this.flapFor - dt);
       const t = (FLAP_SECONDS - this.flapFor) / FLAP_SECONDS;
-      // Two flaps over the flap's time; negative lifts the right wing out from her side.
-      wingR.rotation.z = -Math.abs(Math.sin(t * Math.PI * 2)) * FLAP_LIFT;
+      // Two flaps over the flap's time; negative lifts the book wing forward, over the desk.
+      wingR.rotation.x = -Math.abs(Math.sin(t * Math.PI * 2)) * CARD_FLAP_LIFT;
     } else {
-      wingR.rotation.z = damp(wingR.rotation.z, 0, WING_HALF_LIFE, dt);
+      wingR.rotation.x = damp(wingR.rotation.x, 0, WING_HALF_LIFE, dt);
     }
   }
 

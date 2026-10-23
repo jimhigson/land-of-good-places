@@ -141,7 +141,8 @@ import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, type LibraryBook } from '../src/wo
 import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
-import { HEAD_TURN_LIMIT, OWL_LOOK_RANGE, OWL_ZONE_ID, SHUSH_COOLDOWN_SECONDS, SHUSH_RUN_SECONDS, SHUSH_WING_X } from '../src/world/library/LibraryOwl.ts';
+import { BREATH_DEPTH, HEAD_TURN_LIMIT, OWL_LOOK_RANGE, OWL_ZONE_ID, SHUSH_COOLDOWN_SECONDS, SHUSH_RUN_SECONDS, SHUSH_WING_X } from '../src/world/library/LibraryOwl.ts';
+import { visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { PLAYER_SEPARATION, SEPARATION } from '../src/entities/npc/NpcSystem.ts';
 import { GUEST_PACE } from '../src/entities/npc/residentLooks.ts';
@@ -1925,6 +1926,79 @@ const view = { camera: camera.camera, width: SCREEN.width, height: SCREEN.height
 /** What a sprint mid-card-script measured — CARD runs it (the script is only ever running then), SHUSH reports it. */
 let midCard: { ran: boolean; shushed: number; wingLow: number; stayedOnScript: boolean; stillSpeaking: boolean; travelled: number } | null = null;
 
+/**
+ * **The owl as drawn, measured apart from her solid** — the radius her solid
+ * must cover: a FRESH model (never the room's, never `LibraryOwl.radius`),
+ * posed through every pose she holds standing at her desk — her head turned
+ * anywhere in ±`HEAD_TURN_LIMIT` (21 turns), her breath at rest and at either
+ * extreme of `BREATH_DEPTH` — and the largest plan reach of them
+ * (`visibleReachXZ`). The instrument the OWL clause measures her solid, the
+ * marches and the aisles against; reading her solid's own radius instead would
+ * measure the collider against itself (the review of Step 6: a solid 20 % too
+ * small passed every clause).
+ */
+const drawnOwlReach = ((): number => {
+  const fresh = createLibraryOwl();
+  let reach = 0;
+  for (let i = 0; i <= 20; i += 1) {
+    fresh.head.rotation.y = -HEAD_TURN_LIMIT + (2 * HEAD_TURN_LIMIT * i) / 20;
+    for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
+      fresh.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
+      reach = Math.max(reach, visibleReachXZ(fresh.root));
+    }
+  }
+  return reach;
+})();
+
+/** Every bearing (5° bins) where the drawn owl reaches past her solid, the furthest she reaches, and the bins a child can stand in. */
+interface PastHerSolid {
+  furthest: number;
+  /** Frames measured — with a wing turned from rest; none means the gestures were never seen. */
+  frames: number;
+  readonly bins: Set<number>;
+  readonly standable: Set<number>;
+}
+const pastHerSolid = (): PastHerSolid => ({ furthest: 0, frames: 0, bins: new Set(), standable: new Set() });
+/** Her solid's radius as registered — read off the collision registration, never `LibraryOwl.radius`. */
+const owlSolidRadius = library.solids.find((candidate) => candidate.what === 'the owl')?.radius ?? 0;
+/**
+ * **Where the live owl's drawn body reaches past her solid, and whether a
+ * child could be standing there** — added into `into`, one frame. Every
+ * visible point of her model, room-local, further from her spot than her
+ * solid's radius + `RESOLVER_SLACK` is binned by its bearing from her; for
+ * each new bin, a body of her size touching her solid along that bearing is
+ * asked of the real world (`isClearCircle`). A bin a child can stand in is a
+ * place where the drawn owl reaches into a child who is standing against her
+ * — a wing through a child, the defect this exists to see. Measured on the
+ * owl as the game poses her, whatever axis a gesture turns.
+ */
+const measurePastHerSolid = (radius: number, into: PastHerSolid): void => {
+  into.frames += 1;
+  visiblePoints(
+    owl.handle.root,
+    (point) => {
+      const dx = point.x - owlSpot.x;
+      const dz = point.z - owlSpot.z;
+      const r = Math.hypot(dx, dz);
+      if (r > into.furthest) into.furthest = r;
+      if (r <= radius + RESOLVER_SLACK) return;
+      const bin = Math.round((Math.atan2(dx, dz) * 180) / Math.PI / 5) * 5;
+      if (into.bins.has(bin)) return;
+      into.bins.add(bin);
+      const toward = (bin * Math.PI) / 180;
+      const x = owlSpot.x + Math.sin(toward) * (radius + PLAYER_RADIUS);
+      const z = owlSpot.z + Math.cos(toward) * (radius + PLAYER_RADIUS);
+      if (onPlate(x, z) && collision.isClearCircle(OX + x, OZ + z, PLAYER_RADIUS)) into.standable.add(bin);
+    },
+    library.roomRoot,
+  );
+};
+/** The owl's wings at their widest — the card flap (CARD) and the shush wing (SHUSH) — measured live, asserted under SHUSH. */
+const wingsWide = pastHerSolid();
+/** Any wing of hers turned from rest — the frames worth measuring her at. */
+const wingsOut = (): boolean =>
+  Math.abs(owl.handle.wingL.rotation.x) + Math.abs(owl.handle.wingL.rotation.z) + Math.abs(owl.handle.wingR.rotation.x) + Math.abs(owl.handle.wingR.rotation.z) > 0.05;
+
 console.log('\nOWL — the librarian at her desk: solid, and alive:');
 {
   const player = child.player;
@@ -1934,12 +2008,17 @@ console.log('\nOWL — the librarian at her desk: solid, and alive:');
       solid.shape === 'wall' &&
       solid.points.length === 2 &&
       solid.points.every((point) => point.x === owlSpot.x && point.z === owlSpot.z) &&
-      solid.radius === owl.radius &&
       solid.top === owl.handle.height,
-    `'the owl' is registered as a zero-length capsule at (${owlSpot.x}, ${owlSpot.z}): a disc of r ${owl.radius.toFixed(3)} (her measured plan reach, head and glasses included), ` +
+    `'the owl' is registered as a zero-length capsule at (${owlSpot.x}, ${owlSpot.z}): a disc of r ${solid?.radius.toFixed(3) ?? '?'}, ` +
       `top ${owl.handle.height.toFixed(3)} m (her measured height)${solid ? '' : ' — NOT REGISTERED'}`,
   );
-  say(owl.radius > 0.5 && owl.radius < 0.9, `her reach is a round owl's: ${owl.radius.toFixed(3)} m (0.5..0.9 wanted; the Artist's body alone is ±0.40, her head and glasses reach further)`);
+  const solidRadius = solid?.radius ?? 0;
+  say(
+    solidRadius >= drawnOwlReach - 0.002,
+    `her solid covers her as drawn: r ${solidRadius.toFixed(3)} against her drawn plan reach ${drawnOwlReach.toFixed(3)} m, measured apart on a fresh model ` +
+      `across every pose she holds at her desk (head anywhere in ±${HEAD_TURN_LIMIT} rad, breath ±${BREATH_DEPTH}; 2 mm allowed)`,
+  );
+  say(drawnOwlReach > 0.5 && drawnOwlReach < 0.9, `her drawn reach is a round owl's: ${drawnOwlReach.toFixed(3)} m (0.5..0.9 wanted; the Artist's body alone is ±0.40, her head and glasses reach further)`);
   say(!libraryKeepOuts().some((spot) => spot.what === owlSpot.what), `${owlSpot.what} is no longer a keep-out (${libraryKeepOuts().length} keep-outs, none of them hers)`);
   const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   say(!reachedAt(seen, OX + owlSpot.x, OZ + owlSpot.z), `the fill does not reach her middle at (${owlSpot.x}, ${owlSpot.z}) — she is solid (${seen.reached.size} cells reached from the arrival)`);
@@ -1947,7 +2026,7 @@ console.log('\nOWL — the librarian at her desk: solid, and alive:');
   let marches = 0;
   let skipped = 0;
   let deepest = -Infinity;
-  const reach = owl.radius + 2.2;
+  const reach = drawnOwlReach + 2.2;
   for (let b = 0; b < 16; b += 1) {
     const angle = (b / 16) * Math.PI * 2;
     const start = new Vector3(OX + owlSpot.x + Math.cos(angle) * reach, 0, OZ + owlSpot.z + Math.sin(angle) * reach);
@@ -1958,22 +2037,22 @@ console.log('\nOWL — the librarian at her desk: solid, and alive:');
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       marches += 1;
       const end = march(collision, start, new Vector3(OX + owlSpot.x, 0, OZ + owlSpot.z), step, reach + 1);
-      deepest = Math.max(deepest, PLAYER_RADIUS - (Math.hypot(end.x - OX - owlSpot.x, end.z - OZ - owlSpot.z) - owl.radius));
+      deepest = Math.max(deepest, PLAYER_RADIUS - (Math.hypot(end.x - OX - owlSpot.x, end.z - OZ - owlSpot.z) - drawnOwlReach));
     }
   }
   say(
     marches >= 16 && deepest <= RESOLVER_SLACK,
     `${marches} marches at her from ${16 - skipped} bearings (${skipped} starts skipped: off the plate or inside a solid — the desk stands in front of her): ` +
-      `the deepest a body's edge got into her drawn disc is ${deepest.toFixed(3)} m (allowance ${RESOLVER_SLACK})`,
+      `the deepest a body's edge got into her drawn disc (r ${drawnOwlReach.toFixed(3)}, measured apart) is ${deepest.toFixed(3)} m (allowance ${RESOLVER_SLACK})`,
   );
   let nearestAisle = { id: '', clearance: Infinity };
   for (const aisle of LIBRARY_AISLES) {
     for (let i = 0; i + 1 < aisle.points.length; i += 1) {
-      const clearance = segmentDistance(aisle.points[i]!, aisle.points[i + 1]!, owlSpot) - owl.radius - PLAYER_RADIUS;
+      const clearance = segmentDistance(aisle.points[i]!, aisle.points[i + 1]!, owlSpot) - drawnOwlReach - PLAYER_RADIUS;
       if (clearance < nearestAisle.clearance) nearestAisle = { id: aisle.id, clearance };
     }
   }
-  say(nearestAisle.clearance >= 0, `AISLES above swept every aisle with her in the world; the nearest, '${nearestAisle.id}', passes ${nearestAisle.clearance.toFixed(3)} m clear of her disc at a player's radius`);
+  say(nearestAisle.clearance >= 0, `AISLES above swept every aisle with her in the world; the nearest, '${nearestAisle.id}', passes ${nearestAisle.clearance.toFixed(3)} m clear of her drawn disc (r ${drawnOwlReach.toFixed(3)}) at a player's radius`);
 
   // Out of the door and back in to the desk's front: a visit — which is when she is invited over.
   if (!quietly(() => library.requestEnterDoor())) throw new Error('OWL: /library-door refused her (riding, or a change of space already running)');
@@ -2046,7 +2125,7 @@ console.log('\nOWL — the librarian at her desk: solid, and alive:');
   child.stand(far.x, far.z, 90);
   child.run(2);
   say(farClear && Math.abs(owl.handle.head.rotation.y) < 0.05, `CONTROL: stood ${Math.hypot(far.x - owlSpot.x, far.z - owlSpot.z).toFixed(1)} m away (clear: ${farClear}; her look range ${OWL_LOOK_RANGE}), her head comes back to straight ahead: ${owl.handle.head.rotation.y.toFixed(3)} rad`);
-  note(`OWL: r ${owl.radius.toFixed(3)}, top ${owl.handle.height.toFixed(3)}; blink changes ${changes}, longest ${longest} frame(s); head ${left.rot.toFixed(2)} / ${right.rot.toFixed(2)}; ${child.frames} frames stepped so far`);
+  note(`OWL: solid r ${owl.radius.toFixed(3)}, drawn ${drawnOwlReach.toFixed(3)}, top ${owl.handle.height.toFixed(3)}; blink changes ${changes}, longest ${longest} frame(s); head ${left.rot.toFixed(2)} / ${right.rot.toFixed(2)}; ${child.frames} frames stepped so far`);
 }
 
 console.log('\nCARD — her library card, on the first press at the desk:');
@@ -2071,6 +2150,15 @@ console.log('\nCARD — her library card, on the first press at the desk:');
   }
   say(atOnce && cardsHeld() === 1, `pressing it gives her the card at once (${atOnce}): ${cardsHeld()} '${LIBRARY_CARD.id}' in her inventory (exactly one wanted)`);
   say(owl.midScript && owl.lastSaid === LIBRARY_LINES.owl.card[0], `and starts her script: "${owl.lastSaid ?? ''}" (wanted "${LIBRARY_LINES.owl.card[0]}")`);
+  // A second press mid-ceremony — an E press or a tap commits the zone's primary action whether or
+  // not its chip is drawn (Selection.handleInteractPress) — does nothing: the script goes on.
+  const pressedAgain = owlOffer()[0];
+  pressedAgain?.run();
+  say(
+    !!pressedAgain && owl.midScript && owl.lastSaid === LIBRARY_LINES.owl.card[0] && owl.recommendedBookId === null && cardsHeld() === 1,
+    `pressed again mid-ceremony ('${pressedAgain?.label ?? 'nothing offered'}'), she carries on: still "${owl.lastSaid ?? ''}" (mid-script ${owl.midScript}), ` +
+      `nothing recommended (${owl.recommendedBookId ?? 'none'}), ${cardsHeld()} card`,
+  );
 
   // Mid-script, a sprint — measured here, where the script is running; reported under SHUSH.
   child.run(0.4);
@@ -2094,14 +2182,15 @@ console.log('\nCARD — her library card, on the first press at the desk:');
   for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
     child.step();
     if (owl.lastSaid !== null) said.add(owl.lastSaid);
-    flapLow = Math.min(flapLow, owl.handle.wingR.rotation.z);
+    flapLow = Math.min(flapLow, owl.handle.wingR.rotation.x);
+    if (wingsOut()) measurePastHerSolid(owlSolidRadius, wingsWide);
   }
   const lines = LIBRARY_LINES.owl.card;
   say(
     lines.every((line) => said.has(line)) && !owl.speaking,
     `her ${lines.length} card lines were said in turn and the bubble went away: ${[...said].map((line) => `"${line}"`).join(', ')}`,
   );
-  say(flapLow <= -0.3, `on the hand-over line (#${LIBRARY_LINES.owl.cardCheerAt + 1}) she flapped the wing that holds her book: rotation.z down to ${flapLow.toFixed(2)}`);
+  say(flapLow <= -0.3, `on the hand-over line (#${LIBRARY_LINES.owl.cardCheerAt + 1}) she flapped the wing that holds her book forward, over her desk: rotation.x down to ${flapLow.toFixed(2)}`);
   const again = owlOffer();
   say(
     again.length === 1 && again[0]?.label === LIBRARY_CHIPS.hello && cardsHeld() === 1,
@@ -2192,6 +2281,7 @@ console.log('\nSHUSH — a sprint through the room gets a "Shhh!", and nothing e
     rode ||= player.riding;
     granted ||= owl.bubble.sprite.visible;
     if (firedAt < 0 && owl.shushes > before) firedAt = i + 1;
+    if (wingsOut()) measurePastHerSolid(owlSolidRadius, wingsWide);
   }
   const end = child.room();
   const travelled = Math.hypot(end.x - startAt.x, end.z - startAt.z);
@@ -2234,6 +2324,16 @@ console.log('\nSHUSH — a sprint through the room gets a "Shhh!", and nothing e
     !!midCard && midCard.ran && midCard.shushed === 1 && midCard.stayedOnScript && midCard.stillSpeaking && midCard.wingLow <= SHUSH_WING_X * 0.5,
     `mid-card-script (measured in CARD): a ${midCard?.travelled.toFixed(1) ?? '?'} m sprint (running: ${midCard?.ran ?? false}) shushed her ${midCard?.shushed ?? '?'} time(s) with her free wing ` +
       `(rotation.x down to ${midCard?.wingLow.toFixed(2) ?? '?'}; the full lift is ${SHUSH_WING_X}) — her words stayed on the card's lines (${midCard?.stayedOnScript ?? false}) and the script went on (${midCard?.stillSpeaking ?? false})`,
+  );
+  // Her wings at their widest — the card flap (CARD) and the shush wing (just above) — reach past
+  // her solid only where no child can stand: over her desk.
+  const bins = [...wingsWide.bins].sort((a, b) => a - b);
+  const standable = [...wingsWide.standable].sort((a, b) => a - b);
+  say(
+    wingsWide.frames > 0 && standable.length === 0,
+    `her wings at their widest (the card flap and the shush, measured live on ${wingsWide.frames} frames${wingsWide.frames ? '' : ' — NONE: this asserts nothing'}) reach ${wingsWide.furthest.toFixed(3)} m from her middle; ` +
+      `past her solid (r ${owlSolidRadius.toFixed(3)}) at bearings ${bins.join(', ') || 'none'}°, and a child can stand against her solid at ${standable.length} of them` +
+      `${standable.length ? ` (${standable.join(', ')}°): a wing through a child` : ' — over the desk, where nobody can'}`,
   );
   note(`SHUSH: a run of ${SHUSH_RUN_SECONDS} s, cooldown ${SHUSH_COOLDOWN_SECONDS} s (LibraryOwl.ts); ${owl.shushes} shushes in all; the screen ${SCREEN.width}×${SCREEN.height}; ${child.frames} frames stepped so far`);
 }
