@@ -556,3 +556,124 @@ Children: (2) `dismiss()` returns in `'returning'` (libraryKidDriver.ts:315), re
 `-no-wait` (181 ✓ 1 ✗); (4) the way back resumes its declared leg, red `red-kids-giveup-strolls.log`; (5)
 `endSeated`'s comment; (6) `residentLook(rng)` draws skin, hair, outfit, hair style, backpack, its colour in the
 hotel's old order (diffed), `KID_ROUTE_ARRIVE = ARRIVE_RADIUS` (exported). (1) jitter/crowd: re-run below.
+
+### Step 10 — labels scene 5 and tap spacing (e61b49f8, 56ba141a)
+
+`check:labels` scene 5, the Library: the owl's card (the visit lasts her four card lines, `lineSeconds` the one
+owner), `Say hello!`, the first shelf book's `Read it!`, then **story time with her sat on cushion 1** (30 s: call,
+flight, gathering, reading; `Get up` up under the owl's bubble). Coverage asks each visit what it was for — the card
+held, a book recommended, her seated, the reading reached — not only that a chip was up.
+- **Found, not planted** (the uncommitted scene as I found it, `fin/labels-1.log`, exit 1): the 10 s card visit
+  ended before the 11.3 s card script, so the second press landed mid-ceremony and recommended nothing while the
+  scene printed "the owl selected 2 of 2 visits": `FAIL E coverage: … the library owl never recommended a book`.
+- Green (`fin/labels-2.log`): exit 0, 15983 frames at 390x844, library 3413 frames; "the owl selected 2 of 2 visits
+  (her card handed over, a book recommended), a shelf book's chip up, story time on 1800 frames (1138 reading) with
+  her sat on her cushion"; 55 labels, no overlap.
+- Control, the library scene alone (scenes 1–4 skipped by hand, `fin/labels-libonly-control.log`): no A–D failure
+  in 3413 frames. Red, the same with `LABELS_MUTATE=overlap` (`-overlap.log`): `FAIL A overlap: 2327 occasion(s).
+  First: library-owl-says [actionFeedback over library-owl] at (175,292)–(348,342) and player [playerName over player]
+  at (173,337)–(217,371) overlap by 43x4 px, frame 90 (library)` — the scene has real collisions to resolve.
+- Red, the owl's bubble dropped from `Library.screenLabels` (`fin/red-labels-no-owl-bubble.log`): exit 1,
+  `check:labels: the library owl's labels are not all registered (1 of 1 missing)`.
+
+`check:tap-spacing` prints each space's own counts on stderr now. **The library: 15 zones (Talk, 12 Read, 2 Sit),
+1 portal band, 15 zone-band and 0 close zone-zone pairs**; totals 10 spaces, 146 zones, 27 bands, 246 zone-band,
+20 close pairs, 20 same-action warnings (none the library's); OK.
+
+### origin/main merged (d68e60b4) and #733's red CI run 39864355905
+
+`git -c rerere.enabled=false merge --no-ff origin/main` (6d70f695, #722's true merge of fccadf8b): main's tree equals
+fccadf8b's, already here — no conflict, the merge's diff against its first parent is empty; package.json's
+`scripts` equal on both sides (179 names, 0 differ, parsed).
+
+Run 39864355905 (head b438b695, `gh run view --log-failed`, `fin/ci-39864355905-failed.log`):
+- **Shard 1, check:flat-primitives**: `NEW FLAT PRIMITIVE src/entities/Player.ts:1828 [Y_DIFFERENCE] p.y -
+  this.hoverAt.y` and `src/world/library/reader/pagePictures.ts:286 high - low`. The first is gone at its root (the
+  engine's 0807890d: her altitude in her own column, `altitudeAt`); the second is genuinely flat (a pet model's own
+  local bounds on the reader's flat stage) and carries `flat-ok` since f19cd1fc. **Re-running shard 1 here found three
+  more** (`fin/runs/ci1/check:flat-primitives.log`, exit 1): `scripts/check-library.mts` `feet <= 0.02`
+  [Y_THRESHOLD] (KIDS) and `owl.feet.y - expected.y`, `owl.feet.y - perch.y` [Y_DIFFERENCE] (STORY) — room-local
+  heights and points in the reading room's own flat space; `flat-ok` with that reason (3b0bce86). After: exit 0, "no
+  new flat primitives", 106 flat-ok sites.
+- **Shard 3, check:jitter**: `worst own step : 2.743 m (Theo) bound 1 m … first: frame 2085, Theo … (-20.94, 12.72)
+  near Sunny Side`. Root: a child waiting at Sunny Side was shoved off the platform onto the track by children
+  walking to the same waiting spot, and `offTheLine` set him down 2.74 m in a frame; fixed by the engine's 0807890d
+  (two places to wait per platform, a waiting child holds her ground, the set-down a declared `setDown`), on main.
+  Here: exit 0, 34 children, worst own step 0.177 m (Luca), bound 1 m — deterministic (fixed dt, seeded park; the
+  same numbers on every run since round four).
+
+### The look (headless Chrome, `channel: 'chrome'`, throwaway profile; my dev server on 6621, killed by PID)
+
+`fin/look/look.mjs`, shots in `fin/look/shots/` at 1280x800 and 390x844: the card hand-over, the recommendation,
+a jump's "Shhh!", story time from cushion 1 (call, gathering, reading, dispersal). No page errors.
+- **Found: the owl's reading bubble was cut by the bookcases behind the story chair** — "A day in the pa…", "You
+  close your ey…" (`desktop-9-reading-later.png`). `SpeechBubble` is depth-tested; her bubble's quad, facing the
+  camera from over the chair, reaches back into the wall cases. **Fixed (a9145107):** her bubble's material draws
+  over the scenery (`depthTest` off; LABELS.md: a label floats over the world); other bubbles unchanged. STORY now
+  measures it — a 9 × 5 grid over the painted pill and tail on the camera's axes, rays from the game's camera against
+  the room's and the children's opaque drawn meshes: **6 of 45 points stand behind `library.books.2`** (e.g. room
+  (4.65, 2.79 up, −12.27), the books 0.06 m nearer the camera), drawn over the scenery → ✓. **Red** (the line removed
+  by hand, `fin/red-owl-bubble-depth-tested.log`): exit 1, 203 ✓ 1 ✗ `… it is drawn DEPTH-TESTED, so it is cut there`.
+  After: `desktop-fix-9-reading-later.png` reads "A day in the park with friends!" whole.
+- **For visual QA / Jim:** from cushion 1 the child on the cushion straight in front of the chair sits between the
+  camera and the owl, so while she reads mostly her glasses show over the child's head (`desktop-fix-8-reading-zoom.png`).
+  The seats are the plan's (Step 7/8); moving them moves the children's routes, so they are left for him to judge.
+- **Seen once, the engine's, not the library's:** `dismount: no clear, open spot within 4 m of (-594.00, 0.81,
+  -591.30)` — the desk front at her jump's height, right after a page navigation mid-jump. Most likely the restore
+  of a save written mid-air: `floorOf` refuses a 0.81 m lift with no velocity, so the put-down finds nothing and
+  hands back the exit (she drops 0.81 m). Harmless, but loud; for the engine's owner.
+
+### Checks at the part-4 head (seed 5, the honest park restamped; logs `fin/runs/<tag>/`; exit codes read)
+
+| check | exit | off the screen |
+|---|---|---|
+| tsc --noEmit · typecheck:test | 0 · 0 | |
+| check:library | 0 | **204 ✓**, "All clauses passed." (203 + the bubble clause) |
+| check:labels | 0 | 15983 frames, 55 labels, no overlap; library 3413 frames as above |
+| check:tap-spacing | 0 | library 15 zones, 1 band, 15 zone-band, 0 close pairs |
+| check:brevity | 0 | 356 pieces, 6 recorded exceptions; the Library 45 lines, 10 titles; secrets 7 names, 7 lines |
+| check:exits | 0 | "check:exits OK"; the library 795 exits, 155 off the lattice, 0 nowhere; both Sit chips "→ its own Get up chip" |
+| check:hotel · check:npc-presence | 0 · 0 | 34 children (7 hotel residents) · "npc presence OK" |
+| check:jitter | 0 | 34 children, 9000 frames, worst own step 0.177 m (Luca), bound 1 m |
+| check:served-deep-links (port 6611) | 0 | 22 OK, 0 FAILED; `/library?at=2.1,-8&facing=148&story=now` → "story time 'gathering' within 5 s" |
+| check:served-book-reader (port 6613) | 0 | 1054 ok, 0 FAIL, "check:book-reader passed" |
+| **every other step of `check`** (all 83 distinct, parsed off package.json; served ones on 6615/6617) | all 0 | `fin/runs/sweep/summary.txt` |
+| seed 5's procgen invariants + test/library + library-card | 0 | 5 files, 137 passed |
+| check:coplanar, seed 5 only, every space (by hand: `shippedSeeds()` → [5]) | 0 | 183 seams, none new; 3 BASELINE LOOSE, all garden seams of other seeds |
+| build | 0 | |
+
+### Decisions (part 4; also in the PR body)
+
+1. **Get up stands her on the cushion's top where she sat** (reversing decision 2 above) — the put-down rule's clause 2
+   accepts a solid's top; beside it she popped a stride sideways into the listening children.
+2. **The owl's solid covers her as drawn** (0.668 m over every desk pose), and the card flap goes forward over her desk
+   rather than out to her side — growing her solid to the sideways wing (0.89 m) would be an invisible blocker.
+3. **The owl's bubble draws over the room's furniture** (above).
+4. **Story time reads picture books only** (`storyTimeMayRead`): a chapter page is a paragraph, too long for a bubble.
+5. **A child held off her way by a player standing still** goes round her on lines the real world says are clear;
+   with no way round she waits looking at her, and on the way to the rug settles to listen within 5 s.
+6. **The primitive picture vocabulary of the books2 WIP** (`pictureProps.ts`, `createStoryCloud`, `'prop'`/`'stormCloud'`)
+   is unreachable in the game at this head and is replaced by the Artist's story-props kit in the part-5 PR — not
+   edited twice. **The den's walls, floor and lintel** (Step 11) are primitives hidden behind the shut shelf here; the
+   den kit replaces them in part 5. Both transitional.
+7. Kept from before: the lintel's top is the wall's (5.20 m); the big readers' shelf waits for its six books, loudly.
+
+### Questions for Jim (no new blocker or guard was added)
+
+- **The jet pack and the hidden den.** The library never lowers the fly ceiling, so with the jet pack she can fly over
+  the 5.2 m west wall into the den pocket; its floor and walls are hidden while the shelf is shut, so she stands on an
+  invisible floor among invisible walls until she flies out (not a trap). Part 5's Step 12 (the den shown whenever she
+  is in it; the shelf opening the moment she is found inside) closes it. Sooner would need a banded ceiling over the
+  den (an invisible blocker) or the guard brought forward.
+- **From cushion 1 the owl is half hidden behind a child while she reads** (above) — move the cushions?
+
+### For part 5 (`feat/library-v2b`, stacked on #733)
+
+- Merge `origin/feat/library-v2` at the part-4 head (with `-c rerere.enabled=false`). New since the tracks were cut:
+  476b3afd (Library.ts comments round `playerIsSeated`/`storyPhase` and `update()`), a9145107 (`LibraryOwl`'s
+  constructor: the bubble's `depthTest`; STORY's bubble clause), e61b49f8 (check-labels scene 5 — the plan's cat and
+  dragon visits join it), 56ba141a (tap-spacing's per-space lines: part 5's library line should read 18 zones and 2
+  bands), 3b0bce86 (flat-ok lines in check-library). **Run check:flat-primitives** after adding den/creature clauses:
+  check-library's own room-local heights need `flat-ok`, and nothing else here catches it.
+- Story time, the cushions, the owl and the children are part 4's and on main once #733 merges; Step 12's guard is
+  what answers the jet-pack question above.
