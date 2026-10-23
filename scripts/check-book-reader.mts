@@ -101,6 +101,14 @@
  *    primary action — what the chip and E run — must open that very book as
  *    a mode: the reader on its id, the park paused under it, the menu off the
  *    screen.
+ * 11. **Her library card in her backpack, at full strength** (#718; browser QA
+ *    round 1). In the same fresh profile, the card handed over through the
+ *    owl's own call (`giveLibraryCard`) and the backpack opened with its key
+ *    (`I`): the card's row is there, named, and drawn at full opacity — a
+ *    keepsake, never the shop's half-faded "not available" — while still
+ *    promising no press (`aria-disabled`). CONTROL: the same row given the
+ *    shop's `data-available='false'` by hand reads as faded, so the
+ *    instrument can see the fault it is looking for.
  *
  * It does **not** judge whether the pictures look right — a model can cover
  * the picture and still be the wrong model, badly framed. That is visual QA,
@@ -1658,6 +1666,49 @@ try {
     assert(shelfMode.dt === 0, 'off the shelf: the park is paused under it', `frameContext.dt = ${shelfMode.dt}`);
     assert(shelfMode.menu === 'none', 'off the shelf: the HUD menu is off the screen', `.hud-menu display is "${shelfMode.menu}"`);
     await shelfPage.screenshot({ path: `${SHOTS}/shelf-${shelf.book.id}-open.png` });
+
+    // 11. Her library card in her backpack, at full strength (#718; browser QA round 1).
+    said.push('\nher library card in her backpack:');
+    await shelfPage.keyboard.press('Escape');
+    await shelfPage
+      .waitForFunction(() => (window as unknown as { game: any }).game.bookReader.isOpen === false, undefined, { timeout: 10_000 })
+      .catch(() => {});
+    await shelfPage.evaluate(async () => {
+      const { giveLibraryCard } = await import('/src/world/library/libraryCard.ts');
+      giveLibraryCard();
+    });
+    await shelfPage.keyboard.press('KeyI');
+    const opened = await shelfPage
+      .waitForFunction(() => document.querySelector(".backpack[data-open='true']") !== null, undefined, { timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    // Past any opening transition: what is read is the drawn row, settled.
+    await shelfPage.waitForTimeout(600);
+    await nextFrames(shelfPage);
+    const cardRow = await shelfPage.evaluate(() => {
+      const rows = [...document.querySelectorAll('.backpack .shop-row')] as HTMLElement[];
+      const row = rows.find((candidate) => candidate.querySelector('.row-name')?.textContent === 'Library card');
+      if (!row) return null;
+      const drawn = Number(getComputedStyle(row).opacity);
+      // CONTROL: the shop's "not available" mark, by hand, must read as faded to this same instrument.
+      const had = row.dataset.available;
+      row.dataset.available = 'false';
+      const faded = Number(getComputedStyle(row).opacity);
+      if (had === undefined) delete row.dataset.available;
+      else row.dataset.available = had;
+      return { drawn, faded, ariaDisabled: row.getAttribute('aria-disabled'), keepsake: row.dataset.keepsake ?? null, rows: rows.length };
+    });
+    await shelfPage.screenshot({ path: `${SHOTS}/backpack-library-card.png` });
+    assert(
+      opened && !!cardRow && cardRow.drawn === 1 && cardRow.ariaDisabled === 'true',
+      'her library card in her backpack: there, drawn at full strength, and promising no press',
+      `backpack open: ${opened}; the card's row ${cardRow ? `drawn at opacity ${cardRow.drawn}, aria-disabled ${cardRow.ariaDisabled}, keepsake ${cardRow.keepsake} (${cardRow.rows} rows)` : 'NOT FOUND'}`,
+    );
+    assert(
+      !!cardRow && cardRow.faded < 1,
+      "CONTROL: the same row marked with the shop's 'not available' reads as faded to the same instrument",
+      `opacity ${cardRow?.faded ?? '?'} with data-available='false' by hand`,
+    );
   } finally {
     await shelfContext.close();
   }
