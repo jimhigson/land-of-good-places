@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { gameStore } from '../../src/state/index.ts';
+import { gameStore, SECRETS } from '../../src/state/index.ts';
 import { BOOK_PAGE_COUNTS, BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, storyTimeMayRead, type LibraryBook } from '../../src/world/library/books.ts';
 import { BIG_READER_SECRET_ID, markBookRead } from '../../src/world/library/readBooks.ts';
 
@@ -11,8 +11,9 @@ import { BIG_READER_SECRET_ID, markBookRead } from '../../src/world/library/read
  * Story time reads picture books only, through one predicate (case 2). And on
  * the shelf as it really is — no chapter book yet, because the game ships no
  * placeholder — reading every picture book must never hand over the Big
- * reader card (case 3): the vacuity guard, through the real wiring.
- * `big-reader.test.ts` drives the card with fixtures.
+ * reader card (case 3): the vacuity guard, through the real wiring; and the
+ * card is not even listed in the Cute-o-dex until there is a chapter book to
+ * earn it with (case 4). `big-reader.test.ts` drives the card with fixtures.
  */
 
 beforeEach(() => {
@@ -69,6 +70,13 @@ describe("the library's books", () => {
     const chapter: LibraryBook = { ...PICTURE_BOOKS[0]!, id: 'aChapterBook', kind: 'chapter' };
     expect(storyTimeMayRead(chapter), 'story time would read a chapter page aloud').toBe(false);
     for (const book of CHAPTER_BOOKS) expect(storyTimeMayRead(book), `${book.id}`).toBe(false);
+  });
+
+  /** Case 4 (browser QA round 1, 23 Oct 2026). */
+  it('lists Big reader in the Cute-o-dex only while there is a chapter book to earn it with', () => {
+    // A secret that can never be earned sits at "???" for good, and holds the dex under its own total.
+    const listed = SECRETS.some((secret) => secret.id === BIG_READER_SECRET_ID);
+    expect(listed, `Big reader listed: ${listed}, with ${CHAPTER_BOOKS.length} chapter book(s) on the shelf`).toBe(CHAPTER_BOOKS.length > 0);
   });
 
   /** Case 3. */
