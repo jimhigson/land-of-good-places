@@ -264,4 +264,19 @@ list above and carry on from the first unticked box. `.parks/` holds all 16 hone
   beyond the flowers' 1.3 m reach). **Pre-fix: exit 1, 10 problems** — all 10 neighbouring shelf pairs
   both ways (held at 7 or 9 of 9 points), nothing else. (First version probed only the exact stand:
   2 of 10 on the pre-fix code — a float tie; hence the 5 cm ring.)
-- next: check:labels, check:exits, every Selection-driving check, full `check`, `test:procgen`.
+- **Selection-driving checks with the fix, all exit 0** (`runs/r2-wide`, `r2-served-*`): check:labels
+  (15983 frames, library 3413, no overlap), check:exits ("OK"; the library 795 exits, 0 nowhere),
+  check:hotel ("OK"), check:reptile-house ("All clauses passed."), check:keyring-view ("every keyring
+  visible and separately tappable on every viewport"), check:served-book-reader (port 6751, "passed"),
+  check:served-walking (port 6753, tap-to-move OK at spawn / after the keychain view / a returning save).
+- **`pnpm run test:procgen`** on the fixed tree, 16 honest parks: exit 0, 349 s, 48 files, 2167 tests,
+  0 skipped. Full `pnpm run check` running (`runs/r2-full/check.log`, SERVED_CHECKS_PORT 6747).
+- **The preview walk instrument** (`look/preview-walk.mjs` + `look/identify-books.py`): ONE page, F3
+  readout, arrow keys (pairs learned by trying: north ArrowUp+ArrowRight, south ArrowDown+ArrowLeft,
+  west ArrowUp+ArrowLeft, east ArrowDown+ArrowRight), stops when the readout shows the stand exactly
+  (0.1 m), E, then Escape; the book that opened is named by its cover board's colour (a 5×8 patch at
+  x 102–110, y 420–490 on the left board, 1280×800), calibrated on this round's verified dev frames
+  (production and dev frames give identical patches: sirHopsalot 137,191,215 in all four checked).
+  **CONTROL on the old preview pr-734-83b72db** (pre-fix): 11 presses, **1 of 11 right** — every press
+  after the first opened the previous book (north) or the next one (south): QA's bug exactly, all 22
+  frames opened by eye and agreeing with the colours (`look/walk-83b72db/`).
