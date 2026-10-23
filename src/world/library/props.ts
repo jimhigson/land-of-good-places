@@ -1,6 +1,8 @@
+import type { Object3D } from 'three';
 import type { BoxCollider, CollisionWorld, WallCollider } from '../Collision';
 import { FOOT_HALF_WIDTH } from '../measuredTop';
 import { BUILDING_STEP_UP } from '../../core/constants';
+import { visiblePoints } from '../../art/style/measure';
 import { LIBRARY_ARRIVAL, LIBRARY_STAND_KEEP_OUT, libraryStandSpots, type LocalPoint } from './layout';
 
 /**
@@ -321,6 +323,46 @@ export class LibraryProps {
       }
     }
   }
+}
+
+/**
+ * **The box footprint that covers a model in every pose it is drawn in** — a
+ * creature that breathes, turns its head and flicks its tail (#719: the baby
+ * dragon, the library cat). Each of `poses` is applied in turn and every
+ * visible point of `root` (outlines included, in `root`'s own frame) is taken
+ * into one plan extent; that extent, turned to `facing` about `at`, is the
+ * footprint — so the solid covers what is drawn on every frame, not only at
+ * rest. Leave the model at rest yourself afterwards: this does not know what
+ * rest is.
+ *
+ * Measure before the model is hung under anything hidden: `visiblePoints`
+ * skips a mesh with a hidden ancestor, and a footprint of nothing is thrown.
+ */
+export function posedFootprint(root: Object3D, poses: readonly (() => void)[], at: LocalPoint, facing: number): BoxFootprint {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const pose of poses.length > 0 ? poses : [() => {}]) {
+    pose();
+    visiblePoints(root, (point) => {
+      if (point.x < minX) minX = point.x;
+      if (point.x > maxX) maxX = point.x;
+      if (point.z < minZ) minZ = point.z;
+      if (point.z > maxZ) maxZ = point.z;
+    });
+  }
+  if (!Number.isFinite(minX)) throw new Error(`posedFootprint: '${root.name}' draws nothing to measure (is it under something hidden?)`);
+  const yaw = (facing * Math.PI) / 180;
+  const cx = (minX + maxX) / 2;
+  const cz = (minZ + maxZ) / 2;
+  return {
+    x: at.x + cx * Math.cos(yaw) + cz * Math.sin(yaw),
+    z: at.z - cx * Math.sin(yaw) + cz * Math.cos(yaw),
+    facing,
+    halfLength: (maxX - minX) / 2,
+    halfDepth: (maxZ - minZ) / 2,
+  };
 }
 
 /** XZ distance from `p` to the segment `a`-`b`. */

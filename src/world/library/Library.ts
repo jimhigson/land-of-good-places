@@ -15,8 +15,11 @@ import type { Player, RideHolder } from '../../entities/Player';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { BUILDING_STEP_UP } from '../../core/constants';
+import { PALETTE } from '../../core/palette';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { NameLabel } from '../../ui/NameLabel';
+import { SpeechBubble } from '../../ui/SpeechBubble';
+import { lineSeconds } from '../../ui/speechTiming';
 import { ANCHORS_BY_ID } from '../anchors';
 import { createLibraryExterior, createLibrarySkirt, dressedReach, libraryCushionSize, type LibraryExterior } from '../../art/models/libraryAssets';
 import { KID_HIP_HEIGHT } from '../../art/models/kid';
@@ -27,6 +30,8 @@ import { furnishReadingRoom, StackFader, type FurnishedShelfBook } from './furni
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
 import { SecretLeaf } from './secretShelf';
+import { LibraryDen } from './LibraryDen';
+import { LibraryCat } from './LibraryCat';
 import {
   buildLibraryDenShell,
   buildReadingRoomShell,
@@ -44,7 +49,11 @@ import {
   libraryDenContains,
   LIBRARY_ARRIVAL,
   LIBRARY_BOUNDING_RADIUS,
+  LIBRARY_CAT_PILE,
+  LIBRARY_CAT_STAND,
   LIBRARY_DEN_DOORWAY_STAND,
+  LIBRARY_DRAGON_NEST,
+  LIBRARY_DRAGON_STAND,
   LIBRARY_EXTERIOR_PLAN,
   LIBRARY_FLOOR_Y,
   LIBRARY_HALF_X,
@@ -114,9 +123,15 @@ import type { OpenAreaPoint } from '../dismount';
  * the twelve picture books, then the big readers' shelf, whose slots wait as
  * gaps until their chapter books land), and her two story cushions offer a
  * seat. Still to come on their own tracks: the owl librarian behind the desk
- * at `LIBRARY_LIBRARIAN_SPOT` and story time (#718), and the den's baby dragon
- * and the sleeping cat (#719, plan Step 13). Every one of their stand spots is
- * a keep-out already.
+ * at `LIBRARY_LIBRARIAN_SPOT` and story time (#718). Every one of their stand
+ * spots is a keep-out already.
+ *
+ * ## The library cat (#719)
+ *
+ * By the desk, in its lamp's pool, a ginger cat sleeps on a pile of five fat
+ * books ({@link cat}, `LibraryCat.ts`). **Pet the cat!** from in front of her
+ * and she lifts her head, twitches her ears, smiles, sends up hearts and
+ * purrs.
  *
  * ## The secret den (#719)
  *
@@ -133,6 +148,15 @@ import type { OpenAreaPoint } from '../dismount';
  * Decision 24): never sealed in, never swept through. `layout.ts`'s
  * `libraryDenContains` is the one owner of "she is in the den"; the west wall
  * and the open leaf fade while she is there.
+ *
+ * In the den's far corner a mint baby dragon sits on a nest of books
+ * ({@link den}, `LibraryDen.ts`): it breathes, blinks, flicks its tail, turns
+ * its head to watch her and puffs a warm glow. Meeting it gives her the
+ * **Dragon friend** card; **Say hi!** makes it puff again.
+ *
+ * The cat's purr and the dragon's words share one bubble,
+ * {@link creatureBubble} — the answer to the chip just pressed, so it is
+ * `actionFeedback` for that chip's zone.
  */
 export interface LibraryDeps {
   /** The park's plot for the building. */
@@ -182,6 +206,16 @@ const SIT_STAND_RADIUS = 1.6;
  * wall, so a child who stops short of the exact spot is still offered it.
  */
 const PULL_STAND_RADIUS = 2;
+
+/** The library cat's zone (#719): its id, its pick (the curled cat is 0.6 m across) and its reach from her stand. */
+export const CAT_ZONE_ID = 'library-cat';
+const CAT_PICK_RADIUS = 0.8;
+const CAT_STAND_RADIUS = 1.6;
+
+/** The baby dragon's zone (#719): its id, its pick (the dragon on its nest is a metre and more across) and its reach from her stand. */
+export const DRAGON_ZONE_ID = 'library-dragon';
+const DRAGON_PICK_RADIUS = 1.0;
+const DRAGON_STAND_RADIUS = 2.2;
 
 /**
  * How far a story cushion's measured top may stand from `KID_HIP_HEIGHT` and
@@ -251,6 +285,30 @@ export class Library implements GameSystem {
   private readonly faders: readonly StackFader[];
   /** The one Pull zone, built once: the gold book's shut position never moves. */
   private readonly pullZone: InteractZone;
+  /**
+   * **The baby dragon on its nest of books** (#719, plan Step 13), in the den's
+   * far corner: two bodies in their own shapes, its life, its puff, the
+   * meeting and **Say hi!** — `LibraryDen.ts`. Built after the leaf and before
+   * the keep-out assertion, so both its solids are held clear of every stand
+   * spot.
+   */
+  readonly den: LibraryDen;
+  /** **The library cat asleep on her pile of books** by the desk (#719, plan Step 13) — `LibraryCat.ts`. */
+  readonly cat: LibraryCat;
+  /**
+   * **What the creatures say** — the dragon's hello and its answers, the
+   * cat's purr — one bubble, in the reading room's frame. `actionFeedback`
+   * whose item is the zone just answered (`library-dragon`, `library-cat`),
+   * so it outranks that zone's own chip while it is up.
+   */
+  readonly creatureBubble = new SpeechBubble({ id: 'library-creature-says', item: '', kind: 'actionFeedback' }, PALETTE.markerLemon);
+  /** How long the creature's line stays up (`lineSeconds`, the one rule every speaker holds a line by). */
+  private creatureLineFor = 0;
+  /** The last line the creature bubble was asked to say — kept after the bubble goes, for the checks. */
+  private lastCreatureSaid: string | null = null;
+  /** The two creature zones, built once: neither creature walks. */
+  private readonly catZone: InteractZone;
+  private readonly dragonZone: InteractZone;
   /** How many decorative books the shelves hold. */
   readonly bookCount: number;
   /**
@@ -334,6 +392,14 @@ export class Library implements GameSystem {
       [this.westMaterial],
     );
     this.pullZone = this.secretBookZone();
+    // The creatures (#719, plan Step 13): the dragon on its nest in the den,
+    // the cat on her pile by the desk — every solid of theirs through the
+    // props, before the keep-out assertion below.
+    this.den = new LibraryDen(this.denRoot, this.props, (line) => this.sayCreature(DRAGON_ZONE_ID, line, this.den.bubbleAt));
+    this.cat = new LibraryCat(this.roomRoot, this.props, (line) => this.sayCreature(CAT_ZONE_ID, line, this.cat.bubbleAt));
+    this.roomRoot.add(this.creatureBubble.sprite);
+    this.catZone = this.buildCatZone();
+    this.dragonZone = this.buildDragonZone();
     this.lighting = new LibraryLighting(furnished.pools);
     this.roomRoot.add(this.lighting.group);
     // Her two story cushions (#718): seats only if cut to her hip height.
@@ -453,9 +519,14 @@ export class Library implements GameSystem {
     return this.secretShelf.angle;
   }
 
-  /** The building's name over its door (the owl's bubbles arrive with #714 part 4). */
+  /** The building's name over its door, and the creatures' bubble (#719); the owl's arrive with #714 part 4. */
   get screenLabels(): readonly ManagedLabel[] {
-    return [this.nameLabel];
+    return [this.nameLabel, this.creatureBubble];
+  }
+
+  /** The last line the dragon or the cat was given to say (#719) — kept after the bubble goes, for the checks, which cannot read a sprite. */
+  get lastCreatureLine(): string | null {
+    return this.lastCreatureSaid;
   }
 
   attachPlayer(player: Player): void {
@@ -535,15 +606,18 @@ export class Library implements GameSystem {
   }
 
   /**
-   * Inside, one list (#718, #719): a "Read it!" zone on every readable book
-   * and the Pull zone on the secret shelf's gold book — unless she is riding
-   * (sitting, Step 7), when the room offers her nothing to walk to — and a Sit
-   * zone on each of her two story cushions, always on (the one she sits on
-   * offers 'Get up'). Outside, the building's entrance.
+   * Inside, one list (#718, #719): a "Read it!" zone on every readable book,
+   * the Pull zone on the secret shelf's gold book, the cat's Pet zone, and —
+   * only once the shelf has landed open — the baby dragon's Say hi zone;
+   * none of those while she is riding (sitting, Step 7), when the room offers
+   * her nothing to walk to. And a Sit zone on each of her two story cushions,
+   * always on (the one she sits on offers 'Get up'). Outside, the building's
+   * entrance.
    */
   interactZones(): InteractZone[] {
     if (!this.inside) return [this.exteriorEntranceZone()];
-    return [...(this.player?.riding ? [] : [...this.bookZones, this.pullZone]), ...this.sitZones()];
+    const creatures = this.secretShelf.open ? [this.catZone, this.dragonZone] : [this.catZone];
+    return [...(this.player?.riding ? [] : [...this.bookZones, this.pullZone, ...creatures]), ...this.sitZones()];
   }
 
   /**
@@ -601,6 +675,7 @@ export class Library implements GameSystem {
     if (this.seatedOn !== null) this.updateSeated(player, context);
     if (this.inside) {
       this.updateSecretLeaf(player, dt, context.elapsed);
+      this.updateCreatures(player, dt, context.elapsed);
       this.fadeStacks(player, dt);
     }
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
@@ -726,6 +801,48 @@ export class Library implements GameSystem {
     this.westWallFader.fadeTowards(inDen ? STACK_FADED_ALPHA : 1, dt);
   }
 
+  /**
+   * **The creatures, every frame inside** (#719), after the leaf and its guard
+   * (so a child just found in the den meets the dragon in the same frame the
+   * guard opens it): the cat always; the dragon while the den is drawn — no
+   * one sees it otherwise, and it only ever meets her in there with the shelf
+   * open. Then their one bubble's hold.
+   */
+  private updateCreatures(player: Player, dt: number, elapsed: number): void {
+    this.cat.update(dt, elapsed);
+    if (this.denRoot.visible) {
+      const her = { x: player.position.x - LIBRARY_ORIGIN_X, z: player.position.z - LIBRARY_ORIGIN_Z };
+      this.den.update(dt, elapsed, her, this.playerInDen(player), this.secretShelf.open);
+    }
+    if (this.creatureLineFor > 0) {
+      this.creatureLineFor -= dt;
+      if (this.creatureLineFor <= 0) this.creatureBubble.setText(null);
+      else this.creatureBubble.updateScreenSize(this.deps.camera);
+    }
+  }
+
+  /**
+   * **A creature says a line** — the Reptile House's `say` shape: the bubble
+   * names the zone it answers (its `item`), hangs over the speaker (`at`,
+   * room-local), and holds `lineSeconds` long, the one rule the hotel's and
+   * the owl's lines are held by.
+   */
+  private sayCreature(item: string, text: string, at: { readonly x: number; readonly y: number; readonly z: number }): void {
+    this.lastCreatureSaid = text;
+    this.creatureBubble.identity.item = item;
+    this.creatureBubble.anchorAt(at.x, at.y, at.z);
+    this.creatureBubble.setText(text);
+    this.creatureLineFor = lineSeconds(text);
+  }
+
+  /** Leaving the library: whatever a creature was saying stops, the cat settles, and the dragon will say hello on the next visit. */
+  private leaveCreatures(): void {
+    this.creatureBubble.setText(null);
+    this.creatureLineFor = 0;
+    this.den.leave();
+    this.cat.leave();
+  }
+
   /** Is she in the secret den? `libraryDenContains`, asked of her room-local feet. */
   private playerInDen(player: Player): boolean {
     return libraryDenContains(player.position.x - LIBRARY_ORIGIN_X, player.position.z - LIBRARY_ORIGIN_Z);
@@ -831,6 +948,7 @@ export class Library implements GameSystem {
     // Every visit starts shut (a restore into the den opens it again).
     this.secretShelf.closeInstantly();
     this.syncDen(null);
+    this.leaveCreatures();
   }
 
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */
@@ -843,6 +961,7 @@ export class Library implements GameSystem {
     // Every visit from the park starts with the leaf shut, so the trick is there to find again.
     this.secretShelf.closeInstantly();
     this.syncDen(null);
+    this.leaveCreatures();
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
     const mat = this.doormat;
     player.teleportTo(mat.x, this.surfaces.sample(mat.x, mat.z, terrainHeight(mat.x, mat.z) + 3), mat.z, facing);
@@ -908,6 +1027,55 @@ export class Library implements GameSystem {
       verb: 'Pull',
       highlight: highlightObject(leaf.pullBook),
       actions: () => (leaf.open || leaf.swinging ? [] : pressAction(LIBRARY_CHIPS.pull, () => this.pullSecretBook(), '📕')),
+    };
+  }
+
+  /**
+   * **The library cat's Pet zone** (#719): on the cat, a metre over the floor,
+   * picked within {@link CAT_PICK_RADIUS}; stood at `LIBRARY_CAT_STAND`, in
+   * front of her pile, within {@link CAT_STAND_RADIUS}; the rainbow round the
+   * pile and the cat together; one chip, **Pet the cat!** (`LibraryCat.pet`,
+   * which ignores a second press inside its guard — the chip stays, and the
+   * stroke she gave a moment ago is still going).
+   */
+  private buildCatZone(): InteractZone {
+    return {
+      id: CAT_ZONE_ID,
+      label: 'the library cat',
+      x: LIBRARY_ORIGIN_X + LIBRARY_CAT_PILE.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + LIBRARY_CAT_PILE.z,
+      pickRadius: CAT_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + LIBRARY_CAT_STAND.x,
+      standZ: LIBRARY_ORIGIN_Z + LIBRARY_CAT_STAND.z,
+      standRadius: CAT_STAND_RADIUS,
+      verb: 'Pet',
+      highlight: highlightObject(this.cat.group),
+      actions: () => pressAction(LIBRARY_CHIPS.pet, () => this.cat.pet(), '🐈'),
+    };
+  }
+
+  /**
+   * **The baby dragon's Say hi zone** (#719): on the dragon, a metre over the
+   * floor, picked within {@link DRAGON_PICK_RADIUS}; stood at
+   * `LIBRARY_DRAGON_STAND`, within {@link DRAGON_STAND_RADIUS}; the rainbow
+   * round the dragon itself. Offered only once the secret shelf has landed
+   * open ({@link interactZones}): shut, nobody knows it is there.
+   */
+  private buildDragonZone(): InteractZone {
+    return {
+      id: DRAGON_ZONE_ID,
+      label: 'the baby dragon',
+      x: LIBRARY_ORIGIN_X + LIBRARY_DRAGON_NEST.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + LIBRARY_DRAGON_NEST.z,
+      pickRadius: DRAGON_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + LIBRARY_DRAGON_STAND.x,
+      standZ: LIBRARY_ORIGIN_Z + LIBRARY_DRAGON_STAND.z,
+      standRadius: DRAGON_STAND_RADIUS,
+      verb: 'Say hi',
+      highlight: highlightObject(this.den.dragon.root),
+      actions: () => pressAction(LIBRARY_CHIPS.sayHi, () => this.den.sayHi(), '🐉'),
     };
   }
 
