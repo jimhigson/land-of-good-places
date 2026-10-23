@@ -68,9 +68,9 @@ export const sirHopsalot: LibraryBook = {
       picture: {
         cast: [
           { model: 'queuePosts', at: [-0.5, 0, -0.75] },
-          { model: 'mouse', mood: 'surprised', at: [0.45, 0, -0.05], turn: 65 },
-          { model: 'biscuit', mood: 'frown', at: [-0.5, 0, -0.05], turn: 65 },
-          { model: 'ripika', mood: 'surprised', at: [-1.45, 0, -0.05], turn: 65 },
+          { model: 'mouse', mood: 'surprised', at: [0.45, 0, -0.05], turn: 45 },
+          { model: 'biscuit', mood: 'frown', at: [-0.5, 0, -0.05], turn: 45 },
+          { model: 'ripika', mood: 'surprised', at: [-1.45, 0, -0.05], turn: 45 },
           { model: 'bunny', mood: 'happy', at: [1.55, 0.3, 0.45], turn: 35 },
         ],
         sky: 'skyDayBottom',
@@ -183,11 +183,11 @@ export const sirHopsalot: LibraryBook = {
       picture: {
         cast: [
           { model: 'queuePosts', at: [-0.3, 0, -0.9] },
-          { model: 'mouse', mood: 'happy', at: [1.7, 0, -0.1], turn: 70 },
-          { model: 'biscuit', mood: 'happy', at: [0.6, 0, -0.1], turn: 70 },
+          { model: 'mouse', mood: 'happy', at: [1.7, 0, -0.1], turn: 45 },
+          { model: 'biscuit', mood: 'happy', at: [0.6, 0, -0.1], turn: 45 },
           { model: 'ripika', mood: 'happy', pose: 'wave', at: [-0.5, 0, 0.1], turn: 25 },
           { model: 'rubberDuck', size: 1.1, at: [-0.08, 0.42, 0.35], turn: -15 },
-          { model: 'bunny', mood: 'happy', at: [-1.8, 0, -0.1], turn: 70 },
+          { model: 'bunny', mood: 'happy', at: [-1.8, 0, -0.1], turn: 45 },
         ],
         sky: 'skyDayBottom',
         ground: 'pathSand',

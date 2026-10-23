@@ -36,10 +36,10 @@ export const detectiveBiscuit: LibraryBook = {
       text: 'On Monday, RiPika’s spotty balloon came untied from a bench and vanished. On Tuesday, the strawberry keyring fell off your bag and vanished too. Somebody in the Land of Good Places was taking things!',
       picture: {
         cast: [
-          { model: 'statue', size: 0.35, at: [0.4, 0, -5.5] },
-          { model: 'parkBench', at: [-1.2, 0, -0.2], turn: 10 },
-          { model: 'ripika', mood: 'sad', at: [-0.15, 0, 0.25], turn: -40 },
-          { model: 'kid', mood: 'surprised', keyring: false, at: [1.35, 0, 0.1], turn: 125 },
+          { model: 'statue', size: 0.35, at: [-0.4, 0, -5.5] },
+          { model: 'kid', mood: 'surprised', keyring: false, at: [-1.35, 0, 0.1], turn: 60 },
+          { model: 'ripika', mood: 'sad', at: [0.25, 0, 0.25], turn: 40 },
+          { model: 'parkBench', at: [1.4, 0, -0.2], turn: -10 },
         ],
         sky: 'skyDayBottom',
         ground: 'pathSand',
