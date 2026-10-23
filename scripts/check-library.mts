@@ -469,7 +469,7 @@ console.log('CONTROL — the fill instrument:');
   const control = new CollisionWorld();
   const controlSurfaces = new WalkSurfaces();
   const shell = buildReadingRoomShell(new Group(), control, controlSurfaces);
-  buildLibraryDenShell(new Group(), new LibraryProps(control, OX, OZ), controlSurfaces, shell.fabric);
+  buildLibraryDenShell(new Group(), new LibraryProps(control, OX, OZ), control, controlSurfaces, shell);
   // A pen: four walls round an empty square, the one kind of sealed pocket
   // there can be now a rectangle is a filled box.
   for (const [ax, az, bx, bz] of [

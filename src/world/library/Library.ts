@@ -35,6 +35,7 @@ import { CAT_ZONE_ID, LibraryCat } from './LibraryCat';
 import {
   buildLibraryDenShell,
   buildReadingRoomShell,
+  type LibraryDenShell,
   libraryDenDoorway,
   libraryEntryBand,
   libraryExitBand,
@@ -249,17 +250,20 @@ export class Library implements GameSystem {
   /** The reading room's own four walls' colliders (the west wall's two spans either side of the den's doorway among them). */
   readonly roomWalls: readonly WallCollider[];
   /**
-   * **The secret den** (#719): its floor and three walls, in the reading
-   * room's frame — a child of {@link roomRoot}, so it shows and hides with the
+   * **The secret den** (#719): the Artist's den — its floor, three walls
+   * lined with book niches, stars, a moon and two lanterns — in the reading
+   * room's frame, a child of {@link roomRoot}, so it shows and hides with the
    * room and stays out of the park's drawn reach with it. Hidden while the
    * secret shelf is shut, so nothing of the den shows over the west wall.
    */
   readonly denRoot = new Group();
+  /** What `buildLibraryDenShell` built: the drawn den, its niche books and lanterns, and its bodies. */
+  readonly denShell: LibraryDenShell;
   /** The den's three walls' colliders: west, north, south (`den wall (…)` in {@link solids}). */
   readonly denWalls: readonly WallCollider[];
   /** The banded collider of the lintel over the den's doorway — solid from the secret shelf's top, less the jump grace, up to the wall's own top. */
   readonly lintel: WallCollider;
-  /** The west wall's two spans and the lintel, one group, so they fade together while she is in the den. */
+  /** The west wall's two spans and the den's lintel (the Artist's, hung here), one group, so they fade together while she is in the den. */
   readonly westWall: Group;
   /** Their one material, the walls' green cloned, so fading it fades no other wall. */
   readonly westMaterial: MeshToonMaterial;
@@ -364,14 +368,16 @@ export class Library implements GameSystem {
     this.roomWalls = shell.walls;
     this.westWall = shell.westWall;
     this.westMaterial = shell.westMaterial;
-    this.lintel = shell.lintel;
     this.props = new LibraryProps(collision, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z);
-    // The den (#719) before the furniture, its walls through the same props,
-    // so every one is held clear of every stand spot like any bookcase.
+    // The den (#719) before the furniture, drawn from the Artist's kit, its
+    // walls through the same props, so every one is held clear of every stand
+    // spot like any bookcase; its lintel hung in the west wall.
     this.denRoot.name = 'the-library-den';
     this.denRoot.visible = false;
     this.roomRoot.add(this.denRoot);
-    this.denWalls = buildLibraryDenShell(this.denRoot, this.props, surfaces, shell.fabric).walls;
+    this.denShell = buildLibraryDenShell(this.denRoot, this.props, collision, surfaces, shell);
+    this.denWalls = this.denShell.walls;
+    this.lintel = this.denShell.lintel;
     const furnished = furnishReadingRoom(this.roomRoot, this.props);
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;
