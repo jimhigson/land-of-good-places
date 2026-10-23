@@ -106,15 +106,37 @@ other on screen.
 `speech` is below `callToAction` on purpose: a wild bunny's "appears!" and its
 "Catch!" chip are one item, and the chip is what she needs to catch it.
 
+### Drawn over the scenery
+
+The manager decides whether a label is drawn. It does not decide what the
+scenery may do to a drawn one. A sprite label is a camera-facing quad at its
+speaker's head, and by default its material is **depth-tested**, like
+everything else in the world: furniture nearer the camera than the quad cuts
+it. Every label in the inventory keeps that default except the ones below.
+The choice has one owner, `SpeechBubble`'s `overScenery` option, which turns
+the depth test off on the bubble's own material. Nothing else writes a label's
+material.
+
+| bubble | why |
+|---|---|
+| The owl librarian's (`world/library/LibraryOwl.ts`) | She reads story time from the big armchair, which is backed onto the bookcase wall. Her bubble's quad, facing the camera from over the chair, reaches back into the wall cases, and depth-tested it lost its right side behind them ("A day in the pa…", headless Chrome, 23 Oct 2026). `check:library`'s STORY measures it from her cushion's camera: 6 of 45 points of the painted bubble stand behind `library.books.2`, so it fails if the bubble is depth-tested. |
+
+Turning it on for another speaker changes how that speaker's bubble looks: it
+would show through a wall or a tree that stands in front of her. So it is a
+visible change for Jim to judge, never a default.
+
 ## What `check:labels` proves
 
 `scripts/check-labels.mts`, in `check:shard-4`. The real `World`, a real
 `Player`, the real `Selection` and `ActionChips`, stepped in `Game.tick`'s
-order through four scenes at 390×844 (the tightest portrait the game
+order through five scenes at 390×844 (the tightest portrait the game
 supports): a walk from the gate into the busy middle of the garden and back,
 stopping at the six nearest attractions; every Reptile House zone, each chip
 pressed and its answer watched, twice; every castle shop counter on the ground
-floor with its shoppers; and the hotel reception, checking in.
+floor with its shoppers; the hotel reception, checking in; and the Library —
+the owl's card and her recommendation, a shelf book's chip, and story time with
+the child sat on her cushion, the owl's bubble over the rug and the cushion's
+"Get up" chip below it.
 
 Every frame:
 
@@ -133,7 +155,11 @@ Every frame:
 - **E** — coverage, printed to stderr on every run, and failing below a floor:
   frames with two or more labels up, labels held back by a neighbour, frames a
   call to action was put away for its own action's answer, chips pressed in
-  the Reptile House, shop counters reached, the receptionist reached.
+  the Reptile House, shop counters reached, the receptionist reached; and in
+  the Library, each visit's purpose (the card handed over, a book recommended,
+  a shelf book's chip up, her seated, the reading reached) and, while the owl
+  reads, the frames her bubble, the cushion's "Get up" chip, and both together
+  were drawn — none of them may be zero.
 
 The chips are DOM and Node lays nothing out, so their row size in this check is
 a **layout model** (`chipRowModel`: words at the TEXT RULE minimum, padding,

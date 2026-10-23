@@ -52,7 +52,26 @@ import {
  * and a `LabelManager` it is registered with grants the frame or not (see
  * `ui/LabelManager.ts`). `sprite.visible` is therefore the *outcome*: what was
  * actually drawn, which is what the checks read.
+ *
+ * **Depth-tested, unless its speaker asks for it drawn over the scenery**
+ * ({@link SpeechBubbleOptions.overScenery}; `docs/design/LABELS.md`, "Drawn
+ * over the scenery"). The bubble is a camera-facing quad at its speaker's
+ * head, and by default its material is depth-tested like the rest of the
+ * world, so scenery nearer the camera than the quad cuts it. This class is the
+ * one owner of that choice: a speaker passes the option, and nobody touches
+ * the material from outside.
  */
+
+/** How a bubble is drawn among the scenery — see the class doc. */
+export interface SpeechBubbleOptions {
+  /**
+   * Drawn whole over the scenery: the material skips the depth test, so
+   * nothing nearer the camera cuts a bubble the label manager has granted.
+   * For a speaker whose bubble's quad reaches back into the furniture round
+   * her — LABELS.md lists who, and why. Off by default.
+   */
+  readonly overScenery?: boolean;
+}
 
 /** Beyond this many metres from the camera a bubble is not worth drawing. */
 const BUBBLE_MAX_DISTANCE = 40;
@@ -105,12 +124,13 @@ export class SpeechBubble implements ManagedLabel {
    *  anchor, because the sprite's position is written by the clamp. */
   private readonly anchorLocal = new Vector3();
 
-  constructor(identity: LabelIdentity, accent: number = PALETTE.markerSky) {
+  constructor(identity: LabelIdentity, accent: number = PALETTE.markerSky, options: SpeechBubbleOptions = {}) {
     this.identity = identity;
     this.accent = accent;
     this.material = new SpriteMaterial({
       transparent: true,
       depthWrite: false,
+      depthTest: options.overScenery !== true,
       toneMapped: false,
       fog: false,
     });

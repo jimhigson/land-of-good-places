@@ -355,12 +355,12 @@ export class LibraryOwl {
     roomRoot.add(this.handle.root);
     this.capsule = props.wall('the owl', this.spot, this.spot, this.radius, this.handle.height);
 
-    this.bubble = new SpeechBubble({ id: 'library-owl-says', item: OWL_ZONE_ID, kind: 'actionFeedback' }, PALETTE.markerLilac);
-    // Drawn over the room's furniture, never cut by it (LABELS.md: a label floats over the world). She
-    // reads from the story chair, backed onto the bookcase wall, and a depth-tested bubble there lost its
-    // right side behind the cases — "A day in the pa…" (headless Chrome, 23 Oct; STORY measures it). The
-    // label manager still decides whether it is drawn; this only stops scenery eating a granted one.
-    this.bubble.sprite.material.depthTest = false;
+    // Drawn over the room's furniture, never cut by it (`overScenery`; LABELS.md, "Drawn over the
+    // scenery"): she reads from the story chair, backed onto the bookcase wall, and a depth-tested bubble
+    // there lost its right side behind the cases — "A day in the pa…" (headless Chrome, 23 Oct; STORY
+    // measures it). The label manager still decides whether it is drawn; this only stops scenery cutting
+    // a granted one.
+    this.bubble = new SpeechBubble({ id: 'library-owl-says', item: OWL_ZONE_ID, kind: 'actionFeedback' }, PALETTE.markerLilac, { overScenery: true });
     roomRoot.add(this.bubble.sprite);
     this.anchorBubble();
 
