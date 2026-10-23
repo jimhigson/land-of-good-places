@@ -217,7 +217,21 @@ restamp after EVERY src edit, mutation or not.
   `{ model: 'parkBench', at: [-1.3, 0, -0.9], turn: 15 }` removed from the model sheet's Detective
   page; its own dev server on port 6435) → exit 1, **1053 ok, 1 FAIL**: `FAIL every picture model
   is drawn on a page this check opens — never drawn: parkBench`. Reverted (`git checkout`).
-- **`assertDrawsSomething`, a model that draws nothing**: see the next entry (run after shard-1).
+- **`assertDrawsSomething`, a model that draws nothing** (at 51aec20c, park hash fb2690b5…, seed 5;
+  `SERVED_CHECKS_PORT=6437 pnpm run check:served-book-reader`; logs in the scratch folder).
+  Mutation, `reader/storyProps.ts` `createSpoon`: the kit's one `spoon` node hidden
+  (`handle.root.children[0]!.visible = false` — a visibility flag left off; the model sheet's roof
+  page draws one spoon among seven models) → **exit 1**, `check:book-reader FAILED — 14394
+  problem(s)`: `threw — page.waitForFunction: Timeout 120000ms exceeded.` (the sheet never finishes
+  painting) and `page error — Error: pagePictures: the 'spoon' model drew nothing — no visible
+  vertex under its root 'story.spoon'`, thrown from `renderPicture` ← `PageArtist.picture` ←
+  `BookReader.ensurePainted` (the reader retries the face each frame, hence the count).
+  **CONTROL, the assertion is not redundant**: the same hidden spoon with the
+  `assertDrawsSomething(root, actor)` call commented out → **exit 0**, `check:book-reader passed`
+  (1054 ok): `ok every picture model is drawn on a page this check opens — all 63`, `ok every
+  picture on the model sheet drew its models — 11 pictures, the thinnest covering 21.3% of its
+  pixels`. Item 9b's coverage cannot see one empty model on a crowded page; the assertion can.
+  Both reverted with `git checkout` → tree clean.
 
 **Found red, not planted — check:shard-1 at cece064a** (`check:flat-primitives`, `scripts/
 check-flat-primitives.mts`, baseline 310 expressions, 102 flat-ok sites): exit 1, **5 new flat
