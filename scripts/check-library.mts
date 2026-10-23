@@ -158,8 +158,9 @@ import {
   SHUSH_COOLDOWN_SECONDS,
   SHUSH_RUN_SECONDS,
   SHUSH_WING_X,
+  type LibraryOwl,
 } from '../src/world/library/LibraryOwl.ts';
-import { GATHER_TIMEOUT, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_ID, STORY_SIT_SECONDS, type StoryPhase } from '../src/world/library/storyTime.ts';
+import { GATHER_TIMEOUT, STORY_EVERY, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_ID, STORY_SIT_SECONDS, StoryTime, type StoryPhase } from '../src/world/library/storyTime.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
@@ -3385,12 +3386,16 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  *   first);
  * - **the card**: Story listener, which she did not have before (the control);
  * - **afterwards**: every child up and a metre off her cushion within 20 s of
- *   the last word, the owl home within 10 s, her middle unreachable again.
+ *   the last word, the owl home within 10 s, her middle unreachable again;
+ *   story time idle with one more story told and its clock at `STORY_EVERY`.
  *
  * Then **FLIGHT** (the path over the stacks, both ways, and the live owl on
- * it), **CLOCK** (with the clock let go, the call comes `STORY_FIRST_AFTER`
- * into a visit) and **ABORT** (she leaves by the door mid-story: nobody left
- * sitting, the owl home and solid, quiet, the clock restarted).
+ * it), **CLOCK** (with the clock let go, the next story is called
+ * `STORY_EVERY` after the last one's landing and reads a different book; a
+ * fresh visit's first, `STORY_FIRST_AFTER` in) and **ABORT** (she leaves by
+ * the door mid-story: nobody left sitting, the owl home and solid, quiet, the
+ * clock restarted). The story clock is held from the real child's first
+ * clause until CLOCK lets it go, so nothing else is timed by it.
  *
  * Proved red by `LIBRARY_CHECK_MUTATE=no-story` (the vacuity guard),
  * `block-cushion` (a 0.9 m disc on cushion 4: "every child seated" goes red
@@ -3401,6 +3406,8 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  */
 /** What the live owl's flights measured against `owlFlightPose` — STORY flies them, FLIGHT reports them. */
 const liveFlight = { frames: 0, worst: 0, flights: 0 };
+/** The book STORY's story read to its end — CLOCK's next story must be another. */
+let storyHeard: LibraryBook | null = null;
 
 /**
  * **How far the owl's bubble's tail is from over her head, now** — read off the
@@ -3569,6 +3576,9 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   /** Frames she read the story aloud from the chair, and how many of them the label manager drew her bubble on. */
   let readAloud = 0;
   let readDrawn = 0;
+  /** Story time as the owl landed home — idle again: its clock, and how many stories it has told. */
+  const toldBefore = library.storyTime.told;
+  let landed: { nextIn: number; told: number } | null = null;
   const offCushionAt = kids.map(() => Number.NaN);
   let homeAt = Number.NaN;
   let prevFeet = new Vector3().copy(owl.feet);
@@ -3678,6 +3688,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
       }
     });
     if (phaseAt.dispersing !== undefined && Number.isNaN(homeAt) && owl.atDesk && !owl.flying && !owl.solidWaiting) homeAt = t - phaseAt.dispersing;
+    if (phaseAt.dispersing !== undefined && phase === 'idle' && landed === null) landed = { nextIn: library.storyTime.nextIn, told: library.storyTime.told };
     if (phaseAt.dispersing !== undefined && phase === 'idle' && kids.every((kid, i) => !Number.isNaN(offCushionAt[i]!) || kid.driver.mode === 'stroll')) break;
   }
   if (blocked !== null) collision.removeCircle(blocked);
@@ -3772,6 +3783,12 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     `afterwards every child was up and a metre off her cushion within ${Math.max(...offCushionAt).toFixed(1)} s of the last word ` +
       `(${kids.map((kid, i) => `${kid.plan.name} ${offCushionAt[i]!.toFixed(1)} s`).join(', ')}; 20 allowed), and the owl home, solid, within ${homeAt.toFixed(1)} s (10 allowed)`,
   );
+  say(
+    landed !== null && landed.told === toldBefore + 1 && landed.nextIn === STORY_EVERY,
+    `the owl home, story time is idle again with one more story told (${toldBefore} → ${landed?.told ?? '?'}) and the next story's clock set to ${landed?.nextIn ?? '?'} s (STORY_EVERY ${STORY_EVERY} s)` +
+      `${landed === null ? ' — STORY TIME NEVER CAME BACK TO IDLE' : ''}`,
+  );
+  storyHeard = book;
   const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   say(!reachedAt(seen, OX + desk.x, OZ + desk.z) && owl.atDesk, `back behind her desk, her middle is unreachable again (the fill from the arrival: ${seen.reached.size} cells)`);
   note(
@@ -3875,14 +3892,90 @@ console.log("\nFLIGHT — the owl's path to the story chair and home: over every
   note(`FLIGHT: ${OWL_FLIGHT_SECONDS} s a flight, cruise ${owlCruiseHeight().toFixed(2)} m (the stacks' ${stack.toFixed(2)} + ${OWL_CRUISE_OVER_STACKS}); the owl's own desk solid and the chair she lands in left out of the sweep; ${owl.atDesk ? 'she is home' : 'SHE IS NOT HOME'}`);
 }
 
-console.log('\nCLOCK and ABORT — the call comes forty seconds into a visit, and leaving mid-story leaves nobody sitting:');
+console.log('\nCLOCK and ABORT — the next story comes STORY_EVERY after the last one, a different book; a fresh visit\'s forty seconds in; and leaving mid-story leaves nobody sitting:');
 {
   const owl = library.owl;
   const kids = library.children;
-  // A fresh visit: out by the door and back in at the desk's front, the clock let go.
+  // The next story. STORY left story time idle at its landing, its clock held at STORY_EVERY (asserted
+  // there): let it go where FLIGHT left her, at the desk's front, and wait for the call.
+  const told = library.storyTime.told;
+  const clockAt = library.storyTime.nextIn;
+  const recommended = owl.recommendedBookId;
+  library.storyTime.holdClock(false);
+  let calledNext = Number.NaN;
+  for (let t = 0; t < STORY_EVERY + 5; t += CHILD_DT) {
+    child.step();
+    if (library.storyPhase !== 'idle') {
+      calledNext = t + CHILD_DT;
+      break;
+    }
+  }
+  const nextBook = library.storyTime.book;
+  say(
+    clockAt === STORY_EVERY && Math.abs(calledNext - STORY_EVERY) <= 2 * CHILD_DT,
+    `with the clock let go after story ${told}'s landing, the next story is called ${calledNext.toFixed(2)} s on (STORY_EVERY ${STORY_EVERY} s; the clock stood at ${clockAt} s)`,
+  );
+  // The rule, restated: a different story every time — the recommended book if no story has read it yet,
+  // else the first of the owl's order story time may read that no story has; never the one just heard.
+  const mayRead = RECOMMENDATION_ORDER.filter(storyTimeMayRead);
+  const unheard = (id: string | null): boolean => id !== null && id !== storyHeard?.id && mayRead.some((book) => book.id === id);
+  const wantedId = unheard(recommended) ? recommended : (mayRead.find((book) => unheard(book.id))?.id ?? null);
+  say(
+    !!storyHeard && told === 1 && !!nextBook && nextBook.id === wantedId && nextBook.id !== storyHeard.id,
+    `and it reads a different book: '${nextBook?.id ?? 'none'}' after STORY's '${storyHeard?.id ?? 'none'}' (story ${told + 1} of this session; ` +
+      `'${wantedId ?? 'none'}' wanted — the owl recommending '${recommended ?? 'nothing'}', which ${recommended !== null && recommended === storyHeard?.id ? 'STORY has read' : 'no story has read'})`,
+  );
+  // And over whole rounds, which no child stays long enough for here (twelve stories is half an hour):
+  // the real StoryTime, driven through its four phases by a stand-in owl that is always free, perched
+  // and quiet, with no children — four frames a story. Three owls: one recommending STORY's book all
+  // along, one recommending nothing, and one that starts recommending the last book of her order just
+  // before the round's last story (so the round ends on it, and the next must not begin with it).
+  const lastOfOrder = mayRead[mayRead.length - 1]?.id ?? null;
+  const rounds = [
+    { what: `recommending '${storyHeard?.id ?? 'none'}' all along`, recommends: (_story: number): string | null => storyHeard?.id ?? null },
+    { what: 'recommending nothing', recommends: (_story: number): string | null => null },
+    { what: `recommending '${lastOfOrder ?? 'none'}' from story ${mayRead.length}`, recommends: (story: number): string | null => (story >= mayRead.length ? lastOfOrder : null) },
+  ].map(({ what, recommends }) => {
+    let story = 1;
+    const standIn = {
+      atDesk: true,
+      midScript: false,
+      perched: true,
+      speaking: false,
+      flying: false,
+      get recommendedBookId(): string | null {
+        return recommends(story);
+      },
+      tell: (): void => {},
+      flyTo: (): void => {},
+      sparkleOver: (): void => {},
+    };
+    const time = new StoryTime(standIn as unknown as LibraryOwl, () => [], () => ({ seated: false, feet: { x: 0, y: 0, z: 0 } }));
+    const read: string[] = [];
+    for (; story <= mayRead.length + 2; story += 1) {
+      time.requestStoryTime();
+      time.update(CHILD_DT, true);
+      read.push(time.book?.id ?? 'none');
+      for (let frame = 0; frame < 3; frame += 1) time.update(CHILD_DT, true);
+    }
+    const firstRound = read.slice(0, mayRead.length);
+    const repeats = read.flatMap((id, i) => (i > 0 && id === read[i - 1] ? [`${i}→${i + 1} '${id}'`] : []));
+    const ok =
+      new Set(firstRound).size === mayRead.length &&
+      mayRead.every((book) => firstRound.includes(book.id)) &&
+      repeats.length === 0 &&
+      (recommends(1) === null || read[0] === recommends(1)) &&
+      time.told === read.length;
+    return { what, read, repeats, ok };
+  });
+  say(
+    rounds.every((round) => round.ok),
+    `a different story every time, over whole rounds (the real StoryTime, ${mayRead.length + 2} stories each): the first ${mayRead.length} all different and every book story time may read among them, ` +
+      `the recommended one first, never the same book twice running — ${rounds.map((round) => `${round.what}: ${round.read.join(' → ')}${round.repeats.length ? ` (TWICE RUNNING: ${round.repeats.join(', ')})` : ''}`).join('; ')}`,
+  );
+  // A fresh visit: out by the door (which leaves this story mid-gathering) and back in at the desk's front, the clock let go.
   if (!quietly(() => library.requestEnterDoor())) throw new Error('CLOCK: /library-door refused her');
   child.run(0.2);
-  library.storyTime.holdClock(false);
   child.enter({ x: LIBRARY_DESK_STAND.x, z: LIBRARY_DESK_STAND.z, facing: LIBRARY_DESK_STAND.facing });
   const startsAt = library.storyTime.nextIn;
   let called = Number.NaN;
@@ -3919,7 +4012,10 @@ console.log('\nCLOCK and ABORT — the call comes forty seconds into a visit, an
   library.storyTime.holdClock(true);
   child.enter({ x: LIBRARY_DESK_STAND.x, z: LIBRARY_DESK_STAND.z, facing: LIBRARY_DESK_STAND.facing });
   child.run(0.5);
-  note(`CLOCK: called ${called.toFixed(2)} s into the visit; ABORT left at '${phaseLeft}'; ${child.frames} frames stepped so far`);
+  note(
+    `CLOCK: the next story called ${calledNext.toFixed(2)} s after story ${told}'s landing, reading '${nextBook?.id ?? 'none'}'; a fresh visit's called ${called.toFixed(2)} s in; ` +
+      `ABORT left at '${phaseLeft}'; ${child.frames} frames stepped so far`,
+  );
 }
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──

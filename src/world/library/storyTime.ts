@@ -47,9 +47,16 @@ import { LIBRARY_FLOOR_Y } from './layout';
  * ## Which book
  *
  * Picture books only — `storyTimeMayRead` (`books.ts`, the one owner of that
- * rule: a chapter page is a paragraph, too long for a bubble). The book the
- * owl is recommending, if it may be read; otherwise the next in her one
- * seeded order (`RECOMMENDATION_ORDER`), story by story.
+ * rule: a chapter page is a paragraph, too long for a bubble). **A different
+ * story every time:** the book the owl is recommending, if it may be read and
+ * no story has read it yet this round; otherwise the first of her one seeded
+ * order (`RECOMMENDATION_ORDER`) that may be read and has not been yet this
+ * round. A round ends when every such book has been read to its end once;
+ * the next begins again at the top of her order, never with the book the
+ * last story read. (The plan's `recommended ?? ORDER[storiesTold % 12]` read
+ * the glowing book at every story time for as long as it glowed, and after a
+ * recommended story could pick the very book just read — measured in
+ * `check:library`'s CLOCK: "Fireflies at Night" twice running.)
  *
  * Constructed by `Library`, stepped first in its `update` (before the owl, so
  * a story begun this frame flies this frame), which `World` runs before the
@@ -97,6 +104,10 @@ export class StoryTime {
   private clock = STORY_FIRST_AFTER;
   private gatherFor = 0;
   private storiesTold = 0;
+  /** The books read to their end this round — none is read again until every one story time may read has been. */
+  private readonly heard = new Set<string>();
+  /** The book the last story read to its end: never the next story's, a new round or not. */
+  private lastHeardId: string | null = null;
   private bookValue: LibraryBook | null = null;
   private wanted = false;
   /** She has sat on a story cushion since before the reading began, every frame of it. */
@@ -174,6 +185,10 @@ export class StoryTime {
         if (!this.owl.flying && this.owl.atDesk) {
           this.phaseValue = 'idle';
           this.storiesTold += 1;
+          if (this.bookValue) {
+            this.heard.add(this.bookValue.id);
+            this.lastHeardId = this.bookValue.id;
+          }
           this.bookValue = null;
           this.clock = STORY_EVERY;
         }
@@ -204,13 +219,23 @@ export class StoryTime {
     this.bookValue = null;
   }
 
-  /** The book this story reads: the recommended one if story time may read it, else the next of the owl's order that it may. */
+  /**
+   * The book this story reads (the class doc's "Which book"): the recommended
+   * one if story time may read it and has not this round, else the first of
+   * the owl's order that it may and has not. Every one heard, a new round —
+   * holding back the one just heard, unless it is the only one.
+   */
   private pickBook(): LibraryBook | null {
+    const readable = RECOMMENDATION_ORDER.filter(storyTimeMayRead);
+    const unheard = (book: LibraryBook): boolean => !this.heard.has(book.id);
+    if (!readable.some(unheard)) {
+      this.heard.clear();
+      if (this.lastHeardId !== null && readable.length > 1) this.heard.add(this.lastHeardId);
+    }
     const recommendedId = this.owl.recommendedBookId;
     const recommended = recommendedId === null ? undefined : bookById(recommendedId);
-    if (recommended && storyTimeMayRead(recommended)) return recommended;
-    const readable = RECOMMENDATION_ORDER.filter(storyTimeMayRead);
-    return readable[this.storiesTold % Math.max(1, readable.length)] ?? null;
+    if (recommended && storyTimeMayRead(recommended) && unheard(recommended)) return recommended;
+    return readable.find(unheard) ?? null;
   }
 
   /** The call, the flight, the summons. */
