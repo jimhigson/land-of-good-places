@@ -102,8 +102,8 @@
  *    a mode: the reader on its id, the park paused under it, the menu off the
  *    screen.
  * 11. **Her library card in her backpack, at full strength** (#718; browser QA
- *    round 1). In the same fresh profile, the card handed over through the
- *    owl's own call (`giveLibraryCard`) and the backpack opened with its key
+ *    round 1). In the same fresh profile, the card handed over by the owl's
+ *    own press (`LibraryOwl.talk`, what her chip runs) and the backpack opened with its key
  *    (`I`): the card's row is there, named, and drawn at full opacity — a
  *    keepsake, never the shop's half-faded "not available" — while still
  *    promising no press (`aria-disabled`). CONTROL: the same row given the
@@ -1673,9 +1673,11 @@ try {
     await shelfPage
       .waitForFunction(() => (window as unknown as { game: any }).game.bookReader.isOpen === false, undefined, { timeout: 10_000 })
       .catch(() => {});
-    await shelfPage.evaluate(async () => {
-      const { giveLibraryCard } = await import('/src/world/library/libraryCard.ts');
-      giveLibraryCard();
+    // The owl's own press — what her "Get a library card!" chip runs — wherever she stands.
+    const carded = await shelfPage.evaluate(() => {
+      const g = (window as unknown as { game: any }).game;
+      g.world.library.owl.talk(g.player);
+      return (g.world.library.owl.lastSaid as string | null) ?? null;
     });
     await shelfPage.keyboard.press('KeyI');
     const opened = await shelfPage
@@ -1702,7 +1704,7 @@ try {
     assert(
       opened && !!cardRow && cardRow.drawn === 1 && cardRow.ariaDisabled === 'true',
       'her library card in her backpack: there, drawn at full strength, and promising no press',
-      `backpack open: ${opened}; the card's row ${cardRow ? `drawn at opacity ${cardRow.drawn}, aria-disabled ${cardRow.ariaDisabled}, keepsake ${cardRow.keepsake} (${cardRow.rows} rows)` : 'NOT FOUND'}`,
+      `the owl's press said "${carded ?? ''}"; backpack open: ${opened}; the card's row ${cardRow ? `drawn at opacity ${cardRow.drawn}, aria-disabled ${cardRow.ariaDisabled}, keepsake ${cardRow.keepsake} (${cardRow.rows} rows)` : 'NOT FOUND'}`,
     );
     assert(
       !!cardRow && cardRow.faded < 1,
