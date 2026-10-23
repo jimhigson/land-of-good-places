@@ -806,3 +806,43 @@ asks for `overScenery` — add it to LABELS.md's table if it does. Re-run check:
   — HTTP 200 for `/library?at=2.1,-8&facing=148&story=now`; its `version.txt` is 996d9e34, the PR's merge ref
   (66549d88 into main), as every pull_request build is.
 - Everything after 66549d88 on this branch is handoff only.
+
+## Browser QA round 1 — the fixes (23 Oct 2026, Opus 5.5)
+
+QA's report: head 66549d88, not approved, 2 major + 6 minor; screenshots and scripts in
+`.claude/library-build-scratch/l4qa-1/`. Scratch for this round: `.claude/library-build-scratch/qa1/`.
+
+### Each defect judged (screenshots opened, code read)
+
+1. **Major — she stands inside the perched owl: REAL.** `LibraryOwl` had one solid, the desk
+   capsule; perched she relied on the chair's own solids, and the seat is a top (0.36 m) she can
+   jump onto. Measured: the chair's seat box x 3.57..4.43, z −11.354..−10.610; the perched owl
+   (rest pose) x 3.366..4.634, y 0.348..1.979, z −11.650..−10.566; QA landed on the seat at
+   (3.8, −10.7), 0.53 m from the perch (4.00, −11.19). Her shush wing at the perch reaches
+   0.740 m forward (toward the rug), past the chair's front face.
+2. **Major — the owl lands inside her at the desk: REAL.** `putSolidBack` deliberately left her
+   drawn but not solid where the child stood. The same class covers take-off and the whole
+   flight (her flight had no solid at all): a child at (6, 4.0) — 1.3 m north of her spot — is
+   in her climb's way (at t 0.1 her feet are 1.9 m up, 0.46 m north).
+3. Minor — the card greyed in the backpack: REAL (the card is the only backpack item with no
+   action; `InventoryDrawer` marks such a row `data-available=false`, drawn at opacity 0.5).
+4. Minor — Big reader unearnable at this head: REAL (`SECRETS` lists it, `CHAPTER_BOOKS` is []).
+5. Minor — the card sparkles under her bubble: REAL (spawned 0.3 m over her head, the bubble's
+   tail is 0.42 m over it and the bubble draws over the scenery).
+6. Minor — the outbound flight hidden by her call bubble: REAL (the call is said on the wing).
+7. Minor — the owl hidden from cushion 1: judged below.
+8. Minor — the glow hard to spot from the desk: judged below.
+
+### Design decisions (Jim away; each also goes in the PR body)
+
+- **The owl is solid wherever she is drawn, and never moves into anybody.** At rest she is a
+  capsule — her desk's (as before) or **the story chair's** (new, 'the owl on the story chair',
+  radius her drawn reach over every pose she holds perched, the shush wing included). **On the
+  wing she is one moving body** (`CollisionWorld.addMovingBox`, a disc: rounding = her drawn
+  reach at the widest beat of her wings), moved with her every frame, base at her feet and top
+  at her head — the train's kind of solid. **Like the train, she waits for anybody in her way**:
+  before each step of a flight she asks whether her body there would touch the child, her pets
+  or the library's children (cylinders: their radius and height); if it would, she holds where
+  she is — on the ground at take-off, hovering in the air on the way, over the child's head on
+  the way down — and goes on the moment the way is clear. No new blocker: these are her own
+  solids, where she is drawn.
