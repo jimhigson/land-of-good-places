@@ -86,7 +86,7 @@ import { CARRIAGE_BODY_HALF_WIDTH, CAR_FLOOR_Y } from '../src/world/train/trainD
 import { CAR_GAP, CARRIAGE_LENGTH, LOCO_LENGTH } from '../src/world/train/trainModel.ts';
 import { TRAIN_STOPS_SHORT } from '../src/world/train/ParkTrain.ts';
 import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe, type HopProbe } from './playerSim.mts';
-import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type SolidView } from '../src/world/Collision.ts';
+import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type BoxCollider, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, NPC_RADIUS, PARADE_MEMBER_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
@@ -437,7 +437,17 @@ collision.forEachSolid((solid) => {
   if (solid.moving) movingBodies += 1;
   else solids.push(solid);
 });
-note(`${movingBodies} moving bodies (the train's engine and carriages) are not in the census (4, and 2 and 6 over what it reached), clauses 1, 5, 9 and 10, or the jet pack's report — they move; clause 13 asks them, standing and moving`);
+note(`${movingBodies} moving bodies (the train's engine and carriages) are not in the census (4, and 2 and 6 over what it reached), clauses 1, 5, 9 and 10, or the jet pack's report — they move; clause 13 asks them, standing and moving. Until clause 8 first runs the train they stand out of the park, so nothing before it meets them`);
+// **The park without the train in it**, for every clause before 8: its bodies
+// stood far out of the park until clause 8's first frame, when the train places
+// them again itself (`ParkTrain.moveBodies`, every frame). Left where the park
+// was built with it, a run-and-jump that came down between a standing carriage
+// and the fence at a bend read as a wedged landing (seeds 2 and 4) — the train's
+// own question (clause 13's drops into the slots beside it), asked of wherever
+// it happened to be standing when the park was built.
+for (const body of (world.train as unknown as { bodies: { boxes: BoxCollider[] }[] }).bodies) {
+  for (const box of body.boxes) collision.moveBox(box, box.cx + 1e5, box.cz + 1e5, Math.atan2(box.sin, box.cos), box.topHeight, box.baseHeight);
+}
 
 // ---------------------------------------------------------------------------
 // 1. Real tops
