@@ -71,6 +71,15 @@ export const SECRETS: readonly Secret[] = [
     icon: '📚',
     done: 'You read every chapter book!',
   },
+  // The Library's hidden den (#719): found behind the secret shelf, and its
+  // baby dragon met — awarded by `world/library/LibraryDen.ts` the first time
+  // she stands near its nest, and again (idempotently) by its "Say hi!" chip.
+  {
+    id: 'secret.babyDragon',
+    name: 'Dragon friend',
+    icon: '🐉',
+    done: 'You found the baby dragon in the den!',
+  },
 ];
 
 const BY_ID = new Map<string, Secret>(SECRETS.map((secret) => [secret.id, secret]));
