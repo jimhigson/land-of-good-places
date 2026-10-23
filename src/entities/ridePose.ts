@@ -219,7 +219,11 @@ export const CLIMB_WAVE_HEAD_PITCH =
 export interface RidePoseTarget {
   /** Turned as a whole to lie her down; see {@link applyRidePose}'s recline. */
   readonly root: { rotation: { x: number } };
-  readonly body: { rotation: { x: number; z: number } };
+  /**
+   * `position.y` and `scale` are the listening pose's: it pins the body to
+   * rest so her hips stay on the cushion — see {@link applyListeningPose}.
+   */
+  readonly body: { rotation: { x: number; z: number }; position: { y: number }; scale: { set(x: number, y: number, z: number): unknown } };
   /** `z` is the sleeping pose's own lolled head — see {@link applySleepingRidePose}. */
   readonly head: { rotation: { x: number; z: number } };
   readonly leftArm: { rotation: { x: number; z: number } };
@@ -634,6 +638,18 @@ export function applyListeningPose(model: RidePoseTarget, elapsed: number): void
   // Flushed for the reason every posture in this file flushes it: whatever
   // wrote a walk cycle a moment ago left the gait's roll in here.
   model.body.rotation.z = 0;
+
+  // **Her hips stay on the cushion.** Her legs hang from her body, so anything
+  // that moves the body moves the hip pivot off the seat and the soles off the
+  // floor — and `Player.animate` writes the idle breath (±0.014 m on
+  // `body.position.y`) and the stride's squash (`body.scale`) every frame,
+  // riding or not. Measured on the real player by check:library's SIT before
+  // these two lines: her hip 14.0 mm off the cushion's top and her soles
+  // 17.5 mm off the floor, against tolerances of 3 and 15. So the posture pins
+  // the body to rest — what `NpcCharacter.animate` already does before folding
+  // any posture — and her life is the sway below.
+  model.body.position.y = 0;
+  model.body.scale.set(1, 1, 1);
 
   // Hands in her lap: forward, and tucked in towards each other.
   model.leftArm.rotation.x = LISTEN_ARM_X + Math.sin(elapsed * 1.3) * 0.04;

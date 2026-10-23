@@ -2121,8 +2121,13 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
       world.hotel.hotelRoot,
       world.reptileHouse.hallRoot,
       world.reptileHouse.forecourtRoot,
-      // The Library's reading room (#716), at (-600, -600).
+      // The Library's reading room (#716), at (-600, -600) — and its three
+      // children (#718), whose models hang under a root of their own at an
+      // identity transform (an `NpcCharacter` writes world positions onto its
+      // model's root), standing in that room. Without this line every seed
+      // fails: three children 850 m from the park's middle, the 2 Oct trap.
       world.library.roomRoot,
+      world.library.kidsRoot,
     ];
     const instance = new reachThree.Matrix4();
     const toWorld = new reachThree.Matrix4();

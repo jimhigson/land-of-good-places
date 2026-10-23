@@ -346,14 +346,20 @@ type DeepLink =
    * hotel's QA problem again. `at` is in the room's own metres
    * (`world/library/layout.ts`: +X east, +Z towards the camera), so
    * `?at=-15.8,-4&facing=270` is in front of the secret shelf.
+   * `&story=now` (#718) starts story time on her first frame inside, rather
+   * than forty seconds in (`storyTime.ts`'s `STORY_FIRST_AFTER`):
+   * `/library?at=2.1,-8&facing=150&story=now` stands her by her story cushion
+   * as the owl calls everyone to the rug.
    */
   | {
       readonly kind: 'library';
       readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
+      readonly story?: true;
     }
   /**
-   * `/book?id=<bookId>` — **one of the library's twelve picture books, open in
-   * the reader** (#717), on the paused park, from the first frame.
+   * `/book?id=<bookId>` — **one of the library's books, open in the reader**
+   * (#717: a picture book or a chapter book), on the paused park, from the
+   * first frame.
    *
    * It exists so a book can be judged standalone before the library's shelves
    * do: reaching one otherwise means a walk to the library, a shelf and a tap,
@@ -398,7 +404,10 @@ function parseLibraryLink(search: string): DeepLink {
   const raw = params.get('at');
   const at = parseSpawnPoint(raw);
   const facingRaw = params.get('facing');
-  const link: { kind: 'library'; at?: { x: number; z: number; facing?: number } } = { kind: 'library' };
+  const link: { kind: 'library'; at?: { x: number; z: number; facing?: number }; story?: true } = { kind: 'library' };
+  const story = params.get('story');
+  if (story === 'now') link.story = true;
+  else if (story !== null) console.warn(`Land of Good Places: /library story=${story} — only story=now is understood (story time from her first frame inside).`);
   if (at) {
     const spot: { x: number; z: number; facing?: number } = { x: at.x, z: at.z };
     const facing = facingRaw === null ? Number.NaN : Number(facingRaw);
@@ -420,7 +429,7 @@ function parseBookLink(search: string): DeepLink {
   if (raw !== null && bookById(raw)) return { kind: 'book', bookId: raw };
   console.warn(
     `Land of Good Places: /book ${raw === null ? 'has no ?id=' : `has no book called "${raw}"`} — ` +
-      `opening "${first}" instead. The twelve are: ${BOOKS.map((book) => book.id).join(', ')}.`,
+      `opening "${first}" instead. The ${BOOKS.length} books are: ${BOOKS.map((book) => book.id).join(', ')}.`,
   );
   return { kind: 'book', bookId: first };
 }
@@ -1375,7 +1384,7 @@ async function finishLaunch(
       case 'library':
         // Fails loud, like `/reptile-house`: a reading room that will not open
         // is the thing this link exists to check.
-        if (!game.enterLibrarySpawn(deepLink.at)) {
+        if (!game.enterLibrarySpawn(deepLink.at, deepLink.story === true)) {
           console.error(
             'Land of Good Places: /library did not enter the Library — see Library.requestEnter ' +
               '(she may be riding, or a change of space is already running).',

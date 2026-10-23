@@ -180,7 +180,7 @@ interface SolidHeights {
   /**
    * **A body that moves** ({@link CollisionWorld.addMovingBox}) — the train's
    * engine and carriages, moved every frame by the train itself
-   * ({@link CollisionWorld.moveBox}). Every query a mover asks reads it where
+   * ({@link CollisionWorld.moveBox}), and the library's owl on the wing. Every query a mover asks reads it where
    * it is now (it is filed in the grid's wide bucket, never by cell); nothing
    * that plans the ground counts it — it is banded, so the route lattice and
    * the planner's ground queries pass it by, as they must a thing that will
@@ -486,6 +486,17 @@ export interface BoxCollider extends SolidHeights {
   cos: number;
   sin: number;
   rounding: number;
+}
+
+/**
+ * **A moving body's plan, as {@link CollisionWorld.moveBox} may reshape it**:
+ * the core's half-extents along its own X and Z and the rounding round it — a
+ * disc is no core and its radius, a capsule a core with one zero half-extent.
+ */
+export interface MovingShape {
+  readonly halfX: number;
+  readonly halfZ: number;
+  readonly rounding: number;
 }
 
 /**
@@ -2122,7 +2133,8 @@ export class CollisionWorld {
   /**
    * **A body that moves** — a filled box like {@link addBox}'s, with an
    * absolute top and an absolute base, that its owner moves every frame with
-   * {@link moveBox}: the train's engine and carriages. See
+   * {@link moveBox}: the train's engine and carriages, and the library's owl
+   * in flight. See
    * {@link SolidHeights.moving} for what that changes and what it does not.
    *
    * `base` must be a height in the world below which nothing stands — the
@@ -2130,9 +2142,13 @@ export class CollisionWorld {
    * lattice and the planner's ground queries pass it by, while everything a
    * mover asks (being pushed out, standing on its top, bumping its side) meets
    * it exactly as it meets the scenery.
+   *
+   * `rounding`, as {@link addBox} takes it: a body drawn round is a box with
+   * no core and its radius for a rounding — a disc, the library's owl on the
+   * wing (#718).
    */
-  addMovingBox(cx: number, cz: number, halfX: number, halfZ: number, yaw: number, top: number, base: number): BoxCollider {
-    const box = this.addBox(cx, cz, halfX, halfZ, yaw, 0, top, false, true, base);
+  addMovingBox(cx: number, cz: number, halfX: number, halfZ: number, yaw: number, top: number, base: number, rounding = 0): BoxCollider {
+    const box = this.addBox(cx, cz, halfX, halfZ, yaw, rounding, top, false, true, base);
     box.moving = true;
     return box;
   }
@@ -2140,11 +2156,14 @@ export class CollisionWorld {
   /**
    * **Moves a body {@link addMovingBox} registered** — in place, to `(cx, cz)`
    * turned by `yaw` (as {@link addBox} takes it), with its absolute `top` and
-   * `base` there. Not a change to the park: {@link revision} does not move, so
-   * nothing that caches the park rebuilds — which is why only a moving body may
-   * be moved (anything else throws).
+   * `base` there, and — given a `shape` — its half-extents and rounding too: a
+   * body whose drawn plan changes as it moves (the library's owl, wings folded
+   * low over where she stands and open in the air, #718). Not a change to the
+   * park: {@link revision} does not move, so nothing that caches the park
+   * rebuilds — which is why only a moving body may be moved (anything else
+   * throws).
    */
-  moveBox(box: BoxCollider, cx: number, cz: number, yaw: number, top: number, base: number): void {
+  moveBox(box: BoxCollider, cx: number, cz: number, yaw: number, top: number, base: number, shape?: Readonly<MovingShape>): void {
     if (!box.moving) throw new Error('CollisionWorld.moveBox: only a body addMovingBox registered may move');
     box.cx = cx;
     box.cz = cz;
@@ -2154,6 +2173,12 @@ export class CollisionWorld {
     box.topRadius = radiusFor(cx, cz, top);
     box.baseHeight = base;
     box.baseRadius = radiusFor(cx, cz, base);
+    if (!shape) return;
+    box.halfX = Math.max(0, shape.halfX);
+    box.halfZ = Math.max(0, shape.halfZ);
+    box.rounding = shape.rounding;
+    // A body that changes shape is sub-stepped against its thinnest, as one registered that thin would be.
+    this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, Math.min(box.halfX, box.halfZ) + box.rounding);
   }
 
   /**

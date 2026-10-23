@@ -728,9 +728,15 @@ export function createLibraryArmchair(cloth: number): AssetHandle {
  * seat cushion's top (#715's contract puts it at `KID_HIP_HEIGHT`, the one
  * height where her feet reach the floor) and the whole chair's plan, with its
  * centre — the chair is deeper behind its origin than in front of it.
+ *
+ * `seatCentre` is the middle of the seat cushion itself, in the chair's own
+ * frame (sitter facing +Z): where a sitter's hips go — the owl's perch on the
+ * story chair at story time (#718). Measured off the seat part alone, never
+ * the whole chair's plan, whose middle is pulled back by the chair's back.
  */
 export function libraryArmchairSize(): {
   readonly seat: number;
+  readonly seatCentre: { readonly x: number; readonly z: number };
   readonly width: number;
   readonly depth: number;
   readonly height: number;
@@ -738,8 +744,10 @@ export function libraryArmchairSize(): {
   readonly centreZ: number;
 } {
   const plan = kitBounds(['armchair-frame', 'armchair-seat', 'armchair-feet']);
+  const seat = kitBounds(['armchair-seat']);
   return {
-    seat: kitBounds(['armchair-seat']).maxY,
+    seat: seat.maxY,
+    seatCentre: { x: (seat.minX + seat.maxX) / 2, z: (seat.minZ + seat.maxZ) / 2 },
     width: plan.maxX - plan.minX,
     depth: plan.maxZ - plan.minZ,
     height: plan.maxY,

@@ -41,6 +41,7 @@
  */
 import { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, PLAYER_RADIUS } from '../../core/constants';
 import { LIBRARY_EXTERIOR_PLAN, LIBRARY_SHELF_FOOTPRINT } from '../../art/models/libraryKit';
+import type { BookKind } from './bookKinds';
 
 export { LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z };
 
@@ -272,9 +273,8 @@ export const LIBRARY_SECRET_BOOKCASE: BookcaseSpec = (() => {
  * - `doormat` — inside the way out, across the doorway's own width: the south
  *   wall is drawn hidden so the camera can look in, so this is what tells a
  *   child where the door is from across the room.
- * - `cushion` — a floor cushion on the rug: soft, so a platform she steps up
- *   onto rather than a wall she bumps (the hotel beds' "a prop that is its
- *   own floor is placed soft").
+ * - `cushion` — a floor cushion on the rug: a low solid she steps up onto
+ *   (PR #722: every solid's top is landable) and sits on at story time.
  * - `sconce` — a wall light above the cases at {@link LIBRARY_SCONCE_HEIGHT},
  *   out of reach: drawn, lit, no collider, because nothing at that height can
  *   meet her.
@@ -342,9 +342,64 @@ export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
   { id: 'sconce-north-1', kind: 'sconce', at: { x: -8, z: -LIBRARY_INNER_Z }, facing: 0, pool: true },
   { id: 'sconce-north-2', kind: 'sconce', at: { x: 0, z: -LIBRARY_INNER_Z }, facing: 0 },
   { id: 'sconce-north-3', kind: 'sconce', at: { x: 8, z: -LIBRARY_INNER_Z }, facing: 0, pool: true },
-  { id: 'sconce-west-1', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: -6 }, facing: 90 },
+  // West-1 sits over its own case, not between it and the secret shelf: at
+  // z −6 it hung on the den doorway's north jamb (#719), half over the gap.
+  // It is no pool, so the light rig is unchanged.
+  { id: 'sconce-west-1', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: -8 }, facing: 90 },
   { id: 'sconce-west-2', kind: 'sconce', at: { x: -LIBRARY_INNER_X, z: 6 }, facing: 90, pool: true },
 ];
+
+// ===========================================================================
+// The story corner — who sits where (#718)
+// ===========================================================================
+
+/**
+ * **The two cushions she is offered** — a Sit chip on each, whether a story
+ * is on or not. The library's three children take the other three at story
+ * time (cushions 2, 4 and 5: the build plan's Decision 13), so these two are
+ * always free for her, and a chip on them never has to refuse.
+ */
+export const LIBRARY_PLAYER_SEATS = ['cushion-1', 'cushion-3'] as const;
+export type LibraryPlayerSeat = (typeof LIBRARY_PLAYER_SEATS)[number];
+
+/** A cushion's spot, looked up in {@link LIBRARY_FURNITURE} — the one table of where furniture stands. */
+export function libraryCushion(id: string): FurnitureSpec {
+  const piece = LIBRARY_FURNITURE.find((candidate) => candidate.id === id);
+  if (!piece || piece.kind !== 'cushion') throw new Error(`library layout: '${id}' is not a cushion in LIBRARY_FURNITURE`);
+  return piece;
+}
+
+/** The storyteller's chair: the one `storyChair` in {@link LIBRARY_FURNITURE}. */
+export const LIBRARY_STORY_CHAIR: FurnitureSpec = (() => {
+  const chairs = LIBRARY_FURNITURE.filter((piece) => piece.kind === 'storyChair');
+  if (chairs.length !== 1 || !chairs[0]) {
+    throw new Error(`library layout: ${chairs.length} story chairs in LIBRARY_FURNITURE, where the story corner needs exactly one`);
+  }
+  return chairs[0];
+})();
+
+/**
+ * **Which way a listener at `from` looks to see the storyteller**:
+ * `Player.facing` degrees (0 along +Z, 90 along +X) from `from` to the story
+ * chair's spot. The one bearing a cushion's sitter is turned to — the
+ * cushion's stand spot and her seated facing both read it.
+ */
+export function libraryFacingStoryChair(from: LocalPoint): number {
+  const degrees = (Math.atan2(LIBRARY_STORY_CHAIR.at.x - from.x, LIBRARY_STORY_CHAIR.at.z - from.z) * 180) / Math.PI;
+  return (degrees + 360) % 360;
+}
+
+/**
+ * **A point of a piece of furniture's own frame, in the room**: `(x, z)` in
+ * the piece's model frame, turned by its `facing` (three.js's `rotation.y`,
+ * in degrees here) about its spot. The one owner of that turn — the
+ * furniture's colliders (`furnish.ts`) and the owl's perch on the story chair
+ * (`LibraryOwl.ts`) both ask it.
+ */
+export function pieceToRoom(piece: FurnitureSpec, x: number, z: number): LocalPoint {
+  const yaw = (piece.facing * Math.PI) / 180;
+  return { x: piece.at.x + x * Math.cos(yaw) + z * Math.sin(yaw), z: piece.at.z - x * Math.sin(yaw) + z * Math.cos(yaw) };
+}
 
 // ===========================================================================
 // Where a child must be able to stand
@@ -370,7 +425,15 @@ export const LIBRARY_CASE_STAND_OUT = LIBRARY_STAND_KEEP_OUT + 0.1;
  */
 export const LIBRARY_DESK_STAND: StandSpot = { what: "the desk's front", x: 6, z: 8.7, facing: 180 };
 
-/** Behind the desk, where the owl stands (#714 part 4) — kept clear for her. */
+/**
+ * Behind the desk, where the owl stands (#718, plan Step 6): **her solid
+ * spot, not a keep-out**. It was held clear in {@link libraryStandSpots}
+ * until she arrived; now `LibraryOwl` registers a filled disc of her measured
+ * plan reach here, so a child walks up to her and bumps into her the way she
+ * bumps into the desk. `facing` is the owl's own: 0, toward the desk's front
+ * ({@link LIBRARY_DESK_STAND}) and the camera. Still a `StandSpot`, because
+ * story time (plan Step 9) lands her back on it.
+ */
 export const LIBRARY_LIBRARIAN_SPOT: StandSpot = { what: "the librarian's spot", x: 6, z: 5.3, facing: 0 };
 
 /** Where she stands to pull the secret book (#719): in front of the secret case, facing it. */
@@ -381,12 +444,102 @@ export const LIBRARY_SECRET_STAND: StandSpot = {
   facing: 270,
 };
 
+// ===========================================================================
+// The secret den (#719) — a walled pocket behind the west wall
+// ===========================================================================
+
 /**
- * **The twelve readable books' slots** (#718): each names the case it stands
- * in, which shelf (0 the bottom) and how far along the shelf from the case's
+ * **How deep the secret den runs west of the reading room's west wall** —
+ * from the wall's outer face to the den's own west wall's inner face. Room
+ * for a baby dragon's nest of books in the far corner and a child beside it,
+ * and for the secret shelf to swing in and lie flat against the den's south
+ * wall (#719, plan Step 12) with the doorway still clear.
+ */
+export const LIBRARY_DEN_DEPTH = 5.6;
+
+/**
+ * **Half the den's doorway** — the gap in the west wall is exactly as wide as
+ * the secret shelf, so the shut shelf fills it: the art contract's case length
+ * (`art/blend/library_build.py`, 4 m), halved. Typed here because the den's
+ * walls are laid out from it; `shell.ts`'s `libraryDenGap` measures the drawn
+ * case and throws unless the two agree within 2 cm, so a case of another width
+ * stops the build rather than leaving a slit beside the shut shelf.
+ */
+export const LIBRARY_DEN_DOOR_HALF = 2;
+
+/**
+ * How far the den runs on north past its doorway's north edge: the far
+ * corner the baby dragon's nest is tucked into ({@link LIBRARY_DRAGON_NEST}).
+ */
+const DEN_NORTH_PAST_DOOR = 1.6;
+
+/**
+ * **The den's three inner wall faces**, room-local. The south face is flush
+ * with the doorway's south edge (the swung-open shelf lies along it); the
+ * north runs {@link DEN_NORTH_PAST_DOOR} on past the doorway's north edge.
+ * Its far corner, walls included — (−24.5, −8.2) — stands 25.8 m from the
+ * room's middle, inside {@link LIBRARY_PLAY_RADIUS} (28), which was reserved
+ * for it: the den's walls stop her, and the boundary is only the backstop.
+ */
+export const LIBRARY_DEN_INNER: { readonly west: number; readonly north: number; readonly south: number } = {
+  west: -(LIBRARY_HALF_X + LIBRARY_WALL_HALF + LIBRARY_DEN_DEPTH),
+  north: LIBRARY_SECRET_BOOKCASE.at.z - LIBRARY_DEN_DOOR_HALF - DEN_NORTH_PAST_DOOR,
+  south: LIBRARY_SECRET_BOOKCASE.at.z + LIBRARY_DEN_DOOR_HALF,
+};
+
+/**
+ * **The one owner of "she is in the den"**, room-local: west of the reading
+ * room's inner wall face — so the doorway, the wall's own thickness at the
+ * gap, already counts as the den — and inside the centre lines of the den's
+ * three walls. Every question about the den asks this, never a rectangle of
+ * its own: the guard that opens the secret shelf if she is ever found in the
+ * den with it shut, entering and restoring, the fades and the owl's shush
+ * (#719, plan Steps 12-14), and `check:library`'s fill and marches.
+ */
+export function libraryDenContains(x: number, z: number): boolean {
+  return (
+    x < -LIBRARY_INNER_X &&
+    x >= LIBRARY_DEN_INNER.west - LIBRARY_WALL_HALF &&
+    z >= LIBRARY_DEN_INNER.north - LIBRARY_WALL_HALF &&
+    z <= LIBRARY_DEN_INNER.south + LIBRARY_WALL_HALF
+  );
+}
+
+/** Just inside the den, through its doorway, looking in (#719) — where `/library-den` stands her. */
+export const LIBRARY_DEN_DOORWAY_STAND: StandSpot = { what: "inside the secret den's doorway", x: -19.6, z: -4.3, facing: 270, den: true };
+
+/** Beside the baby dragon's nest, facing it (#719) — where she stands to say hi. */
+export const LIBRARY_DRAGON_STAND: StandSpot = { what: 'beside the baby dragon', x: -21.3, z: -5.0, facing: 225, den: true };
+
+/** The baby dragon's nest of books (#719): in the den's far corner, facing the doorway and the camera. */
+export const LIBRARY_DRAGON_NEST: LocalPoint & { readonly facing: number } = { x: -22.6, z: -6.3, facing: 45 };
+
+/**
+ * The secret shelf's pull book (#719): the second shelf up — inside her
+ * reach, like every book she is meant to take hold of — and centred on it,
+ * where {@link LIBRARY_SECRET_STAND} already faces.
+ */
+export const LIBRARY_SECRET_BOOK: { readonly shelf: number; readonly along: number } = { shelf: 1, along: 0 };
+
+// Typed spots, so they are held to the den's one owner as the module loads:
+// a stand or the nest moved outside the walls is a build failure, not a
+// child standing in the reading room's wall.
+for (const spot of [LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DRAGON_STAND, { what: "the dragon's nest", ...LIBRARY_DRAGON_NEST }]) {
+  if (!libraryDenContains(spot.x, spot.z)) throw new Error(`library layout: ${spot.what} at (${spot.x}, ${spot.z}) is not inside the secret den (libraryDenContains)`);
+}
+
+/**
+ * **The readable books' slots** (#718): each names the case it stands in,
+ * which shelf (0 the bottom) and how far along the shelf from the case's
  * middle (metres, along the case's right-hand side as you face it), and where
  * she stands to take it down. Books #718 fills them; this PR only keeps their
  * stand spots clear and leaves the gap on the shelf.
+ *
+ * **Slot `i` holds `BOOKS[i]`**: the picture books' twelve first, in
+ * `books.ts`'s order, then the big readers' shelf, one slot per chapter book in
+ * `chapterBooks/index.ts`'s shelf order. Each slot names the kind of book it is
+ * for ({@link ReadableSlot.kind}), so a check can hold every book to a slot of
+ * its own kind, whichever list grows.
  *
  * **Only the two bottom shelves**: the drawn shelf's third board stands above
  * `KID_REACH_HEIGHT` (#715's contract: "only rows 1-2 are under it"), and a
@@ -396,13 +549,15 @@ export const LIBRARY_SECRET_STAND: StandSpot = {
  */
 export interface ReadableSlot {
   readonly index: number;
+  /** The kind of book this slot is for: a picture book's, or the big readers' shelf's chapter book. */
+  readonly kind: BookKind;
   readonly bookcase: string;
   readonly shelf: number;
   readonly along: number;
   readonly stand: StandSpot;
 }
 
-function slotStand(bookcase: string, along: number, index: number): StandSpot {
+function slotStand(bookcase: string, along: number, index: number, kind: BookKind, ofKind: number): StandSpot {
   const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === bookcase);
   if (!spec) throw new Error(`library layout: readable slot ${index} names no bookcase '${bookcase}'`);
   const yaw = (spec.facing * Math.PI) / 180;
@@ -414,14 +569,15 @@ function slotStand(bookcase: string, along: number, index: number): StandSpot {
   const rightZ = outX;
   const out = bookcaseFrontOut(spec) + LIBRARY_CASE_STAND_OUT;
   return {
-    what: `readable book ${index + 1}'s stand (${bookcase})`,
+    what: kind === 'picture' ? `readable book ${index + 1}'s stand (${bookcase})` : `big reader ${ofKind + 1}'s stand (${bookcase})`,
     x: spec.at.x + outX * out - rightX * along,
     z: spec.at.z + outZ * out - rightZ * along,
     facing: (spec.facing + 180) % 360,
   };
 }
 
-const READABLE: readonly (readonly [string, number, number])[] = [
+/** The picture books' twelve, spread round the room, in `books.ts`'s order. */
+const PICTURE_SHELF: readonly (readonly [string, number, number])[] = [
   ['north-2', 1, 0.6],
   ['north-3', 0, -0.8],
   ['north-6', 1, 0.6],
@@ -436,12 +592,39 @@ const READABLE: readonly (readonly [string, number, number])[] = [
   ['stack-1-5', 0, -0.5],
 ];
 
-export const LIBRARY_READABLE_SLOTS: readonly ReadableSlot[] = READABLE.map(([bookcase, shelf, along], index) => ({
+/**
+ * **The big readers' shelf** (track D of #714): the chapter books, in
+ * `chapterBooks/index.ts`'s shelf order, together on one tall case —
+ * `west-4`, the west wall's south-middle case, at the end of the entrance
+ * hall's aisle and under `sconce-west-2`'s pool of light. Chosen because it is
+ * the quiet end of the room: nothing else she can press stands near it, no
+ * child's walk (Steps 7–8: the cushions, Juno's, Lark's and Fenn's routes)
+ * passes it, and it is four metres south of the secret shelf (`west-2`) and of
+ * the gap the den's doorway is cut through (Step 11), with `west-3` between.
+ *
+ * Read left to right as she faces the case, zig-zagging between the two shelves
+ * she can reach (1, then 0) so each book has its own `along`, 0.6 m from the
+ * next, and therefore its own stand spot.
+ */
+const BIG_READERS_SHELF: readonly (readonly [string, number, number])[] = [
+  ['west-4', 1, -1.5],
+  ['west-4', 0, -0.9],
+  ['west-4', 1, -0.3],
+  ['west-4', 0, 0.3],
+  ['west-4', 1, 0.9],
+  ['west-4', 0, 1.5],
+];
+
+export const LIBRARY_READABLE_SLOTS: readonly ReadableSlot[] = [
+  ...PICTURE_SHELF.map(([bookcase, shelf, along], ofKind) => ({ kind: 'picture' as const, bookcase, shelf, along, ofKind })),
+  ...BIG_READERS_SHELF.map(([bookcase, shelf, along], ofKind) => ({ kind: 'chapter' as const, bookcase, shelf, along, ofKind })),
+].map(({ kind, bookcase, shelf, along, ofKind }, index) => ({
   index,
+  kind,
   bookcase,
   shelf,
   along,
-  stand: slotStand(bookcase, along, index),
+  stand: slotStand(bookcase, along, index, kind, ofKind),
 }));
 
 /**
@@ -473,6 +656,143 @@ export const LIBRARY_AISLES: readonly Aisle[] = [
   { id: 'east', points: [{ x: 14.5, z: 4 }, { x: 14.5, z: -0.5 }, { x: 14.5, z: -3.9 }, { x: 14.5, z: -7 }, { x: 11, z: -7.4 }] },
 ];
 
+/** A node of a named aisle, by index — throws naming both, so a renumbered aisle stops the build rather than moving a child's walk. */
+export function aisleNode(aisleId: string, index: number): LocalPoint {
+  const aisle = LIBRARY_AISLES.find((candidate) => candidate.id === aisleId);
+  if (!aisle) throw new Error(`library layout: no aisle '${aisleId}' in LIBRARY_AISLES`);
+  const point = aisle.points[index];
+  if (!point) throw new Error(`library layout: aisle '${aisleId}' has ${aisle.points.length} nodes, so there is no node ${index}`);
+  return point;
+}
+
+// ===========================================================================
+// The library's children — who strolls where, and how each gets to the rug (#718)
+// ===========================================================================
+
+/**
+ * **One of the library's three children** (#718, plan Step 8): where she
+ * strolls, which story cushion is hers, and the way from the one to the other.
+ *
+ * Every point here is read off {@link LIBRARY_AISLES} by aisle id and node
+ * index ({@link aisleNode}) or typed once, and nothing retypes it: her driver
+ * (`libraryKidDriver.ts`) walks these points and `check:library`'s KIDS
+ * sweeps a child-sized disc along every leg of them against the real
+ * collision world, so a bookcase moved onto a route is found by the check and
+ * never by a child leaning on it through a whole story.
+ *
+ * - `circuit`: node indices on **one** aisle, strolled in order and round
+ *   again. Written as a ping-pong (`[3, 2, 1, 2]`) so the wrap from the last
+ *   node to the first is a leg she already walks, never a cut across the
+ *   stacks. **The first node is the exit node**: where her way to the rug
+ *   leaves the aisle, and where she rejoins it afterwards — so every circuit
+ *   starts there and a fresh stroll can begin from it.
+ * - `toSeat`: the points between the exit node and her cushion, neither
+ *   included. Drawn to keep `PLAYER_SEPARATION` from the two cushions the
+ *   player is offered (`LIBRARY_PLAYER_SEATS`) and `SEPARATION` from the other
+ *   children's seats; `LibraryKids.ts` asserts the seats apart at load, KIDS
+ *   measures the legs.
+ */
+export interface LibraryKidPlan {
+  readonly name: string;
+  /** The aisle she strolls: an id in {@link LIBRARY_AISLES}. */
+  readonly aisle: string;
+  /** Node indices on that aisle, in stroll order; the first is the exit node. */
+  readonly circuit: readonly number[];
+  /** Her story cushion, an id in {@link LIBRARY_FURNITURE} — never one of {@link LIBRARY_PLAYER_SEATS}. */
+  readonly seat: string;
+  /** From the exit node to the cushion, both excluded. */
+  readonly toSeat: readonly LocalPoint[];
+}
+
+/**
+ * The three children, their aisles and their cushions (plan Decision 13: the
+ * children take cushions 2, 4 and 5; the player is offered 1 and 3).
+ *
+ * - Lark's circuit stops at `north[2]` (−4, −7.4): `north[3]` (2, −7.4) is
+ *   0.61 m from cushion 1, and a child pausing there would shove a seated
+ *   player.
+ * - Juno's (0.5, −8.3) passes the west story armchair's corner by a hand's
+ *   breadth at a child's radius; KIDS measures it, and the lever is to move it
+ *   east in 5 cm steps.
+ */
+export const LIBRARY_KID_PLANS: readonly LibraryKidPlan[] = [
+  {
+    name: 'Juno',
+    aisle: 'west-aisle-1',
+    circuit: [3, 2, 1, 2],
+    seat: 'cushion-4',
+    toSeat: [aisleNode('central', 4), { x: 0.5, z: -8.3 }, { x: 1.0, z: -9.9 }],
+  },
+  {
+    name: 'Lark',
+    aisle: 'north',
+    circuit: [2, 1, 0, 1],
+    seat: 'cushion-2',
+    toSeat: [aisleNode('central', 4), { x: 3.0, z: -6.6 }],
+  },
+  {
+    name: 'Fenn',
+    aisle: 'east-aisle-2',
+    circuit: [2, 1, 0, 1],
+    seat: 'cushion-5',
+    toSeat: [aisleNode('east', 1), aisleNode('east', 2), aisleNode('east', 3), aisleNode('east', 4), { x: 7.8, z: -7.3 }, { x: 7.0, z: -10.0 }],
+  },
+];
+
+/** A child's circuit as room-local points, in stroll order — the exit node first. */
+export function libraryKidCircuit(plan: LibraryKidPlan): LocalPoint[] {
+  return plan.circuit.map((index) => aisleNode(plan.aisle, index));
+}
+
+/** Where a child's way to the rug leaves her aisle: the circuit's first node. */
+export function libraryKidExitNode(plan: LibraryKidPlan): LocalPoint {
+  return aisleNode(plan.aisle, plan.circuit[0]!);
+}
+
+/**
+ * **The aisle a child is somewhere along, as a polyline from its far end to
+ * the exit node**: the circuit's distinct nodes, so a driver can find the
+ * nodes between where she stands and the exit without retyping the circuit.
+ * For `[3, 2, 1, 2]` that is nodes 1, 2, 3.
+ */
+export function libraryKidAisle(plan: LibraryKidPlan): LocalPoint[] {
+  const distinct: number[] = [];
+  for (const index of plan.circuit) if (!distinct.includes(index)) distinct.push(index);
+  return distinct.reverse().map((index) => aisleNode(plan.aisle, index));
+}
+
+/**
+ * **A child's way between her aisle and her cushion**, room-local: the exit
+ * node, then `toSeat`, then the cushion's middle. The summons walks it
+ * forward; the dismissal walks it back to the exit node, where the stroll
+ * begins again. One list, read by the driver and swept by KIDS.
+ */
+export function libraryKidRugRoute(plan: LibraryKidPlan): LocalPoint[] {
+  return [libraryKidExitNode(plan), ...plan.toSeat, libraryCushion(plan.seat).at];
+}
+
+// Held as the module loads, so a plan that names a missing aisle node, a
+// chair that is not a cushion, a cushion the player is offered, or two
+// children on one cushion is a build failure rather than a child walking into
+// a wall or sitting on the player.
+{
+  const seats = new Set<string>();
+  const names = new Set<string>();
+  for (const plan of LIBRARY_KID_PLANS) {
+    if (names.has(plan.name)) throw new Error(`library layout: two children are called '${plan.name}'`);
+    names.add(plan.name);
+    if (plan.circuit.length < 2) throw new Error(`library layout: ${plan.name}'s circuit has ${plan.circuit.length} node(s); a stroll needs two`);
+    libraryKidCircuit(plan);
+    if (plan.toSeat.length === 0) throw new Error(`library layout: ${plan.name}'s way to the rug has no points between the exit node and the cushion`);
+    const seat = libraryCushion(plan.seat);
+    if ((LIBRARY_PLAYER_SEATS as readonly string[]).includes(seat.id)) {
+      throw new Error(`library layout: ${plan.name}'s seat ${seat.id} is one of the player's two cushions (LIBRARY_PLAYER_SEATS)`);
+    }
+    if (seats.has(seat.id)) throw new Error(`library layout: two children sit on ${seat.id}`);
+    seats.add(seat.id);
+  }
+}
+
 /**
  * Where she stands to sit in a chair: this far out along its facing from its
  * middle — a metre clear of the seat's front edge, so the stand spot's keep-out
@@ -482,20 +802,30 @@ export const LIBRARY_SEAT_FRONT = 1.5;
 
 /**
  * **Every spot a child must be able to stand on, room-local** — the arrival,
- * the doorway, the desk's front, the librarian's spot, the rug, every seat's
- * front, the secret shelf's stand, the twelve readable books' stands, and
- * every aisle node. `props.ts`'s `libraryKeepOuts` turns these into keep-out
- * discs and refuses any collider inside one; `check:library` floods the floor
- * from the arrival and asserts every one is reached.
+ * the doorway, the desk's front, the rug, every seat's front, every story
+ * cushion's seat, the secret shelf's stand, the secret den's two (tagged
+ * `den`), every readable book's stand (the picture books' twelve and the big
+ * readers' shelf, {@link LIBRARY_READABLE_SLOTS}), and every aisle node.
+ * `props.ts`'s `libraryKeepOuts` turns these into keep-out discs and refuses
+ * any collider inside one; `check:library` floods the floor from the arrival
+ * and asserts every one is reached — and, while the secret shelf is shut,
+ * that every `den` one is not: the den is the one pocket the room is meant to
+ * have.
+ *
+ * **Not here: {@link LIBRARY_LIBRARIAN_SPOT}.** It was, until the owl arrived
+ * (#718, plan Step 6); now she stands on it, solid, and a spot a child bumps
+ * into is the opposite of one she must be able to stand on. `check:library`'s
+ * OWL clause asserts the fill does *not* reach it.
  */
 export function libraryStandSpots(): StandSpot[] {
   const spots: StandSpot[] = [
     LIBRARY_ARRIVAL,
     { what: 'the doorway', x: LIBRARY_DOOR_X, z: LIBRARY_INNER_Z - 0.4, facing: 0 },
     LIBRARY_DESK_STAND,
-    LIBRARY_LIBRARIAN_SPOT,
     { what: 'the story rug', x: LIBRARY_STORY_RUG.x, z: LIBRARY_STORY_RUG.z, facing: 180 },
     LIBRARY_SECRET_STAND,
+    LIBRARY_DEN_DOORWAY_STAND,
+    LIBRARY_DRAGON_STAND,
   ];
   for (const piece of LIBRARY_FURNITURE) {
     if (piece.kind !== 'armchair' && piece.kind !== 'storyChair') continue;
@@ -506,6 +836,14 @@ export function libraryStandSpots(): StandSpot[] {
       z: piece.at.z + Math.cos(yaw) * LIBRARY_SEAT_FRONT,
       facing: (piece.facing + 180) % 360,
     });
+  }
+  // Every story cushion's own middle (#718): **the seat is the stand**. She
+  // walks onto the soft cushion and sits where she stands, so nothing has to
+  // step her back off it; and a keep-out on each is what stops a collider
+  // landing on a seat she, or one of the library's children, is invited to.
+  for (const piece of LIBRARY_FURNITURE) {
+    if (piece.kind !== 'cushion') continue;
+    spots.push({ what: `${piece.id}'s seat`, x: piece.at.x, z: piece.at.z, facing: libraryFacingStoryChair(piece.at) });
   }
   for (const slot of LIBRARY_READABLE_SLOTS) spots.push(slot.stand);
   for (const aisle of LIBRARY_AISLES) {

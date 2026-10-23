@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Group, Vector3, type MeshToonMaterial, type Object3D } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -11,21 +11,32 @@ import { highlightObject } from '../highlight';
 import type { PlacedEntry } from '../parkLayout';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import { terrainHeight } from '../terrain';
-import type { Player } from '../../entities/Player';
+import type { Player, RideHolder } from '../../entities/Player';
+import type { CharacterModel } from '../../entities/CharacterModel';
+import type { NpcCharacter, ResidentSpec } from '../../entities/npc';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
-import { BUILDING_STEP_UP } from '../../core/constants';
+import { BUILDING_STEP_UP, NPC_RADIUS, PARADE_MEMBER_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { NameLabel } from '../../ui/NameLabel';
 import { ANCHORS_BY_ID } from '../anchors';
-import { createLibraryExterior, createLibrarySkirt, dressedReach, type LibraryExterior } from '../../art/models/libraryAssets';
+import { createLibraryExterior, createLibrarySkirt, dressedReach, libraryCushionSize, type LibraryExterior } from '../../art/models/libraryAssets';
+import { KID_HIP_HEIGHT } from '../../art/models/kid';
+import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
 import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
 import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './furnish';
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
+import { LibraryOwl, OWL_ZONE_ID, type OwlBystander } from './LibraryOwl';
+import { hasLibraryCard } from './libraryCard';
+import { gameStore } from '../../state';
+import { libraryResidents, type LibraryResident } from './LibraryKids';
+import { StoryTime, type StoryListenerView, type StoryPhase } from './storyTime';
+import type { LibraryKidDriver } from './libraryKidDriver';
 import {
+  buildLibraryDenShell,
   buildReadingRoomShell,
   libraryEntryBand,
   libraryExitBand,
@@ -38,13 +49,20 @@ import {
 import {
   LIBRARY_ARRIVAL,
   LIBRARY_BOUNDING_RADIUS,
+  LIBRARY_DESK_STAND,
   LIBRARY_EXTERIOR_PLAN,
   LIBRARY_FLOOR_Y,
+  LIBRARY_LIBRARIAN_SPOT,
   LIBRARY_ORIGIN_X,
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAY_RADIUS,
+  LIBRARY_PLAYER_SEATS,
+  libraryCushion,
+  libraryFacingStoryChair,
   libraryStandSpots,
   type LibraryExteriorPlan,
+  type LibraryKidPlan,
+  type LibraryPlayerSeat,
   type LocalPoint,
 } from './layout';
 import type { OpenAreaPoint } from '../dismount';
@@ -92,12 +110,27 @@ import type { OpenAreaPoint } from '../dismount';
  * keeps words off in-world boards (`core/textures.ts`); the pill is screen
  * constant, so it is never too small to read.
  *
- * ## What later PRs add (#714 parts 3-5)
+ * ## What the rest of the Library adds (#714 parts 4-5)
  *
- * The twelve readable books stand in `LIBRARY_READABLE_SLOTS` (#718: a gap is
- * already left on each shelf), the owl librarian behind the desk at
- * `LIBRARY_LIBRARIAN_SPOT`, and the secret den behind `LIBRARY_SECRET_BOOKCASE`
- * (#719). Their stand spots are kept clear today.
+ * The readable books stand in `LIBRARY_READABLE_SLOTS` (#718, `shelfBooks.ts`:
+ * the twelve picture books, then the big readers' shelf, whose slots wait as
+ * gaps until their chapter books land), her two story cushions offer a seat,
+ * and the owl librarian stands behind her desk at `LIBRARY_LIBRARIAN_SPOT`
+ * ({@link owl}, `LibraryOwl.ts`: solid, alive, the card, the recommendation,
+ * the shush). Still to come on their own tracks: story time (#718), and the
+ * secret shelf swinging open onto the den below, with its dragon and the cat
+ * (#719). Every one of their stand spots is a keep-out already.
+ *
+ * ## The secret den (#719)
+ *
+ * A walled pocket of the reading room behind its west wall — no space of its
+ * own (plan Decision 20). The west wall has a doorway the secret shelf's
+ * width, a lintel over it from the shelf's top to the wall's, and the den's
+ * floor and three walls beyond ({@link denRoot}, `shell.ts`'s
+ * `buildLibraryDenShell`). The shelf is still an ordinary case with its own
+ * collider, so the doorway is shut and the den is the one sealed pocket the
+ * room has, hidden; the shelf swings open onto it in plan Step 12.
+ * `layout.ts`'s `libraryDenContains` is the one owner of "she is in the den".
  */
 export interface LibraryDeps {
   /** The park's plot for the building. */
@@ -133,10 +166,65 @@ const STACK_FADED_ALPHA = 0.28;
  */
 const SHELF_BOOK_PICK_RADIUS = 0.7;
 
+/**
+ * How close (XZ metres) a tap must land to the owl to count as her (#718):
+ * her own plan reach is about 0.65 m, and a finger aiming at a round owl
+ * lands on her rather than beside her. `check:tap-spacing` measures how near
+ * any other pick comes.
+ */
+const OWL_PICK_RADIUS = 1.2;
+
+/**
+ * A story cushion's Sit zone (#718): a tap within this of the cushion's
+ * middle lands on it (the drawn cushion is 0.45 m round), and standing within
+ * {@link SIT_STAND_RADIUS} of it — on it, or a stride off it — offers the chip.
+ */
+const SIT_PICK_RADIUS = 0.8;
+const SIT_STAND_RADIUS = 1.6;
+
+/**
+ * How far a story cushion's measured top may stand from `KID_HIP_HEIGHT` and
+ * still be a seat — see {@link assertCushionsAreSeats}.
+ */
+const CUSHION_SEAT_TOLERANCE = 0.02;
+
+/** One of her two story cushions: where it is, which way she faces on it, and its drawn piece. */
+interface PlayerSeat {
+  readonly id: LibraryPlayerSeat;
+  readonly at: LocalPoint;
+  /** `Player.facing` degrees: at the storyteller's chair (`libraryFacingStoryChair`). */
+  readonly facing: number;
+  /** The cushion as drawn — what the rainbow hugs while its chip is up. */
+  readonly piece: Object3D;
+}
+
+/**
+ * **One of the library's three children, met again in the crowd** (#718):
+ * her plan (`LIBRARY_KID_PLANS`), the driver the Library handed in, the body
+ * `NpcSystem` built round it, and the model she is drawn with — for story
+ * time (plan Step 9), which sits her and stands her up, and for the checks.
+ */
+export interface LibraryKid {
+  readonly plan: LibraryKidPlan;
+  readonly driver: LibraryKidDriver;
+  readonly body: NpcCharacter;
+  readonly model: CharacterModel;
+}
+
 export class Library implements GameSystem {
   readonly name = 'library';
   /** The reading room, at its own origin, hidden unless she is inside. */
   readonly roomRoot = new Group();
+  /**
+   * **The library's children's models** (#718, `LibraryKids.ts`) — a root of
+   * its own at an **identity transform**, because an `NpcCharacter` writes
+   * world positions straight onto its model's root and the room's root stands
+   * at (−600, −600). In the scene beside {@link roomRoot} (World adds it),
+   * shown and hidden with the room ({@link showRoom}), and excluded from the
+   * park's drawn reach with it (`test/procgen/parkFacts.ts`), or every seed
+   * would measure three children 850 m from the park's middle.
+   */
+  readonly kidsRoot = new Group();
   /** The building in the park, inside `anchor:library`. */
   readonly parkRoot = new Group();
   /** The building's frame and the plan measured off its model — for the checks. */
@@ -148,8 +236,23 @@ export class Library implements GameSystem {
   readonly skirtDepth: number;
   /** "The Library", over the door. */
   readonly nameLabel: NameLabel;
-  /** The reading room's own four walls' colliders. */
+  /** The reading room's own four walls' colliders (the west wall's two spans either side of the den's doorway among them). */
   readonly roomWalls: readonly WallCollider[];
+  /**
+   * **The secret den** (#719): its floor and three walls, in the reading
+   * room's frame — a child of {@link roomRoot}, so it shows and hides with the
+   * room and stays out of the park's drawn reach with it. Hidden while the
+   * secret shelf is shut, so nothing of the den shows over the west wall.
+   */
+  readonly denRoot = new Group();
+  /** The den's three walls' colliders: west, north, south (`den wall (…)` in {@link solids}). */
+  readonly denWalls: readonly WallCollider[];
+  /** The banded collider of the lintel over the den's doorway — solid from the secret shelf's top, less the jump grace, up to the wall's own top. */
+  readonly lintel: WallCollider;
+  /** The west wall's two spans and the lintel, one group, so they can fade while she is in the den (plan Step 12). */
+  readonly westWall: Group;
+  /** Their one material, the walls' green cloned, so fading it fades no other wall. */
+  readonly westMaterial: MeshToonMaterial;
   /** Every free-standing stack and its fade. */
   readonly stacks: readonly StackFader[];
   /** How many decorative books the shelves hold. */
@@ -160,10 +263,34 @@ export class Library implements GameSystem {
    * spot — for their zones, the checks, and the recommendation's glow (Step 6).
    */
   readonly shelfBooks: readonly FurnishedShelfBook[];
+  /**
+   * **The owl librarian** (#718, plan Step 6), behind her desk: solid, alive,
+   * the library card, the recommendation, the shush — `LibraryOwl.ts`. Built
+   * after the furniture (her glow lights the shelf books) and before
+   * `props.assertClear()`, so her solid is held to every keep-out like a
+   * bookcase's.
+   */
+  readonly owl: LibraryOwl;
   /** The room's light rig — for the checks (no black light, the darkest floor). */
   readonly lighting: LibraryLighting;
   /** How far the building is moved along its up from the ground at its centre (`libraryBaseSink`). */
   readonly baseSink: number;
+  /** Her two story cushions (`LIBRARY_PLAYER_SEATS`), each with its drawn piece. */
+  private readonly playerSeats: readonly PlayerSeat[];
+  /** The cushion she is sitting on, or null when she is not. */
+  private seatedOn: LibraryPlayerSeat | null = null;
+  /**
+   * Whoever sits on a story cushion is held by this (`Player.beginRide` takes
+   * a `RideHolder`), and let go by getting up — the "Next day" button's way
+   * off, and `check:exits`'. **A seat, not a ride** (Jim, 19 Oct 2026: her pets
+   * ride along only on a ride): her line stays out at her heels, as at the
+   * hotel's breakfast chairs and the castle's banquet.
+   */
+  private readonly cushionHolder: RideHolder = { holding: 'a story cushion', letGo: () => this.standUp(), companion: 'not a ride' };
+  /** The children as built (`libraryResidents`): their specs go to `NpcSystem`, their drivers come back through it. */
+  private readonly kids: readonly LibraryResident[];
+  /** The children met again in the crowd ({@link attachNpcs}); empty until World introduces them. */
+  private kidsAttached: readonly LibraryKid[] = [];
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -174,11 +301,25 @@ export class Library implements GameSystem {
   /** The drawn building. */
   readonly exterior: LibraryExterior;
   private player: Player | null = null;
+  /** Her line of pets out of the backpack ({@link attachParade}) — the owl keeps clear of them as she does of her. */
+  private parade: { standing(): Iterable<Readonly<Vector3>> } | null = null;
+  /** The one record {@link owlBystanders} writes and hands out, again and again: the owl reads each at once. */
+  private readonly bystander: OwlBystander = { what: '', x: 0, y: 0, z: 0, radius: 0, height: 0 };
   private inside = false;
   private readonly from = new Vector3();
   private readonly cameraLocal = new Vector3();
   /** One "Read it!" zone per readable book, built once: the books never move. */
   private readonly bookZones: readonly InteractZone[];
+  /** The owl's Talk zone, built once: offered only while she is at her desk (`Selection` caches her box there). */
+  private readonly owlZone: InteractZone;
+  /**
+   * **Story time** (#718, plan Step 9, `storyTime.ts`): the clock, the owl's
+   * flight to the story chair, the children's gathering, the reading, the
+   * dispersal. Stepped first in {@link update}.
+   */
+  readonly storyTime: StoryTime;
+  /** What story time asks about her, kept here and written in place — no allocation a frame. */
+  private readonly listenerView = { seated: false, feet: { x: 0, y: 0, z: 0 } };
   /** What a Read chip opens a book with ({@link attachBookReader}); null until `Game` attaches it, and headless. */
   private bookOpener: LibraryBookOpener | null = null;
 
@@ -193,16 +334,45 @@ export class Library implements GameSystem {
     this.roomRoot.name = 'the-library-inside';
     this.roomRoot.position.set(LIBRARY_ORIGIN_X, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z);
     this.roomRoot.visible = false;
-    this.roomWalls = buildReadingRoomShell(this.roomRoot, collision, surfaces);
+    const shell = buildReadingRoomShell(this.roomRoot, collision, surfaces);
+    this.roomWalls = shell.walls;
+    this.westWall = shell.westWall;
+    this.westMaterial = shell.westMaterial;
+    this.lintel = shell.lintel;
     this.props = new LibraryProps(collision, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z);
+    // The den (#719) before the furniture, its walls through the same props,
+    // so every one is held clear of every stand spot like any bookcase.
+    this.denRoot.name = 'the-library-den';
+    this.denRoot.visible = false;
+    this.roomRoot.add(this.denRoot);
+    this.denWalls = buildLibraryDenShell(this.denRoot, this.props, surfaces, shell.fabric).walls;
     const furnished = furnishReadingRoom(this.roomRoot, this.props);
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;
     this.shelfBooks = furnished.shelfBooks;
+    // The owl (#718): after the furniture, whose shelf books her glow lights,
+    // and before `assertClear`, so her solid is checked against every keep-out.
+    this.owl = new LibraryOwl(this.roomRoot, this.props, collision, this.shelfBooks, controls, () => this.owlBystanders());
+    this.owlZone = this.buildOwlZone();
     this.bookZones = this.shelfBooks.map((placed) => this.shelfBookZone(placed));
     this.lighting = new LibraryLighting(furnished.pools);
     this.roomRoot.add(this.lighting.group);
+    // Her two story cushions (#718): seats only if cut to her hip height.
+    assertCushionsAreSeats();
+    this.playerSeats = LIBRARY_PLAYER_SEATS.map((id) => {
+      const cushion = libraryCushion(id);
+      const piece = furnished.pieces.get(id);
+      if (!piece) throw new Error(`Library: ${id} was never furnished, so there is no cushion to offer her`);
+      return { id, at: cushion.at, facing: libraryFacingStoryChair(cushion.at), piece };
+    });
     this.props.assertClear();
+    // The library's children (#718): built here, run by `NpcSystem` (World
+    // hands it {@link residents}), and met again in {@link attachNpcs}.
+    this.kidsRoot.name = 'the-library-children';
+    this.kidsRoot.visible = false;
+    // Each child plans her way round a player standing still in her way against the real world.
+    this.kids = libraryResidents(this.kidsRoot, (x, z, radius) => collision.isClearCircle(x, z, radius));
+    this.storyTime = new StoryTime(this.owl, () => this.kidsAttached, () => this.listener());
 
     // ------------------------------------------------------- the building
     const plot = deps.plot;
@@ -272,6 +442,28 @@ export class Library implements GameSystem {
     return this.inside;
   }
 
+  /** Where story time is: `'idle'`, `'gathering'`, `'reading'` or `'dispersing'`. */
+  get storyPhase(): StoryPhase {
+    return this.storyTime.phase;
+  }
+
+  /**
+   * **A story, now** — the `/library?story=now` link (`Game.enterLibrarySpawn`):
+   * begun on the first frame she is inside and the owl is free.
+   */
+  requestStoryTime(): void {
+    this.storyTime.requestStoryTime();
+  }
+
+  /**
+   * Sitting on one of her story cushions (#718) — for `Game`'s "a tap anywhere
+   * gets her up" and for the checks. True only while the cushion still has
+   * her: a ride ended by anything else is not a seat.
+   */
+  get playerIsSeated(): boolean {
+    return this.seatedOn !== null && (this.player?.riding ?? false);
+  }
+
   /** Where she stands outside: the plot's doormat, the one the paths are routed to. */
   get doormat(): { readonly x: number; readonly z: number } {
     return { x: this.deps.plot.entranceX, z: this.deps.plot.entranceZ };
@@ -287,13 +479,63 @@ export class Library implements GameSystem {
     return this.props.standables;
   }
 
-  /** The building's name over its door (the owl's bubbles arrive with #714 part 4). */
+  /** The building's name over its door, and the owl's speech bubble (#718). */
   get screenLabels(): readonly ManagedLabel[] {
-    return [this.nameLabel];
+    return [this.nameLabel, this.owl.bubble];
+  }
+
+  /**
+   * **The library's children, as residents for `NpcSystem` to run** (#718) —
+   * read once, by `World`, when it builds the crowd, which is why the Library
+   * is constructed before `NpcSystem` there. Each spec hands in its own
+   * `LibraryKidDriver`; see `LibraryKids.ts` and `NpcSystem`'s `ResidentSpec`.
+   */
+  get residents(): readonly ResidentSpec[] {
+    return this.kids.map((kid) => kid.spec);
+  }
+
+  /**
+   * **The children, met again in the crowd** — one {@link LibraryKid} per plan,
+   * once `World` has called {@link attachNpcs}; empty before. Story time (plan
+   * Step 9) summons, sits and dismisses them through these; the checks measure
+   * them.
+   */
+  get children(): readonly LibraryKid[] {
+    return this.kidsAttached;
   }
 
   attachPlayer(player: Player): void {
     this.player = player;
+  }
+
+  /**
+   * **Her line of pets, for the owl to keep clear of** — given by
+   * `World.attachParade`, the one place her parade is introduced to the park,
+   * as the train is given it. Each pet standing out of the backpack is somebody
+   * the owl never flies into or comes down on.
+   */
+  attachParade(parade: { standing(): Iterable<Readonly<Vector3>> }): void {
+    this.parade = parade;
+  }
+
+  /**
+   * **Introduces the crowd's bodies to the Library** (#718): of every character
+   * `NpcSystem` built, the ones driven by one of this Library's own drivers are
+   * its children. `World` calls this once the crowd exists — the same
+   * late-binding `Entrance.attachNpcs` uses, for the same reason: the crowd
+   * needs the finished collision world, and the Library is built before it.
+   * Throws if a child has no body, which means `World` never handed
+   * {@link residents} to `NpcSystem`.
+   */
+  attachNpcs(all: readonly NpcCharacter[]): void {
+    this.kidsAttached = this.kids.map((kid): LibraryKid => {
+      const driver = kid.driver;
+      const body = driver ? all.find((candidate) => candidate.driver === driver) : undefined;
+      if (!driver || !body) {
+        throw new Error(`Library: ${kid.plan.name} has no body in the crowd — World must hand library.residents to NpcSystem before library.attachNpcs`);
+      }
+      return { plan: kid.plan, driver, body, model: kid.model };
+    });
   }
 
   /**
@@ -317,9 +559,10 @@ export class Library implements GameSystem {
     if (!player) return;
     if (spaceAt(player.position.x, player.position.z) !== SPACE_LIBRARY) return;
     this.inside = true;
-    this.roomRoot.visible = true;
+    this.showRoom(true);
     this.boundToRoom();
     this.spaces.holdOff();
+    this.owl.enter();
   }
 
   // --------------------------------------------------------------- doors
@@ -352,13 +595,49 @@ export class Library implements GameSystem {
   }
 
   /**
-   * Inside, a "Read it!" zone on every readable book — unless she is riding
-   * (sitting, #718 Step 7), when the room offers her nothing to walk to.
-   * Outside, the building's entrance.
+   * Inside, one list (#718): the owl's Talk zone while she is at her desk, and
+   * a "Read it!" zone on every readable book — neither while she is riding
+   * (sitting, Step 7), when the room offers her nothing to walk to — and a Sit
+   * zone on each of her two story cushions, always on (the one she sits on
+   * offers 'Get up'). Outside, the building's entrance.
    */
   interactZones(): InteractZone[] {
-    if (this.inside) return this.player?.riding ? [] : [...this.bookZones];
-    return [this.exteriorEntranceZone()];
+    if (!this.inside) return [this.exteriorEntranceZone()];
+    const standing = this.player?.riding ? [] : [...(this.owl.atDesk ? [this.owlZone] : []), ...this.bookZones];
+    return [...standing, ...this.sitZones()];
+  }
+
+  /**
+   * **Up off her story cushion** (#718) — the 'Get up' chip, a jump
+   * ({@link update}), or a tap anywhere (`Game.ts`'s `onTap`: Jim's nap rule,
+   * *"tapping anywhere, clicking anywhere … wakes them"*). A safe no-op when
+   * she is not sitting, so `Game` can call it unasked — `Hotel.wakeNap`'s
+   * shape.
+   *
+   * **Up where she sat, on the cushion's top** — where her feet were before
+   * she sat: she walks up onto the cushion to sit down (a low solid within a
+   * step, PR #722), so getting up stands her back on it, and she walks off
+   * its edge, one step down. The hotel nap's way off a mattress
+   * (`Hotel.wakeNap`), not the breakfast chair's: a chair's seat is inside the
+   * chair and within her table's reach, while a cushion is a soft solid open
+   * on every side, and **its top is where she stands on it**. `endRide` is
+   * given that top — the surface her feet find there, which the put-down rule
+   * (`world/dismount.ts`, clause 2: "a solid's top is such a surface, as it is
+   * under her feet") accepts as it stands and hands back unchanged; were it
+   * ever not clear or not connected, the same rule would move her, as it does
+   * for every seat. At story time this keeps her where she listened, between
+   * the children on their cushions, rather than popping her a stride sideways
+   * into them. Nothing here steps her off a seat by hand.
+   */
+  standUp(): void {
+    if (this.seatedOn === null) return;
+    const seat = this.playerSeats.find((candidate) => candidate.id === this.seatedOn);
+    this.seatedOn = null;
+    const player = this.player;
+    if (!player?.riding) return;
+    const at = seat?.at ?? { x: player.position.x - LIBRARY_ORIGIN_X, z: player.position.z - LIBRARY_ORIGIN_Z };
+    const top = seat ? libraryCushionSize().top : 0;
+    player.endRide({ x: LIBRARY_ORIGIN_X + at.x, y: LIBRARY_FLOOR_Y + top, z: LIBRARY_ORIGIN_Z + at.z });
   }
 
   update(context: FrameContext): void {
@@ -367,6 +646,12 @@ export class Library implements GameSystem {
     this.updateNameLabel();
     const player = this.player;
     if (!player) return;
+    // The plan's order: story → owl → glow → seated jump. Story time first, so
+    // a story begun this frame flies this frame; then the owl (her words, her
+    // shush, her life and the recommended book's glow), then the seat.
+    this.storyTime.update(dt, this.inside);
+    if (this.inside) this.owl.update(dt, context.elapsed, player, this.spaces.isChanging, this.deps.camera);
+    if (this.seatedOn !== null) this.updateSeated(player, context);
     if (this.inside) this.fadeStacks(player, dt);
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
@@ -392,6 +677,82 @@ export class Library implements GameSystem {
     const camera = this.deps.camera;
     const at = this.nameLabel.sprite.getWorldPosition(this.from);
     this.nameLabel.updateScreenSize(camera.worldUnitsPerPixel, at.distanceTo(camera.focusPoint));
+  }
+
+  /**
+   * **A Sit chip on each of her two story cushions** (#718) — always on while
+   * she is inside, story or no story. The library's children take the other
+   * three cushions at story time, so these two never have to refuse her.
+   *
+   * The breakfast chair's shape (`Hotel.ts`), down to the two details that are
+   * easy to leave out and expensive to leave out:
+   *
+   * - **`selectableWhileRiding`.** Sitting is a ride as far as the engine
+   *   cares, and a zone is not offered while riding unless it says so: without
+   *   it, sitting down would eat every chip, the way back up included.
+   * - **No chip that refuses.** Sitting on one cushion, the other offers
+   *   nothing (a tap anywhere gets her up first); `sit` would refuse a child
+   *   who is already sitting, and a chip that appears and then does nothing
+   *   teaches a six-year-old that chips sometimes lie.
+   *
+   * The seat is the stand: she walks onto the cushion and sits where she
+   * stands, so the stand spot is the cushion's own middle.
+   */
+  private sitZones(): InteractZone[] {
+    return this.playerSeats.map((seat): InteractZone => ({
+      id: `library-sit:${seat.id}`,
+      label: 'a story cushion',
+      x: LIBRARY_ORIGIN_X + seat.at.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + seat.at.z,
+      pickRadius: SIT_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + seat.at.x,
+      standZ: LIBRARY_ORIGIN_Z + seat.at.z,
+      standRadius: SIT_STAND_RADIUS,
+      selectableWhileRiding: true,
+      verb: 'Sit',
+      highlight: highlightObject(seat.piece),
+      actions: () => {
+        if (this.seatedOn === seat.id) return [{ id: 'get-up', label: LIBRARY_CHIPS.getUp, run: () => this.standUp() }];
+        if (this.player?.riding) return [];
+        return pressAction(LIBRARY_CHIPS.sit, () => this.sit(seat.id), '🧘');
+      },
+    }));
+  }
+
+  /**
+   * **Down onto a story cushion** (#718): the breakfast chair's shape
+   * (`beginRide`, then `setRidePose`) and the castle banquet's rule for where
+   * her root goes — **the floor**, never the cushion's top. The cushion is cut
+   * to `KID_HIP_HEIGHT` ({@link assertCushionsAreSeats}), so with her legs
+   * hanging straight down (`ridePose.ts`'s `'listening'`; the rig has no knee)
+   * her feet land on the floor and her hips on the cushion. She faces the
+   * storyteller's chair. The posture is set **after** `beginRide`, which
+   * resets it to `'seated'`.
+   */
+  private sit(id: LibraryPlayerSeat): void {
+    const player = this.player;
+    const seat = this.playerSeats.find((candidate) => candidate.id === id);
+    if (!player || !seat || !this.inside || player.riding || this.spaces.isChanging) return;
+    player.beginRide(this.cushionHolder);
+    player.setRidePose(LIBRARY_ORIGIN_X + seat.at.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + seat.at.z, (seat.facing * Math.PI) / 180);
+    player.ridePosture = 'listening';
+    this.seatedOn = id;
+  }
+
+  /**
+   * While she sits: a jump gets her up. Read here, not in `Player`, because
+   * `Player.update` returns early for the whole time she rides and never
+   * reaches its own jump (`Hotel.update`'s nap, the same reason). And a ride
+   * that something else ended leaves no seat behind it — or every later tap
+   * would try to stand up a child who is already standing.
+   */
+  private updateSeated(player: Player, context: FrameContext): void {
+    if (!player.riding) {
+      this.seatedOn = null;
+      return;
+    }
+    if (context.input.justPressed('jump')) this.standUp();
   }
 
   /** A stack between the camera and her eases translucent; one that is not, back to solid. */
@@ -437,14 +798,22 @@ export class Library implements GameSystem {
   private enterRoom(at?: { readonly x: number; readonly z: number; readonly facing?: number }): void {
     const player = this.player;
     if (!player) return;
+    // Every road in refuses a sitting child, so this is a belt: nobody is put
+    // somewhere new still sitting on a cushion she has left.
+    this.standUp();
+    // Coming in from the park (or a link): a visit. Already inside — a link
+    // typed from the room, or the fall rescue below — it is not, and the owl
+    // does not greet her twice.
+    const arriving = !this.inside;
     this.inside = true;
-    this.roomRoot.visible = true;
+    this.showRoom(true);
     this.boundToRoom();
     const spot: LocalPoint = at ?? LIBRARY_ARRIVAL;
     const facing = ((at?.facing ?? LIBRARY_ARRIVAL.facing) * Math.PI) / 180;
     player.teleportTo(LIBRARY_ORIGIN_X + spot.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + spot.z, facing);
     // A fresh visit starts with every stack solid.
     for (const stack of this.stacks) stack.setAlpha(1);
+    if (arriving) this.owl.enter();
   }
 
   /**
@@ -466,15 +835,20 @@ export class Library implements GameSystem {
   releasePlayer(): void {
     if (!this.inside) return;
     this.inside = false;
-    this.roomRoot.visible = false;
+    this.showRoom(false);
+    this.storyTime.abort();
+    this.owl.leave();
   }
 
   /** Out on the doormat, facing `facing` (radians): away from the door on leaving, at it for the door link. */
   private standOutside(facing: number): void {
     const player = this.player;
     if (!player) return;
+    this.standUp();
     this.inside = false;
-    this.roomRoot.visible = false;
+    this.showRoom(false);
+    this.storyTime.abort();
+    this.owl.leave();
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
     const mat = this.doormat;
     player.teleportTo(mat.x, this.surfaces.sample(mat.x, mat.z, terrainHeight(mat.x, mat.z) + 3), mat.z, facing);
@@ -485,11 +859,77 @@ export class Library implements GameSystem {
   }
 
   /**
+   * **The reading room and its children appear and vanish together.** The
+   * children's models hang under {@link kidsRoot}, not {@link roomRoot} (its
+   * transform is not the identity), so whoever shows or hides the room goes
+   * through here — the one place both are written.
+   */
+  private showRoom(visible: boolean): void {
+    this.roomRoot.visible = visible;
+    this.kidsRoot.visible = visible;
+  }
+
+  /**
+   * **Everybody the owl must never fly into or come down on** (`LibraryOwl`'s
+   * `wouldTouch`): the child — her collision radius and her height — every pet
+   * of hers standing out of the backpack, and the library's three children.
+   * Each as an upright cylinder from where its feet are; a pet as tall as the
+   * child (shorter in fact, so the owl only ever waits a little higher over
+   * one). One record, rewritten for each and read at once.
+   */
+  private *owlBystanders(): Generator<Readonly<OwlBystander>> {
+    const one = this.bystander;
+    const player = this.player;
+    if (player) {
+      one.what = 'the child';
+      one.x = player.position.x;
+      one.y = player.position.y;
+      one.z = player.position.z;
+      one.radius = PLAYER_RADIUS;
+      one.height = KID_HEIGHT;
+      yield one;
+    }
+    for (const kid of this.kidsAttached) {
+      one.what = kid.plan.name;
+      one.x = kid.body.position.x;
+      one.y = kid.body.position.y;
+      one.z = kid.body.position.z;
+      one.radius = NPC_RADIUS;
+      one.height = KID_HEIGHT;
+      yield one;
+    }
+    if (!this.parade) return;
+    for (const at of this.parade.standing()) {
+      one.what = 'a pet';
+      one.x = at.x;
+      one.y = at.y;
+      one.z = at.z;
+      one.radius = PARADE_MEMBER_RADIUS;
+      one.height = KID_HEIGHT;
+      yield one;
+    }
+  }
+
+  /** Story time's view of her: on one of her cushions, and where her feet are, room-local. */
+  private listener(): StoryListenerView {
+    const view = this.listenerView;
+    view.seated = this.playerIsSeated;
+    const at = this.player?.position;
+    if (at) {
+      view.feet.x = at.x - LIBRARY_ORIGIN_X;
+      view.feet.y = at.y - LIBRARY_FLOOR_Y; // flat-ok: her height above the reading room's own flat floor, in its own space off the sphere
+      view.feet.z = at.z - LIBRARY_ORIGIN_Z;
+    }
+    return view;
+  }
+
+  /**
    * **A readable book's zone** (#718): on the book itself, a metre over the
    * floor (where a tap on a book on a low shelf lands); stood at its slot's
    * stand, in front of the case, facing it; the rainbow round the book's own
    * mesh; and one chip, "Read it!", which opens that book through the attached
-   * opener — the paper book over the paused park.
+   * opener — the paper book over the paused park. The book the owl is
+   * recommending — the one glowing on its shelf — says "Read me!" instead.
    */
   private shelfBookZone(placed: FurnishedShelfBook): InteractZone {
     const { book, slot, mesh, local } = placed;
@@ -506,12 +946,42 @@ export class Library implements GameSystem {
       highlight: highlightObject(mesh),
       actions: () =>
         pressAction(
-          LIBRARY_CHIPS.read,
+          this.owl.recommendedBookId === book.id ? LIBRARY_CHIPS.readGlowing : LIBRARY_CHIPS.read,
           () => {
             this.bookOpener?.open(book.id);
           },
           '📖',
         ),
+    };
+  }
+
+  /**
+   * **The owl's Talk zone** (#718): on the owl, a metre over the floor, picked
+   * within {@link OWL_PICK_RADIUS}; stood at the desk's front
+   * (`LIBRARY_DESK_STAND`), facing her across the desk; the rainbow round the
+   * owl herself. One chip: "Get a library card!" until she has one, then "Say
+   * hello!" — both the one press, `LibraryOwl.talk`, which knows which it is.
+   * Offered only while the owl is at her desk ({@link interactZones}): the
+   * selection caches her box where it first finds her, so a zone that
+   * followed her flight would ring the desk while she sat on the story chair.
+   */
+  private buildOwlZone(): InteractZone {
+    const spot = LIBRARY_LIBRARIAN_SPOT;
+    const talk = (): void => {
+      if (this.player) this.owl.talk(this.player);
+    };
+    return {
+      id: OWL_ZONE_ID,
+      label: 'the librarian',
+      x: LIBRARY_ORIGIN_X + spot.x,
+      y: LIBRARY_FLOOR_Y + 1,
+      z: LIBRARY_ORIGIN_Z + spot.z,
+      pickRadius: OWL_PICK_RADIUS,
+      standX: LIBRARY_ORIGIN_X + LIBRARY_DESK_STAND.x,
+      standZ: LIBRARY_ORIGIN_Z + LIBRARY_DESK_STAND.z,
+      verb: 'Talk',
+      highlight: highlightObject(this.owl.handle.root),
+      actions: () => (hasLibraryCard(gameStore.get()) ? pressAction(LIBRARY_CHIPS.hello, talk, '🦉') : pressAction(LIBRARY_CHIPS.getCard, talk, '🪪')),
     };
   }
 
@@ -534,6 +1004,25 @@ export class Library implements GameSystem {
       standX: band.centreX,
       standZ: band.centreZ,
     };
+  }
+}
+
+/**
+ * **The story cushions are seats, or the build stops** (#718). A sitter's
+ * root is on the floor and her legs hang straight down — the rig has no knee
+ * (`ridePose.ts`'s `'listening'`) — so her hips land on the cushion only if
+ * its top is `KID_HIP_HEIGHT`. A taller cushion buries her hips in it, a
+ * lower one leaves her sitting on air, and both look fine until she sits.
+ * `library.glb`'s cushion is cut to it today; this is what keeps it cut.
+ */
+function assertCushionsAreSeats(): void {
+  const top = libraryCushionSize().top;
+  if (Math.abs(top - KID_HIP_HEIGHT) > CUSHION_SEAT_TOLERANCE) {
+    throw new Error(
+      `Library: the story cushion's top is ${top.toFixed(3)} m, but a seat must be KID_HIP_HEIGHT (${KID_HIP_HEIGHT} m) to within ${CUSHION_SEAT_TOLERANCE} m, ` +
+        `or a listener's hips sit ${(Math.abs(top - KID_HIP_HEIGHT) * 1000).toFixed(0)} mm ${top > KID_HIP_HEIGHT ? 'inside' : 'above'} it: ` +
+        `cut library.glb's cushion-body (or createLibraryCushion) to KID_HIP_HEIGHT`,
+    );
   }
 }
 

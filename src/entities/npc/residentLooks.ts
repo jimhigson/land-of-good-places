@@ -1,5 +1,8 @@
 import { PALETTE } from '../../core/palette';
+import type { Rng } from '../../core/mathUtils';
 import { ART } from '../../art/style/artPalette';
+import { KID_SKIN_TONES, type KidOptions } from '../../art/models/kid';
+import type { CharacterColours } from '../CharacterModel';
 
 /**
  * **How a resident child looks, and how fast she strolls** — the one owner,
@@ -49,3 +52,27 @@ export const HAIR_STYLES = ['bunches', 'bob', 'short', 'bowl', 'spiky'] as const
  * constant anywhere.
  */
 export const GUEST_PACE = 0.45;
+
+/**
+ * **One resident child's look, drawn from her own seeded stream** — skin,
+ * hair, outfit, hair style, backpack and the backpack's colour, in that order.
+ * The one owner of the order, because **the order is the child**: swap two of
+ * these draws and every guest in the hotel is wearing somebody else's clothes.
+ * The hotel's guests (`HotelGuests.ts`) and the library's children
+ * (`LibraryKids.ts`) both dress here; their streams are their own.
+ */
+export function residentLook(rng: Rng): { readonly colours: CharacterColours; readonly options: KidOptions } {
+  const skin = (KID_SKIN_TONES[rng.int(0, KID_SKIN_TONES.length - 1)] ?? KID_SKIN_TONES[1])!.colour;
+  const hair = rng.pick(HAIRS);
+  const outfit = rng.pick(OUTFITS);
+  const hairStyle = rng.pick(HAIR_STYLES);
+  const backpack = rng.chance(0.5);
+  const backpackColour = rng.pick(OUTFITS);
+  return {
+    // A resident's arms match her shirt — the plain, single-colour look
+    // `createKid` gave these children before `CharacterModel` (which asks for
+    // both) took over building them.
+    colours: { skin, hair, outfit, outfitArms: outfit, shoe: PALETTE.shoe },
+    options: { hairStyle, backpack, backpackColour },
+  };
+}

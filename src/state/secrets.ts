@@ -1,4 +1,6 @@
 import { gameStore } from './store';
+// Data only (its one import is a type), so a state module may read it without pulling the world in.
+import { CHAPTER_BOOKS } from '../world/library/chapterBooks/index';
 
 /**
  * Things to *do*, as opposed to things to own.
@@ -62,6 +64,33 @@ export const SECRETS: readonly Secret[] = [
     icon: '🐍',
     done: 'You found all five hiding baby snakes!',
   },
+  // The Library's story time (#718): sat on a story cushion from before the
+  // owl's first word to her last — awarded by `world/library/storyTime.ts`.
+  {
+    id: 'secret.storyTime',
+    name: 'Story listener',
+    icon: '📖',
+    done: 'You sat and listened to a whole story!',
+  },
+  // The Library's big readers' shelf (track D of #714): every chapter book
+  // read to its end. Awarded by `world/library/readBooks.ts`'s `markBookRead`,
+  // the one owner of that rule. The picture books keep their own prize.
+  //
+  // **Listed only while there is a chapter book to read** (browser QA round
+  // 1, 23 Oct 2026): with the shelf empty it could never be earned, so its
+  // card sat at "???" for good and the Cute-o-dex could never reach its own
+  // total. The shelf is the one owner of whether it exists: when the chapter
+  // books land, the card comes with them, and nobody adds it by hand.
+  ...(CHAPTER_BOOKS.length > 0
+    ? [
+        {
+          id: 'secret.bigReader',
+          name: 'Big reader',
+          icon: '📚',
+          done: 'You read every chapter book!',
+        },
+      ]
+    : []),
 ];
 
 const BY_ID = new Map<string, Secret>(SECRETS.map((secret) => [secret.id, secret]));

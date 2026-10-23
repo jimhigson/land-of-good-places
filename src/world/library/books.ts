@@ -3,21 +3,43 @@ import type { Expression } from '../../art/style/faces';
 import type { BalloonKind } from '../../art/models/balloons';
 import type { KeychainKind } from '../../art/models/keychains';
 import type { BreakfastKind } from '../../art/models/hotelAssets';
+import type { FlossFlavour } from '../../art/models/shopItems';
+import type { TreeVariant } from '../../art/models/props';
+import type { BookKind } from './bookKinds';
+import { CHAPTER_BOOKS } from './chapterBooks';
+
+export type { BookKind } from './bookKinds';
 
 /**
- * **The twelve library books** — the one table every word and picture in them
- * comes from (#717, part 3 of the Library epic #714).
+ * **The library's books** — the one table every word and picture in them comes
+ * from (#717, part 3 of the Library epic #714), in two kinds ({@link BookKind}).
  *
- * Jim, 13 October 2026: *"twelve authored short picture books about the park"*,
- * 4–6 pages each, **one sentence and one big picture per page**. Written for a
- * six-year-old who is learning to read, so every rule of GAME_DESIGN.md's
- * BREVITY RULE applies to every line: a title is at most 24 characters, a page
- * is one sentence of at most 50. `pnpm run check:brevity` walks this table
- * (`scripts/check-copy-brevity.mts`), so a page cannot quietly grow.
+ * **Picture books** ({@link PICTURE_BOOKS}, here). Jim, 13 October 2026:
+ * *"twelve authored short picture books about the park"*, 4–6 pages each,
+ * **one sentence and one big picture per page**. Written for a six-year-old who
+ * is learning to read, so every rule of GAME_DESIGN.md's BREVITY RULE applies
+ * to every line: a title is at most 24 characters, a page is one sentence of
+ * at most 50.
  *
- * Every other spine on the library's shelves is decoration; these twelve are
- * the ones you can open. They live here, in data, so the family can edit a
- * story without touching the reader — `world/library/reader/` turns a
+ * **Chapter books** ({@link CHAPTER_BOOKS}, one file each under
+ * `chapterBooks/`, listed in shelf order by `chapterBooks/index.ts`). Jim,
+ * 14 October 2026: *"we also need some more grown-up books, these are ok for a
+ * 3 year old, so keep them, but add more that have ~30 words per page and more
+ * involved story lines with jokes, adventure, adversaries, conflict, but
+ * resolve well. A 6 year old advanced reader needs a bit more."* So 8–10 pages,
+ * each a picture and a paragraph of 20–40 words whose every sentence is at
+ * most 120 characters — the BREVITY RULE's own written exception for them. The
+ * picture books stay exactly as they were.
+ *
+ * `pnpm run check:brevity` walks {@link BOOKS} (`scripts/check-copy-brevity.mts`)
+ * and holds each page to its own kind's limits, keyed by the book's `kind` and
+ * nothing else, so a page cannot quietly grow.
+ *
+ * Every other spine on the library's shelves is decoration; these are the ones
+ * you can open, each on its own readable slot (`layout.ts`'s
+ * `LIBRARY_READABLE_SLOTS`: slot `i` holds `BOOKS[i]`, the chapter books on the
+ * big readers' shelf). They live here, in data, so the family can edit a story
+ * without touching the reader — `world/library/reader/` turns a
  * {@link LibraryBook} into paper, and nothing in it knows a single word.
  *
  * ## The pictures are the park's own models
@@ -55,6 +77,35 @@ import type { BreakfastKind } from '../../art/models/hotelAssets';
  * beside a child on foot; `raceCart` is the cart **with the reader riding in
  * it**, both at park scale exactly as the race seats a rider, under duck bars
  * (`duckBar`) hung at the race's own height for them.
+ *
+ * **The chapter books' additions** (track D of #714, the editor's list for
+ * the six), each one of the park's own factories, at its park size, standing
+ * on the ground at the origin like every model here:
+ *
+ * - `mini` — the lilac mini (`createMini`); {@link PictureActor.grab} lifts its
+ *   grabby arms;
+ * - `pinkWall` — two segments of the park's pink stone wall (`createPinkWall`);
+ * - `tortoise` — a Reptile House tortoise, Grandpa Tock (`createTortoise`):
+ *   mood `blink` is asleep, `neutral` drowsy (eyes half shut), any other wide
+ *   awake; pose `stretch` pushes his head right out (his poke), `tuck` pulls
+ *   it into his shell;
+ * - `owl` — the owl librarian (`createLibraryOwl`): her faces are neutral,
+ *   blink, happy and her shush, which mood `surprised` shows;
+ * - `candyFloss` — on its stick (`createCandyFloss`), `variant` its flavour;
+ * - `jetpack` — a jet pack on its own (`createJetpack`); to put one on the
+ *   reader or a pet, give that actor {@link PictureActor.jetpack} instead;
+ * - `discoBall` — the hotel's (`createDiscoBall`), set down to stand on its
+ *   lowest point rather than hanging from its chain;
+ * - `lollipopTree` — a park tree (`createLollipopTree`), `variant` its kind;
+ * - `surpriseEgg` — a surprise egg (`createSurpriseEgg`): `colour` its shell,
+ *   {@link PictureActor.accent} its spots;
+ * - `alienSaucer` — the friendly alien from the Space Ferris Wheel's sky
+ *   (`createAlienSaucer`), fully arrived; it is 5 m across, so give it a `size`;
+ * - `stormCloud` — a book-only cloud with a face (`reader/readerAssets.ts`'s
+ *   `createStoryCloud`), in `colour` (grey for a storm, white for a fair
+ *   weather cloud), its moods the house five;
+ * - `prop` — anything no factory builds, made of primitive shapes: give its
+ *   {@link PictureActor.parts}.
  */
 export const PICTURE_MODELS = [
   'kid',
@@ -76,6 +127,18 @@ export const PICTURE_MODELS = [
   'dragon',
   'book',
   'duckBar',
+  'mini',
+  'pinkWall',
+  'tortoise',
+  'owl',
+  'candyFloss',
+  'jetpack',
+  'discoBall',
+  'lollipopTree',
+  'surpriseEgg',
+  'alienSaucer',
+  'stormCloud',
+  'prop',
 ] as const;
 
 /** A model the reader knows how to build for a picture — see {@link PICTURE_MODELS}. */
@@ -85,9 +148,51 @@ export type PictureModel = (typeof PICTURE_MODELS)[number];
  * How a creature with arms and legs holds them. Anything without limbs ignores
  * it. `duck` is a rider's: the reader in a `raceCart`, folded under a bar by
  * the Rail Race's own pose (`railRace/duckPose.ts`); a `raceCart` with any
- * other pose has her sitting up.
+ * other pose has her sitting up. `stretch` and `tuck` are the tortoise's: his
+ * head pushed right out, or pulled into his shell.
  */
-export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit' | 'duck';
+export type PicturePose = 'stand' | 'armsUp' | 'wave' | 'sit' | 'duck' | 'stretch' | 'tuck';
+
+/** A primitive's shape, for a {@link PropPart}. */
+export type PropShape = 'box' | 'ball' | 'cylinder' | 'cone' | 'ring';
+
+/**
+ * **One primitive piece of a `prop`** — a picnic blanket is one `box`, a
+ * magnifying glass a `ring`, a flat `cylinder` for its lens and another for
+ * its handle. Built by `reader/pictureProps.ts` in the house toon look with
+ * an ink outline, so a prop sits in a picture like the park's own models.
+ */
+export interface PropPart {
+  readonly shape: PropShape;
+  /**
+   * Its size in metres, before it is turned or tilted:
+   * - `box` — width, height, depth;
+   * - `ball` — the box it fills: a sphere squashed or stretched to it (a cloud
+   *   puff, a pancake footprint, a feather);
+   * - `cylinder` — width and depth are its diameters, height its height
+   *   ({@link PropPart.sides} `3` makes it a wedge, a sandwich);
+   * - `cone` — its base's diameters, and its height, point up;
+   * - `ring` — its outer diameter, the thickness of its tube, and (unused) a
+   *   third number: a torus standing upright facing the reader, tilt it to lay
+   *   it down; {@link PropPart.arc} draws part of it (180 is an arch).
+   */
+  readonly size: readonly [number, number, number];
+  /** Where its middle is, in the prop's own metres. Default the origin. */
+  readonly at?: readonly [number, number, number];
+  /** Degrees about the vertical. */
+  readonly turn?: number;
+  /** Degrees about x (tipping it towards the reader), then about z (leaning it right). */
+  readonly tilt?: readonly [number, number];
+  readonly colour: PaletteKey;
+  /** `ring` only: how much of it, in degrees, from its right-hand side round over the top. Default 360. */
+  readonly arc?: number;
+  /** `cylinder` and `cone` only: how many sides. Default round. */
+  readonly sides?: number;
+  /** Glowing, as if lit from inside — a fairground bulb. */
+  readonly glow?: boolean;
+  /** `false` for no ink outline: confetti, raindrops, anything too small to carry one. */
+  readonly outline?: boolean;
+}
 
 /** One model on a page, and how it stands. Everything optional has a sensible default. */
 export interface PictureActor {
@@ -100,10 +205,24 @@ export interface PictureActor {
   readonly size?: number;
   readonly mood?: Expression;
   readonly pose?: PicturePose;
-  /** Which balloon, keychain or breakfast — only read for those three models. */
-  readonly variant?: BalloonKind | KeychainKind | BreakfastKind;
-  /** A colour for models that take one (the cart, the star, a book). */
+  /** Which balloon, keychain, breakfast, candy floss or tree — only read for those models. */
+  readonly variant?: BalloonKind | KeychainKind | BreakfastKind | FlossFlavour | TreeVariant;
+  /** A colour for models that take one (the cart, the star, a book, the egg's shell, the cloud). */
   readonly colour?: PaletteKey;
+  /** A second colour, for a model that takes two: the surprise egg's spots. */
+  readonly accent?: PaletteKey;
+  /** The mini's grabby arms, 0 down to 1 a full "MINI ATTACK!". Only read for the mini. Default 0. */
+  readonly grab?: number;
+  /**
+   * A jet pack on her back, firing (`on`) or not (`off`) — the reader (on her
+   * own `jetpackAnchor`, as she wears one in the park) or a pet (a smaller one,
+   * on the middle of its back). Omitted for none.
+   */
+  readonly jetpack?: 'on' | 'off';
+  /** `false` takes the keyring off the reader's bag for this picture (she wears whatever she has on today otherwise). Only read for `kid`. */
+  readonly keyring?: false;
+  /** A `prop`'s pieces. Only read for `prop`. */
+  readonly parts?: readonly PropPart[];
 }
 
 /** Little things painted over the picture, the way an illustrator would. */
@@ -132,7 +251,11 @@ export interface PagePicture {
 }
 
 export interface BookPage {
-  /** One sentence, at most 50 characters (BREVITY RULE, measured by `check:brevity`). */
+  /**
+   * A picture book's page: one sentence, at most 50 characters. A chapter
+   * book's: a paragraph of 20–40 words, each sentence at most 120 characters.
+   * Both measured by `check:brevity`, by the book's {@link LibraryBook.kind}.
+   */
   readonly text: string;
   readonly picture: PagePicture;
 }
@@ -140,23 +263,45 @@ export interface BookPage {
 export interface LibraryBook {
   /** Stable id: the deep link (`/book?id=`), the save key and the cache key all use it. */
   readonly id: string;
+  /**
+   * A picture book (one sentence a page) or a chapter book (a paragraph a
+   * page). Every rule that differs between them asks this and nothing else:
+   * the page count ({@link BOOK_PAGE_COUNTS}), the brevity limits, the
+   * reader's page layout, the prizes, and which books story time may read
+   * ({@link storyTimeMayRead}).
+   */
+  readonly kind: BookKind;
   /** At most 24 characters (BREVITY RULE). */
   readonly title: string;
   /** The cover boards' colour, and the bookmark's in the Cute-o-dex. */
   readonly cover: PaletteKey;
   /** The picture on the title page. */
   readonly titlePicture: PagePicture;
-  /** Four to six pages — the reader and `check:book-reader` both hold it to that. */
+  /** Within its kind's {@link BOOK_PAGE_COUNTS} — `check:book-reader` holds every book to it. */
   readonly pages: readonly BookPage[];
 }
 
-/** The fewest and most pages a book may have. */
-export const BOOK_MIN_PAGES = 4;
-export const BOOK_MAX_PAGES = 6;
+/**
+ * The fewest and most pages a book of each kind may have: a picture book is
+ * short (4–6), a chapter book is a proper read (8–10).
+ */
+export const BOOK_PAGE_COUNTS: Readonly<Record<BookKind, { readonly min: number; readonly max: number }>> = {
+  picture: { min: 4, max: 6 },
+  chapter: { min: 8, max: 10 },
+};
 
-export const BOOKS: readonly LibraryBook[] = [
+/** The most pages any book has, of either kind — what one open book's caches must hold. */
+export const BOOK_MOST_PAGES = Math.max(...Object.values(BOOK_PAGE_COUNTS).map((count) => count.max));
+
+/**
+ * **The twelve picture books**, in shelf order (slots 0–11). Kept exactly as
+ * they were written for #717 — Jim, 14 October 2026: *"these are ok for a 3
+ * year old, so keep them"*.
+ */
+export const PICTURE_BOOKS: readonly LibraryBook[] = [
   {
     id: 'ripikaBalloon',
+    kind: 'picture',
     title: "RiPika's Balloon",
     cover: 'blossomPink',
     titlePicture: {
@@ -230,6 +375,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'biscuitBreakfast',
+    kind: 'picture',
     title: "Biscuit's Breakfast",
     cover: 'flowerYellow',
     titlePicture: {
@@ -295,6 +441,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'trillaHigh',
+    kind: 'picture',
     title: 'Trilla Goes Up High',
     cover: 'flowerViolet',
     titlePicture: {
@@ -351,6 +498,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'catBusDay',
+    kind: 'picture',
     title: "The Cat Bus's Long Day",
     cover: 'slideChute',
     titlePicture: {
@@ -412,6 +560,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'duckBars',
+    kind: 'picture',
     title: 'Duck, Duck, Duck!',
     cover: 'markerLemon',
     titlePicture: {
@@ -482,6 +631,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'bookDragon',
+    kind: 'picture',
     title: 'The Dragon Who Reads',
     cover: 'leafDeep',
     titlePicture: {
@@ -555,6 +705,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'foreverSlide',
+    kind: 'picture',
     title: 'The Forever Slide',
     cover: 'slideRail',
     titlePicture: {
@@ -609,6 +760,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'fireflies',
+    kind: 'picture',
     title: 'Fireflies at Night',
     cover: 'markerLilac',
     titlePicture: {
@@ -675,6 +827,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'fountainWish',
+    kind: 'picture',
     title: 'The Fountain Wish',
     cover: 'waterTop',
     titlePicture: {
@@ -740,6 +893,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'keychainStall',
+    kind: 'picture',
     title: 'The Keychain Stall',
     cover: 'stonePink',
     titlePicture: {
@@ -803,6 +957,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'bigParade',
+    kind: 'picture',
     title: 'The Big Parade',
     cover: 'fairyPink',
     titlePicture: {
@@ -878,6 +1033,7 @@ export const BOOKS: readonly LibraryBook[] = [
   },
   {
     id: 'goodnightPark',
+    kind: 'picture',
     title: 'Goodnight, Park',
     cover: 'skyNightBottom',
     titlePicture: {
@@ -943,6 +1099,49 @@ export const BOOKS: readonly LibraryBook[] = [
     ],
   },
 ];
+
+export { CHAPTER_BOOKS };
+
+/**
+ * **Every library book, in shelf order**: the picture books, then the chapter
+ * books. Slot `i` of `layout.ts`'s `LIBRARY_READABLE_SLOTS` holds `BOOKS[i]`,
+ * and every count of books in the game derives from this list's length —
+ * never a typed twelve.
+ */
+export const BOOKS: readonly LibraryBook[] = [...PICTURE_BOOKS, ...CHAPTER_BOOKS];
+
+// Each list holds only its own kind, and no two books share an id (the deep
+// link, the save key and the slot pairing all key on it). Loud at load, so a
+// book filed in the wrong list never reaches a shelf.
+{
+  const problems: string[] = [];
+  for (const [list, kind] of [
+    [PICTURE_BOOKS, 'picture'],
+    [CHAPTER_BOOKS, 'chapter'],
+  ] as const) {
+    for (const book of list) {
+      if (book.kind !== kind) problems.push(`'${book.id}' is a ${book.kind} book in the ${kind} books' list`);
+    }
+  }
+  const seen = new Set<string>();
+  for (const book of BOOKS) {
+    if (seen.has(book.id)) problems.push(`two books share the id '${book.id}'`);
+    seen.add(book.id);
+  }
+  if (problems.length > 0) throw new Error(`library books: ${problems.join('; ')}`);
+}
+
+/**
+ * **Which books story time may read aloud** — the one owner of that rule
+ * (#718's story time, plan Step 9): picture books only. The owl reads a book
+ * one page per speech bubble, and a speech bubble holds one short line; a
+ * chapter page is a whole paragraph, far too long for one. Story time picks
+ * its book (the recommended one, or the next in its order) from the books this
+ * says yes to.
+ */
+export function storyTimeMayRead(book: LibraryBook): boolean {
+  return book.kind === 'picture';
+}
 
 /** The Cute-o-dex key a read book is filed under — see the file comment. */
 export function bookCollectionId(bookId: string): string {

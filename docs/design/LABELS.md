@@ -33,6 +33,7 @@ cannot float over anything.
 | Park children's chat bubbles ("I'm going to The Castle") | `NpcSystem.ts` → `ui/SpeechBubble.ts` | `speech` | `npc:<name>` |
 | The hotel receptionist's script | `world/hotel/Hotel.ts` → `SpeechBubble` | `actionFeedback` | `hotel-reception` |
 | The Reptile House's answers — blurbs, "peep!", "ribbit!", "Hisss-ello!", "3 of 5 babies found!", the Noodle-o-meter reading | `world/reptileHouse/ReptileHouse.ts` (`say`) → `SpeechBubble` | `actionFeedback` | the pressed zone's id (`reptile:<exhibit>`, `reptile:baby:<n>`, `reptile:meter`) |
+| The owl librarian's lines — "Shhh!", the card ceremony, the recommendation, story time | `world/library/LibraryOwl.ts` → `SpeechBubble` | `actionFeedback` | `library-owl` |
 | "a wild bunny appears!" on the castle roof | `world/building/WildPets.ts` → `SpeechBubble` | `speech` | `wildPet:<uid>` (its catch chip's item) |
 | Dodgems: "TWEET!?" | `minigames/dodgems/tree.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:tree` |
 | Dodgems: giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:giggle:<n>` |
@@ -105,15 +106,40 @@ other on screen.
 `speech` is below `callToAction` on purpose: a wild bunny's "appears!" and its
 "Catch!" chip are one item, and the chip is what she needs to catch it.
 
+### Drawn over the scenery
+
+The manager decides whether a label is drawn. It does not decide what the
+scenery may do to a drawn one. A sprite label is a camera-facing quad at its
+speaker's head, and by default its material is **depth-tested**, like
+everything else in the world: furniture nearer the camera than the quad cuts
+it. Every label in the inventory keeps that default except the two below.
+
+Who decides it: a `SpeechBubble`'s material is its own, so a speaker asks for
+the bubble's `overScenery` option and nothing reaches through `sprite.material`
+to change it. A `SpriteLabel` wraps a sprite its maker built, so the maker owns
+that sprite's material.
+
+| label | decided by | why |
+|---|---|---|
+| The owl librarian's bubble | `SpeechBubble`'s `overScenery`, asked for by `world/library/LibraryOwl.ts` | She reads story time from the big armchair, which is backed onto the bookcase wall. Her bubble's quad, facing the camera from over the chair, reaches back into the wall cases, and depth-tested it lost its right side behind them ("A day in the pa…", headless Chrome, 23 Oct 2026). `check:library`'s STORY measures it from her cushion's camera: 6 of 45 points of the painted bubble stand behind `library.books.2`, so it fails if the bubble is depth-tested. |
+| The dodgems' giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts`, which builds the sprites its `SpriteLabel`s wrap | Built that way with the dodgems (48bf4bcc, 26 July 2026); no reason is recorded. |
+
+Turning it on for another speaker changes how that speaker's bubble looks: it
+would show through a wall or a tree that stands in front of her. So it is a
+visible change for Jim to judge, never a default.
+
 ## What `check:labels` proves
 
 `scripts/check-labels.mts`, in `check:shard-4`. The real `World`, a real
 `Player`, the real `Selection` and `ActionChips`, stepped in `Game.tick`'s
-order through four scenes at 390×844 (the tightest portrait the game
+order through five scenes at 390×844 (the tightest portrait the game
 supports): a walk from the gate into the busy middle of the garden and back,
 stopping at the six nearest attractions; every Reptile House zone, each chip
 pressed and its answer watched, twice; every castle shop counter on the ground
-floor with its shoppers; and the hotel reception, checking in.
+floor with its shoppers; the hotel reception, checking in; and the Library —
+the owl's card and her recommendation, a shelf book's chip, and story time with
+the child sat on her cushion, the owl's bubble over the rug and the cushion's
+"Get up" chip below it.
 
 Every frame:
 
@@ -132,7 +158,12 @@ Every frame:
 - **E** — coverage, printed to stderr on every run, and failing below a floor:
   frames with two or more labels up, labels held back by a neighbour, frames a
   call to action was put away for its own action's answer, chips pressed in
-  the Reptile House, shop counters reached, the receptionist reached.
+  the Reptile House, shop counters reached, the receptionist reached; and in
+  the Library, each visit's purpose (the card handed over, a book recommended,
+  a shelf book's chip up, her seated, the reading reached), the frames the
+  owl's bubble was drawn on the wing, and, while she reads, the frames her
+  bubble, the cushion's "Get up" chip, and both together were drawn — none of
+  them may be zero.
 
 The chips are DOM and Node lays nothing out, so their row size in this check is
 a **layout model** (`chipRowModel`: words at the TEXT RULE minimum, padding,

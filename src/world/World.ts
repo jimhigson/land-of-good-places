@@ -455,7 +455,9 @@ export class World implements GameSystem {
       // `train` is built well above, so every bridge already exists here.
       (x, z) => bridgeHeightAt(this.train.bridges, x, z),
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
-      this.hotel.residents,
+      // …and the library's three children (#718), residents in the same sense:
+      // their models and drivers are the Library's, their bodies the crowd's.
+      [...this.hotel.residents, ...this.library.residents],
       // The ways between the castle's decks, and the castle's shops as places
       // to go (issue #350). The building is built far above, so both exist.
       () => this.building.surfaces.connectors,
@@ -467,6 +469,9 @@ export class World implements GameSystem {
     // this cannot be a constructor argument in either direction — it is the
     // same late-binding `attachPlayer` has always used.
     this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
+    // The Library meets its children's bodies the same way (#718): it handed
+    // the crowd their drivers above, and recognises them by those.
+    this.library.attachNpcs(this.npcs.all);
     // The train stops for anyone on the line ahead of it (Jim, 19 Oct 2026),
     // the crowd as much as her — `Game` tells it of her and her parade.
     this.train.keepClearOf(() => this.npcs.onTheLine());
@@ -527,6 +532,10 @@ export class World implements GameSystem {
       this.reptileHouse.hallRoot,
       this.reptileHouse.forecourtRoot,
       this.library.roomRoot,
+      // The library's children's models, at an identity transform beside the
+      // room (an `NpcCharacter` writes world positions onto its model's root);
+      // the Library shows and hides them with the room.
+      this.library.kidsRoot,
       this.ferrisWheel.group,
     );
   }
@@ -890,13 +899,16 @@ export class World implements GameSystem {
    *   (Jim, 19 Oct 2026) — and whose line her companions, coming back out of
    *   her backpack after a ride, never form up on;
    * - the ferris wheel, whose gondola seats her companion — the front of her
-   *   line — in a chair of its own (`CompanionRide`'s `'drawn by the ride'`).
+   *   line — in a chair of its own (`CompanionRide`'s `'drawn by the ride'`);
+   * - the library's owl, who waits for any of them in her way as she does for
+   *   her: never flown into, never landed on (#718).
    */
   attachParade(parade: Parade): void {
     this.hotel.petParade = parade;
     this.building.petParade = parade;
     this.train.attachParade(parade);
     this.ferrisWheel.attachParade(parade);
+    this.library.attachParade(parade);
     parade.keepOff((x, y, z, radius) => this.train.onTheLine(x, y, z, radius));
   }
 

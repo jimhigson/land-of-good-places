@@ -52,6 +52,7 @@ import type { LibraryProps } from './props';
 import type { PoolSpot } from './lighting';
 import { SHELF_BOOKS, type ShelfBook } from './shelfBooks';
 import {
+  pieceToRoom,
   LIBRARY_BOOKCASES,
   LIBRARY_DOOR_HALF,
   LIBRARY_FURNITURE,
@@ -131,7 +132,7 @@ export function bookcaseCentre(spec: BookcaseSpec): LocalPoint {
 }
 
 /**
- * **Every readable book within her reach** (#718's twelve): the slot's shelf
+ * **Every readable book within her reach** (#718's, the big readers' too): the slot's shelf
  * top, measured off the drawn case, at or under `KID_REACH_HEIGHT` — how far a
  * child's hand reaches above the floor — or the build throws. A shelf the
  * Artist moves up cannot quietly put a book out of her hand.
@@ -588,10 +589,7 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     return 0;
   };
   /** A model's own-frame point carried to a spot and turned with it. */
-  const turned = (piece: FurnitureSpec, x: number, z: number): LocalPoint => {
-    const yaw = (piece.facing * Math.PI) / 180;
-    return { x: piece.at.x + x * Math.cos(yaw) + z * Math.sin(yaw), z: piece.at.z - x * Math.sin(yaw) + z * Math.cos(yaw) };
-  };
+  const turned = (piece: FurnitureSpec, x: number, z: number): LocalPoint => pieceToRoom(piece, x, z);
   /** Bake a model and stand it at a spot; a lamp marked `pool` hangs its light in the middle of its glowing shade. */
   const place = (piece: FurnitureSpec, model: Object3D, y: number, lamp?: LampHandle): void => {
     const group = new Group();

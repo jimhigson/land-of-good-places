@@ -449,6 +449,12 @@ export class Game {
           this.world.reptileHouse.dismountTortoise();
           return;
         }
+        // On a story cushion in the Library, the same (#718): a tap anywhere
+        // gets her up — the nap's rule, and the 'Get up' chip says it too.
+        if (this.world.library.playerIsSeated) {
+          this.world.library.standUp();
+          return;
+        }
         if (this.parade.handleTap(point)) return;
         // GAME_DESIGN.md's SELECTION RULE, step 1: a tap that lands on a thing
         // *selects* it and goes no further. Selection is free — it costs no
@@ -1629,10 +1635,14 @@ export class Game {
   /**
    * `/library` and `/library?at=x,z&facing=deg` (#716): into the Library's
    * reading room, at that room-local spot or just in from the door — from
-   * anywhere, the room included (`Library.requestEnter`).
+   * anywhere, the room included (`Library.requestEnter`). `story` (the link's
+   * `&story=now`, #718) asks for story time at once: it begins on her first
+   * frame inside.
    */
-  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
-    return this.world.library.requestEnter(at);
+  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }, story = false): boolean {
+    const entered = this.world.library.requestEnter(at);
+    if (entered && story) this.world.library.requestStoryTime();
+    return entered;
   }
 
   start(): void {

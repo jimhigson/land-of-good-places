@@ -35,8 +35,9 @@ import {
 } from './readerAssets';
 import { bookById, type LibraryBook } from '../books';
 import { smootherstep, TURN_SECONDS, writeLeaf, type LeafGrid } from './pageCurl';
-import { bookFaces, PAGE_CANVAS_HEIGHT, PageArtist, type PageFace, type PaintedFace } from './pageFaces';
+import { bookFaces, chapterBookFits, PAGE_CANVAS_HEIGHT, PageArtist, type PageFace, type PaintedFace } from './pageFaces';
 import { pictureWarmSteps, pinPrograms, type ReaderLook } from './pagePictures';
+import { READER_WORDS } from './readerWords';
 
 /**
  * **The library's book reader: a real book, open in front of you** (#717).
@@ -108,6 +109,20 @@ import { pictureWarmSteps, pinPrograms, type ReaderLook } from './pagePictures';
  * and the words are painted no smaller than `minTextPx()` (the TEXT RULE's one
  * shared minimum) at that height. `check:book-reader` measures it again from
  * the outside, off the built meshes, and fails if a sentence is smaller.
+ *
+ * ## A chapter book on a short screen
+ *
+ * A chapter book's page is a picture and a paragraph of up to forty words
+ * (`pageFaces.ts`'s `chapterLayout`). On a laptop the whole spread holds both
+ * at the floor with room to spare, and on a phone held upright one page at a
+ * time does. On a phone held on its side it cannot: the open book is as tall
+ * as the screen, about 320 CSS pixels a page, and forty words at the TEXT
+ * RULE's floor need more paper than that before a picture gets any. So on
+ * every layout the reader asks whether each page of the open chapter book fits
+ * ({@link pagesFit}), and when one does not, a card over the book asks her to
+ * turn the phone upright ({@link READER_WORDS} `turnUpright`), the pages stop
+ * turning, and nothing is shown smaller than the floor or cut off. Turning the
+ * phone is a resize, so the very next layout takes the card away.
  */
 
 /** Vertical field of view of the reader's camera, degrees. Long, so the pages are not distorted. */
@@ -263,6 +278,8 @@ export class BookReader {
   private readonly prevButton: HTMLButtonElement;
   private readonly nextButton: HTMLButtonElement;
   private readonly closeButton: HTMLButtonElement;
+  /** The card over a chapter book whose pages do not fit this screen — see the class doc. */
+  private readonly uprightCard: HTMLElement;
 
   private book: LibraryBook | null = null;
   private faces: PageFace[] = [];
@@ -289,6 +306,8 @@ export class BookReader {
   private look: ReaderLook | null = null;
   /** The smallest font, in page-canvas pixels, that meets the TEXT rule at the current layout. */
   private minFontPx = 48;
+  /** Every page of the open book lays out at this layout's floor — false only for a chapter book on a short screen. */
+  private fits = true;
   private open = false;
   /** True when we are the reason the park is paused — see `CuteODex.pausedByUs`. */
   private pausedByUs = false;
@@ -349,7 +368,23 @@ export class BookReader {
       this.close();
     });
 
-    this.root.append(this.prevButton, this.nextButton, this.closeButton);
+    // Under the ✕ in the DOM, so the way out is always on top of it.
+    this.uprightCard = document.createElement('div');
+    this.uprightCard.className = 'book-upright';
+    this.uprightCard.setAttribute('role', 'status');
+    const panel = document.createElement('div');
+    panel.className = 'book-upright-card';
+    const phone = document.createElement('span');
+    phone.className = 'book-upright-phone';
+    phone.setAttribute('aria-hidden', 'true');
+    phone.textContent = '📱';
+    const words = document.createElement('span');
+    words.className = 'book-upright-words';
+    words.textContent = READER_WORDS.turnUpright;
+    panel.append(phone, words);
+    this.uprightCard.append(panel);
+
+    this.root.append(this.prevButton, this.nextButton, this.uprightCard, this.closeButton);
     options.container.append(this.root);
 
     // Swipes, and dropping the controller's rainbow the moment a finger or a
@@ -393,6 +428,15 @@ export class BookReader {
     return this.framingMode;
   }
 
+  /**
+   * Every page of the open book lays out legibly at this screen's floor. False
+   * only for a chapter book on a screen too short for its paragraphs — a
+   * phone held on its side — while the card asks her to turn it upright.
+   */
+  get pagesFit(): boolean {
+    return this.fits;
+  }
+
   /** On a tall screen, the face the camera frames; null when the whole spread shows. */
   framedFace(): number | null {
     return this.framingMode === 'page' ? this.faceInView : null;
@@ -426,11 +470,23 @@ export class BookReader {
 
   /**
    * Opens `bookId` at its title page. Returns false for an id that is not one
-   * of the twelve. Opening a different book while one is open swaps them.
+   * of the library's books. Opening a different book while one is open swaps
+   * them.
    */
   openBook(bookId: string): boolean {
     const book = bookById(bookId);
     if (!book) return false;
+    return this.openLibraryBook(book);
+  }
+
+  /**
+   * Opens `book` itself at its title page — what {@link openBook} does once it
+   * has found the book by id. Public so `check:book-reader` can open a book it
+   * made for the purpose (its chapter-page fixtures, which live in the check
+   * and never on a shelf): reading one to its end files nothing, because
+   * `readBooks.ts`'s `markBookRead` files only the library's own books.
+   */
+  openLibraryBook(book: LibraryBook): boolean {
     // Already done behind the bus ride, normally; a deep link straight into a
     // book pays it here, once.
     this.ensureWarm();
@@ -493,7 +549,7 @@ export class BookReader {
    * asked for next.
    */
   next(): void {
-    if (!this.open) return;
+    if (!this.open || !this.fits) return;
     if (this.turn || this.pan) {
       if (this.queued === 0) this.queued = 1;
       return;
@@ -515,7 +571,7 @@ export class BookReader {
 
   /** Turns back a spread — or on a tall screen, a page. Mid-move, it is asked for next. */
   previous(): void {
-    if (!this.open) return;
+    if (!this.open || !this.fits) return;
     if (this.turn || this.pan) {
       if (this.queued === 0) this.queued = -1;
       return;
@@ -993,6 +1049,14 @@ export class BookReader {
     // The TEXT rule's floor at this layout, in page-canvas pixels.
     const pageScreen = this.pageScreenHeight();
     const floor = Math.ceil((minTextPx() * PAGE_CANVAS_HEIGHT) / Math.max(1, pageScreen)) + 1;
+    // A chapter book whose paragraphs do not fit this screen at that floor
+    // asks to be turned upright instead (see the class doc).
+    const fits = this.book ? chapterBookFits(this.book, floor) : true;
+    if (fits !== this.fits) {
+      this.fits = fits;
+      if (this.open) this.refreshButtons();
+    }
+    this.root.dataset.fits = fits ? 'true' : 'false';
     if (floor !== this.minFontPx) {
       this.minFontPx = floor;
       // Faces painted for another screen are repainted (a face at a time, by
@@ -1179,8 +1243,8 @@ export class BookReader {
       this.framingMode === 'page'
         ? this.readableAfter(this.faceInView) < 0
         : this.spreadIndex >= this.spreadCount - 1 && !(this.turn && this.turn.direction < 0);
-    this.prevButton.dataset.show = atStart ? 'false' : 'true';
-    this.nextButton.dataset.show = atEnd ? 'false' : 'true';
+    this.prevButton.dataset.show = atStart || !this.fits ? 'false' : 'true';
+    this.nextButton.dataset.show = atEnd || !this.fits ? 'false' : 'true';
     // A button about to be disabled under keyboard focus would drop the focus
     // on the floor; hand it to whatever is still useful — the other page, or
     // at the very end, the ✕ that is the only thing left to press.
@@ -1194,8 +1258,8 @@ export class BookReader {
       if (this.prevButton.dataset.padFocus) this.padFocus(this.nextButton);
       else this.nextButton.focus({ preventScroll: true });
     }
-    this.prevButton.disabled = atStart;
-    this.nextButton.disabled = atEnd;
+    this.prevButton.disabled = atStart || !this.fits;
+    this.nextButton.disabled = atEnd || !this.fits;
     this.settleIfIdle();
     // After the leaves are where the spread says: the page now showing on each
     // side may be a different leaf, a sheet higher or lower than the last.
