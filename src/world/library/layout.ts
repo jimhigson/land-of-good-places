@@ -509,6 +509,26 @@ for (const spot of [LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DRAGON_STAND, { what: "th
   if (!libraryDenContains(spot.x, spot.z)) throw new Error(`library layout: ${spot.what} at (${spot.x}, ${spot.z}) is not inside the secret den (libraryDenContains)`);
 }
 
+// ===========================================================================
+// The library cat (#719) — asleep on a pile of books by the desk
+// ===========================================================================
+
+/**
+ * **The library cat's pile of books** (#719): beside the desk, in the desk
+ * lamp's pool of light, on the camera's near side of the stacks and turned to
+ * face it — 1.7 m clear of the desk's east end and 3.1 m from the entrance
+ * hall's aisle, so nobody walking the room has to step round her. The pile
+ * and the cat asleep on it are one group (`LibraryCat.ts`).
+ */
+export const LIBRARY_CAT_PILE: LocalPoint & { readonly facing: number } = { x: 9.6, z: 7.2, facing: 45 };
+
+/**
+ * Where she stands to pet the cat (#719): 1.6 m in front of the pile, looking
+ * at it — re-measured against the pile's true size: 1.4 m (the first design's)
+ * put the pile's near corner inside this spot's keep-out.
+ */
+export const LIBRARY_CAT_STAND: StandSpot = { what: 'beside the library cat', x: 9.6, z: 8.8, facing: 180 };
+
 /**
  * **The readable books' slots** (#718): each names the case it stands in,
  * which shelf (0 the bottom) and how far along the shelf from the case's
@@ -666,6 +686,7 @@ export function libraryStandSpots(): StandSpot[] {
     LIBRARY_SECRET_STAND,
     LIBRARY_DEN_DOORWAY_STAND,
     LIBRARY_DRAGON_STAND,
+    LIBRARY_CAT_STAND,
   ];
   for (const piece of LIBRARY_FURNITURE) {
     if (piece.kind !== 'armchair' && piece.kind !== 'storyChair') continue;
