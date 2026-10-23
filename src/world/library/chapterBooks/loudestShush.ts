@@ -39,7 +39,10 @@ export const loudestShush: LibraryBook = {
   id: 'loudestShush',
   kind: 'chapter',
   title: 'The Loudest Shush',
-  cover: 'trampolinePad',
+  // Coral, the shelf's only red. Every book wears a colour of its own
+  // (test/library/chapter-books.test.ts, case 4); the evening violet
+  // `trampolinePad` is Catch That Chicken!'s.
+  cover: 'flowerRed',
   titlePicture: {
     cast: [
       ...crumpetPile(0.7, -0.2),
