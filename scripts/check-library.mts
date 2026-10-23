@@ -2481,7 +2481,7 @@ const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendW
     const half = camera.screenRightAxis.clone().multiplyScalar(BEACON_SCALE / 2);
     const a = pointOn(caseTopAt.clone().sub(half), screen);
     const b = pointOn(caseTopAt.clone().add(half), screen);
-    return Math.hypot(b.x - a.x, b.y - a.y);
+    return Math.hypot(b.x - a.x, b.y - a.y); // flat-ok: two points on the screen, CSS pixels — not heights in the world
   };
   for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
     if (!glanced) {
