@@ -524,7 +524,15 @@ The Fable agent below died after its gate run at bf7b1c8b (04:32) without record
   only once a drawn chip and a train standing a second), 4a walk into the nose at Bluebell Halt (on the line 3.5 m
   ahead of where it stops), 4b stand on carriage 2 at Bluebell Halt (the platform is level with the rims there).
   Calibrated on bf7b1c8's preview: 3 rode a lap and got off; 4b stood on carriage 2, the train waited 10 s.
-- Full census on all 16 parks at 906510e8 running for the PR's per-park table: `/tmp/es-census13/<seed>.log`.
+- Full census on all 16 parks at 906510e8 (`/tmp/es-census13/<seed>.log`): green 0 1 3 5 7 8 10 12 13 14; red 2 and 4
+  (one run-and-jump wedge each) and 11 (three new + the known walk-off), all between the fence and the train's carriages
+  standing where the park was built — none there at 8e8d318a (seed 11 at 8e8d318a: only the known walk-off). Fix
+  b78789c6: the static clauses ask the park without the train (its bodies stood out of the park until clause 8's first
+  frame; ParkTrain.moveBodies puts them back every frame). After it: seeds 2, 4, 5 green, 11 back to the known walk-off,
+  core OK. Known, unchanged: 9 and 11 walk-off squeezes, 15 bench lean, 6 carriage rim (decision 7).
+- Full census on all 16 at b78789c6 running for the PR's table: `/tmp/es-census15/<seed>.log`. Plan: when run
+  39905508749's "Parks / Parks" finishes, move the PR head to b78789c6+ (check-only: same park source hash 7acd3093…,
+  so the new run takes the parks from that one), then play plays9.mjs on its preview.
 - **The previous CI run, 39249030666 on 8e8d318a, FAILED and nobody recorded it**: 14 of 16 seeds solved no park ("no block
   accepted a restart (restarts 0..63 all rejected)"; only 5 and 15 built), so Procgen invariants and Checks failed for want
   of parks. Cause, from the block logs: seed 0 restart 3 (main's) "rejected by check:park rail.walkable" — the tunnel commit's
