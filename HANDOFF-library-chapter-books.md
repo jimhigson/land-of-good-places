@@ -34,8 +34,11 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
       "Tests 2167 passed (2167)"**, 0 skipped; its stderr notes are the standing park-wide ones ("the
       park gate arch invariant asserts nothing about whether a child can walk through the gateway"
       ×16, etc.), none the library's
-- [ ] `check:coplanar`, `check:walk-reach`, `check:swept-bus`, `check:entrance-road` (CI jobs of
-      their own, outside `check`) locally on the 16 parks — running
+- [x] CI's own park jobs, locally on the 16 honest parks (`runs/ci-extra/`): `check:coplanar` exit 0
+      (72 s: "186 same-facing coplanar seam(s) across 16 seed(s) and 10 space(s) … All of them are in
+      the baseline; none is new" — the six books on the shelf add no seam); `check:walk-reach` exit 0
+      ("walk reach OK"); `check:swept-bus` exit 0 (17 seeds, both controls held); `check:entrance-road`
+      exit 0 (16 pool seeds, tightest 5.68 m, seed 9)
 - [x] PR held until #733's CI run 39953269843 was down to its last job (its parks stage had 28
       runners going; the account runs ~40 jobs at once), then opened
 - [x] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk) — below
