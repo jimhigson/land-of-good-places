@@ -10,21 +10,19 @@ built.
 
 ## Branches and the PR
 
+**Current state (23 Oct, part-4 restart — see "Restart: the part-4 milestone" at the end):** PR #722 is merged
+(main 6d70f695). **PR #733 is part 4** (#718), base `main`, head `feat/library-v2-pr`, moved only by a fast-forward
+push from this branch. **Part 5** (#719 and the chapter books) is built by other engineers on `feat/library-v2b`,
+stacked on #733.
+
 | branch | what |
 |---|---|
-| `feat/engine-solids` @ 003d6489 | the engine (PR #722's work branch), **merged in whole at 679c3b31** (round four; it was 2aa9da02 before — see "Engine round four merged" at the end) |
-| `feat/engine-solids-pr` @ fccadf8b | PR #722's head (base of the Library v2 PR); an ancestor of this branch since 679c3b31 |
-| **`feat/library-v2`** | **this integration branch**: engine + the four tracks + the API adaptation. Tracks A–D cut their branches from its head. |
-| `feat/library-v2-pr` | the draft Library v2 PR's head; moved only at milestones by a fast-forward push (`git push origin feat/library-v2:feat/library-v2-pr`), never force |
+| **`feat/library-v2`** | this integration branch: part 4 (the owl, the card, the recommendation, the shush, the children, the cushions, story time) on main, plus the den's hidden walls (Step 11) and the chapter books' engineering base |
+| `feat/library-v2-pr` | PR #733's head; `git push origin feat/library-v2:feat/library-v2-pr` (a fast-forward, never force) |
+| `feat/library-v2b` | part 5 (other engineers), stacked on #733 |
+| `feat/engine-solids` / `-pr` | the engine, merged (#722) |
 
-**The PR: #733** (draft), head `feat/library-v2-pr` @ b438b695, base `feat/engine-solids-pr`
-(#722's head, 8e8d318a). Body: stacked on #722, what is in, what is still being built, the six
-decisions, the question for Jim, "What to look at", the checks; `Closes #718` / `Closes #719`.
-Raise no other. ~~`origin/feat/engine-solids` has moved on~~ — **done: round four (003d6489)
-is merged at 679c3b31** (no conflicts; see "Engine round four merged" at the end). **#733's CI
-at b438b695 (run 39864355905) is red** on shard 1 (check:flat-primitives) and shard 3
-(check:jitter); both are fixed on this branch at f19cd1fc and green locally — the next
-fast-forward of the PR head takes them.
+The history below (rounds, merges, tracks) is kept as it was written.
 
 ## What was merged, in order (each `git -c rerere.enabled=false merge --no-ff`)
 
