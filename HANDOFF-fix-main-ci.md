@@ -23,8 +23,18 @@ Do NOT merge. Do not touch the den/part-5 or engine-follow-up work.
 - [x] **PR #735**; CI run 40032476645 on ae2b08f9: **25 success, 6 skipped (Deploy, the parks matrix on a
       cache hit) — Checks pass, Procgen invariants pass**; Update adoption 40032476641 pass
 - [x] **check:served-walking red locally under load — root-caused and fixed** (section below)
-- [ ] full `pnpm run check` alone, clean, on the final head
-- [ ] every CI job green on the final head; the beacon seen on the newest preview
+- [x] **full `pnpm run check` alone on 98226e17: exit 0, 2106 s** (105 `$` lines, 0 ELIFECYCLE; 84 distinct
+      steps by parsing package.json); **test:procgen alone on 98226e17: exit 0, 374 s, 48 files, 2168 tests,
+      0 skipped** (`runs/full5-check.log`, `runs/final-procgen.log`)
+- [x] **PR #735 head 98226e17: CI run 40038029208 success (25 success, 6 skipped: Deploy and the parks
+      matrix on a cache hit) — `Checks` pass, `Procgen invariants` pass; Update adoption 40038029250 pass**
+- [x] the beacon seen on the newest preview, https://pr-735-98226e1-land-of-good-places.blockstack.workers.dev
+      (build 680b4685 = main 49e1351e + 98226e17, tree identical to 98226e17), headless Chrome, a fresh
+      context per size (`look/preview-98226e1/`, sheets `sheet-laptop.png`, `sheet-phone.png`): laptop — the
+      whole picture (owl, child, north-8 and its beacon) from 5.6 to 9.8 s, home at 12.2 s; phone — the
+      north-east corner case centred with its beacon, no chip, home at 12.2 s; no page errors.
+- PR head kept at 98226e17 (green, previewed); this handoff's last commit lives on
+  `fix/main-ci-after-library-handoff` so pushing it does not restart the PR's CI or change its preview.
 
 ## The beacon — root cause and the fix (decided)
 
