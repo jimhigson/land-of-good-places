@@ -1,5 +1,165 @@
 # HANDOFF — Library v2 on the engine: the integration branch (`feat/library-v2`)
 
+## PAUSED 23 Oct 22:00 — how to pick this up
+
+Jim paused all work at 22:00 on 23 Oct ("get all agents to write detailed handover so can be picked up later"); the
+Mac was overloaded. Written at the pause by the Opus 5.5 engineer on part 4. **Read this section first; the rest of
+the file is history, newest at the end.**
+
+### Where things stand
+
+- **`feat/library-v2` = this handoff's commit on top of `ae4c6376`, pushed, worktree clean.** Nothing of mine is
+  running (no dev server, browser or check). My four red worktrees (`library-v2-red1..4`) are removed.
+- **PR #733 (part 4, #718): its head `feat/library-v2-pr` is still `66549d88`.** CI was green there (39953269843,
+  88 jobs; Update adoption 39953269896; see "CI on the final head" below), but **browser QA round 1 did not approve
+  it**: 2 majors and 6 minors. QA's material is in `.claude/library-build-scratch/l4qa-1/`, and each defect is
+  judged in "Browser QA round 1 — the fixes" below. The PR body still describes `66549d88` (saved as
+  `qa1/pr733-body-before.md`).
+- **None of the fixes since `66549d88` has been through CI**: the PR head was never moved. `66549d88` is an
+  ancestor of this head (checked), so the PR fast-forwards.
+- **origin/main is 72 commits past this branch's base** (counted at the pause).
+- **#734** (the chapter books, `feat/library-chapter-books`) has merged this branch up to `a79c265f`. It carries the
+  QA fixes up to the beacon but **not** `ae4c6376` (the flight). **Its CI is red on my RECOMMEND clause "found from
+  the desk"**. That is the Overseer's report; I have not opened the run. See "#734's red" below.
+
+### QA round 1's defects: fix, green, red
+
+Greens: `check:library` at `ae4c6376` is **224 ✓ 0 ✗** (`qa1/runs/lib10`, 42 s). Run `lib9` was the same code
+except scenario 4b's start (224 ✓). Reds were made by hand with `qa1/byhand.py`: it mutates, runs, reverts and
+restamps, and `git status` was clean after every one. Logs are `qa1/red-qa1-<x>.log`, and the exact mutation is in
+each log's first lines. Each red is listed with the commit it was proved against, because a red goes stale when the
+geometry moves.
+
+| defect | fix | green: the instrument, numbers | red: mutation → result |
+|---|---|---|---|
+| **Major: the child stands inside the perched owl** (on the story chair's seat) | `64e02d9c` gave her a solid on the chair, and `8f063e18` keeps her wings down there (a shush on the chair is her face alone). **`ae4c6376` redid it**: perched, her moving body stays as her solid. It is a box of her drawn outline, 1.282 × 1.097 m with its middle +0.083 ahead, 0.009 m inside the chair's front (`OWL_PERCH_BACK` 0.15 → 0.21), top her head (2.011) | `check:library` NEVER INSIDE HER (`5c02a0d7`), "the seat with the owl on it (QA's major)": 9 hops from the floor at the chair's front and from cushions 4 and 5, owl drawn inside the child on **0 of 864** frames (lib9). "her solid on the story chair": the box equals a fresh model's outline and sits inside the chair's front and sides (lib10). STORY "solid on the chair": top 2.011, back to 0.360 once she has flown | **(j) at `ae4c6376`**, body taken out on perching → **222 ✓ 2 ✗**: inside her on 220 of 864 frames, 1016 of 3460 points, e.g. (4.17, 1.64 up, −10.84), the child's feet at (4.08, 1.40 up, −10.91); "solid on the chair" top 0.360. The earlier (a) at `5c02a0d7` targeted the old capsule |
+| **Major: the owl lands inside the child in her desk spot** | `64e02d9c`: before every step of a flight `wouldTouch` asks whether her body would touch the child, her pets or the 3 children (one step of headroom over a head, `OWL_HEADROOM`), and she holds if it would. `ae4c6376` made the question shape-aware | NEVER INSIDE HER "the child in the owl's desk spot": she waited 3.2 s for 'the child' and landed once the child walked out, inside her on **0 of 667** frames (lib9). Also "the child on the seat first" and "the child stood on her head" | **(k) at `ae4c6376`**, `wouldTouch` never asked → **221 ✓ 3 ✗**: in the desk spot she landed on the child (16 of 667 frames, 1542 points, the child moved 1.288 m); seat first she perched on her (219 points, 0.757 m); on her head she flew off with her (42 of 277 frames). The earlier (b) was at `5c02a0d7` |
+| Minor: the flight hidden under her call bubble | `64e02d9c` (`storyTime` `flyWhenSaid`): the call is said at her desk and she takes off when it is said, so every flight is silent | `check:library` STORY "her flights are silent": spoke on 0 of 382 frames on the wing. `check:labels` scene 5 (`12533eff`): her call drawn on 208 of 208 frames at her desk, 0 spoken on the wing | (e) at `5c02a0d7`, the call said on the wing → library: spoke on 191 of 382 wing frames; labels: `FAIL E coverage` |
+| Minor: the library card greyed out in the backpack | `cbe0b608`: a row with no action is a keepsake, drawn at full strength and still `aria-disabled`. `9a2fe385` hands the card over by the owl's own press in the check | `check:served-book-reader` item 11: the row's opacity is 1, aria-disabled. CONTROL: `data-available='false'` set by hand reads 0.5 (`qa1/runs/br3`, 1056 ok) | (g) at `cbe0b608` (before `9a2fe385`), the old two lines → `FAIL … opacity 0.5` |
+| Minor: Big reader can never be earned | `745cb651`: `SECRETS` lists it only while `CHAPTER_BOOKS` is non-empty | vitest `test/library/chapter-books.test.ts` case 4 (the 3 library files: 17/17) | (f) at `745cb651`, the condition forced true → 1 failed, 12 passed |
+| Minor: the card sparkles hardly show | `7965e947`: their own pool of 12 sky-blue sparkles at 0.55 m, in 3 clouds across the desk toward the child. The card is waved high (`CARD_FLAP_LIFT` 2.0, 1.4 s) | `check:library` CARD: 852 sparkle-frames on 71 frames of the hand-over line, **0 behind her bubble** (lib10) | (h) at `7965e947`, the old puff over her head → 708 of 852 behind her bubble |
+| Minor: the glowing book is hard to spot from the desk | `a79c265f`: a beacon, one sky-blue 0.7 m sparkle every 0.25 s off the top of its case | `check:library` RECOMMEND "found from the desk": seen on 171 of 180 frames over `stack-3-3`, 0 hidden (lib10) | (i) at `a79c265f`, beacon removed → seen on 0 frames |
+| Minor: the owl hidden from cushion 1 | **not fixed: a question for Jim** (below) | — | — |
+| *(found during the fixes by my headless look, not by QA)* With a child at the chair's front the owl never landed; a child pressed against her at her desk held up her take-off | `ae4c6376`: she flies straight up, across and straight down, wings folded while low, turning only at the top, her body the shape she stands in. See "second pass" at the end | NEVER INSIDE HER 4: with the child pressed against her north side she rose at once (waited 0.00 s, the child moved 0.000 m). **4b: the child walked to QA's spot**, at (3.95, −9.98) ("there"): she came straight down and perched in 3.2 s, waited 0.00 s (lib10) | **(l) at `ae4c6376`**, the old slanting path plus `OWL_PERCH_BACK` 0.15 → **221 ✓ 3 ✗**: the box sits −0.051 m inside the chair's front; take-off held 4.15 s and she never perched; at QA's spot she was held 1.42 s and never perched. **(m)**, no headroom → **222 ✓ 2 ✗**: 1 wedge put-down, and the child on the seat was moved 1.250 m |
+
+The browser look of the new flight (`qa1/look/owlbody2.mjs`, headless Chrome, my server on 6721, finished and
+stopped):
+- (B) A child in her desk spot: she hovered at 2.87 m, waiting for 'the child'.
+- (C) `story=now` at the desk: reading and perched 7 s later.
+- (A) Did **not** reach QA's spot. The deep link stood the child at (6.25, −9.5) and the nudge didn't move her. The
+  owl perched and waited 0 s.
+
+The frames are `qa1/look/shots/v2-{A,B,C}-*.png` and **I have not looked at them yet.**
+
+### What is left, in order
+
+1. **Read the load (`uptime`) before anything heavy.** At a load average of ~75, `check:library` took 7199 s; idle,
+   it takes ~45 s.
+2. **Look at the `v2-*` frames** and send the flight (C) and the hover over her spot (B) to the Overseer.
+3. **Rewrite PR #733's body** from `qa1/pr733-body-before.md`. It needs the defects table above, the visible changes
+   below as decisions, the cushion-1 question with its numbers, a fresh visual-QA list, and the checks at the head.
+4. **Fast-forward the PR**: `git push origin feat/library-v2:feat/library-v2-pr`, never force.
+5. **Get CI green on that head**: every job (`gh pr checks 733`), zero tolerance, and root-cause any red. If GitHub
+   reports conflicts with main (72 commits ahead), **merge** origin/main into `feat/library-v2`
+   (`git -c rerere.enabled=false merge --no-ff`, as every merge in this file) rather than rebasing, because #734 and
+   `feat/library-v2b` carry these commits. Then rerun what the merge touches, and parse the `check` chain (CLAUDE.md)
+   if `package.json` conflicts.
+6. **QA round 2 on the newest "Deploy PR preview" URL** (from the PR's newest preview comment):
+   - `/library?at=6,8.7&facing=180`: the card (sparkles across the desk, the card waved high), the backpack card,
+     "Say hello!" (the beacon from the desk, on a laptop and on a phone), the shush.
+   - `/library?at=2.1,-8&facing=148&story=now`: the silent flight (straight up, across, down) and the reading from
+     cushions 1 and 3.
+   - The owl landing with the child waiting at the chair's front: walk there off cushion 5, as QA did.
+   - The Cute-o-dex with no Big reader.
+7. **The one PR review.** Then the Overseer merges. This is a visible change, so it is Jim's call.
+8. **Then #734**: merge the new `feat/library-v2` into `feat/library-chapter-books` and fix its red at the root
+   (below).
+
+### #734's red "found from the desk" — what I know (not verified: I have not opened the run)
+
+The clause (`scripts/check-library.mts`, RECOMMEND) stands the child at the desk's front for 3 s. On at least 80 %
+of 180 frames it needs a beacon or twinkle sparkle over the top of the glowing book's case that is on the 1280×720
+screen and not behind any opaque room mesh. The owl's pick is the first unread book in `RECOMMENDATION_ORDER`, so 18
+books move the glow to another book on another case.
+
+First read the failing line: it names the case, the frames it was seen on, and how many sparkles the room hid.
+- **If the case is in shot but hidden by the stacks:** a taller beacon may fix it.
+- **If the case is out of shot from the desk:** no sparkle over it can be seen from there, and finding the book
+  becomes a design question for Jim (for example, sparkles that lead from the desk to the book). Do not weaken the
+  assertion.
+
+### Visible changes since `66549d88` (each a decision for the PR body; Jim judges them on the preview)
+
+- **The flight.** Straight up, across, straight down (it was a smooth arc), with her wings folded while she is low
+  and turning only at the top.
+- **The story chair.** She sits 6 cm further back on it. On the chair a shush is her face alone: the wing stays down.
+- **The story call.** She says it at her desk, then flies, silent.
+- **The card hand-over.** The sparkles are sky blue and bigger and rise across the desk. The card is waved high, twice.
+- **The glowing book.** A beacon of sky-blue sparkles rises over its case.
+- **The backpack.** The library card is drawn at full strength. **This applies to every backpack row with no action,
+  not only the card**, so check who else has none before the review.
+- **The Cute-o-dex.** Big reader is not listed until a chapter book exists (the dex total is 76 at this head).
+
+### Question for Jim
+
+- **The cushion-1 view.** While the owl reads, Fenn on cushion 5 (5, −9.5) hides 15.4 % of her from cushion 1 and
+  7.4 % from cushion 3. That was measured in headless Chrome at 1280×800 (`qa1/look/occlusion.mjs`). The options:
+  - **Move cushion 5.** It is bound by SEPARATION 1.8 m and PLAYER_SEPARATION 1.52 m.
+  - **Move the story chair about 1 m east.** Cushion 5's offset from her on screen goes from about 0.49 m to about
+    1.19 m. Those offsets are estimated from plan geometry, with the camera along (−x, −z), not measured in a frame.
+    The chair would then be off the rug's middle.
+
+  Both change a merged layout (#716, plan Decision 13). **The PR body's question has not been updated with these
+  numbers yet.** The minors section below says it was; it was not.
+
+### Not in a commit: notes for the next engineer and the reviewer
+
+Nothing is uncommitted. These were only in my head:
+- **A wrong comment, probably.** The `OWL_PERCH_BACK` comment in `LibraryOwl.ts` says her back "stands 6 cm behind
+  the chair's back". By round 1's numbers her back was 6.6 cm inside the chair's back at 0.15, so at 0.21 it should be
+  about flush (≈0.5 cm inside). Re-measure and correct the comment. The check does not measure her back; STORY's
+  "the owl as drawn on the chair" passes at 0 points beyond the chair's solids.
+- **The first `state → world` import.** `state/secrets.ts` now imports `world/library/chapterBooks/index.ts`, which is
+  data only. If a layering rule exists, it will object.
+- **One rectangle, two definitions.** `owlBubbleOnScreen` in `check-library.mts` re-derives the bubble's on-screen
+  rectangle the way `LabelManager.measureSprite` does. Better to export it from one owner.
+- **Two API changes.** `SpritePuffs` now has a public `sprites` getter (the private list is renamed `pool`; the
+  Reptile House uses the class too). `CollisionWorld.moveBox` takes an optional `MovingShape`; trains pass none, so
+  they are unchanged.
+- **Not run since `66549d88`:**
+  - the full `check` chain
+  - `test:procgen`
+  - the full vitest suite (only the 3 library files ran)
+  - `check:hotel`, `check:jitter`, `check:npc-presence`, `check:served-deep-links`, `check:coplanar`
+  - `build`
+- **Run since `66549d88`, all clean:**
+  - `tsc --noEmit`: exit 0 at `ae4c6376`
+  - `typecheck:test`: exit 0 at `745cb651`
+  - `check:labels`: exit 0 at `12533eff`
+  - `check:flat-primitives`, `check:tap-spacing`, `check:solids`, `check:exits`, `check:brevity`: exit 0 at
+    `5c02a0d7`
+  - `check:served-book-reader`: exit 0 at `9a2fe385`
+  - `check:library`: 224 ✓ 0 ✗ at `ae4c6376`
+  - Scripts typecheck (`qa1/tsconfig.scripts.qa1.json`): 63 errors, the same set as the pre-existing baseline
+    `r1/tsc-scripts-f2.log`.
+
+### Scratch (`.claude/library-build-scratch/`)
+
+- `qa1/`: this round's scratch.
+  - **Reds:** `red-qa1-{a..m}-*.log`. (a)–(e) were proved at `5c02a0d7`, (f) at `745cb651`, (g) at `cbe0b608`, (h) at
+    `7965e947`, (i) at `a79c265f`, and (j)–(m) at `ae4c6376`.
+  - **Greens:** `runs/<tag>/<check>.log`, for tags lib3..lib10, g1, g2 and br1..br3.
+  - **`byhand.py`:** run `python3 qa1/byhand.py <name> <check> <file> <old> <new> [...]` from the worktree. It
+    mutates, restamps, runs, reverts, restamps again and prints `git status`. `byhand-wt.py` is the same with
+    `BYHAND_WT=<worktree>`, so reds can run in throwaway worktrees.
+  - **`run-checks.sh <tag> <check>...`:** runs checks in parallel and appends `exit=` and `seconds=` to each log.
+  - **Other files:** `tsconfig.scripts.qa1.json`; `pr733-body-before.md`; `look/` (headless-Chrome look scripts and
+    `shots/`); `handoff-updown.md` (folded into this file).
+- `st9/restamp.mjs <worktree>`: writes the current park source hash into `.parks/manifest.json`, so checks use the
+  prebuilt seed-5 park instead of re-solving it. Run it after every source edit and before a check. It asserts the
+  park would come out the same (see "Taking over at zero notice"). CI builds its own parks.
+- `l4qa-1/`: QA round 1's material, its scripts and its shots.
+
 Engineer, Claude Fable 5.1, 22 Oct 2026. Epic #714; this branch finishes #718 (the owl
 librarian, story time) and #719 (the secret den, the dragon, the cat) and adds the six chapter
 books, all on top of the engine rework (PR #722, `feat/engine-solids`). Worktree
@@ -835,6 +995,9 @@ QA's report: head 66549d88, not approved, 2 major + 6 minor; screenshots and scr
 
 ### Design decisions (Jim away; each also goes in the PR body)
 
+> **Superseded in part by `ae4c6376`**. Perched, her solid is her moving body as a box, not a capsule. She flies
+> straight up, across and straight down, wings folded while she is low. See "second pass" at the end.
+
 - **The owl is solid wherever she is drawn, and never moves into anybody.** At rest she is a
   capsule — her desk's (as before) or **the story chair's** (new, 'the owl on the story chair',
   radius her drawn reach over every pose she holds perched, the shush wing included). **On the
@@ -848,6 +1011,10 @@ QA's report: head 66549d88, not approved, 2 major + 6 minor; screenshots and scr
   solids, where she is drawn.
 
 ### The majors — fixed (64e02d9c, 8f063e18, 5c02a0d7, 12533eff)
+
+> **Superseded in part by `ae4c6376`** ("second pass", at the end). The story-chair capsule below is gone: perched,
+> her moving body stays as her solid, a box of her outline. Reds (a) and (b) below target code that no longer exists;
+> on the current code their equivalents are (j) and (k), in the PAUSED section at the top.
 
 - `LibraryOwl`: **'the owl on the story chair'** — a zero-length capsule at `owlPerch()` (4.00, −11.19),
   r = `perchReach` (her drawn reach perched, breath ±, head straight, wings down: **0.663**), top = seat 0.36 +
@@ -938,10 +1105,50 @@ check:solids, check:exits (235 s), check:brevity all exit 0 (`qa1/runs/g1`, `g2`
    the plan's seat rules (two children ≥ SEPARATION 1.8 m, a child and her cushion ≥ PLAYER_SEPARATION 1.52 m —
    cushion 3 is 1.75 m from 5); **moving the story chair 1 m east** (to (5, −11.1)) clears every seat (screen
    offsets ≥ 1.19 m) but puts the chair off the rug's middle. Both are visible changes to a merged layout (#716)
-   and the plan's Decision 13 — for Jim; the PR's question is updated with these numbers.
+   and the plan's Decision 13 — for Jim. **Correction at the pause: the PR body's question was NOT updated with these
+   numbers; that is still to do.**
 8. **The glow hard to spot from the desk — fixed.** A **beacon**: one sky-blue sparkle (0.7 m) every 0.25 s rises
    off the top of the glowing book's own case, right over it (`glowBeaconBase`: its bookcase kind's measured
    height + 0.1) — a little column of light over the stacks. RECOMMEND at the desk's front for 3 s: a sparkle in
    the open over `stack-3-3` (3.20 m), on screen and in clear view of the camera (a ray from it past every opaque
    room mesh), on **171 of 180 frames** (724 sparkle-frames, 0 hidden). **Red** (the beacon's puff removed,
    `red-qa1-i-no-beacon.log`): `on 0 (0 sparkle-frames …)` — the book's own twinkles never rise over its case.
+
+
+## Browser QA round 1 — second pass: up, across, down (`ae4c6376`, 23 Oct 2026, Opus 5.5)
+
+**Found by looking.** I drove QA's own flow in headless Chrome (`qa1/look/owlbody.mjs`, my server on 6721): a child
+stood by the deep link at the chair's front (`/library?at=4,-9.95&facing=180`), the owl was sent to the chair, and
+**she never landed** (the 20 s wait timed out). Separately, a child pressed against her at her desk would have held up
+her take-off, because her wings would have opened into him.
+
+**Root cause.** The first design flew her down a slanting path low over the rug, right over a child waiting at the
+chair's front. Her disc (0.877 m on the wing; 0.663 m perched) reached 8 cm past the chair's front, so the wait held
+her in the air for good. Low over the floor she was wider than the solid she stands in, and she was over floor where
+children stand.
+
+**The fix in `ae4c6376`:**
+- **`owlFlightPose`: straight up, across, straight down.** She climbs at `from` until t 0.2, crosses at cruise
+  height until 0.8, and descends at `to`.
+- **`owlWingOpening`.** Her wings stay folded until t 0.14 and are open by 0.19, and the same in reverse coming down.
+  At t 0.14 her feet are 2.98 m up from the desk and 3.06 m from the chair, a step over a child's head (2.12 + 0.62).
+- **Turning.** She turns between her facing and her direction of travel only over t 0.2..0.3 and 0.7..0.8
+  (`OWL_TURN_SHARE`), so she rises and comes down without turning.
+- **Her body's shape follows her** (`shapeAt`; `CollisionWorld.moveBox` now takes an optional `MovingShape`).
+  - **Low, with her wings folded:** the shape she stands in at that end. That is her desk's disc (0.668) or the
+    chair's box (`perchShape`: her drawn outline with breath ±, head straight and wings down, 1.282 × 1.097 m with its
+    middle +0.083 ahead).
+  - **Wings open:** a disc of `flightRadius` (0.877).
+  - **Perched:** the body stays, and that box is her solid on the chair. There is no separate capsule any more. As a
+    moving body it is passed by planning queries, and it stands inside the chair's plan, which planning already holds.
+  - The wait (`wouldTouch`) asks against the same shape.
+- **`OWL_PERCH_BACK` 0.15 → 0.21.** Her front (0.631 m from her middle at the top of a breath) is now 0.009 m inside
+  the chair's front face. The comment about her back is probably wrong; see the PAUSED notes.
+- **`check:library` NEVER INSIDE HER, new scenarios:**
+  - **4.** The child pressed against her north side at take-off. She is 1.31 m away, and open wings would want
+    1.50 m.
+  - **4b.** The child at QA's spot, walked there off cushion 5's top. A teleport there is put down beside the chair,
+    at (2.68, −10.66) in lib9, because there is no walk out of that gap except over a cushion.
+- **The solids clause** now measures the chair box against a fresh model's outline, and checks it is inside the
+  chair's front and sides.
+- **Results** are in the PAUSED table: lib10 green, reds (j)–(m).
