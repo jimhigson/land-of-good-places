@@ -221,8 +221,18 @@ export class InventoryDrawer {
       // is `aria-disabled` rather than `disabled`. That is also the exact
       // attribute the global HIGHLIGHT rule and `ui/TapBurst.ts` both skip, so
       // nothing promises a child a press that would do nothing.
-      row.dataset.available = action.kind === 'none' ? 'false' : 'true';
-      if (action.kind === 'none') row.setAttribute('aria-disabled', 'true');
+      //
+      // **But it is a keepsake, not a thing she cannot have** — the library
+      // card the owl gave her (#718) — so it is drawn at full strength, never
+      // with the shop's half-faded `data-available='false'`: a prize she has
+      // just been handed looked greyed out beside her hat and her pet
+      // (browser QA round 1, 23 Oct 2026). Everything in her backpack is hers.
+      if (action.kind === 'none') {
+        row.dataset.keepsake = 'true';
+        row.setAttribute('aria-disabled', 'true');
+      } else {
+        row.dataset.available = 'true';
+      }
       row.dataset.selected = index === this.selected ? 'true' : 'false';
       row.dataset.carried = item.uid === state.carriedUid ? 'true' : 'false';
       row.dataset.worn = action.kind === 'wear' && action.active ? 'true' : 'false';

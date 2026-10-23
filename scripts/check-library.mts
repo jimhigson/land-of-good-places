@@ -163,10 +163,13 @@ import {
   OWL_PERCH_BACK,
   OWL_WING_BEAT,
   OWL_ZONE_ID,
+  OWL_HEADROOM,
   owlCruiseHeight,
   owlFlightPose,
   owlPerch,
   owlWingOpening,
+  flightReach,
+  perchReach,
   SHUSH_COOLDOWN_SECONDS,
   SHUSH_RUN_SECONDS,
   SHUSH_WING_X,
@@ -176,7 +179,7 @@ import { GATHER_TIMEOUT, STORY_EVERY, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_I
 import { Parade } from '../src/entities/parade/Parade.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
-import { visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
+import { visibleBounds, visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { PLAYER_SEPARATION, SEPARATION } from '../src/entities/npc/NpcSystem.ts';
 import { GUEST_PACE } from '../src/entities/npc/residentLooks.ts';
@@ -1986,6 +1989,22 @@ const drawnOwlReach = ((): number => {
   return reach;
 })();
 
+/**
+ * **The owl's drawn top at her tallest, measured apart** — a FRESH model's visible top with her breath at
+ * rest and at either extreme of `BREATH_DEPTH` (her head rides her body, so a breath in lifts it): the
+ * top every solid of hers must stand to, so a child stood on her head is never pierced by her ear tufts
+ * as she breathes (NEVER INSIDE HER found that, with her solid's top at the rest pose's height).
+ */
+const drawnOwlTop = ((): number => {
+  const fresh = createLibraryOwl();
+  let top = 0;
+  for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
+    fresh.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
+    top = Math.max(top, visibleBounds(fresh.root).top);
+  }
+  return top;
+})();
+
 /** Every bearing (5° bins) where the drawn owl reaches past her solid, the furthest she reaches, and the bins a child can stand in. */
 interface PastHerSolid {
   furthest: number;
@@ -2044,9 +2063,9 @@ console.log('\nOWL — the librarian at her desk: solid, and alive:');
       solid.shape === 'wall' &&
       solid.points.length === 2 &&
       solid.points.every((point) => point.x === owlSpot.x && point.z === owlSpot.z) &&
-      solid.top === owl.handle.height,
+      Math.abs(solid.top - drawnOwlTop) <= 0.002,
     `'the owl' is registered as a zero-length capsule at (${owlSpot.x}, ${owlSpot.z}): a disc of r ${solid?.radius.toFixed(3) ?? '?'}, ` +
-      `top ${owl.handle.height.toFixed(3)} m (her measured height)${solid ? '' : ' — NOT REGISTERED'}`,
+      `top ${solid?.top.toFixed(3) ?? '?'} m against her drawn top at her tallest breath ${drawnOwlTop.toFixed(3)} m, measured apart (2 mm allowed; her rest pose's ${owl.handle.height.toFixed(3)})${solid ? '' : ' — NOT REGISTERED'}`,
   );
   const solidRadius = solid?.radius ?? 0;
   say(
@@ -3369,12 +3388,17 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  *   sit is never a metre's snap; none moving more than 0.05 while the story
  *   is read;
  * - **the owl**: perched within 0.1 of `owlPerch()`, her desk spot clear while
- *   she is away, and **as drawn on the chair, no point a child standing on
- *   clear floor can touch beyond the chair's solids** (the reason she sits
- *   `OWL_PERCH_BACK` into it);
+ *   she is away, **solid on the chair** (the top over her perch is her head
+ *   while she sits there, and the seat's again once she has gone — browser QA
+ *   round 1: the child stood inside her on the seat), and **as drawn on the
+ *   chair, no point a child standing on clear floor can touch beyond her
+ *   solids** (the reason she sits `OWL_PERCH_BACK` into it); her two flights
+ *   each `OWL_FLIGHT_SECONDS` long, with nobody in her way to wait for;
  * - **her bubble** (plan Step 9: "the bubble follows her"): on every frame she
- *   speaks — the call on the wing, the story on the chair — its tail is over
- *   her head, read off the bubble (`worldAnchor`) against the live owl; the
+ *   speaks — the call at her desk, the story on the chair — its tail is over
+ *   her head, read off the bubble (`worldAnchor`) against the live owl, and
+ *   **never a word on the wing** (she calls first and then flies, so her bubble
+ *   never hides her flight: browser QA round 1); the
  *   label manager (`world.labels.resolve`, every frame here, as `Game` runs
  *   it) draws it on every frame she reads aloud, so the child on her cushion
  *   can read the story; and, seen from that cushion, the room's furniture
@@ -3405,7 +3429,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  * bubble clauses), the bubble depth-tested (no `overScenery`).
  */
 /** What the live owl's flights measured against `owlFlightPose` — STORY flies them, FLIGHT reports them. */
-const liveFlight = { frames: 0, worst: 0, flights: 0 };
+const liveFlight = { frames: 0, worst: 0, flights: 0, waited: 0 };
 /** The book STORY's story read to its end — CLOCK's next story must be another. */
 let storyHeard: LibraryBook | null = null;
 
@@ -3871,8 +3895,12 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   let landed: { nextIn: number; told: number } | null = null;
   const offCushionAt = kids.map(() => Number.NaN);
   let homeAt = Number.NaN;
+  /** The top over her perch, read off the collision world the first frame she sits there: her head, if her chair solid came with her. */
+  let perchTopSat = Number.NaN;
   let prevFeet = new Vector3().copy(owl.feet);
   let flight: { from: { x: number; y: number; z: number }; to: { x: number; y: number; z: number }; k: number } | null = null;
+  /** Each flight's frames, as she landed it. */
+  const flightFrames: number[] = [];
   const expected = { x: 0, y: 0, z: 0 };
   let t = 0;
   const LIMIT = 150;
@@ -3898,7 +3926,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
       readAloud += 1;
       if (owl.bubble.sprite.visible) readDrawn += 1;
     }
-    // The live owl on her path.
+    // The live owl on her path, at the progress she has made along it (a wait pauses her on it).
     if (owl.flying) {
       if (!flight) {
         const home = phase === 'dispersing';
@@ -3906,11 +3934,13 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
         liveFlight.flights += 1;
       }
       flight.k += 1;
-      owlFlightPose(flight.from, flight.to, (flight.k * CHILD_DT) / OWL_FLIGHT_SECONDS, expected);
+      owlFlightPose(flight.from, flight.to, owl.flightProgress, expected);
       // flat-ok: two room-local points (her root in the room's group, the pure path's pose) in the reading room's own flat space
       liveFlight.worst = Math.max(liveFlight.worst, Math.hypot(owl.feet.x - expected.x, owl.feet.y - expected.y, owl.feet.z - expected.z));
       liveFlight.frames += 1;
+      liveFlight.waited = Math.max(liveFlight.waited, owl.waited);
     } else {
+      if (flight) flightFrames.push(flight.k);
       flight = null;
     }
     prevFeet.copy(owl.feet);
@@ -3919,6 +3949,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
       deskClearAway &&= collision.isClearCircle(OX + desk.x, OZ + desk.z, PLAYER_RADIUS);
     }
     if (owl.perched) {
+      if (Number.isNaN(perchTopSat)) perchTopSat = collision.highestTopAt(OX + perch.x, OZ + perch.z, Infinity) - LIBRARY_FLOOR_Y; // flat-ok: a top over the reading room's own flat floor
       // flat-ok: two room-local points (her root in the room's group, owlPerch()) in the reading room's own flat space
       perchedOff = Math.min(perchedOff, Math.hypot(owl.feet.x - perch.x, owl.feet.y - perch.y, owl.feet.z - perch.z));
       if (!perchedTouch) {
@@ -3977,7 +4008,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
         if (off >= 1) offCushionAt[i] = t - phaseAt.dispersing;
       }
     });
-    if (phaseAt.dispersing !== undefined && Number.isNaN(homeAt) && owl.atDesk && !owl.flying && !owl.solidWaiting) homeAt = t - phaseAt.dispersing;
+    if (phaseAt.dispersing !== undefined && Number.isNaN(homeAt) && owl.atDesk && !owl.flying) homeAt = t - phaseAt.dispersing;
     if (phaseAt.dispersing !== undefined && phase === 'idle' && landed === null) landed = { nextIn: library.storyTime.nextIn, told: library.storyTime.told };
     if (phaseAt.dispersing !== undefined && phase === 'idle' && kids.every((kid, i) => !Number.isNaN(offCushionAt[i]!) || kid.driver.mode === 'stroll')) break;
   }
@@ -4027,6 +4058,13 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     awayFrames > 0 && deskClearAway,
     `while she was away (${awayFrames} frames) her desk spot (${desk.x}, ${desk.z}) was clear for a child: ${deskClearAway} — her solid goes with her`,
   );
+  const chairSeat = libraryArmchairSize().seat;
+  const perchTopGone = collision.highestTopAt(OX + perch.x, OZ + perch.z, Infinity) - LIBRARY_FLOOR_Y; // flat-ok: a top over the reading room's own flat floor
+  say(
+    Math.abs(perchTopSat - (perch.y + drawnOwlTop)) <= 0.002 && Math.abs(perchTopGone - chairSeat) <= 0.002,
+    `solid on the chair: the top over her perch was ${perchTopSat.toFixed(3)} m the first frame she sat there — her head (${(perch.y + drawnOwlTop).toFixed(3)}: the seat ` +
+      `${perch.y.toFixed(3)} and her drawn top ${drawnOwlTop.toFixed(3)}), a body nobody stands inside — and ${perchTopGone.toFixed(3)} m once she had flown home (the seat's, ${chairSeat.toFixed(3)})`,
+  );
   say(
     !!perchedTouch && perchedTouch.points > 0 && perchedTouch.touchable === 0,
     `the owl as drawn on the chair: ${perchedTouch?.touchable ?? '?'} of her ${perchedTouch?.points ?? 0} visible points are beyond the chair's solids (by more than ${RESOLVER_SLACK} m) ` +
@@ -4035,10 +4073,14 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   /** How far a bubble's tail may be from over her head: the anchor is written the frame she moves, so this is rounding. */
   const TAIL_OFF = 0.02;
   say(
-    trail.wing > 0 && trail.chair > 0 && trail.worst <= TAIL_OFF,
-    `her bubble follows her: on every frame she spoke through the story (${trail.wing} on the wing, the call; ${trail.chair} on the story chair, the reading; ${trail.desk} at her desk) ` +
+    trail.desk > 0 && trail.chair > 0 && trail.worst <= TAIL_OFF,
+    `her bubble follows her: on every frame she spoke through the story (${trail.desk} at her desk, the call; ${trail.chair} on the story chair, the reading) ` +
       `its tail was at most ${trail.worst.toFixed(3)} m from ${OWL_BUBBLE_OVER_HEAD} m over her head (${TAIL_OFF} allowed)${trail.worstAt ? `, the worst ${trail.worstAt}` : ''}` +
-      `${trail.wing === 0 ? ' — SHE NEVER SPOKE ON THE WING: nothing measured there' : ''}${trail.chair === 0 ? ' — SHE NEVER SPOKE ON THE CHAIR: nothing measured there' : ''}`,
+      `${trail.desk === 0 ? ' — SHE NEVER SPOKE AT HER DESK: the call was not measured' : ''}${trail.chair === 0 ? ' — SHE NEVER SPOKE ON THE CHAIR: nothing measured there' : ''}`,
+  );
+  say(
+    trail.wing === 0 && liveFlight.frames > 0,
+    `her flights are silent, so her bubble never hides her flying over the stacks (browser QA round 1): she spoke on ${trail.wing} of her ${liveFlight.frames} frames on the wing — the call is said at her desk, and she takes off when it is said`,
   );
   say(
     readAloud > 0 && readDrawn === readAloud,
@@ -4072,6 +4114,12 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     offCushionAt.every((at) => at <= 20) && homeAt <= 10,
     `afterwards every child was up and a metre off her cushion within ${Math.max(...offCushionAt).toFixed(1)} s of the last word ` +
       `(${kids.map((kid, i) => `${kid.plan.name} ${offCushionAt[i]!.toFixed(1)} s`).join(', ')}; 20 allowed), and the owl home, solid, within ${homeAt.toFixed(1)} s (10 allowed)`,
+  );
+  const flightLength = Math.round(OWL_FLIGHT_SECONDS / CHILD_DT);
+  say(
+    flightFrames.length === 2 && flightFrames.every((frames) => Math.abs(frames - flightLength) <= 2) && liveFlight.waited === 0,
+    `nobody was in her way: her ${flightFrames.length} flights took ${flightFrames.join(' and ')} frames (${flightLength} for OWL_FLIGHT_SECONDS ${OWL_FLIGHT_SECONDS} s, 2 allowed either way), ` +
+      `and she waited ${liveFlight.waited.toFixed(2)} s for anybody (the child on her cushion, her pets at her heels, the children on theirs)`,
   );
   say(
     landed !== null && landed.told === toldBefore + 1 && landed.nextIn === STORY_EVERY,
@@ -4149,37 +4197,362 @@ console.log("\nFLIGHT — the owl's path to the story chair and home: over every
     liveFlight.flights >= 2 && liveFlight.frames > 0 && liveFlight.worst <= 0.01,
     `the live owl flew owlFlightPose itself: ${liveFlight.flights} flights, ${liveFlight.frames} frames, at most ${(liveFlight.worst * 100).toFixed(2)} cm off it (1 cm allowed)`,
   );
-  // Landing home onto a child: she stands where the owl's solid goes while the owl is away, and the
-  // owl lands there. Her solid must wait — never appear round the child and shove her — and go back
-  // the moment she has stepped out. Flown by the owl's own `flyTo`, story time not asked.
-  {
-    const spot = LIBRARY_LIBRARIAN_SPOT;
-    owl.flyTo(false);
-    child.run(OWL_FLIGHT_SECONDS + 0.2);
-    const perchedThere = owl.perched;
-    // Behind the desk, on her spot: the desk is in front of it, so stand her there by teleport, as a
-    // child who walked round would be.
-    child.stand(spot.x, spot.z, 0);
-    child.run(0.2);
-    const stood = child.room();
-    const onTheSpot = Math.hypot(stood.x - spot.x, stood.z - spot.z);
-    owl.flyTo(true);
-    child.run(OWL_FLIGHT_SECONDS + 0.2);
-    const after = child.room();
-    const shoved = Math.hypot(after.x - stood.x, after.z - stood.z);
-    const waited = owl.atDesk && owl.solidWaiting && collision.isClearCircle(OX + spot.x, OZ + spot.z, 0.05);
-    // She walks out from behind the desk: the solid goes back as soon as she is clear of it.
-    child.run(2, child.towards(-1, 0));
-    const back = !owl.solidWaiting && !collision.isClearCircle(OX + spot.x, OZ + spot.z, 0.05);
-    say(
-      perchedThere && onTheSpot <= owl.radius && waited && shoved <= 0.01 && back,
-      `landing home onto a child: stood on the owl's spot (${onTheSpot.toFixed(2)} m from it) while she was on the chair (${perchedThere}), ` +
-        `the owl landed and her solid waited (${waited}) — the child was moved ${shoved.toFixed(3)} m (0.01 allowed) — and went back once she walked out (${back})`,
-    );
-    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
-    child.run(0.3);
-  }
   note(`FLIGHT: ${OWL_FLIGHT_SECONDS} s a flight, cruise ${owlCruiseHeight().toFixed(2)} m (the stacks' ${stack.toFixed(2)} + ${OWL_CRUISE_OVER_STACKS}); the owl's own desk solid and the chair she lands in left out of the sweep; ${owl.atDesk ? 'she is home' : 'SHE IS NOT HOME'}`);
+}
+
+
+/**
+ * **NEVER INSIDE HER** (browser QA round 1, 23 Oct 2026) — the owl is solid
+ * wherever she is drawn, and never moves into anybody.
+ *
+ * QA found the two drawn inside each other twice: the child hopped onto the
+ * story chair's seat and stood inside the reading owl (her only solid was her
+ * desk's; the seat is a top), and the owl flew home onto a child standing in
+ * her spot behind the desk (her desk solid deliberately waited, so she stood
+ * drawn through the child). Now she has a solid on the chair, one moving body
+ * on the wing, and she waits for anybody in her way (`LibraryOwl`'s class doc).
+ *
+ * **The instrument** is the thing QA saw, measured: every visible point of the
+ * owl as the game poses her, each frame, inside the real child's own collision
+ * cylinder (`PLAYER_RADIUS` round her feet, `KID_HEIGHT` tall — what every
+ * solid in the game keeps her out of) by more than the resolver's slack. It
+ * has a control first: a cylinder stood on the owl's own feet finds her inside
+ * it, one 2.5 m off finds nothing. Then, each by the real child on the stick
+ * — her three pets at her heels, the library's children strolling — with the
+ * real owl flying by her own `flyTo` (story time not asked, its clock held),
+ * each from a state it sets up and asserts:
+ *
+ * 1. **the seat, the owl on it** (QA's major): hops at the seat from the floor
+ *    at its front and from the tops of cushions 4 and 5, at three moments of a
+ *    step — she is never up on the chair, the owl never inside her;
+ * 2. **the seat, the child on it first**: the owl comes to the chair and waits
+ *    over her, never moving her, and perches once she has stepped down;
+ * 3. **her desk spot, the child in it** (QA's other major): the owl comes home,
+ *    waits over her through three hops, and lands once she has walked out,
+ *    her desk solid back;
+ * 4. **beside her at take-off**: the child pressed against her north side,
+ *    where the climb goes — she waits on the ground until the child steps away;
+ * 5. **on her head at take-off**: she does not fly off with the child on her
+ *    head, and goes once the child has stepped off.
+ *
+ * Who she waited for is reported with each (`LibraryOwl.waitingFor`).
+ *
+ * Proved red by hand (the handoff, with the geometry): the chair solid never
+ * attached; the wait taken out (`wouldTouch` always false); her solids' top at
+ * the rest pose's height; and the old `LibraryOwl` whole.
+ */
+console.log('\nNEVER INSIDE HER — the owl is solid wherever she is drawn, and never flies into anybody or comes down on them:');
+{
+  const spot = LIBRARY_LIBRARIAN_SPOT;
+  const perch = owlPerch();
+  const chair = libraryArmchairSize();
+  const seatTop = chair.seat;
+  /** A room-local point in the story chair's own frame (+Z its front, the way its sitter looks). */
+  const chairLocal = (x: number, z: number): { x: number; z: number } => {
+    const yaw = (LIBRARY_STORY_CHAIR.facing * Math.PI) / 180;
+    const dx = x - LIBRARY_STORY_CHAIR.at.x;
+    const dz = z - LIBRARY_STORY_CHAIR.at.z;
+    return { x: dx * Math.cos(yaw) - dz * Math.sin(yaw), z: dx * Math.sin(yaw) + dz * Math.cos(yaw) };
+  };
+  /** Up on the story chair: her feet on its seat's top, her middle over the chair or just off its front (QA stood her there). */
+  const upOnTheChair = (): boolean => {
+    const at = chairLocal(child.room().x, child.room().z);
+    const front = chair.centreZ + chair.depth / 2;
+    return (
+      Math.abs(at.x - chair.centreX) <= chair.width / 2 + 0.1 &&
+      at.z <= front + 0.35 &&
+      Math.abs(child.player.position.y - (LIBRARY_FLOOR_Y + seatTop)) <= 0.03 // flat-ok: her feet over the reading room's own flat floor
+    );
+  };
+
+  /** How much of the owl is drawn inside an upright cylinder `radius` round `feet` (world), `height` tall — deeper than the resolver's slack. */
+  const owlDrawnInside = (feet: Readonly<Vector3>, radius: number, height: number): { points: number; inside: number; first: string } => {
+    let points = 0;
+    let inside = 0;
+    let first = '';
+    const fx = feet.x - OX;
+    const fy = feet.y - LIBRARY_FLOOR_Y; // flat-ok: the reading room's own flat floor
+    const fz = feet.z - OZ;
+    visiblePoints(
+      owl.handle.root,
+      (p) => {
+        points += 1;
+        if (Math.hypot(p.x - fx, p.z - fz) > radius - RESOLVER_SLACK) return;
+        const up = p.y - fy; // flat-ok: a height in the reading room's own flat space
+        if (up < RESOLVER_SLACK || up > height - RESOLVER_SLACK) return;
+        inside += 1;
+        if (!first) first = `(${p.x.toFixed(2)}, ${p.y.toFixed(2)} up, ${p.z.toFixed(2)})`;
+      },
+      library.roomRoot,
+    );
+    return { points, inside, first };
+  };
+  /** Every frame of a scenario: on how many the owl was drawn inside the child, the worst and where, frames she was up on the chair, and who the owl waited for. */
+  interface Watch {
+    frames: number;
+    insideFrames: number;
+    worst: number;
+    worstAt: string;
+    onChair: number;
+    readonly waitedFor: Set<string>;
+  }
+  const watching = (): Watch => ({ frames: 0, insideFrames: 0, worst: 0, worstAt: '', onChair: 0, waitedFor: new Set() });
+  const look = (into: Watch, what: string): void => {
+    into.frames += 1;
+    if (owl.waitingFor) into.waitedFor.add(owl.waitingFor);
+    if (upOnTheChair() && owl.perched) into.onChair += 1;
+    const seen = owlDrawnInside(child.player.position, PLAYER_RADIUS, KID_HEIGHT);
+    if (seen.inside === 0) return;
+    into.insideFrames += 1;
+    if (seen.inside <= into.worst) return;
+    into.worst = seen.inside;
+    const at = child.player.position;
+    into.worstAt =
+      `${what}: ${seen.inside} of her ${seen.points} points inside the child, e.g. ${seen.first}; the child's feet at room ` +
+      `(${(at.x - OX).toFixed(2)}, ${(at.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(at.z - OZ).toFixed(2)})`; // flat-ok: room-local, the reading room's own flat space
+  };
+  /** Steps `seconds` (or until `until`), watching every frame; hands back the seconds `until` took, or NaN. */
+  const run = (into: Watch, what: string, seconds: number, steer?: Steer, until?: () => boolean): number => {
+    for (let i = 0; i < Math.round(seconds / CHILD_DT); i += 1) {
+      child.step(steer);
+      look(into, what);
+      if (until?.()) return (i + 1) * CHILD_DT;
+    }
+    return Number.NaN;
+  };
+  const verdict = (watch: Watch): string =>
+    (watch.insideFrames === 0
+      ? `the owl drawn inside her on 0 of ${watch.frames} frames`
+      : `the owl drawn INSIDE HER on ${watch.insideFrames} of ${watch.frames} frames — the worst ${watch.worstAt}`) +
+    `; she waited for ${watch.waitedFor.size ? [...watch.waitedFor].join(', ') : 'nobody'}`;
+  /** The top over a room-local point: a solid's, or the floor's. */
+  const topAt = (x: number, z: number): number => collision.highestTopAt(OX + x, OZ + z, Infinity) - LIBRARY_FLOOR_Y; // flat-ok: a top over the reading room's own flat floor
+  /**
+   * **The owl home, or on the chair, with the child well out of her way first** (at the desk's front,
+   * her pets with her) — a scenario's starting state, asserted: a set-up that did not happen throws, and
+   * says who the owl was waiting for.
+   */
+  const settle = (home: boolean, into: Watch, what: string): void => {
+    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+    child.run(1);
+    if (home ? owl.atDesk : owl.perched) return;
+    owl.flyTo(home);
+    const took = run(into, what, OWL_FLIGHT_SECONDS + 6, undefined, () => (home ? owl.atDesk : owl.perched));
+    if (Number.isNaN(took)) throw new Error(`NEVER INSIDE HER: ${what} — the owl never got there in ${OWL_FLIGHT_SECONDS + 6} s (waiting for: ${owl.waitingFor || 'nobody'}; flying ${owl.flying}, progress ${owl.flightProgress.toFixed(3)})`);
+  };
+
+  // CONTROL — the instrument finds the owl inside a cylinder stood on her own feet, and nothing in one 2.5 m off.
+  const atHer = new Vector3(OX + owl.feet.x, LIBRARY_FLOOR_Y + owl.feet.y, OZ + owl.feet.z);
+  const onHer = owlDrawnInside(atHer, PLAYER_RADIUS, KID_HEIGHT);
+  const offHer = owlDrawnInside(atHer.clone().add(new Vector3(0, 0, -2.5)), PLAYER_RADIUS, KID_HEIGHT);
+  say(
+    owl.atDesk && onHer.inside > 0 && offHer.inside === 0,
+    `CONTROL — the instrument: a child's cylinder (r ${PLAYER_RADIUS}, ${KID_HEIGHT} m) stood on the owl's own feet has ${onHer.inside} of her ${onHer.points} drawn points inside it; ` +
+      `one 2.5 m north of her, ${offHer.inside}`,
+  );
+
+  // Her solids, as registered, against her drawn reach measured apart on fresh models.
+  const perchSolid = library.solids.find((candidate) => candidate.what === 'the owl on the story chair');
+  const drawnPerchReach = perchReach(createLibraryOwl());
+  const drawnFlightReach = flightReach(createLibraryOwl());
+  say(
+    !!perchSolid &&
+      perchSolid.shape === 'wall' &&
+      perchSolid.points.every((point) => Math.abs(point.x - perch.x) < 1e-9 && Math.abs(point.z - perch.z) < 1e-9) &&
+      perchSolid.radius >= drawnPerchReach - 0.002 &&
+      Math.abs(perchSolid.top - (perch.y + drawnOwlTop)) <= 0.002 &&
+      owl.flightRadius >= drawnFlightReach - 0.002,
+    `her solid on the story chair: 'the owl on the story chair' ${perchSolid ? `a zero-length capsule at (${perch.x.toFixed(2)}, ${perch.z.toFixed(2)}), r ${perchSolid.radius.toFixed(3)}, top ${perchSolid.top.toFixed(3)}` : 'NOT REGISTERED'} ` +
+      `against her drawn reach perched ${drawnPerchReach.toFixed(3)} m (a fresh model: breath at its widest, head straight, wings down) and her head on the seat ` +
+      `${(perch.y + drawnOwlTop).toFixed(3)}; on the wing a moving body r ${owl.flightRadius.toFixed(3)} against her drawn reach in flight ${drawnFlightReach.toFixed(3)} m (2 mm allowed)`,
+  );
+
+  // 1. The seat, the owl on it: hops at the seat from the floor at its front (QA's spot between
+  // cushions 4 and 5) and from the tops of cushions 4 and 5 (QA's other road, "Up+Left from cushion
+  // 5"), each at three moments of a step.
+  const toChair = watching();
+  settle(false, toChair, 'flying to the chair');
+  const seatTopPerched = topAt(perch.x, perch.z);
+  const cushionTop = libraryCushionSize().top;
+  const seatFront = { x: perch.x - 0.2, z: perch.z + 0.5 };
+  const STARTS = [
+    { what: "the floor at the chair's front", x: 4.0, z: -9.95, up: 0, dx: seatFront.x - 4.0, dz: seatFront.z + 9.95 },
+    { what: 'the top of cushion 5', x: libraryCushion('cushion-5').at.x, z: libraryCushion('cushion-5').at.z, up: cushionTop, dx: -0.55, dz: -0.85 },
+    { what: 'the top of cushion 4', x: libraryCushion('cushion-4').at.x, z: libraryCushion('cushion-4').at.z, up: cushionTop, dx: 0.55, dz: -0.85 },
+  ];
+  /** Stood at a start: on the floor, or on a cushion's top (a teleport to its height, as a child who climbed it is). */
+  const standAt = (start: (typeof STARTS)[number]): void => {
+    child.player.teleportTo(OX + start.x, LIBRARY_FLOOR_Y + start.up, OZ + start.z, Math.PI);
+    camera.snapTo(child.player.position);
+    child.run(0.3);
+  };
+  /** QA's hop: the stick held toward the seat, jump pressed `after` seconds in, the stick let go `hold` seconds in. */
+  const hopAtTheSeat = (start: (typeof STARTS)[number], after: number, hold: number, into: Watch | null): void => {
+    const steer = child.towards(start.dx, start.dz);
+    for (let i = 0; i < Math.round(1.6 / CHILD_DT); i += 1) {
+      if (i === Math.round(after / CHILD_DT)) child.input.pressVirtual('jump');
+      child.step(i * CHILD_DT < hold ? steer : undefined);
+      if (into) look(into, `hopping at the seat from ${start.what}, the jump ${after} s in`);
+    }
+  };
+  const hops = watching();
+  let hopsTried = 0;
+  for (const start of STARTS) {
+    for (const after of [0.06, 0.15, 0.3]) {
+      standAt(start);
+      hopAtTheSeat(start, after, 0.45, hops);
+      hopsTried += 1;
+    }
+  }
+  say(
+    owl.perched && Math.abs(seatTopPerched - (perch.y + drawnOwlTop)) <= 0.002 && hops.onChair === 0 && hops.insideFrames === 0 && toChair.insideFrames === 0,
+    `the seat with the owl on it (QA's major): perched (${owl.perched}), the top over her perch ${seatTopPerched.toFixed(3)} m — her head; ` +
+      `${hopsTried} hops at the seat from its front and from cushions 4 and 5 — the child up on the chair on ${hops.onChair} frames, ${verdict(hops)}; flying in, ${verdict(toChair)}`,
+  );
+
+  // 2. The seat, the child on it first: the owl home, the child hops up the way QA did, the owl comes — and waits.
+  const home1 = watching();
+  settle(true, home1, 'flying home');
+  let upOn = false;
+  for (const hold of [0.38, 0.3, 0.45, 0.52]) {
+    standAt(STARTS[1]!);
+    hopAtTheSeat(STARTS[1]!, 0.06, hold, null);
+    upOn = upOnTheChair() && !child.player.isAirborne;
+    if (upOn) break;
+  }
+  child.run(0.3);
+  const onSeatAt = child.room();
+  const rescuesOnSeat = child.player.wedgeRescues;
+  const firstOn = watching();
+  owl.flyTo(false);
+  run(firstOn, 'the owl coming to the chair with the child on its seat', 6);
+  const waitedOverHer = owl.waited;
+  const waitingThen = owl.waitingFor;
+  const stillUp = upOnTheChair();
+  const perchedOnHer = owl.perched;
+  const offAt = child.room();
+  const stayedPut = Math.hypot(offAt.x - onSeatAt.x, offAt.z - onSeatAt.z);
+  const rescuesWaited = child.player.wedgeRescues - rescuesOnSeat;
+  // Down off the chair the way she came, and off with her pets along the north aisle, out of the owl's way.
+  // Down off the chair the way she came, over cushion 5's top (a step, climbed walking into it: the floor
+  // in front of the chair between cushions 4 and 5 is narrower than she is), and then she goes — stood at the
+  // desk's front, as a child who walked off would be; her pets walk after her.
+  const back = child.room();
+  run(firstOn, 'the child stepping down off the seat over cushion 5, the owl waiting over her', 0.8, child.towards(libraryCushion('cushion-5').at.x + 0.6 - back.x, libraryCushion('cushion-5').at.z + 0.6 - back.z));
+  const steppedTo = child.room();
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  const goneTo = child.room();
+  const perchedAfter = run(firstOn, 'the owl perching once the seat is free', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.perched);
+  say(
+    upOn && stillUp && !perchedOnHer && waitedOverHer > 2 && waitingThen === 'the child' && stayedPut <= 0.01 && !Number.isNaN(perchedAfter) && firstOn.insideFrames === 0,
+    `the child on the seat first (up on it: ${upOn}, at room (${onSeatAt.x.toFixed(2)}, ${onSeatAt.z.toFixed(2)})): the owl came and waited ${waitedOverHer.toFixed(1)} s for '${waitingThen || 'nobody'}' ` +
+      `(perched on her: ${perchedOnHer}; the child moved ${stayedPut.toFixed(3)} m meanwhile, 0.01 allowed; still up on the chair: ${stillUp}), and perched ${perchedAfter.toFixed(1)} s after she had gone ` +
+      `(stepped down to room (${steppedTo.x.toFixed(2)}, ${steppedTo.z.toFixed(2)}), then off to the desk's front (${goneTo.x.toFixed(2)}, ${goneTo.z.toFixed(2)})); ${verdict(firstOn)}`,
+  );
+  say(
+    upOn && rescuesWaited === 0,
+    `nothing about where she stood changed with the owl waiting over her (${OWL_HEADROOM} m of headroom kept over a head, a step): ${rescuesWaited} wedge put-down(s) ` +
+      `while the owl waited (none wanted; an owl hovering a hand over her hair once made the chair's arm — a step she could climb — a wall, and put her down on a cushion 1.25 m off)`,
+  );
+
+  // 3. Her desk spot, the child in it (QA's other major): the owl comes home, waits over her through three hops, lands once she has walked out.
+  const toChair2 = watching();
+  settle(false, toChair2, 'flying to the chair');
+  child.stand(spot.x, spot.z, 0);
+  child.run(0.5);
+  const inSpot = child.room();
+  const spotClear = topAt(spot.x, spot.z) <= 0.01;
+  const homing = watching();
+  owl.flyTo(true);
+  run(homing, 'the owl coming home with the child in her spot', 6);
+  const waitedHome = owl.waited;
+  const waitingHome = owl.waitingFor;
+  const landedOnHer = owl.atDesk;
+  const stood = child.room();
+  const moved = Math.hypot(stood.x - inSpot.x, stood.z - inSpot.z);
+  for (let hop = 0; hop < 3; hop += 1) {
+    child.input.pressVirtual('jump');
+    run(homing, `hop ${hop + 1} under the waiting owl`, 1.2);
+  }
+  // Out from behind the desk the way a child goes: north onto the entrance hall's aisle, and off east along it, her pets after her.
+  run(homing, 'the child walking out of her spot, north', 0.3, child.towards(0, -1));
+  run(homing, 'the child going off east along the aisle, her pets after her', 1.2, child.towards(1, 0));
+  const leftTo = child.room();
+  const landed = run(homing, 'the owl landing once her spot is free', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.atDesk);
+  const deskTop = topAt(spot.x, spot.z);
+  say(
+    spotClear && !landedOnHer && waitedHome > 2 && waitingHome === 'the child' && moved <= 0.01 && !Number.isNaN(landed) && Math.abs(deskTop - drawnOwlTop) <= 0.002 && homing.insideFrames === 0,
+    `the child in the owl's desk spot (QA's other major; the spot clear floor while she was away: ${spotClear}): the owl came home and waited ${waitedHome.toFixed(1)} s for '${waitingHome || 'nobody'}' ` +
+      `(landed on her: ${landedOnHer}; the child moved ${moved.toFixed(3)} m, 0.01 allowed; three hops under her), and landed ${landed.toFixed(1)} s after she had walked out (to room (${leftTo.x.toFixed(2)}, ${leftTo.z.toFixed(2)})), ` +
+      `the top over her spot then ${deskTop.toFixed(3)} m — her head, her desk solid back; ${verdict(homing)}`,
+  );
+
+  // 4. Beside her at take-off: the child pressed against her north side, in the climb's way.
+  const home2 = watching();
+  settle(true, home2, 'flying home');
+  child.stand(spot.x, spot.z - (owl.radius + PLAYER_RADIUS + 0.02), 180);
+  child.run(0.5);
+  const beside = child.room();
+  const besideApart = Math.hypot(beside.x - spot.x, beside.z - spot.z);
+  const takeOff = watching();
+  owl.flyTo(false);
+  run(takeOff, 'the owl about to take off with the child against her', 3);
+  const heldOnGround = !owl.airborne && owl.waited >= 2.9 && Math.abs(topAt(spot.x, spot.z) - drawnOwlTop) <= 0.002;
+  const waitingBeside = owl.waitingFor;
+  run(takeOff, 'the child stepping away west', 1.2, child.towards(-1, 0));
+  const flewOff = run(takeOff, 'the owl taking off once there is room', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.perched);
+  say(
+    besideApart <= owl.flightRadius + PLAYER_RADIUS && heldOnGround && takeOff.waitedFor.has('the child') && !Number.isNaN(flewOff) && takeOff.insideFrames === 0,
+    `the child pressed against her at take-off, ${besideApart.toFixed(2)} m north of her middle (her wings want ${(owl.flightRadius + PLAYER_RADIUS).toFixed(2)}): ` +
+      `she waited on the ground (for '${waitingBeside || 'nobody'}' at 3 s), her desk solid still under her (${heldOnGround}), and flew once the child stepped away (perched ${flewOff.toFixed(1)} s later); ${verdict(takeOff)}`,
+  );
+
+  // 5. On her head at take-off: home first, then the child stood on her head, then asked to fly.
+  const home3 = watching();
+  settle(true, home3, 'flying home');
+  child.player.teleportTo(OX + spot.x, LIBRARY_FLOOR_Y + drawnOwlTop, OZ + spot.z, 0);
+  camera.snapTo(child.player.position);
+  child.run(0.5);
+  const headFeet = child.player.position.y - LIBRARY_FLOOR_Y; // flat-ok: her feet over the reading room's own flat floor
+  const onHead = Math.abs(headFeet - drawnOwlTop) <= 0.02 && !child.player.isAirborne;
+  const onHerHead = watching();
+  owl.flyTo(false);
+  run(onHerHead, 'the owl asked to fly with the child on her head', 3);
+  const stayedDown = !owl.airborne && owl.waited >= 2.9;
+  const waitingHead = owl.waitingFor;
+  // Off her head the way a child goes: a step off its edge, north, onto the floor, and off east along the aisle.
+  run(onHerHead, 'the child stepping off her head', 0.4, child.towards(0, -1));
+  run(onHerHead, 'the child going off east along the aisle, her pets after her', 1.2, child.towards(1, 0));
+  const flewAfter = run(onHerHead, 'the owl taking off once her head is free', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.perched);
+  say(
+    onHead && stayedDown && onHerHead.waitedFor.has('the child') && !Number.isNaN(flewAfter) && onHerHead.insideFrames === 0,
+    `the child stood on her head (her feet at ${headFeet.toFixed(3)} m, her drawn top ${drawnOwlTop.toFixed(3)}: on her head ${onHead}): asked to fly, she stayed down for '${waitingHead || 'nobody'}' (${stayedDown}) ` +
+      `(for '${waitingHead || 'nobody'}' at 3 s) and flew once the child stepped off (perched ${flewAfter.toFixed(1)} s later); ${verdict(onHerHead)}`,
+  );
+
+  // Home again, the child at the desk's front, for CLOCK.
+  const home4 = watching();
+  settle(true, home4, 'flying home');
+  const between = [home1, toChair2, home2, home3, home4];
+  const merged: Watch = watching();
+  for (const watch of between) {
+    merged.frames += watch.frames;
+    merged.insideFrames += watch.insideFrames;
+    if (watch.worst > merged.worst) {
+      merged.worst = watch.worst;
+      merged.worstAt = watch.worstAt;
+    }
+    for (const who of watch.waitedFor) merged.waitedFor.add(who);
+  }
+  say(
+    owl.atDesk && !owl.flying && Math.abs(topAt(spot.x, spot.z) - drawnOwlTop) <= 0.002 && merged.insideFrames === 0,
+    `and home behind her desk at the end, solid there (${owl.atDesk}); her flights between the scenarios, the child at the desk's front: ${verdict(merged)}`,
+  );
+  note(
+    `NEVER INSIDE HER: ${[toChair, hops, home1, firstOn, toChair2, homing, home2, takeOff, home3, onHerHead, home4].reduce((sum, watch) => sum + watch.frames, 0)} frames watched ` +
+      `(the owl's ${onHer.points} drawn points against the child's cylinder each frame); her chair solid r ${perchSolid?.radius.toFixed(3) ?? '?'}, her body on the wing r ${owl.flightRadius.toFixed(3)}, ` +
+      `her solids' top ${drawnOwlTop.toFixed(3)} m over her feet; ${child.frames} frames stepped so far`,
+  );
 }
 
 console.log('\nCLOCK and ABORT — the next story comes STORY_EVERY after the last one, a different book; a fresh visit\'s forty seconds in; and leaving mid-story leaves nobody sitting:');

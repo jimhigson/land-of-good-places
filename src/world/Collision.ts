@@ -180,7 +180,7 @@ interface SolidHeights {
   /**
    * **A body that moves** ({@link CollisionWorld.addMovingBox}) — the train's
    * engine and carriages, moved every frame by the train itself
-   * ({@link CollisionWorld.moveBox}). Every query a mover asks reads it where
+   * ({@link CollisionWorld.moveBox}), and the library's owl on the wing. Every query a mover asks reads it where
    * it is now (it is filed in the grid's wide bucket, never by cell); nothing
    * that plans the ground counts it — it is banded, so the route lattice and
    * the planner's ground queries pass it by, as they must a thing that will
@@ -2122,7 +2122,8 @@ export class CollisionWorld {
   /**
    * **A body that moves** — a filled box like {@link addBox}'s, with an
    * absolute top and an absolute base, that its owner moves every frame with
-   * {@link moveBox}: the train's engine and carriages. See
+   * {@link moveBox}: the train's engine and carriages, and the library's owl
+   * in flight. See
    * {@link SolidHeights.moving} for what that changes and what it does not.
    *
    * `base` must be a height in the world below which nothing stands — the
@@ -2130,9 +2131,13 @@ export class CollisionWorld {
    * lattice and the planner's ground queries pass it by, while everything a
    * mover asks (being pushed out, standing on its top, bumping its side) meets
    * it exactly as it meets the scenery.
+   *
+   * `rounding`, as {@link addBox} takes it: a body drawn round is a box with
+   * no core and its radius for a rounding — a disc, the library's owl on the
+   * wing (#718).
    */
-  addMovingBox(cx: number, cz: number, halfX: number, halfZ: number, yaw: number, top: number, base: number): BoxCollider {
-    const box = this.addBox(cx, cz, halfX, halfZ, yaw, 0, top, false, true, base);
+  addMovingBox(cx: number, cz: number, halfX: number, halfZ: number, yaw: number, top: number, base: number, rounding = 0): BoxCollider {
+    const box = this.addBox(cx, cz, halfX, halfZ, yaw, rounding, top, false, true, base);
     box.moving = true;
     return box;
   }

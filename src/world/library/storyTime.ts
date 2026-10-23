@@ -31,12 +31,19 @@ import { LIBRARY_FLOOR_Y } from './layout';
  * ## Phases
  *
  * - `idle` — the clock runs.
- * - `gathering` — the call is said, the owl flies to the chair, and every
- *   child is summoned (`LibraryKidDriver.summon`). A child at her cushion's
- *   edge hops onto it ({@link STORY_SIT_SECONDS}, `NpcCharacter.beginSeated`:
- *   her root on the **floor**, the dining rule) facing the chair. When every
- *   child is seated or has settled where she was held, and the owl has
- *   perched — or after {@link GATHER_TIMEOUT} — the reading begins.
+ * - `gathering` — the owl says the call from her desk and every child is
+ *   summoned (`LibraryKidDriver.summon`); **once the call is said, she flies**
+ *   to the chair. Never the call on the wing: her bubble is bigger on screen
+ *   than she is, and a call held over the whole flight turned it into a
+ *   speech bubble gliding over the stacks (browser QA round 1, 23 Oct 2026).
+ *   Every flight of hers is silent, so the flight is hers to see. A child at
+ *   her cushion's edge hops onto it ({@link STORY_SIT_SECONDS},
+ *   `NpcCharacter.beginSeated`: her root on the **floor**, the dining rule)
+ *   facing the chair. When every child is seated or has settled where she was
+ *   held, and the owl has perched — or after {@link GATHER_TIMEOUT} — the
+ *   reading begins. (The owl perches only on a seat nobody is standing on: she
+ *   waits over a child up on it, `LibraryOwl`'s flight; past the timeout, she
+ *   reads from the air.)
  * - `reading` — the owl says the title line, the book's own pages (already
  *   held to the brevity rule by the books' own check) and the ending. A child
  *   still arriving sits when she gets there.
@@ -114,6 +121,8 @@ export class StoryTime {
   private listenedThrough = false;
   private awarded = false;
   private held = false;
+  /** The call is being said: she takes off for the chair the frame she falls quiet. */
+  private flyWhenSaid = false;
 
   constructor(owl: LibraryOwl, children: () => readonly StoryChild[], listener: () => StoryListenerView) {
     this.owl = owl;
@@ -173,6 +182,10 @@ export class StoryTime {
         return;
       case 'gathering':
         this.gatherFor += dt;
+        if (this.flyWhenSaid && !this.owl.speaking) {
+          this.flyWhenSaid = false;
+          this.owl.flyTo(false);
+        }
         this.seatArrivals();
         if (this.gatherFor >= GATHER_TIMEOUT || (this.owl.perched && this.children().every((kid) => kid.driver.seated || kid.driver.gaveUp))) this.read();
         return;
@@ -205,6 +218,7 @@ export class StoryTime {
    */
   abort(): void {
     this.wanted = false;
+    this.flyWhenSaid = false;
     this.clock = STORY_FIRST_AFTER;
     if (this.phaseValue === 'idle') return;
     for (const kid of this.children()) {
@@ -238,7 +252,7 @@ export class StoryTime {
     return readable.find(unheard) ?? null;
   }
 
-  /** The call, the flight, the summons. */
+  /** The call and the summons — the flight follows the call, the frame she has said it ({@link update}). */
   private begin(): void {
     this.wanted = false;
     const book = this.pickBook();
@@ -251,7 +265,7 @@ export class StoryTime {
     this.gatherFor = 0;
     this.awarded = false;
     this.owl.tell([LIBRARY_LINES.owl.storyCall]);
-    this.owl.flyTo(false);
+    this.flyWhenSaid = true;
     for (const kid of this.children()) kid.driver.summon();
   }
 
