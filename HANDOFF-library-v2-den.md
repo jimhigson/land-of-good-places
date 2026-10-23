@@ -261,9 +261,9 @@ the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.0
 - [x] Green: `check:library` **139 ✓, 0 ✗, exit 0** on the honest seed-5 park; every red below proved
       and reverted; `tsc --noEmit` 0, `typecheck:test` 0, `build` 0, `check:tap-spacing` 0,
       `check:exits` 0, `check:solids` (core) 0, the library vitests 20/20.
-- [ ] Step 13, Step 14 (not this step).
+- [x] Step 13 — after this section was written; see the Step 13 part above. Step 14 not started.
 
-The park source hash at this head is **49915bd62ca101f37a9fe5cb4dc21ac22b94f7ce1dd24f99377c22c45610688b**
+The park source hash at Step 12's head (f0d4b8e2) was **49915bd62ca101f37a9fe5cb4dc21ac22b94f7ce1dd24f99377c22c45610688b**
 (every src file here is in the closure). No park was re-solved: `.parks/` holds the integration
 branch's honest seed 5 (hash 8644cfac…, digest d6721090fb3f1d3a, copied from
 `.claude/worktrees/library-v2/.parks`), and every World-building check was run with
@@ -505,9 +505,9 @@ both files are other tracks' live work. Shard 1 of CI will be red for the PR unt
   (ready); `makeSessionUnsavable()` for den links; KIDS den avoidance; `ASSET_MANIFEST.md` and the
   `library_build.py` docstring (the game hinges the leaf on its back-left edge by the measured depth
   and swings it +π/2 into the den).
-- **Step 13**: DEN WALLS' 12 bodies and the nest's disc (−22.6, −6.3) r ≈ 0.83 (the old handoff's
-  note); `check-labels` scene 5's dragon visit uses `openDenInstantly()`; the dragon zone only while
-  `denOpen`.
+- **Step 13** — done at 9dc39dd9 (above): DEN WALLS sets apart the two grid spots under the dragon and
+  its nest; the dragon zone is offered only while the shelf is open; `check-labels` scene 5's visits are
+  the join's (Step 13's "For the join").
 - **The Artist's den kit** (`origin/art/library-v2-den` @ b76a149c: `src/art/assets/libraryDen.glb`,
   `libraryDenGlb.ts`, `art/blend/library_den_build.py`, `pack-library-den-asset.mts`, +84 lines in
   `layout.ts`; its handoff `HANDOFF-art-library-v2-den.md` is filled only to its Step 1) has the
