@@ -846,3 +846,63 @@ QA's report: head 66549d88, not approved, 2 major + 6 minor; screenshots and scr
   she is — on the ground at take-off, hovering in the air on the way, over the child's head on
   the way down — and goes on the moment the way is clear. No new blocker: these are her own
   solids, where she is drawn.
+
+### The majors — fixed (64e02d9c, 8f063e18, 5c02a0d7, 12533eff)
+
+- `LibraryOwl`: **'the owl on the story chair'** — a zero-length capsule at `owlPerch()` (4.00, −11.19),
+  r = `perchReach` (her drawn reach perched, breath ±, head straight, wings down: **0.663**), top = seat 0.36 +
+  `owlTop` (**2.011**), registered through `props.wall` (so held to every keep-out) and detached until she
+  perches. **On the wing one moving body** (`CollisionWorld.addMovingBox`, now with a `rounding`: a disc,
+  r = `flightReach` **0.877** — wings at the widest beat, head anywhere in ±1, shush wing up or down, breath ±),
+  base her feet, top her feet + `owlTop`, moved every flight frame; out of the world at rest. **The wait**:
+  before each flight step, `wouldTouch(next pose)` against every bystander (`Library.owlBystanders`: the child
+  r 0.62, the library's three children r 0.5, each pet out of the backpack r 0.22 — all `KID_HEIGHT` tall, with
+  `OWL_HEADROOM` = one step 0.62 over a head); touching → she holds this frame (`waited`, `waitingFor`). Take-off
+  = the first step taken (her capsule out, the body in); landing hands over to the capsule she lands in (no
+  wider than the body). `putSolidBack`/`solidWaiting` are gone. `World.attachParade` gives the library the parade.
+- **`owlTop`** (1.651 = her head at the top of a breath; rest pose 1.619): every solid of hers stands to it —
+  found by NEVER INSIDE HER: with the rest-pose top a breath in pushed her ear tufts up through the feet of a
+  child stood on her head.
+- **`OWL_HEADROOM`** (one step): found by NEVER INSIDE HER — hovering 10 cm over the head of a child stood on the
+  chair's seat edge, the owl took the headroom of the arm (a step she could climb), the arm became a wall,
+  and the wedge rescue put her down on cushion 4, 1.25 m away.
+- **A shush on the story chair is her face alone**: the shush wing reaches 0.740 m forward, 0.16 m past the
+  chair's front, over the rug; covering it would hold every child 16 cm off the chair all story long.
+- **The call is said at her desk, then she flies** (`storyTime` `flyWhenSaid`): every flight silent.
+
+**Instrument (check:library NEVER INSIDE HER):** every visible point of the owl (3460, the room frame) inside the
+real child's cylinder (r 0.62, 2.12 m, from her feet) by more than 0.03; CONTROL: a cylinder on the owl's own feet
+holds 3015 of her points, one 2.5 m north holds 0. Scenarios (seed 5, room (−600, −600), the desk spot (6, 5.3),
+the perch (4.00, 0.36, −11.19), the chair's seat box x 3.57..4.43, z −11.354..−10.610, top 0.36; arms to 0.717;
+cushions 4 (3, −9.5) and 5 (5, −9.5), top 0.36): (1) 9 hops at the seat with her on it, from (4.0, −9.95) on
+the floor and from the tops of cushions 5 and 4 (QA's stick (−0.55, −0.85) / (0.55, −0.85), jump at 0.06/0.15/0.3 s,
+stick let go at 0.45 s); (2) the child on the seat first (QA's recipe from cushion 5's top → (3.81, −10.73)), the
+owl comes, waits, perches after she goes; (3) the child in the desk spot, the owl comes home, waits through 3 hops,
+lands after she walks out north and east; (4) the child 1.31 m north of the owl at take-off; (5) the child on her
+head (feet 1.651). Green at 5c02a0d7: **221 ✓ 0 ✗**, every scenario "inside her on 0 of N frames" (864, 434, 670,
+409, 433; 3578 watched); she waited for the child (and a pet) where she should, for nobody in STORY.
+
+**Reds** (each by hand, reverted, restamped; logs `.claude/library-build-scratch/qa1/red-*.log`):
+- (a) the chair solid never attached (`if (flight.home) this.props.attach(...)`) → exit 1, **219 ✓ 2 ✗**:
+  `✗ solid on the chair: the top over her perch was 0.360 m …` and `✗ the seat with the owl on it (QA's major): …
+  the owl drawn INSIDE HER on 312 of 864 frames — the worst hopping at the seat from the top of cushion 5, the jump
+  0.3 s in: 1095 of her 3460 points inside the child, e.g. (3.89, 0.64 up, -10.89); the child's feet at room
+  (3.68, 0.54 up, -10.41)` — QA's Defect B (`red-qa1-a-no-chair-solid.log`).
+- (b) the wait taken out (`if (false && this.wouldTouch(...))`) → exit 1, **217 ✓ 4 ✗**: the desk spot
+  `… landed on her: true; the child moved 1.347 m … the owl drawn INSIDE HER on 31 of 667 frames — … 2787 of her
+  3460 points inside the child, e.g. (5.80, 0.07 up, 5.35); the child's feet at room (6.14, 0.00 up, 5.68)` — QA's
+  Defect A; the seat first (770 points, moved 1.625 m), beside her (`desk solid still under her (false)`), on her
+  head (410 points) (`red-qa1-b-no-wait.log`).
+- (c) her solids' top at the rest pose (`this.top = this.handle.height`) → exit 1, **8 ✗**: OWL `top 1.619 m against
+  her drawn top at her tallest breath 1.651 m`, the chair solid's top 1.979 vs 2.011, and on her head `2 of her 3460
+  points inside the child, e.g. (6.43, 1.65 up, 5.30); the child's feet at room (6.00, 1.62 up, 5.30)` (`red-qa1-c-rest-top.log`).
+- (d) no headroom (`OWL_HEADROOM = 0 * BUILDING_STEP_UP`) → exit 1, **219 ✓ 2 ✗**: `the child moved 1.250 m meanwhile …
+  still up on the chair: false` and `✗ … 1 wedge put-down(s) while the owl waited` (`red-qa1-d-no-headroom.log`).
+- (e) the call said on the wing (`this.owl.flyTo(false)` in `begin`) → check:library exit 1, **219 ✓ 2 ✗**: `✗ her
+  flights are silent …: she spoke on 191 of her 382 frames on the wing` and `… 0 at her desk, the call … — SHE NEVER
+  SPOKE AT HER DESK`; check:labels exit 1, `FAIL E coverage: … the owl's bubble was never drawn while she called story
+  time from her desk (0 frames she said it)` (`red-qa1-e-call-on-wing*.log`).
+
+Other checks at 12533eff: check:labels exit 0 (library: her call drawn on 208 of 208 frames at the desk, 0 frames
+spoken on the wing; reading bubble 1368, chip 1369, both 1368); check:flat-primitives, check:tap-spacing,
+check:solids, check:exits (235 s), check:brevity all exit 0 (`qa1/runs/g1`, `g2`).
