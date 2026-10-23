@@ -11,7 +11,7 @@ import { SpeechBubble } from '../../ui/SpeechBubble';
 import { lineSeconds } from '../../ui/speechTiming';
 import { playSurpriseChime } from '../../ui/chime';
 import { createFaceLife, type FaceLife } from '../../art/style/faceLife';
-import { visibleBounds, visibleReachXZ } from '../../art/style/measure';
+import { visibleBounds, visiblePoints, visibleReachXZ } from '../../art/style/measure';
 import { SpritePuffs } from '../../art/effects/spritePuffs';
 import { createLibraryOwl, type OwlHandle } from '../../art/models/libraryCreatures';
 import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../../art/models/libraryAssets';
@@ -46,29 +46,35 @@ import { LIBRARY_BOOKCASES, LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIA
  * standing there ({@link radius}, {@link standingReach} on the built model —
  * never typed), registered through `props.wall(spot, spot, …)` as a
  * zero-length capsule: the one round solid `CollisionWorld` can take out and
- * put back as the same object. **On the story chair** she has one of her own
- * too ({@link perchCapsule}: her reach over every pose she holds perched —
- * where her wings stay down, a shush there being her face alone). Each top is
- * her head at the top of a breath ({@link owlTop}), like every solid's real top
- * since PR #722: a top is where a jump
- * lands, and a jump that reaches the top of her head lands on it — physics,
- * not a flag. `LIBRARY_LIBRARIAN_SPOT` therefore left
+ * put back as the same object. `LIBRARY_LIBRARIAN_SPOT` therefore left
  * `libraryStandSpots()`: it is a place a child bumps into now, not one she
  * must be able to stand on.
  *
- * **On the wing she is one body that moves with her** ({@link body}: a moving
- * disc, `CollisionWorld.addMovingBox`, of her drawn reach at the widest beat
- * of her wings, base at her feet and top at her head) — the train's kind of
- * solid. And **like the train, she waits for anybody in her way**: before
- * each step of a flight she asks whether her body there would touch the
- * child, the child's pets or the library's children ({@link OwlBystanders});
- * if it would, she holds where she is — on the ground with her wings folded at
- * take-off, hovering on the way, just over the child's head coming down — and
- * flies on the moment it is clear. So she is never drawn inside anybody: not
- * landing on a child standing in her spot behind the desk, not perched round
- * one standing on the story chair's seat, not climbing through one beside her
- * (browser QA round 1, 23 Oct 2026, found the first two; the third is the
- * same disease).
+ * **Everywhere else she is one body that moves with her** ({@link body},
+ * `CollisionWorld.addMovingBox` — the train's kind of solid), its base at her
+ * feet and its top her head, in the shape she is there: low over her desk,
+ * her desk's disc; low over the story chair and perched on it, her drawn
+ * outline as a box ({@link perchShape}), which stands inside the chair's
+ * front ({@link OWL_PERCH_BACK}); in the air with her wings open, a disc of
+ * her reach at their widest beat ({@link flightReach}). She flies straight up,
+ * across and straight down ({@link owlFlightPose}), turning only at the top,
+ * her wings folded while she is low ({@link owlWingOpening}) — so whenever
+ * she is low she is over the spot she stands on and no wider than her solid
+ * there. Each top is her head at the top of a breath ({@link owlTop}), like
+ * every solid's real top since PR #722: a jump that reaches it lands on it —
+ * physics, not a flag.
+ *
+ * And **like the train, she waits for anybody in her way**: before each step
+ * of a flight she asks whether her body there would touch the child, the
+ * child's pets or the library's children ({@link OwlBystanders}), with a
+ * step's headroom over a head ({@link OWL_HEADROOM}); if it would, she holds
+ * where she is — on the ground at take-off, a step over the child's head
+ * coming down — and flies on the moment it is clear. So she is never drawn
+ * inside anybody: not landing on a child standing in her spot behind the
+ * desk, not perched round one standing on the story chair's seat, not rising
+ * through one on her head (browser QA round 1, 23 Oct 2026, found the first
+ * two; the third is the same disease) — and a child waiting at the chair's
+ * front, or pressed against her at her desk, is never in her way.
  *
  * ## Her words
  *
@@ -95,19 +101,18 @@ import { LIBRARY_BOOKCASES, LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIA
  * in making her say it. She shushes from her desk and from the story chair,
  * never on the wing; mid-story only her face answers (a story is a script),
  * and on the chair her wings stay down: there the shush wing would swing out
- * over the rug, past her chair's front, into a listener ({@link perchReach}).
- * Not while the
- * child is in the secret den: that condition is the den track's (#719), which
- * owns `libraryDenContains`.
+ * over the rug, past her chair's front, into a listener ({@link perchShape}).
+ * Not while the child is in the secret den: that condition is the den track's
+ * (#719), which owns `libraryDenContains`.
  *
  * ## Story time (plan Step 9)
  *
- * `storyTime.ts` flies her to the story chair and back ({@link flyTo}): a
- * straight line in plan, eased, over the stacks at her measured cruise
+ * `storyTime.ts` flies her to the story chair and back ({@link flyTo}): up,
+ * across in a straight line over the stacks at her measured cruise, and down
  * ({@link owlFlightPose}, pure, so `check:library`'s FLIGHT measures the very
- * path she flies — a wait only pauses her on it). The solid she stands in
- * goes as she leaves the ground and her moving body takes over; on landing it
- * hands over to the capsule where she lands. She perches on the chair's seat
+ * path she flies — a wait only pauses her on it). Her desk capsule goes as she
+ * leaves her desk and her body takes over; landed home, it hands back; landed
+ * on the chair, it stays, her solid there. She perches on the chair's seat
  * ({@link owlPerch}), `OWL_PERCH_BACK` into it.
  */
 export const OWL_ZONE_ID = 'library-owl';
@@ -165,23 +170,37 @@ const BEACON_POOL = 6;
 export const OWL_FLIGHT_SECONDS = 3.2;
 /** How far over the stacks' measured top her feet cruise (metres). */
 export const OWL_CRUISE_OVER_STACKS = 0.6;
-/** She is up at her cruise from this share of a flight … */
+/** She rises straight up to her cruise by this share of a flight … */
 export const OWL_CLIMBED_BY = 0.2;
-/** … until this one, and then comes down. */
+/** … crosses the room at it until this one, and then comes straight down. */
 export const OWL_DESCEND_AT = 0.8;
+/**
+ * Her wings stay folded until this share of a flight — when she is a step
+ * over a child's head (at 0.14 her feet are 2.98 m up from her desk, 3.06 from
+ * the story chair) — and are fully open by {@link OWL_WINGS_OPEN_BY}; folded
+ * again by the mirror of it as she comes down. Low over where she stands, she
+ * is no wider than her solid there, so a child pressed against it is never
+ * touched by a wing, and never in her way.
+ */
+export const OWL_WINGS_OPEN_FROM = 0.14;
+/** … open by this share (and from `1 −` it, folding). */
+export const OWL_WINGS_OPEN_BY = 0.19;
 /** Her wings' beat in flight: this far about each wing's own z (radians), at {@link OWL_WING_BEAT_RATE}. */
 export const OWL_WING_BEAT = 0.6;
 /** How fast her wings beat (radians a second). */
 export const OWL_WING_BEAT_RATE = 9;
 /**
  * How far back of the story chair's seat centre she sits (metres, along the
- * chair's own −Z, into it): measured, so that her face and glasses stay over
- * the chair's seat, inside its solids, where a child standing at the chair's
- * front cannot touch them — on the seat centre itself they reach 8 cm past
- * its front edge, at 0.12 m back still 4 cm — and her back stays inside the
- * chair's back (6.6 cm to spare). `check:library`'s STORY measures her perched.
+ * chair's own −Z, into it): far enough that her glasses — her furthest point
+ * forward, 0.631 m from her middle at the top of a breath — stay inside the
+ * chair's front face, so her solid there ({@link perchShape}) does too, and a
+ * child standing against the chair's front is never in her way as she comes
+ * down to it (browser QA round 1: at 0.15 they reached 4 cm past it, and a
+ * child at the chair's front held her in the air). Her back then stands 6 cm
+ * behind the chair's back, in the gap before the wall cases, which nobody fits
+ * in. `check:library` measures both, on a fresh model.
  */
-export const OWL_PERCH_BACK = 0.15;
+export const OWL_PERCH_BACK = 0.21;
 
 /**
  * **Where the glowing book's beacon rises from** ({@link BEACON_EVERY}): the
@@ -223,12 +242,15 @@ export interface RoomPoint {
 /**
  * **Where the owl's feet are at `t` of a flight** (0 at take-off, 1 on
  * landing), room-local — the plan's path, pure, so the check measures the
- * very line she flies. In plan, straight from `from` to `to`, eased in and out
- * (`s = smoothstep(0, 1, t)`); in height, the line between the two ends'
- * heights lifted to `cruise` by a bump that rises by {@link OWL_CLIMBED_BY}
- * and falls from {@link OWL_DESCEND_AT}, so she is up over the stacks for the
- * middle of the flight and comes down almost straight onto where she lands.
- * Writes `out` (allocating nothing) and returns it.
+ * very line she flies. **Straight up, across, straight down**: she rises from
+ * where she stood to `cruise` by {@link OWL_CLIMBED_BY}, crosses the room in a
+ * straight line at it, eased in and out, until {@link OWL_DESCEND_AT}, and
+ * comes straight down onto where she lands. Never low over the floor between:
+ * low, she is only ever over the spot she stands on, inside the solid she has
+ * there — so a child next to her desk or against her chair's front is never in
+ * her way (browser QA round 1: on a slanting way down over the rug, a child
+ * waiting at the chair's front held her in the air for good). Writes `out`
+ * (allocating nothing) and returns it.
  */
 export function owlFlightPose(
   from: Readonly<RoomPoint>,
@@ -238,23 +260,23 @@ export function owlFlightPose(
   cruise: number = owlCruiseHeight(),
 ): RoomPoint {
   const u = clamp01(t);
-  const s = smoothstep(0, 1, u);
+  const s = smoothstep(OWL_CLIMBED_BY, OWL_DESCEND_AT, u);
   out.x = lerp(from.x, to.x, s);
   out.z = lerp(from.z, to.z, s);
-  const base = lerp(from.y, to.y, s);
-  const bump = smoothstep(0, OWL_CLIMBED_BY, u) * (1 - smoothstep(OWL_DESCEND_AT, 1, u));
-  out.y = base + (cruise - base) * bump;
+  out.y = u < OWL_DESCEND_AT ? lerp(from.y, cruise, smoothstep(0, OWL_CLIMBED_BY, u)) : lerp(cruise, to.y, smoothstep(OWL_DESCEND_AT, 1, u));
   return out;
 }
 
 /**
- * **How far open her wings' beat is at `t` of a flight**, 0..1: opening as she
- * lifts off, folded again as she lands — the share of {@link OWL_WING_BEAT}
- * she beats at. One owner, so `check:library`'s FLIGHT measures her reach at
- * the opening she really has.
+ * **How far open her wings' beat is at `t` of a flight**, 0..1: folded while
+ * she rises and comes down near where she stands, open between — from
+ * {@link OWL_WINGS_OPEN_FROM} to {@link OWL_WINGS_OPEN_BY}, and closing over the
+ * mirror of it — the share of {@link OWL_WING_BEAT} she beats at. One owner, so
+ * `check:library`'s FLIGHT measures her reach at the opening she really has,
+ * and her moving body is the shape she is at it ({@link LibraryOwl.body}).
  */
 export function owlWingOpening(t: number): number {
-  return smoothstep(0, 0.1, t) * (1 - smoothstep(0.92, 1, t));
+  return smoothstep(OWL_WINGS_OPEN_FROM, OWL_WINGS_OPEN_BY, t) * (1 - smoothstep(1 - OWL_WINGS_OPEN_BY, 1 - OWL_WINGS_OPEN_FROM, t));
 }
 
 /**
@@ -359,23 +381,50 @@ export function owlTop(handle: OwlHandle): number {
 }
 
 /**
- * **Her plan reach across every pose she holds perched on the story chair** —
- * the radius of her solid there: her head straight (she watches the child
- * only from her desk) and her breath at rest or at either extreme, the
- * largest of them. Her wings stay down on the chair: a shush there is her face
- * alone ({@link noticeShush}), because the shush wing swings forward over the
- * rug — 0.740 m from her middle, 0.16 m past the chair's front — where at her
- * desk it swings over the desk, which nobody can stand in. The handle is left
- * at rest.
+ * **A plan shape of her solid, in her own frame**: a box (`halfX` across her,
+ * `halfZ` front to back) round its middle `(offX, offZ)`, thickened by
+ * `rounding` — a disc is no box and a rounding; her drawn outline at rest, a
+ * box and no rounding. `CollisionWorld.moveBox` takes its extents
+ * (`MovingShape`); the middle is carried round her by her yaw.
  */
-export function perchReach(handle: OwlHandle): number {
-  let reach = 0;
+export interface OwlShape {
+  readonly halfX: number;
+  readonly halfZ: number;
+  readonly rounding: number;
+  readonly offX: number;
+  readonly offZ: number;
+}
+
+/**
+ * **Her drawn outline as she sits on the story chair, in her own frame** —
+ * the box her solid there is ({@link LibraryOwl.body} at rest on the chair):
+ * every visible point of her with her head straight (she watches the child
+ * only from her desk), her wings down, and her breath at rest or at either
+ * extreme. A box rather than a disc of her reach because the chair is a box
+ * and she is wider than she is deep: a disc of 0.663 m stood 8 cm proud of the
+ * chair's front, where a child waiting there for the story held her in the air
+ * (browser QA round 1); the box stands inside the chair's front
+ * ({@link OWL_PERCH_BACK}). Her wings stay down on the chair: a shush there is
+ * her face alone ({@link noticeShush}), because the shush wing would swing
+ * forward over the rug — 0.740 m from her middle, 0.16 m past the chair's
+ * front. The handle is left at rest.
+ */
+export function perchShape(handle: OwlHandle): OwlShape {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
   for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
     handle.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
-    reach = Math.max(reach, visibleReachXZ(handle.root));
+    visiblePoints(handle.root, (point) => {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minZ = Math.min(minZ, point.z);
+      maxZ = Math.max(maxZ, point.z);
+    });
   }
   handle.body.scale.set(1, 1, 1);
-  return reach;
+  return { halfX: (maxX - minX) / 2, halfZ: (maxZ - minZ) / 2, rounding: 0, offX: (minX + maxX) / 2, offZ: (minZ + maxZ) / 2 };
 }
 
 /**
@@ -441,6 +490,13 @@ export type OwlBystanders = () => Iterable<Readonly<OwlBystander>>;
  */
 export const OWL_HEADROOM = BUILDING_STEP_UP;
 
+/**
+ * She turns between her facing and the way she travels over this share of a
+ * flight, at its top — after the climb, and before the descent — so she rises
+ * and comes down without turning, her solid the shape she stands in there.
+ */
+export const OWL_TURN_SHARE = 0.1;
+
 /** A flight under way: from where she took off, to where she lands, how far through, and how she faces on landing. */
 interface Flight {
   readonly from: RoomPoint;
@@ -454,6 +510,12 @@ interface Flight {
   t: number;
   /** Lands at her desk (her solid goes back) rather than on the story chair. */
   readonly home: boolean;
+  /** Her solid's shape low over where she took off — her desk's disc, the chair's box, or (from mid-air) her wings' disc. */
+  readonly fromShape: OwlShape;
+  /** … and low over where she lands. */
+  readonly toShape: OwlShape;
+  /** She has taken her first step: the solid she stood in has handed over to her body. */
+  leftGround: boolean;
 }
 
 /** A run of lines being said: which is up, how long it has left, and which one carries the cheer. */
@@ -487,22 +549,18 @@ export class LibraryOwl {
   readonly capsule: WallCollider;
   /** Her drawn top at her tallest breath ({@link owlTop}), over her feet: the top of every solid of hers. */
   readonly top: number;
-  /** Her plan reach over every pose she holds perched ({@link perchReach}): the radius of {@link perchCapsule}. */
-  readonly perchRadius: number;
-  /**
-   * Her solid on the story chair: a zero-length capsule at {@link owlPerch},
-   * {@link perchRadius} wide, its top her head's as she sits on the seat —
-   * registered as `'the owl on the story chair'`, out of the world until she
-   * lands there and taken out again as she leaves it.
-   */
-  readonly perchCapsule: WallCollider;
-  /** Her plan reach on the wing ({@link flightReach}): the radius of {@link body}. */
+  /** Her drawn outline perched, in her own frame ({@link perchShape}): her body's shape on the story chair. */
+  readonly perchBox: OwlShape;
+  /** Her plan reach on the wing ({@link flightReach}): the radius of {@link body} while her wings are open. */
   readonly flightRadius: number;
   /**
-   * **Her solid on the wing**: one moving disc (`CollisionWorld.addMovingBox`,
-   * a rounding of {@link flightRadius} round no core), its base at her feet and
-   * its top at her head, moved with her every frame of a flight. Out of the
-   * world whenever she is standing in one of her capsules.
+   * **Her solid everywhere but her desk**: one moving body
+   * (`CollisionWorld.addMovingBox`), its base at her feet and its top at her
+   * head, moved with her every frame of a flight, in the shape she is there
+   * ({@link shapeAt}) — her desk's disc or the chair's box low over each, a disc
+   * of {@link flightRadius} with her wings open — and, landed on the story chair,
+   * her solid there, in the shape of {@link perchBox}. Out of the world while
+   * she stands at her desk, where {@link capsule} is her solid.
    */
   readonly body: BoxCollider;
   /** Her speech bubble — `actionFeedback` for {@link OWL_ZONE_ID}, so it outranks her own chip. */
@@ -544,8 +602,12 @@ export class LibraryOwl {
   /** On the story chair, reading. */
   private perchedFlag = false;
   private flight: Flight | null = null;
-  /** The capsule she is standing in — her desk's or the story chair's — or null while her moving body has her. */
-  private restSolid: WallCollider | null;
+  /** Her desk capsule is in the world: she is standing behind her desk, not about to leave it. */
+  private deskSolidIn = true;
+  /** Her moving body is in the world: she is on the wing, or perched on the story chair. */
+  private bodyIn = false;
+  /** Scratch for her body's shape at the step being asked about. */
+  private readonly shapeScratch = { halfX: 0, halfZ: 0, rounding: 0, offX: 0, offZ: 0 };
   /** How long she has waited, this flight, for somebody to get out of her way (seconds). */
   private waitedSeconds = 0;
   /** Who she is waiting for this frame, or '' — the bystander her next step would have touched. */
@@ -572,18 +634,13 @@ export class LibraryOwl {
     // Measured before she is moved: her reach about her own origin, in her own frame.
     this.radius = standingReach(this.handle);
     this.top = owlTop(this.handle);
-    this.perchRadius = perchReach(this.handle);
+    this.perchBox = perchShape(this.handle);
     this.flightRadius = flightReach(this.handle);
     this.handle.root.position.set(this.spot.x, 0, this.spot.z);
     this.handle.root.rotation.y = (this.spot.facing * Math.PI) / 180;
     roomRoot.add(this.handle.root);
     this.capsule = props.wall('the owl', this.spot, this.spot, this.radius, this.top);
-    this.restSolid = this.capsule;
-    // The story chair's: held to every keep-out like the desk's, then out of the world until she perches.
-    const perch = owlPerch();
-    this.perchCapsule = props.wall('the owl on the story chair', perch, perch, this.perchRadius, perch.y + this.top);
-    props.detach([this.perchCapsule]);
-    // On the wing: registered once, out of the world until she leaves the ground (`updateFlight`).
+    // Her body: registered once, out of the world until she leaves her desk (`updateFlight`).
     this.body = collision.addMovingBox(
       LIBRARY_ORIGIN_X + this.spot.x,
       LIBRARY_ORIGIN_Z + this.spot.z,
@@ -631,7 +688,7 @@ export class LibraryOwl {
 
   /** Off the ground, her moving body carrying her solid ({@link body}) — from the frame she leaves her capsule to the frame she lands. */
   get airborne(): boolean {
-    return this.restSolid === null;
+    return this.flight !== null && this.flight.leftGround;
   }
 
   /** How far through her flight she is, 0 at take-off to 1 on landing — `NaN` when she is not flying. What `owlFlightPose` is asked at. */
@@ -734,6 +791,9 @@ export class LibraryOwl {
    */
   flyTo(home: boolean): void {
     const root = this.handle.root;
+    // Where she stands now decides her shape low over it: her desk's disc, the chair's box, or — turned
+    // round in the air — her wings' disc.
+    const fromShape = this.atDeskFlag ? this.deskShape : this.perchedFlag ? this.perchBox : this.wingShape;
     this.atDeskFlag = false;
     this.perchedFlag = false;
     this.waitedSeconds = 0;
@@ -743,7 +803,18 @@ export class LibraryOwl {
     const landYaw = ((home ? this.spot.facing : perch.facing) * Math.PI) / 180;
     const from: RoomPoint = { x: root.position.x, y: root.position.y, z: root.position.z };
     const travelYaw = Math.atan2(to.x - from.x, to.z - from.z);
-    this.flight = { from, to, startYaw: root.rotation.y, landYaw, travelYaw, t: 0, home };
+    const toShape = home ? this.deskShape : this.perchBox;
+    this.flight = { from, to, startYaw: root.rotation.y, landYaw, travelYaw, t: 0, home, fromShape, toShape, leftGround: false };
+  }
+
+  /** Her desk solid's shape, as her body has it low over her desk: a disc of {@link radius}. */
+  private get deskShape(): OwlShape {
+    return { halfX: 0, halfZ: 0, rounding: this.radius, offX: 0, offZ: 0 };
+  }
+
+  /** Her body's shape with her wings open: a disc of {@link flightRadius}. */
+  private get wingShape(): OwlShape {
+    return { halfX: 0, halfZ: 0, rounding: this.flightRadius, offX: 0, offZ: 0 };
   }
 
   /**
@@ -763,9 +834,9 @@ export class LibraryOwl {
     this.atDeskFlag = true;
     this.waitingForWhat = '';
     this.collision.removeBox(this.body);
-    this.props.detach([this.perchCapsule]);
+    this.bodyIn = false;
     this.props.attach([this.capsule]);
-    this.restSolid = this.capsule;
+    this.deskSolidIn = true;
     this.anchorBubble();
   }
 
@@ -945,7 +1016,7 @@ export class LibraryOwl {
     }
     head.rotation.y = damp(head.rotation.y, target, HEAD_TURN_HALF_LIFE, dt);
 
-    // The shush wing goes up only at her desk, over the desk; on the story chair a shush is her face alone (`perchReach`).
+    // The shush wing goes up only at her desk, over the desk; on the story chair a shush is her face alone (`perchShape`).
     wingL.rotation.x = damp(wingL.rotation.x, this.shushFor > 0 && this.atDeskFlag ? SHUSH_WING_X : 0, WING_HALF_LIFE, dt);
     // On the wing they beat (`updateFlight` writes them); landed, they fold back.
     if (!this.flight) {
@@ -1005,52 +1076,49 @@ export class LibraryOwl {
 
   /**
    * **One frame of a flight** — the next step along {@link owlFlightPose},
-   * **taken only if her moving body there would touch nobody**
-   * ({@link wouldTouch}); otherwise she waits where she is this frame, and asks
-   * again the next. The first step she takes is her take-off: the capsule she
-   * stood in goes and her moving body ({@link body}) takes over; every step
-   * after moves it with her; the last is her landing, where it hands over to
-   * the capsule she lands in — her desk's, or the story chair's — no wider
-   * than it, so nobody it kept out is inside the one that replaces it.
+   * **taken only if her body there would touch nobody** ({@link wouldTouch});
+   * otherwise she waits where she is this frame, and asks again the next. The
+   * first step she takes is her take-off: from her desk, its capsule goes and
+   * her moving body ({@link body}) takes over; from the story chair, the body
+   * that was her solid there flies on. Every step moves the body with her, in
+   * the shape she is at it ({@link shapeAt}); the last is her landing: at her
+   * desk the body hands back to its capsule (the same disc), on the chair it
+   * stays, her solid there.
    *
-   * She turns from her facing to the way she travels as she climbs, and to her
-   * landing facing as she comes down; her wings beat, opening as she lifts off
-   * and folding as she lands — and while she waits in the air they keep
-   * beating, so she hovers.
+   * She turns between her facing and the way she travels only at the top of
+   * the flight ({@link yawAt}), so she rises and comes down without turning,
+   * no wider than the solid she stands in. Her wings beat with the opening
+   * {@link owlWingOpening} gives — folded low, open in the air — and while she
+   * waits in the air they keep beating, so she hovers.
    */
   private updateFlight(dt: number, elapsed: number): void {
     const flight = this.flight;
     if (!flight) return;
+    const { root, wingL, wingR, head } = this.handle;
     const next = Math.min(1, flight.t + dt / OWL_FLIGHT_SECONDS);
     owlFlightPose(flight.from, flight.to, next, this.pose);
-    if (this.wouldTouch(this.pose)) {
+    const yaw = this.yawAt(flight, next);
+    const shape = this.shapeAt(flight, next);
+    if (this.wouldTouch(this.pose, yaw, shape)) {
       this.waitedSeconds += dt;
     } else {
       this.waitingForWhat = '';
-      if (this.restSolid) {
-        this.props.detach([this.restSolid]);
-        this.restSolid = null;
-        this.collision.restoreBox(this.body);
+      if (!flight.leftGround) {
+        flight.leftGround = true;
+        if (this.deskSolidIn) {
+          this.props.detach([this.capsule]);
+          this.deskSolidIn = false;
+        }
+        if (!this.bodyIn) {
+          this.collision.restoreBox(this.body);
+          this.bodyIn = true;
+        }
       }
       flight.t = next;
-      this.handle.root.position.set(this.pose.x, this.pose.y, this.pose.z);
-      this.collision.moveBox(
-        this.body,
-        LIBRARY_ORIGIN_X + this.pose.x,
-        LIBRARY_ORIGIN_Z + this.pose.z,
-        0,
-        LIBRARY_FLOOR_Y + this.pose.y + this.top,
-        LIBRARY_FLOOR_Y + this.pose.y,
-      );
+      root.position.set(this.pose.x, this.pose.y, this.pose.z);
+      root.rotation.y = yaw;
+      this.placeBody(yaw, shape);
     }
-    const { root, wingL, wingR, head } = this.handle;
-    const climb = smoothstep(0, OWL_CLIMBED_BY, flight.t);
-    const land = smoothstep(OWL_DESCEND_AT, 1, flight.t);
-    const yaw =
-      land > 0
-        ? flight.travelYaw + angleDelta(flight.travelYaw, flight.landYaw) * land
-        : flight.startYaw + angleDelta(flight.startYaw, flight.travelYaw) * climb;
-    root.rotation.y = yaw;
     head.rotation.y = damp(head.rotation.y, 0, HEAD_TURN_HALF_LIFE, dt);
     const beat = Math.sin(elapsed * OWL_WING_BEAT_RATE) * OWL_WING_BEAT * owlWingOpening(flight.t);
     wingL.rotation.z = beat;
@@ -1058,31 +1126,78 @@ export class LibraryOwl {
     if (flight.t < 1) return;
     this.flight = null;
     root.rotation.y = flight.landYaw;
-    this.collision.removeBox(this.body);
-    this.restSolid = flight.home ? this.capsule : this.perchCapsule;
-    this.props.attach([this.restSolid]);
-    if (flight.home) this.atDeskFlag = true;
-    else this.perchedFlag = true;
+    if (flight.home) {
+      this.collision.removeBox(this.body);
+      this.bodyIn = false;
+      this.props.attach([this.capsule]);
+      this.deskSolidIn = true;
+      this.atDeskFlag = true;
+    } else {
+      this.perchedFlag = true;
+    }
+  }
+
+  /** Her facing at `t` of a flight: her own at the ends, the way she travels across the top, turning over {@link OWL_TURN_SHARE} after the climb and before the descent. */
+  private yawAt(flight: Readonly<Flight>, t: number): number {
+    const out = smoothstep(OWL_CLIMBED_BY, OWL_CLIMBED_BY + OWL_TURN_SHARE, t);
+    const back = smoothstep(OWL_DESCEND_AT - OWL_TURN_SHARE, OWL_DESCEND_AT, t);
+    return back > 0
+      ? flight.travelYaw + angleDelta(flight.travelYaw, flight.landYaw) * back
+      : flight.startYaw + angleDelta(flight.startYaw, flight.travelYaw) * out;
   }
 
   /**
-   * **Would her moving body at `pose` (room-local feet) touch anybody?** — the
-   * child, her pets, the library's children ({@link OwlBystanders}), each an
-   * upright cylinder: within {@link flightRadius} and their radius of her in
-   * plan, and their heights — with {@link OWL_HEADROOM} over their heads —
-   * overlapping hers. The one question that keeps her from ever being drawn
-   * inside somebody, asked before every step she takes.
+   * **Her body's shape at `t` of a flight**: with her wings open at all, a disc
+   * of {@link flightRadius}; folded, the shape she stands in at the end she is
+   * low over — her desk's disc, or the story chair's box. Written into one
+   * scratch shape.
    */
-  private wouldTouch(pose: Readonly<RoomPoint>): boolean {
-    const x = LIBRARY_ORIGIN_X + pose.x;
+  private shapeAt(flight: Readonly<Flight>, t: number): Readonly<OwlShape> {
+    const shape = owlWingOpening(t) > 0 ? this.wingShape : t < 0.5 ? flight.fromShape : flight.toShape;
+    const out = this.shapeScratch;
+    out.halfX = shape.halfX;
+    out.halfZ = shape.halfZ;
+    out.rounding = shape.rounding;
+    out.offX = shape.offX;
+    out.offZ = shape.offZ;
+    return out;
+  }
+
+  /** Her body moved to where she is, turned with her, in `shape` — its middle carried round her by her yaw. */
+  private placeBody(yaw: number, shape: Readonly<OwlShape>): void {
+    const at = this.handle.root.position;
+    const middleX = at.x + shape.offX * Math.cos(yaw) + shape.offZ * Math.sin(yaw);
+    const middleZ = at.z - shape.offX * Math.sin(yaw) + shape.offZ * Math.cos(yaw);
+    this.collision.moveBox(this.body, LIBRARY_ORIGIN_X + middleX, LIBRARY_ORIGIN_Z + middleZ, -yaw, LIBRARY_FLOOR_Y + at.y + this.top, LIBRARY_FLOOR_Y + at.y, shape);
+  }
+
+  /**
+   * **Would her body at `pose` (room-local feet), turned to `yaw`, in `shape`,
+   * touch anybody?** — the child, her pets, the library's children
+   * ({@link OwlBystanders}), each an upright cylinder: in plan, closer to her
+   * shape than their radius (the shape's box in her own frame, its rounding
+   * round it — `CollisionWorld`'s own box), and their heights — with
+   * {@link OWL_HEADROOM} over their heads — overlapping hers. The one question
+   * that keeps her from ever being drawn inside somebody, asked before every
+   * step she takes.
+   */
+  private wouldTouch(pose: Readonly<RoomPoint>, yaw: number, shape: Readonly<OwlShape>): boolean {
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const middleX = LIBRARY_ORIGIN_X + pose.x + shape.offX * cos + shape.offZ * sin;
+    const middleZ = LIBRARY_ORIGIN_Z + pose.z - shape.offX * sin + shape.offZ * cos;
     const feet = LIBRARY_FLOOR_Y + pose.y;
-    const z = LIBRARY_ORIGIN_Z + pose.z;
     const head = feet + this.top;
     for (const somebody of this.bystanders()) {
-      const reach = this.flightRadius + somebody.radius;
-      const dx = somebody.x - x;
-      const dz = somebody.z - z;
-      if (dx * dx + dz * dz >= reach * reach) continue;
+      // Into her own frame (her local x across her, z ahead), then to the box's nearest point.
+      const dx = somebody.x - middleX;
+      const dz = somebody.z - middleZ;
+      const lx = dx * cos - dz * sin;
+      const lz = dx * sin + dz * cos;
+      const ox = Math.max(Math.abs(lx) - shape.halfX, 0);
+      const oz = Math.max(Math.abs(lz) - shape.halfZ, 0);
+      const reach = shape.rounding + somebody.radius;
+      if (ox * ox + oz * oz >= reach * reach) continue;
       // flat-ok: heights in the reading room's own flat space, off the sphere — her feet and head against theirs
       if (somebody.y < head && feet < somebody.y + somebody.height + OWL_HEADROOM) {
         this.waitingForWhat = somebody.what;

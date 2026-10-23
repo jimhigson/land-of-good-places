@@ -489,6 +489,17 @@ export interface BoxCollider extends SolidHeights {
 }
 
 /**
+ * **A moving body's plan, as {@link CollisionWorld.moveBox} may reshape it**:
+ * the core's half-extents along its own X and Z and the rounding round it — a
+ * disc is no core and its radius, a capsule a core with one zero half-extent.
+ */
+export interface MovingShape {
+  readonly halfX: number;
+  readonly halfZ: number;
+  readonly rounding: number;
+}
+
+/**
  * **A world `y` at the solid's reference point, held as its distance from the
  * planet's centre** — or `NaN` where heights are plain `y` (indoors, or a
  * height that is not a place: relative, infinite). See {@link SolidHeights}.
@@ -2145,11 +2156,14 @@ export class CollisionWorld {
   /**
    * **Moves a body {@link addMovingBox} registered** — in place, to `(cx, cz)`
    * turned by `yaw` (as {@link addBox} takes it), with its absolute `top` and
-   * `base` there. Not a change to the park: {@link revision} does not move, so
-   * nothing that caches the park rebuilds — which is why only a moving body may
-   * be moved (anything else throws).
+   * `base` there, and — given a `shape` — its half-extents and rounding too: a
+   * body whose drawn plan changes as it moves (the library's owl, wings folded
+   * low over where she stands and open in the air, #718). Not a change to the
+   * park: {@link revision} does not move, so nothing that caches the park
+   * rebuilds — which is why only a moving body may be moved (anything else
+   * throws).
    */
-  moveBox(box: BoxCollider, cx: number, cz: number, yaw: number, top: number, base: number): void {
+  moveBox(box: BoxCollider, cx: number, cz: number, yaw: number, top: number, base: number, shape?: Readonly<MovingShape>): void {
     if (!box.moving) throw new Error('CollisionWorld.moveBox: only a body addMovingBox registered may move');
     box.cx = cx;
     box.cz = cz;
@@ -2159,6 +2173,12 @@ export class CollisionWorld {
     box.topRadius = radiusFor(cx, cz, top);
     box.baseHeight = base;
     box.baseRadius = radiusFor(cx, cz, base);
+    if (!shape) return;
+    box.halfX = Math.max(0, shape.halfX);
+    box.halfZ = Math.max(0, shape.halfZ);
+    box.rounding = shape.rounding;
+    // A body that changes shape is sub-stepped against its thinnest, as one registered that thin would be.
+    this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, Math.min(box.halfX, box.halfZ) + box.rounding);
   }
 
   /**
