@@ -27,10 +27,13 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
 - [x] full `pnpm run check` (seed 5): exit 0, 2708 s
 - [ ] `pnpm run test:procgen` (16 seeds) + `check:coplanar`, `check:walk-reach`, `check:swept-bus`
       (`check:all`'s extra steps; CI jobs of their own) once `.parks/all16/` is complete and swapped in
-- [ ] PR held until #733's CI run 39953269843 finishes, so its final gate is not queued behind my
-      parks jobs (the account runs ~40 jobs at once; #733 alone had 28 parks runners going)
+- [x] PR held until #733's CI run 39953269843 was down to its last job (its parks stage had 28
+      runners going; the account runs ~40 jobs at once), then opened
 - [x] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk) — below
-- [ ] PR opened, stacked on #733
+- [x] **PR #734** opened, stacked on #733: head `feat/library-chapter-books-pr` (fast-forward pushes
+      only: `git push origin feat/library-chapter-books:feat/library-chapter-books-pr`), base
+      `feat/library-v2-pr`; body from `chapter-books/pr-body.md` (`gh pr edit 734 --body-file …`);
+      first CI run 39964056493 (+ Update adoption 39964056536) on d063e876
 - [ ] CI green on the PR head
 - [ ] preview deep links checked and in the PR body
 
