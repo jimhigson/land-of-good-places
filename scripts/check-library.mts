@@ -2621,7 +2621,7 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
     say(
       took && releasedAfter === 1 && zoomBack === zoomHad && cameBack === 0,
       `a step hands the camera straight back: pressed again, the glance took the camera after ${waited} frames (${took}; zoom ${zoomIn.toFixed(2)}, she had ${zoomHad.toFixed(2)}); ` +
-        `a nudge of the stick (moving her at most ${GLANCE_MOVE_CANCEL} m wanted to count) and it let go ${releasedAfter >= 0 ? `on frame ${releasedAfter}` : 'NOT within 6 frames'} (1 wanted), ` +
+        `a nudge of the stick and it let go ${releasedAfter >= 0 ? `on frame ${releasedAfter}` : 'NOT within 6 frames'} (1 wanted: she is no longer standing still — a drift of ${GLANCE_MOVE_CANCEL} m off where she stood counts too), ` +
         `the zoom target back at ${zoomBack.toFixed(2)}, and it took the camera again on ${cameBack} frames of the rest of her recommendation (0 wanted)`,
     );
     child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
