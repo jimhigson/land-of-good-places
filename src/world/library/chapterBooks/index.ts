@@ -80,13 +80,12 @@ import { catchThatChicken } from './catchThatChicken';
  * (`parkFacts.ts` → `World.ts` → `Library.ts` → `libraryLines.ts` →
  * `books.ts` → this index), so every edit to a book moves the park hash.
  *
- * **When the sixth book is in**: `check-library.mts`'s READABLE clause
- * `CHAPTER_BOOKS.length <= chapter slots` becomes `===` and its "slot(s) WAIT
- * for their books" note goes (`shelfBooks.ts`'s `WAITING_SLOTS` is empty
- * then) — never the other way round.
- *
- * Empty until the real books land: the checks measure fixtures of their own
- * meanwhile, and the game ships no placeholder book.
+ * **All six are in** (the two book branches joined, 23 October 2026), so
+ * `check-library.mts`'s READABLE clause holds `CHAPTER_BOOKS.length ===`
+ * the big readers' slots and no slot waits (`shelfBooks.ts`'s
+ * `WAITING_SLOTS` is empty): a book that goes missing from this list goes
+ * red there, never quietly back to a gap in the row. Every book wears a
+ * cover colour of its own (`test/library/chapter-books.test.ts`, case 4).
  */
 export const CHAPTER_BOOKS: readonly LibraryBook[] = [
   // Shelf places 1–3, in shelf order, below this line.
