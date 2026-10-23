@@ -6,9 +6,9 @@ worktree `.claude/worktrees/library-v2-den`. Epic #714, part #719. The plan is
 the walled pocket) came onto the integration branch from the old den track — its record is
 `HANDOFF-library-den.md`, still accurate for what it built. Step 12: Claude Fable 5.1, 22–23 Oct.
 Step 13: Claude Opus 5.5, 23 Oct (a restart: the first Step 13 agent left only scratch measures,
-nothing committed). **Step den-art: Claude Opus 5.5, 23 Oct (in progress — see its section
-below).** Step 14 (links, tap spacing, kids out of the den, docs) is this track's next step
-and is **not started**.
+nothing committed). **Step den-art: Claude Opus 5.5, 23 Oct — done (its section first, below).**
+Step 14 (links, tap spacing, kids out of the den, docs) is this track's next step and is **not
+started**.
 
 Scratch logs: `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/den12/` (Step 12),
 `…/den13/` (Step 13) and `…/denart/` (the review fixes and Step den-art). Scratch instruments (gitignored, in the worktree so they load its own three.js):
@@ -46,7 +46,19 @@ committed). Commit first, then mutate, then `git checkout`.
       156 off the lattice, 0 nowhere); `check:brevity` 0 (356); `check:cycle-tdz` 0; vitest 4 files
       20 passed; `build` 0; `check:flat-primitives` 1 — the same two sites Steps 12–13 recorded,
       neither this track's (below, "Found, not mine").
-- [ ] Looked at in headless Chrome; docs (`Library.ts` class doc, `ASSET_MANIFEST.md` §42 note).
+- [x] **f4f61eb1** docs: `Library.ts`'s class doc, `ASSET_MANIFEST.md` §42 "In the game".
+- [x] Scripts typecheck instrument (`den12/tsconfig.scripts.json`): exit 2, **56 messages, the same set
+      as Step 13** (`denart/tsc-scripts.log`; the sets diffed: none new, none gone). `check:labels` 0
+      (12570 frames, no overlap); `check:png-integrity` 0 (the kit's eight renders among them).
+- [x] **Looked at in headless Chrome** (playwright-core, `channel: 'chrome'`, a throwaway profile; my
+      dev server on 5874, killed by PID; the dev park cache seeded with the hydrated seed 5 under
+      this tree's source hash, `.parks/dev/eb0f75aa11af07d6/5/`), 0 page errors —
+      `denart/look/`: `1-pull-stand.png` (shut, the chip), `3-open-from-room.png` (the shelf open: the den's
+      niches, stars, moon and lanterns over the west wall), `4-den-doorway.png`, `5-dragon-stand.png`
+      (Say hi! offered), `6-west-niches.png` (the west wall faded, the dragon on its nest),
+      `10-gold-book-free.png` (a free camera at the shelf: the Artist's gold tome with its star,
+      ringed by the rainbow, alone in its gap), `11-den-west-lantern-free.png` (a lantern over the
+      niches, stars and the moon), `12-den-north-free.png` (the dragon on its nest, the niches behind).
 
 ## What den-art built
 **The den, drawn (`shell.ts` `buildLibraryDenShell`).** `createLibraryDen({ floor: fabric.floor,
@@ -169,6 +181,37 @@ lanterns at room (−23.9, 3.9, −3.91) and (−21.99, 3.9, −7.6); the real c
   one thing it can cost is the line's sliver under an overhanging edge of a part that rests half on
   something (a book half over the one below), which a camera that only looks down sees at most along
   one edge.
+
+## For the join (den-art)
+- **`ReadingRoomShell` has no `lintel` any more; `buildLibraryDenShell(denRoot, props, collision,
+  surfaces, room)`** returns `{ model, walls, lintel, books, lanterns }` and `Library.denShell`
+  exposes it. Any track that edits the lines round `this.lintel = shell.lintel` in `Library.ts`'s
+  constructor, or `check-library.mts`'s CONTROL 1 call of `buildLibraryDenShell`, meets this hunk:
+  take this branch's.
+- **`check:coplanar`** (its own CI workflow, not in `check`): the library space has **0** findings
+  on this branch, measured with the gate's own ratchet on seed 5 (the interiors are swept on one
+  seed). **The owl (track A), the children (track B) and the chapter books' props (track D) were not
+  swept here** — run the room sweep (`.claude/scratch/coplanar-room.mts`, with `LGP_PARK_FILE`) on
+  the joined tree. A model that rests on the floor or on another part with ink outlines will show
+  the same hull-under-the-floor seams; `dropHiddenOutlineFaces(root, down, 0)` in its factory is the
+  fix (as here for the nest, the pile and the dragon).
+- `libraryCreatures.ts`: three new calls (the dragon, the nest, the pile) and one import line — if
+  track A changed the owl's factory, the imports' hunk is the only shared one.
+- `furnish.ts`: `shelveFace`'s loop lives in `shelveRows` now (same draws, same books); a track that
+  edited `shelveFace`'s body re-applies its change inside `shelveRows`.
+- `check:flat-primitives` stays red on the two sites recorded under Step 12 ("Found, not mine"):
+  `Player.ts:1828` (the engine's; fixed on the engine branch's head) and `pagePictures.ts:286` (track
+  D's). None of den-art's: its height reads carry `// flat-ok:` reasons (125 sites now).
+- Step 14 is unchanged by den-art: its `library_build.py` docstring note, the deep links, the
+  tap-spacing snapshot, KIDS den avoidance.
+
+## Questions for Jim (den-art; no blocker was added)
+- **The lanterns, like the room's sconces, have no body**: they hang at the sconce height (3.9 m),
+  over every walk and jump (her head tops out at 3.40 m), so only a jet-pack flier could pass
+  through one. Say if lamps on walls should be solid to fliers too (one banded body each).
+- The Artist's three questions stand (`HANDOFF-art-library-v2-den.md`): no trim round the den's
+  doorway (the lintel reads as plain wall, keeping the secret); the stars and the moon are 25 mm
+  reliefs; the lanterns glow but cast no light (the room's eight pools are spent).
 
 ## The review of Step 12 — each finding judged against the code
 1. **REAL — "no check covers the pull book's gap in the secret row"** (minor). Confirmed by reading
