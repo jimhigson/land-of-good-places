@@ -55,10 +55,13 @@ export const SLIDE = 0.12;
 export const SLIDE_SECONDS = 0.3;
 /** How long the swing takes, from the end of the slide to the thunk. */
 export const SWING_SECONDS = 1.6;
-/** Where the swing ends: a quarter turn, flat against the den's south wall. */
+/**
+ * Where the swing ends: a quarter turn, flat against the den's south wall.
+ * **The one owner of the turn**: the drawn leaf lands here, and the open
+ * collider is the shut one turned this far about the hinge
+ * ({@link turnedAboutHinge}), so neither can land without the other.
+ */
 export const SWING_END = Math.PI / 2;
-/** How far the leaf turns from shut to open, as the open footprint's facing is to the shut one's. */
-const SWING_DEGREES = 90;
 /** The pull book's ease home after the landing: a half-life. */
 const BOOK_HOME_HALF_LIFE = 0.08;
 /** The twinkle on the gold book: one wink every this many seconds while shut. */
@@ -66,6 +69,26 @@ export const TWINKLE_PERIOD = 4.5;
 /** The twinkle's sprite: its size, and how far in front of the book's spine it floats. */
 const TWINKLE_SIZE = 0.3;
 const TWINKLE_OUT = 0.06;
+
+/**
+ * **A footprint turned `angle` about the hinge**, room-local, `angle` in the
+ * leaf's own `rotation.y` sense: the box that covers the drawn leaf at that
+ * turn, exactly as the shut footprint covers it at 0. The open collider is
+ * the shut footprint turned {@link SWING_END}.
+ */
+export function turnedAboutHinge(box: BoxFootprint, hinge: LocalPoint, angle: number): BoxFootprint {
+  const dx = box.x - hinge.x;
+  const dz = box.z - hinge.z;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: hinge.x + dx * cos + dz * sin,
+    z: hinge.z - dx * sin + dz * cos,
+    facing: (((box.facing + (angle * 180) / Math.PI) % 360) + 360) % 360,
+    halfLength: box.halfLength,
+    halfDepth: box.halfDepth,
+  };
+}
 
 export class SecretLeaf {
   /** On the west wall's inner face at the doorway's south edge, turned to the case's facing; holds {@link leaf}. */
@@ -107,13 +130,14 @@ export class SecretLeaf {
     const model = createLibrarySecretLeaf();
     const { length, depth, height } = model.size;
     const [, gapSouth] = libraryDenGap();
+    const hingeAt: LocalPoint = { x: spec.at.x, z: gapSouth };
     const yaw = (spec.facing * Math.PI) / 180;
 
     // The hinge: the case's back on the wall's inner face, at the doorway's
     // south edge, turned to the case's facing — asset +X along the wall to the
     // north, asset +Z out into the room.
     this.hinge.name = 'library.secretShelf';
-    this.hinge.position.set(spec.at.x, 0, gapSouth);
+    this.hinge.position.set(hingeAt.x, 0, hingeAt.z);
     this.hinge.rotation.y = yaw; // flat-ok: room-local yaw in the library's own flat space at (-600, -600), off the sphere
     this.leaf.name = 'library.secretShelf.leaf';
     this.hinge.add(this.leaf);
@@ -152,21 +176,16 @@ export class SecretLeaf {
     // Where the shut book stands in the room: the leaf's frame at angle 0,
     // through the hinge.
     this.shutBookRoom = {
-      x: spec.at.x + this.bookHome.x * Math.cos(yaw) + this.bookHome.z * Math.sin(yaw),
-      z: gapSouth - this.bookHome.x * Math.sin(yaw) + this.bookHome.z * Math.cos(yaw),
+      x: hingeAt.x + this.bookHome.x * Math.cos(yaw) + this.bookHome.z * Math.sin(yaw),
+      z: hingeAt.z - this.bookHome.x * Math.sin(yaw) + this.bookHome.z * Math.cos(yaw),
     };
 
     // Both collider states, keep-out checked as they go down; the open one
-    // taken out at once.
+    // taken out at once. Shut, the case stands where an ordinary one would;
+    // open, it is that box turned the swing's own quarter about the hinge.
     const centre = bookcaseCentre(spec);
     this.shutFootprint = { x: centre.x, z: centre.z, facing: spec.facing, halfLength: length / 2, halfDepth: depth / 2 };
-    this.openFootprint = {
-      x: spec.at.x - length / 2,
-      z: gapSouth - depth / 2,
-      facing: (spec.facing + SWING_DEGREES) % 360,
-      halfLength: length / 2,
-      halfDepth: depth / 2,
-    };
+    this.openFootprint = turnedAboutHinge(this.shutFootprint, hingeAt, SWING_END);
     this.shutColliders = props.box(`bookcase ${spec.id}`, this.shutFootprint, height);
     this.openColliders = props.box(SECRET_LEAF_OPEN, this.openFootprint, height);
     props.detach(this.openColliders);
