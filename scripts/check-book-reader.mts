@@ -148,10 +148,17 @@ const MIN_COVERAGE = 0.02;
  */
 const SHELF_STAND_TOLERANCE = 0.1;
 
-/** The book the deep link opens, the one read to the end, and the one that completes the dex. */
+/**
+ * The book the deep link opens, the one read to the end, and the one that
+ * completes the dex. `LAST` is the last **picture** book: section 8 reads it
+ * to complete the dex *and* the picture books, so both celebrations wait for
+ * it. A chapter book on the end of `BOOKS` would leave every picture book
+ * among the entries the section files first, and the library's celebration
+ * would be showing before any book opened.
+ */
 const FIRST = BOOKS[0]?.id ?? '';
 const READ_THROUGH = BOOKS[3]?.id ?? FIRST;
-const LAST = BOOKS[BOOKS.length - 1]?.id ?? FIRST;
+const LAST = BOOKS.filter((book) => book.kind === 'picture').at(-1)?.id ?? FIRST;
 const FIRST_BOOK = BOOKS.find((book) => book.id === FIRST);
 if (!FIRST_BOOK) throw new Error('check:book-reader: the library has no books at all');
 
