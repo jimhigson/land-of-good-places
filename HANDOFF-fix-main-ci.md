@@ -12,17 +12,20 @@ Do NOT merge. Do not touch the den/part-5 or engine-follow-up work.
 ## Status
 
 - [x] worktree + `pnpm install --frozen-lockfile` (pnpm 12.1.0, node 26.5.0)
-- [ ] main's CI run 40024042181 (Update adoption 40024042300: **success**) on 49e1351e finished; every
-      failed job's log read. At 21:45 UTC its parks were still solving (seeds 10 and 14 in their second
-      wave, restarts 8+).
+- [x] main's CI run 40024042181 read: **only `Checks shard 4` red** — `check:library` "1 clause(s) FAILED.",
+      the beacon clause. Shard 4 stopped there, so its 11 steps after check:library never ran on main (the
+      PR's CI runs them). Update adoption 40024042300: success. (Other jobs still finishing at 22:15 UTC.)
 - [x] the beacon: fixed (below), red without / green with; seen in headless Chrome on a local production build
-- [ ] any other CI failure: fixed
-- [x] local, exit codes read (seed 5 park = CI's `park-5-b0` block artifact for hash 752998c3, restart 1,
-      digest 9c7a86e2b266ca08, copied to `.parks/`): tsc 0, typecheck:test 0, check:library 0 (298 ✓),
-      check:labels 0, check:tap-spacing 0, check:jitter 0, check:exits 0
-- [ ] full `pnpm run check` and `pnpm run test:procgen` (needs all 16 parks: CI's `parks-752998c3…`)
-- [ ] PR opened; every CI job green on its head
-- [ ] beacon seen on the newest preview (headless Chrome, throwaway profile)
+- [x] local (16 parks = CI's `parks-752998c3…` artifact in `.parks/`): tsc 0, typecheck:test 0,
+      check:library 0 (300 ✓), check:labels 0, check:tap-spacing 0, check:jitter 0, check:exits 0,
+      flat-primitives 0; **test:procgen exit 0, 271 s, 48 files, 2168 tests, 0 skipped** (at b6bef002;
+      ae2b08f9 differs from it only in check-library's flat-ok comment and bookGlance's doc)
+- [ ] full `pnpm run check` on ae2b08f9 (`run-check.sh full4`, running from 22:17 UTC)
+- [ ] the reds re-proved on the final code (no-glance, glance-stays, by hand: move-cancel, draw-back 0.4,
+      book-itself framed round everything)
+- [x] **PR #735** opened (head ae2b08f9); CI run 40032476645 + Update adoption 40032476641
+- [ ] every CI job green on the PR head
+- [ ] beacon seen on the PR's newest preview (headless Chrome, throwaway profile: `look/owl-glance.mjs <host> <dir>`)
 
 ## The beacon — root cause and the fix (decided)
 
