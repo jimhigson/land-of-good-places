@@ -20,7 +20,155 @@ here, and was killed by PID.
 reverts to the index and takes the work too (it did once here, on the swing fix; redone and
 committed). Commit first, then mutate, then `git checkout`.
 
-# Step den-art — the den from the Artist's Blender pieces (Claude Opus 5.5, 23 Oct; in progress)
+# Step den-art — the den from the Artist's Blender pieces (Claude Opus 5.5, 23 Oct)
+
+## Status (Step den-art)
+- [x] **The review of Step 12**, both findings real and fixed (below): **61cfdccf** (the turn's one
+      owner), **91e1cb19** (the pull book's gap clause; red by hand pasted).
+- [x] **9356cb61** merge of `origin/art/library-v2-den` @ 0c0fecd0 (rerere off): one conflict,
+      `layout.ts`'s den block — this branch's (the dragon's moved stand) with `export` kept on
+      `DEN_NORTH_PAST_DOOR` (the kit's `ts_const` reads only exports); the two blocks diffed first,
+      differing in exactly those two places. `package.json` parsed: +3 kit scripts, every check chain's
+      step set unchanged (`check` 9, shards 26/4/17/15/8/4/6/1/2, `check:all` 6).
+- [x] **da1a75b8** `furnish.ts`: `shelveRows` (one row loop for a case's face and a den niche; the
+      draws in the same order — the room's 9406 books unchanged) and `shelveDenNiches` (seed
+      `DEN_BOOK_SEED` 0x0b00d7, one `InstancedMesh`, 476 books).
+- [x] **9595c447** `shell.ts`, `Library.ts`: the den drawn from the kit (below); the lintel's body moves
+      into `buildLibraryDenShell`; `libraryDenPlacement()` holds the kit to the layout at load.
+- [x] **ae44e5ed** `secretShelf.ts`: the pull book is the kit's `secretBook` (below).
+- [x] **5ed383c3** `check-library.mts`: **THE DEN, DRAWN** (new clause) + mutation `undrawn-den-wall`.
+- [x] **fb4a1866** `check:coplanar` red on this branch since Step 13 (16 seams) + 3 from the kit → 0:
+      `src/art/style/outlineHiddenFaces.ts` (below).
+- [x] **6d618c97** `// flat-ok:` reasons on the new height reads.
+- [x] Green at 6d618c97: `check:library` **176 ✓, 0 ✗** (`denart/kit-5.log`); tsc 0; typecheck:test 0;
+      `check:library-glb` 0; `check:assets` 0 (138); `check:tap-spacing` 0 (147 zones); `check:solids`
+      0 (the library: 13 tops, 0 drop regions, 732 jumps); `check:exits` 0 (the library: 802 exits,
+      156 off the lattice, 0 nowhere); `check:brevity` 0 (356); `check:cycle-tdz` 0; vitest 4 files
+      20 passed; `build` 0; `check:flat-primitives` 1 — the same two sites Steps 12–13 recorded,
+      neither this track's (below, "Found, not mine").
+- [ ] Looked at in headless Chrome; docs (`Library.ts` class doc, `ASSET_MANIFEST.md` §42 note).
+
+## What den-art built
+**The den, drawn (`shell.ts` `buildLibraryDenShell`).** `createLibraryDen({ floor: fabric.floor,
+wall: fabric.wall, lintel: westMaterial })` replaces Step 11's four primitive boxes (the floor slab,
+the three walls) and the lintel's primitive box. Placed by `libraryDenPlacement()`: root at
+(−LIBRARY_HALF_X, −floorTop, secret.at.z), turned the secret shelf's facing (90°), so kit +Z → room
++X. **Held to the layout at load**: the doorway's edges, the three inner faces, the walls'
+half-thickness and height, the lintel's base (the shut shelf's top) and top, the den's depth and its
+run north past the door, and the floor slab's four edges are read back into the room and must be
+the layout's within 5 mm, or it throws naming each (red by hand below). The south wall is hidden,
+not shortened. **The lintel** (`den-lintel`) is `attach`ed into the west wall's group, painted the
+west wall's cloned material: shown with the room while the den is hidden, faded with the wall's
+spans. **The niches** hold 476 books (`shelveDenNiches`, the case loop in the niche's own measured
+terms). **Two lanterns** (`libraryDenLanternSpots`): over the pier between the west wall's first
+two niches and between the north wall's last two, their bottoms at `LIBRARY_SCONCE_HEIGHT` (3.9 m),
+glowing, no light, no body (Decision D3).
+
+**The bodies are unchanged** — the walkable plate, the three den walls through props (capsules to
+their real top 5.20, removable by name), the lintel's band 3.00–5.20 — laid out from the layout the
+drawn den is now held to; the lintel's body moved into the den shell, so the call that draws the
+den makes it solid. (Decision D1.)
+
+**The pull book (`secretShelf.ts`)** is the kit's `secretBook` (a fat gold tome, 0.46 tall, a star on
+its spine): stood by `bookSpot` with its spine-and-star reach (depth/2 + the kit's measured proud),
+3 cm proud of its row and 3 cm inside the case's drawn front; every paint from the kit's shared cache
+cloned (the open leaf's fader fades it alone); the twinkle sprite in front of the star (measured off
+the kit) and the star's own emissive rising from the kit's rest glow with each wink.
+
+**Hidden ink faces (`src/art/style/outlineHiddenFaces.ts`, `dropHiddenOutlineFaces`).** An ink
+outline is its part pushed a line's width out along its normals, so a face a part rests on has a
+copy a line's width *inside* its support, a few mm off the support's face: `check:coplanar` counts
+every such pair NEW, seen or not, and the library had 19 (16 since Step 13 placed the nest, the
+pile and the dragon; 3 from the kit: the lanterns' back plates, the pull book's underside). Deleted
+at the source (ART_DIRECTION.md: remove the hidden face, never nudge a surface): the copy of every
+face that looks the way the model rests and rests on something within the line's width (the
+model's resting plane or another of its parts, asked at seven points by a ray), and the second of
+two copies lying in one plane overlapping in plan (the nest's covers). Called on the nest, the pile
+and the dragon (down onto y = 0), the lantern (into its wall, z = 0) and the pull book (down onto its
+board). `isOutlineMesh` moved into `materials.ts`, the outline's owner.
+
+## The check — THE DEN, DRAWN (`check:library`, after DEN WALLS; 176 ✓ 0 ✗ at 6d618c97)
+Off the screen (`denart/kit-5.log`):
+- `the den is drawn from the Artist's kit: 13 meshes, each a libraryDen.glb node's own geometry (9
+  room nodes, 2 lanterns), 3 ink outline(s), the niche books, and 0 anything else; the lintel hangs in
+  the west wall's group (true)`
+- per wall: `its face to the den at x -23.900 (the layout's -23.900, within 5 mm); at 5 stations along
+  it 0.05 m behind the drawn face is solid (every one) and 0.05 m in front is clear (every one)`
+  (north z −7.600, south z −2.000 likewise)
+- `the lintel, drawn y 3.20..5.20, x -18.30..-17.70, z -6.00..-2.00, lies inside its body's band
+  3.00..5.20 m over z -6.00..-2.00 (… 0.000 m, at most 0.005)`
+- `the den's floor slab is drawn with its top at the room's floor (0.0000 m), in the room floor's own
+  paint (true: LIGHT's den cells measure that paint), x -24.50..-18.60, z -8.20..-1.40; her feet find
+  it at 9 of 9 points across the den`
+- `476 books line the den's niches (at least 300 wanted), 0 standing in the open den: the nearest any
+  comes to its wall's drawn face is 0.030 m behind it`
+- `2 lanterns hang with their lowest point 3.89 m up, over her head at the top of her highest jump
+  (1.28 + 2.12 = 3.40 m): out of every reach, so drawn with no body; 0 light(s) in the den`
+- SECRET SHELF with the kit book: `the gold book stands alone in its gap: 37 book(s) … 0 pass(es)
+  through it (x 1.945..2.055 in the leaf's frame); the nearest stands 0.051 m beside it` and `the whole
+  drawn gold book stands inside the leaf's own 4.00 x 3.20 x 0.60 box … y 0.756..1.216, z 0.288..0.570
+  (its front 0.030 m inside the case's), 0.030 m clear of the box at its nearest`.
+- Every other den clause unchanged by the kit: DEN WALLS `10 of 12 bodies … 0 ended outside`; LINTEL
+  `202 marches … furthest west -17.08 (at 3.10 m)`; REACHABILITY `2 of 2 sealed off`, `the one pocket
+  is the secret den: 268 clear cells`; SECRET SHELF open `78 of 78`, `zero pockets`, `enterable and
+  leavable (9032 cells)`; LIGHT `the darkest patch of the secret den's floor, (-23.0, -7.0), renders at
+  0.0580 linear, brighter than PALETTE.ink's 0.0509 (25 den cells measured)`.
+
+## Reds (den-art; seed 5 restart 1, digest d6721090fb3f1d3a, hydrated; by-hand ones reverted with `git checkout` after the work was committed)
+Geometry: the den kit at 0c0fecd0 placed at room (−18, −0.5, −4) turned 90°; the den's inner faces
+x −23.90, z −7.60 / −2.00; walls 0.6 thick, 5.2 tall; the lintel x −18.3..−17.7, y 3.2..5.2, z
+−6..−2, body band 3.00..5.20; the north wall's body a capsule (−24.2, −7.9)–(−18.0, −7.9) r 0.3; the
+lanterns at room (−23.9, 3.9, −3.91) and (−21.99, 3.9, −7.6); the real child at 60 fps.
+- **`LIBRARY_CHECK_REMOVE='den wall (north)'`** → exit 1, **172 ✓ 8 ✗** (`denart/red-remove-den-wall-north.log`):
+  DEN WALLS `✗ a body marched north (−Z) from (-21.76, -4.80) at 0.05 m a step ended at (-21.11,
+  -16.33), outside the den and the room` (×4), `✗ … 16 ended outside`, `✗ … north (−Z) 11.825 m`;
+  THE DEN, DRAWN `✗ the den's north wall, drawn: its face to the den at z -7.600 …; at 5 stations along
+  it 0.05 m behind the drawn face is solid (NOT at (-23.50, -7.65) (-22.30, -7.65) (-21.10, -7.65)
+  (-19.90, -7.65) (-18.70, -7.65))`; SECRET SHELF `✗ zero pockets with the leaf open: 4 clear cell(s)
+  unreached of 9086, e.g. (-23.25, -7.75)`.
+- **`LIBRARY_CHECK_MUTATE=undrawn-den-wall`** (the drawn north wall taken out, its body left) → exit 1,
+  **175 ✓ 1 ✗** (`red-undrawn-den-wall.log`): `✗ the den's north wall is not drawn (no 'den-wallNorth'
+  in the den) — its body stands for nothing a child can see`.
+- **By hand — the drawn west wall moved 0.3 m into the den** (`model.walls.west.position.z += 0.3` in the
+  clause) → exit 1, **175 ✓ 1 ✗** (`red-byhand-west-wall-moved.log`): `✗ the den's west wall, drawn: its
+  face to the den at x -23.600 (the layout's -23.900, within 5 mm); at 5 stations along it 0.05 m behind
+  the drawn face is solid (NOT at (-23.65, -7.20) (-23.65, -6.00) (-23.65, -4.80) (-23.65, -3.60)
+  (-23.65, -2.40))`.
+- **By hand — `LIBRARY_DEN_DEPTH = 5.7`** (the layout off the drawn den) → the World refuses to build,
+  exit 1 (`red-byhand-den-depth.log`): `Library: the drawn den (libraryDen.glb) is not where layout.ts
+  lays it out …: - the far (west) wall's inner face, x: drawn -23.900, laid out -24.000 - the den's
+  depth: drawn 5.600, laid out 5.700 - the floor slab's west edge, x: drawn -24.500, laid out -24.600`.
+- **By hand — the lanterns' hidden-face trim switched off** (`createLibraryDenLantern`'s
+  `dropHiddenOutlineFaces` call commented out) → the room's coplanar sweep finds **2 pairs** again
+  (`red-byhand-lantern-untrimmed.log`): `0.0318 m² sep 8.76e-3 at room (-22.013, 4.436, -7.609) n (0,
+  0, 1) den-wallNorth | denLantern-bracket/<outline>` and the west wall's twin at (−23.909, 4.436,
+  −3.887). With the trim: 0 pairs (`coplanar-room-trim3.log`).
+- **`check:coplanar`'s own ratchet on seed 5, every space** (`coplanar-gate-head.log` →
+  `coplanar-gate-trim.log`, the gate's `coplanarRegressions` over the child's JSON): **19 NEW → 0**,
+  all 19 in the library. Before den-art (3e058878, the detached scratch worktree
+  `library-v2-den-base`): 16 NEW (`coplanar-base-library.log`) — Step 13's.
+
+## Decisions (den-art, with reasons) — Jim is away; each belongs in the PR body too
+- **D1. The den's bodies stay the layout's shapes (the walls capsules, as every room wall is; the
+  lintel a banded capsule), now held to the drawn kit at load and measured against it by THE DEN,
+  DRAWN.** Boxes off the meshes were weighed: the walls' faces to the den are identical either way,
+  and the only difference is the west wall's two outer corner columns, outside the den where no child
+  walks; boxes would also have registered three 5.2 m tops whose LANDING control ring lies outside the
+  building over no floor. One owner (the layout), asserted, never two trusted.
+- **D2. The lintel's body moves into `buildLibraryDenShell`** with its drawn piece (the call that
+  draws a thing makes it solid). Same band, same figures; `ReadingRoomShell` loses `lintel`.
+- **D3. The lanterns hang at the room's `LIBRARY_SCONCE_HEIGHT` with no body**, the sconces' own rule
+  and reason ("out of every reach, a child's jumping head included"): measured lowest point 3.89 m
+  against her head at the top of her highest jump, 3.40 m. A jet-pack flier passes through them, as
+  through the room's sconces (question for Jim below).
+- **D4. The pull book is the kit's**, as the Artist's handoff proposed; the sprite twinkle stays (its
+  clause measures it) and the star's emissive winks with it.
+- **D5. The niche books come from a seed of their own** (0x0b00d7), so no book in the room moves.
+- **D6. `check:coplanar` red found on this branch and fixed at the cause**, not baselined: the
+  creatures' 16 seams are Step 13's, this track's own. The deletion keeps every visible line; the
+  one thing it can cost is the line's sliver under an overhanging edge of a part that rests half on
+  something (a book half over the one below), which a camera that only looks down sees at most along
+  one edge.
 
 ## The review of Step 12 — each finding judged against the code
 1. **REAL — "no check covers the pull book's gap in the secret row"** (minor). Confirmed by reading
