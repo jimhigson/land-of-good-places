@@ -12,6 +12,25 @@ are known and accepted), **nothing new**. Only what the merge needs to be correc
 
 Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline owns them).
 
+## ROUND 2 (23 Oct, ~16:30) — QA blocker: "Read it!" at the big readers' shelf opens the PREVIOUS book
+
+QA (`.claude/library-build-scratch/l734qa/comment.md`, `sheet-walk1.png`, `sheet-laptop-titles.png`):
+walking north along west-4's stands (0.6 m apart) and pressing E opens the book of the stand before,
+at every stand 2–6; the same with the six `/library?at=` links opened one after another on one
+profile. Cause per QA: book zones have no stand radius (DEFAULT_STAND_RADIUS 3 m), and
+`Selection.pickNearby` keeps the held zone unless a rival is MORE than HYSTERESIS_MARGIN (0.6 m)
+nearer. My look missed it: every book was opened on a fresh profile with nothing held.
+
+Overseer's ask: fix the RULE (hysteresis must never hold the previous zone once she is on another
+zone's own stand; keep the anti-flicker midway between two zones; a tap on a book opens that book);
+a check that walks the shelf both ways in ONE session pressing the interact key at each stand, proved
+red without the fix (geometry pasted); if tap-spacing's warnings describe this, make them a failure
+that can go red; run library/tap-spacing/labels/exits + every Selection-driving check, full `check`,
+`test:procgen`; push, fast-forward the PR head, every CI job green, walk the shelf on the NEWEST preview
+on one page. As-is still holds for everything else.
+
+Progress (this round): see "Round 2 log" at the end.
+
 ## Status
 
 - [x] worktree cut from origin/feat/library-v2 @ 9a269a31, pnpm 12.1.0 / node 26.5.0, branch pushed
@@ -201,3 +220,7 @@ list above and carry on from the first unticked box. `.parks/` holds all 16 hone
   then `node .claude/library-build-scratch/chapter-books/look/preview.mjs <host> <outDir>` (headless
   Chrome, throwaway profile; no seed suffix on the preview), open every frame, and put the two links
   in `chapter-books/pr-body.md`'s "What to look at" → `gh pr edit 734 --body-file …`.
+
+## Round 2 log
+
+- started: reading `Selection` (`src/world/…`), `DEFAULT_STAND_RADIUS`, `HYSTERESIS_MARGIN`.
