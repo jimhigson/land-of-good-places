@@ -514,6 +514,17 @@ The Fable agent below died after its gate run at bf7b1c8b (04:32) without record
   "Get off" click landed on a chip fading out as the train came in, so she rode on (a play-script bug: plays8.mjs waits
   for a drawn chip and a train standing a second); the jump meant to land on carriage 1 at Sunny Side carried her over
   it to the far side (plays8.mjs walks into carriage 3 instead: its rim is 0.45 m over the platform, a step).
+- **906510e8 (code) gate, local**: nine shards exit 0 (`/tmp/es-sh-r7-*.log`, snapshot), test:procgen exit 0 (46 files,
+  2154 tests, 274 s), build exit 0; clauses 8/12/13 on all 16 parks: 15 green, seed 6 one line (`/tmp/es-seeds13`);
+  the 11 train proofs red at 906510e8 (`/tmp/es-proofs12`, riders-sit-on-her on seed 2).
+- **PR head moved bf7b1c8b..1655d287 at 06:23 BST**; CI run 39905508749 (+ Update adoption 39905508638). ParkTrain.ts is
+  in the parks' source closure, so CI re-solves all 16.
+- Plays: `/tmp/es-qa/plays9.mjs` (lib `/tmp/es-qa/lib.mjs`, coordinates from `es-r7-geom.mts`, untracked scratch):
+  1 fence+train (west stretch), 2 tunnel, 3 ride with `?pets=3` (frames in the open off Sunny Side's canopy; "Get off"
+  only once a drawn chip and a train standing a second), 4a walk into the nose at Bluebell Halt (on the line 3.5 m
+  ahead of where it stops), 4b stand on carriage 2 at Bluebell Halt (the platform is level with the rims there).
+  Calibrated on bf7b1c8's preview: 3 rode a lap and got off; 4b stood on carriage 2, the train waited 10 s.
+- Full census on all 16 parks at 906510e8 running for the PR's per-park table: `/tmp/es-census13/<seed>.log`.
 - **The previous CI run, 39249030666 on 8e8d318a, FAILED and nobody recorded it**: 14 of 16 seeds solved no park ("no block
   accepted a restart (restarts 0..63 all rejected)"; only 5 and 15 built), so Procgen invariants and Checks failed for want
   of parks. Cause, from the block logs: seed 0 restart 3 (main's) "rejected by check:park rail.walkable" — the tunnel commit's
