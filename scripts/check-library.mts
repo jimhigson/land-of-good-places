@@ -2249,9 +2249,10 @@ console.log('\nSHUSH — a sprint through the room gets a "Shhh!", and nothing e
  * by luck of phase): her lowest drawn point and each of her soles on the
  * floor, and her hip pivot on the cushion's top, to the tolerances of
  * `scripts/lib/seatedPose.mts`. While she sits no Read chip is offered, her
- * cushion offers 'Get up' and the other offers nothing. 'Get up' stands her on
- * clear floor and she walks off; sat down again, a jump stands her up, with no
- * hop in it.
+ * cushion offers 'Get up' and the other offers nothing. 'Get up' stands her
+ * where she sat, on the cushion's top (where her feet were before she sat, and
+ * inside no solid there), and she walks off it onto the floor; sat down again,
+ * a jump stands her up, with no hop in it.
  *
  * Proved red by hand: a leg rotated in `applyListeningPose` — one leg (its
  * sole, `seatedErrors`' `soles`) or both (her lowest point too). The whole
@@ -2424,15 +2425,22 @@ console.log('\nSIT — the real child walks onto a story cushion, sits down to l
       `playerIsSeated ${library.playerIsSeated}`,
   );
 
-  // 'Get up': up at once, on clear floor, and she walks off.
+  // 'Get up': up at once, where she sat — on the cushion's top, where her feet were before she
+  // sat (the hotel nap's way off a mattress) — and she walks off it. Her body there, at the top's
+  // height, is inside no solid: the put-down rule's own clause 3, asked of the resolver.
   seatedOffer[0]?.run();
   const upByChip = !player.riding && !library.playerIsSeated;
-  const clearWhereShe = collision.isClearCircle(player.position.x, player.position.z, PLAYER_RADIUS);
+  const upAt = child.room();
+  const upOff = Math.hypot(upAt.x - cushion.at.x, upAt.z - cushion.at.z);
+  const upFeet = feet();
+  const upOverlap = collision.deepestSolidOverlap(player.position, PLAYER_RADIUS, 0, undefined, KID_HEIGHT, player.position.y);
   child.run(0.5);
+  const restOff = Math.hypot(child.room().x - cushion.at.x, child.room().z - cushion.at.z);
   say(
-    upByChip && clearWhereShe,
-    `'${LIBRARY_CHIPS.getUp}' stands her up (riding ${player.riding}, seated ${library.playerIsSeated}) where a body of her size is clear: ${clearWhereShe}; ` +
-      `half a second on she stands at (${child.room().x.toFixed(2)}, ${child.room().z.toFixed(2)}), her feet ${feet().toFixed(3)} m up`,
+    upByChip && upOff <= 0.05 && Math.abs(upFeet - cushionTop) <= FEET_TOLERANCE && upOverlap <= 1e-3 && restOff <= 0.05 && Math.abs(feet() - cushionTop) <= FEET_TOLERANCE,
+    `'${LIBRARY_CHIPS.getUp}' stands her up (riding ${player.riding}, seated ${library.playerIsSeated}) where she sat: ${upOff.toFixed(3)} m from the cushion's middle ` +
+      `(0.05 allowed), her feet ${upFeet.toFixed(3)} m up on its top (${cushionTop.toFixed(3)}), her body there inside no solid (deepest overlap ${(upOverlap * 1000).toFixed(1)} mm); ` +
+      `half a second on she still stands there, at (${child.room().x.toFixed(2)}, ${child.room().z.toFixed(2)}), ${restOff.toFixed(3)} m off its middle, her feet ${feet().toFixed(3)} m up`,
   );
   const leaving = child.room();
   child.run(0.6, child.towards(Math.sin(away), Math.cos(away)));

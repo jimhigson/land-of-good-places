@@ -575,13 +575,20 @@ export class Library implements GameSystem {
    * she is not sitting, so `Game` can call it unasked — `Hotel.wakeNap`'s
    * shape.
    *
-   * `endRide` is given the cushion's own spot on the floor — the floor, never
-   * the seat, as every `RideExit` is — and the put-down rule
-   * (`world/dismount.ts`) does the rest, as it does for every seat in the game:
-   * the cushion is a solid now (a low one she steps up onto), so its middle is
-   * not clear floor at the floor's height, and the rule stands her on the
-   * nearest clear floor that reaches the room, beside it. Nothing here steps
-   * her off a seat by hand.
+   * **Up where she sat, on the cushion's top** — where her feet were before
+   * she sat: she walks up onto the cushion to sit down (a low solid within a
+   * step, PR #722), so getting up stands her back on it, and she walks off
+   * its edge, one step down. The hotel nap's way off a mattress
+   * (`Hotel.wakeNap`), not the breakfast chair's: a chair's seat is inside the
+   * chair and within her table's reach, while a cushion is a soft solid open
+   * on every side, and **its top is where she stands on it**. `endRide` is
+   * given that top — the surface her feet find there, which the put-down rule
+   * (`world/dismount.ts`, clause 2: "a solid's top is such a surface, as it is
+   * under her feet") accepts as it stands and hands back unchanged; were it
+   * ever not clear or not connected, the same rule would move her, as it does
+   * for every seat. At story time this keeps her where she listened, between
+   * the children on their cushions, rather than popping her a stride sideways
+   * into them. Nothing here steps her off a seat by hand.
    */
   standUp(): void {
     if (this.seatedOn === null) return;
@@ -590,7 +597,8 @@ export class Library implements GameSystem {
     const player = this.player;
     if (!player?.riding) return;
     const at = seat?.at ?? { x: player.position.x - LIBRARY_ORIGIN_X, z: player.position.z - LIBRARY_ORIGIN_Z };
-    player.endRide({ x: LIBRARY_ORIGIN_X + at.x, y: LIBRARY_FLOOR_Y, z: LIBRARY_ORIGIN_Z + at.z });
+    const top = seat ? libraryCushionSize().top : 0;
+    player.endRide({ x: LIBRARY_ORIGIN_X + at.x, y: LIBRARY_FLOOR_Y + top, z: LIBRARY_ORIGIN_Z + at.z });
   }
 
   update(context: FrameContext): void {
