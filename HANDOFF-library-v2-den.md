@@ -1,4 +1,4 @@
-# HANDOFF — Library v2, track C: the secret leaf (plan Step 12) and the dragon and the cat (plan Step 13)
+# HANDOFF — Library v2, track C: the secret leaf (plan Step 12), the dragon and the cat (plan Step 13), the den from the Artist's Blender pieces (plan Step den-art)
 
 Branch `feat/library-v2-den`, cut from the integration head **33bcc361** (`feat/library-v2`);
 worktree `.claude/worktrees/library-v2-den`. Epic #714, part #719. The plan is
@@ -6,15 +6,53 @@ worktree `.claude/worktrees/library-v2-den`. Epic #714, part #719. The plan is
 the walled pocket) came onto the integration branch from the old den track — its record is
 `HANDOFF-library-den.md`, still accurate for what it built. Step 12: Claude Fable 5.1, 22–23 Oct.
 Step 13: Claude Opus 5.5, 23 Oct (a restart: the first Step 13 agent left only scratch measures,
-nothing committed). Step 14 (links, tap spacing, kids out of the den, docs) is this track's next step
+nothing committed). **Step den-art: Claude Opus 5.5, 23 Oct (in progress — see its section
+below).** Step 14 (links, tap spacing, kids out of the den, docs) is this track's next step
 and is **not started**.
 
-Scratch logs: `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/den12/` (Step 12) and
-`…/den13/` (Step 13). Scratch instruments (gitignored, in the worktree so they load its own three.js):
+Scratch logs: `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/den12/` (Step 12),
+`…/den13/` (Step 13) and `…/denart/` (the review fixes and Step den-art). Scratch instruments (gitignored, in the worktree so they load its own three.js):
 `.claude/scratch/creature-play.mts` (the real child's jumps at the creatures, `WIDE=1` its control).
 **Run any scratch script that imports `src/` with `LGP_PARK_FILE=$PWD/.parks/5.json`**: without it a
 module load starts the seed-5 acceptance loop for the new source hash (20 minutes) — it did once
 here, and was killed by PID.
+**Never `git checkout <file>` to revert a by-hand mutation on a file with uncommitted work** — it
+reverts to the index and takes the work too (it did once here, on the swing fix; redone and
+committed). Commit first, then mutate, then `git checkout`.
+
+# Step den-art — the den from the Artist's Blender pieces (Claude Opus 5.5, 23 Oct; in progress)
+
+## The review of Step 12 — each finding judged against the code
+1. **REAL — "no check covers the pull book's gap in the secret row"** (minor). Confirmed by reading
+   `furnish.ts`'s secret branch and SECRET SHELF's gold-book clause: nothing read the row's
+   neighbours. **Fixed in the check (91e1cb19):** SECRET SHELF's new clause reads the leaf's row
+   (`library.secretShelf.books`, one `InstancedMesh`) and the gold book's drawn bodies (outlines
+   left out) in the leaf's own frame, takes every row book whose height range meets the gold
+   book's, and asserts none passes through it, printing the nearest clearance (at least 10 row
+   books on the shelf, so an empty row cannot pass). Green: `✓ the gold book stands alone in its
+   gap: 37 book(s) of its row on shelf 1 (at least 10 wanted), 0 pass(es) through it (x
+   1.955..2.045 in the leaf's frame); the nearest stands 0.061 m beside it` (167 ✓, 0 ✗,
+   `denart/f1-green.log`). **Red, by hand** (`furnish.ts` `shelveFace(spec, false, new
+   Rng(rng.state), shapes, true)` → `false`; reverted with `git checkout` after the clause was
+   committed): exit 1, **166 ✓, 1 ✗** (`denart/f1-red-nogap.log`): `✗ the gold book stands alone
+   in its gap: 43 book(s) of its row on shelf 1 (at least 10 wanted), 2 pass(es) through it (x
+   1.955..2.045 in the leaf's frame); the nearest stands -0.085 m beside it`. Geometry: the leaf's
+   frame (origin its back-left edge, +X along the case, 4.00 × 0.60 × 3.20), shelf 1 top 0.756, the
+   gold book `createShelfBook(ART.helmetGold)` at x 2.000 (`LIBRARY_SECRET_BOOK` along 0), the
+   gap ±`SLOT_HALF` 0.1.
+2. **REAL — "the quarter turn has two owners"** (minor). `SWING_END = π/2` drove the drawn swing
+   and `SWING_DEGREES = 90` the open footprint's facing, with the open footprint's middle written
+   for a quarter turn by hand (so the reviewer's one-line fix, deriving the degrees, would still
+   have left the middle a second owner). **Fixed at the root (61cfdccf):**
+   `turnedAboutHinge(box, hinge, angle)` turns a footprint about the hinge in the leaf's own
+   `rotation.y` sense; the open footprint is the shut one turned `SWING_END`. Same numbers at a
+   quarter turn (166 ✓, `denart/f2-green-2.log`). The reviewer's mutation R4 re-run against the
+   fix (`SWING_END = Math.PI * 0.45` by hand, reverted): the open collider now follows the drawn
+   leaf — `✓ CONTROL: the sweep's leaf at 0 is the shut footprint (middle -17.40, -4.00) and at π/2
+   the open one (-19.63, -2.61)` — and what goes red is the design clause holding it flush on the
+   den's south wall, `✗ the open footprint lies flush along the den's south wall (its back on z
+   -2.31, …) facing 171`, plus the marches at a leaf no longer where they march (exit 1, 164 ✓
+   2 ✗, `denart/f2-R4-after-fix.log`). The SWEEP CONTROL stays as the drift alarm.
 
 # Step 13 — the baby dragon and the sleeping cat
 
