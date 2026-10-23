@@ -24,10 +24,12 @@ here, and was killed by PID.
 - [x] **d17a4ee4 / 83de8771 / fd4cda15** `LibraryDen.ts`, `LibraryCat.ts` (new), `props.ts` (`posedFootprint`, `sweep`), `Library.ts` (wiring).
 - [x] **3c62d674** `docs/design/LABELS.md`: the creatures' bubble row.
 - [x] **d57a9f12 / 9dc39dd9** `check-library.mts`: CREATURES, DEN WALLS sets the creatures' two grid spots apart, mutation `wide-creature-tops`.
-- [x] Green: `check:library` **166 ✓, 0 ✗, exit 0** (`den13/green-2.log`; Step 12 left it at 139 — CREATURES is the 27); every red below proved at **9dc39dd9** and reverted.
+- [x] **3014933b** `layout.ts`: `LIBRARY_DRAGON_STAND` moved beside the dragon, (−21.3, −5.0) facing 225 → **(−20.6, −6.3) facing 270** — looked at in headless Chrome, the old spot put her body over the dragon (Decision 15).
+- [x] Green: `check:library` **166 ✓, 0 ✗, exit 0** at 3014933b (`den13/green-3.log`; Step 12 left it at 139 — CREATURES is the 27); every red below re-proved at **3014933b** (same counts as at 9dc39dd9) and reverted.
+- [x] Looked at in headless Chrome (playwright-core, `channel: 'chrome'`, a throwaway profile; my dev server on 5873, killed by PID, the dev park cache seeded with the hydrated seed 5 for the new source hash): `den13/look-cat.png`, `look-cat-petted.png` (the purr bubble), `look-dragon.png` (the OLD stand: the dragon hidden behind her), `look2-stand.png` (the new stand: side by side, "Oh, a visitor for me!"), `look2-doorway.png` (from the doorway: Say hi! offered); 0 page errors.
 - [ ] Step 14 (not this step).
 
-The park source hash at 9dc39dd9 is **b0bd865753ecf9c4844d17d8573c0d7836061e4ac24865dbdac3ae5a2eb98615**
+The park source hash at 3014933b is **c86ef951b9f8ead2…** (`node -e "import('./scripts/lib/park-source-hash.mjs').then(m=>console.log(m.parkSourceHash(process.cwd())))"`)
 (every src file here is in the closure). No park was re-solved: `.parks/5.json` is the integration
 branch's honest seed 5 (digest d6721090fb3f1d3a), hydrated whatever the hash with `LGP_PARK_FILE`. The
 creatures change nothing the park plan reads (`parkManifest.ts` takes the library's footprint from
@@ -87,13 +89,14 @@ while she rides); `update`: leaf + guard → `updateCreatures` (the cat; the dra
 drawn; the bubble's hold) → the stacks' fades; `leaveCreatures()` from `standOutside` and
 `releasePlayer`. `chime.ts`'s `playPurr` was already there (the shared track's): unchanged.
 
-## The check — CREATURES (`check:library`, 166 ✓ 0 ✗ exit 0 at 9dc39dd9, `den13/green-2.log`)
+## The check — CREATURES (`check:library`, 166 ✓ 0 ✗ exit 0 at 3014933b, `den13/green-3.log`)
 Counts off the screen:
 - DEX: `GUARD's walk into the den at (-21, -5), 2.06 m from the nest (the meeting's 2.2), already met the
   baby dragon` → the entry taken back out (check-side); `CONTROL: 60 frames at the arrival with the leaf
   shut, the baby dragon is not met …, says nothing new, and its Say hi zone is not offered`; `stood beside
   the baby dragon (1.84 m from the nest, inside 2.2), one frame later it is met: Dragon friend discovered
-  (count 1), it says 'Oh, a visitor for me!' … and puffs (1); the guard opened the leaf the same frame`;
+  (count 1), it says 'Oh, a visitor for me!' … and puffs (1); the guard opened the leaf the same frame` (at
+  the moved stand: `2.00 m from the nest, inside 2.2`);
   the zone `offers 'Say hi!' …, verb 'Say hi', its stand 0.000 m off the layout's, … the rainbow rings the
   dragon`; `Say hi twice: 'I love my books!', then 'I keep books, not gold!' (its answers, in order), and
   still one discovery (count 1)`; a visit later `'Hello again, friend!'`.
@@ -127,9 +130,11 @@ Counts off the screen:
   cell(s) unreached of 9032`, `a fill seeded beside the baby dragon reaches the arrival and the way out's
   centre`.
 
-## Reds (each proved at 9dc39dd9, seed 5 restart 1, digest d6721090fb3f1d3a, hydrated; by hand ones reverted with `git checkout`)
-Geometry: the four bodies in the table above; the dragon's stand (−21.3, −5.0), 1.84 m from the nest;
-the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.00; the real child at 60 fps.
+## Reds (each proved at 9dc39dd9 and again at 3014933b — the same counts — seed 5 restart 1, digest d6721090fb3f1d3a, hydrated; by hand ones reverted with `git checkout`)
+Geometry: the four bodies in the table above; the dragon's stand (−20.6, −6.3), 2.00 m from the nest
+(at 9dc39dd9 it was (−21.3, −5.0), 1.84 m); the cat's stand (9.6, 8.8); the den's inner faces x −23.90,
+z −7.60 / −2.00; the real child at 60 fps. Logs at 3014933b: `den13/red3-*.log`; at 9dc39dd9 the names
+below.
 - **`LIBRARY_CHECK_REMOVE='dragon'`** (the dragon and its nest) → exit 1, **9 FAILED** (161 ✓;
   `red-remove-dragon-2.log`): LANDING `✗ the dragon's nest of books at (-22.60, -6.30): landed at 0.000, its
   top is 0.190` ×4 + `37 fell through`; `✗ … reaches none of their middles: the baby dragon IS reached, the
@@ -156,8 +161,8 @@ the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.0
   first: a jump from beside it from (10.84, 7.20): 4 frame(s) standing on its top`. The control that the
   jump sweep can see a child on a creature (the scratch instrument's own control first: `play-2-wide.log`).
 - **By hand, `DRAGON_MEET_RADIUS = 0.5`** → exit 1, **2 FAILED** (163 ✓; `red-byhand-meet-radius.log`):
-  `✗ stood beside the baby dragon (1.84 m from the nest, inside 0.5), one frame later it is met: Dragon friend
-  discovered (count 0), it says 'null' …`; `✗ a visit later, … it says 'Prrrrr…' (wanted 'Hello again,
+  `✗ stood beside the baby dragon (2.00 m from the nest, inside 0.5), one frame later it is met: Dragon friend
+  discovered (count 0), it says 'null' …` (1.84 m at 9dc39dd9); `✗ a visit later, … it says 'Prrrrr…' (wanted 'Hello again,
   friend!')`. (GUARD's cross-check steps aside, as it must: 2.06 m is outside 0.5.)
 - **By hand, `PET_SECONDS = 0`** → exit 1, **2 FAILED** (164 ✓; `red-byhand-pet-seconds.log`): `✗ … within
   0.5 s an ear twitches 0.000 rad off its rest (over 0.1) and she lifts her face 0.1 cm (over 2)`; `✗ she is
@@ -174,9 +179,9 @@ the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.0
 | `pnpm run typecheck:test` | 0 | |
 | scripts typecheck instrument (`den12/tsconfig.scripts.json`) | 2 | **56 messages, as at Step 12**; the message sets diff empty — none new (the one in check-library.mts is the old environmental `process.exit`) |
 | `check:brevity` | 0 | `the secrets — 7 names and 7 lines`; `356 pieces of copy are short enough` |
-| `check:tap-spacing` | 0 | 10 spaces, **147 zones** (+1, the cat; the dragon's is open-only), 27 bands, 247 zone-band and 20 close zone-zone pairs, 20 same-action overlaps; OK |
-| `check:exits` | 0 | the library: 802 exits (795 at Step 12: the cat's stand), 156 off the lattice, 0 with nowhere; the guard fired once on the den band's walk, as at Step 12 |
-| `check:solids` (core) | 0 | `the library: 13 tops reached, 0 region(s) she can drop into, 732 jumps simulated` (664 at Step 12: the nest's and the pile's tops aimed at, neither reached — the census agrees with the jumps above); `no jump or walk-off of 732 leaves her wedged` |
+| `check:tap-spacing` | 0 | 10 spaces, **147 zones** (+1, the cat; the dragon's is open-only), 27 bands, 247 zone-band and 20 close zone-zone pairs, 20 same-action overlaps; OK (re-run at 3014933b: the same) |
+| `check:exits` | 0 | the library: 802 exits (795 at Step 12: the cat's stand), 156 off the lattice, 0 with nowhere; the guard fired once on the den band's walk, as at Step 12 (re-run at 3014933b: the same) |
+| `check:solids` (core) | 0 | `the library: 13 tops reached, 0 region(s) she can drop into, 732 jumps simulated` (664 at Step 12: the nest's and the pile's tops aimed at, neither reached — the census agrees with the jumps above); `no jump or walk-off of 732 leaves her wedged` (re-run at 3014933b: the same) |
 | `check:assets` | 0 | 135 assets check out (the five creatures among them since Step 3) |
 | `check:labels` | 0 | `55 labels registered` (the creature bubble among them; scene 5 is the join's) |
 | `check:cycle-tdz` | 0 | the same 5 sites as the baseline |
@@ -226,6 +231,14 @@ the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.0
 14. **Merge-friendly placement**: the cat's layout block sits after the den's, its stand appended after the
     dragon's in `libraryStandSpots`, and the LABELS.md row after the wild bunny's — clear of the lines the
     owl track rewrote; the stale doc lists they share are left for the join (below).
+15. **The dragon's stand moved beside it** (Step 11's `LIBRARY_DRAGON_STAND`, (−21.3, −5.0) facing 225 →
+    (−20.6, −6.3) facing 270). The camera looks into the room along (−1, −1), and the old spot was straight
+    in front of the dragon on that line: in Chrome her body covered the dragon the whole time she said hi
+    (`den13/look-dragon.png`), and a tap on the dragon walks her to that spot. Due east of the nest, 2.0 m
+    off (inside the 2.2 meeting), clear of the north wall by 0.4 m past its keep-out and of the dragon's
+    body by 0.23, the two stand side by side (`look2-stand.png`) and the dragon turns its head to her as far
+    as it goes (0.6 rad). The nest is in the den's corner, so no spot to the camera's side of it fits her;
+    beside it, to the east, is the nearest to that. A visible change: name it to Jim with the PR.
 
 ## For the join (Step 13)
 - **Track A (owl)**: `screenLabels` → `[nameLabel, owl.bubble, creatureBubble]`; `interactZones()` merges the
@@ -242,6 +255,9 @@ the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.0
   visit(dragon, true, 3)` (`library-cat`, `library-dragon`; the creature bubble is registered already).
 - **Step 14**: `/library?at=9.6,8.8&facing=180` lands at `LIBRARY_CAT_STAND`; tap-spacing's open-den snapshot
   takes the dragon zone in; the dragon and the cat are in the open area the put-down rule reads.
+  **`LIBRARY_DRAGON_STAND` is (−20.6, −6.3) now** (Decision 15): the plan's preview sentence for
+  `/library-den` still stands (it lands at the doorway stand, from where the dragon shows and Say hi! is
+  offered — `look2-doorway.png`).
 
 ## Questions for Jim (Step 13; no blocker was added)
 - **Nothing unkind was found**: in 42 real jumps she never stood on the dragon or the cat. But the cat's
