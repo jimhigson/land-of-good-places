@@ -1268,6 +1268,9 @@ export class Game {
    */
   private selectionBlocked(): boolean {
     return (
+      // The owl is showing her the book she recommends (`bookGlance.ts`): mid-script, so her chip would
+      // offer a press that does nothing, and the camera may be looking at a shelf she is out of shot of.
+      this.bookGlance.active ||
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
       this.cuteODex.isOpen ||

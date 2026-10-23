@@ -23,11 +23,12 @@ import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
  *
  * So while the owl names the book and says it is glowing, the camera slides
  * over to it — the book's case, its glowing cover and the beacon rising over
- * it — drawing back, if it has to, until **she, the owl and the glowing book
- * are all in the picture**; and when the owl has finished, it comes back to
- * her. The owl's words stay true and are shown: the book she named is right
- * there, glowing, and the child has seen which way to walk. She can be shown
- * again any time: "Say hello!" recommends the same book until it is read
+ * it — drawing back a little, if that is enough, until **she, the owl and the
+ * glowing book are all in the picture**, and otherwise looking at the book
+ * itself; and when the owl has finished, it comes back to her. The owl's
+ * words stay true and are shown: the book she named is right there, glowing,
+ * and the child has seen which way to walk. She can be shown again any time:
+ * "Say hello!" recommends the same book until it is read
  * (`recommendation.ts`).
  *
  * ## It never takes the controls
@@ -66,12 +67,19 @@ import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
  * Everything fits a phone held upright only at a zoom where the beacon's
  * sparkles are a few pixels across — the whole room shrunk into the middle of
  * the screen and the glow a dot by its far wall (headless Chrome, 390×844,
- * the north wall's *Cat Bus* book: zoom 0.46). So the zoom stops at
- * {@link GLANCE_DRAW_BACK} of hers, the beacon three quarters of the size she
- * always sees it, and when everything does not fit there the book comes
- * first: the frame holds the book and its beacon whole, and as much of the
- * way back to her as fits ({@link GlanceShot.whole} false). The camera's slide
- * from her to it is what shows her which way to go.
+ * the north wall's *Cat Bus* book: zoom 0.46). So it draws back at most to
+ * {@link GLANCE_DRAW_BACK} of her zoom, the beacon three quarters of the size
+ * she always sees it; and when everything does not fit even there, it looks
+ * at **the book itself**, in the middle of the screen, at her own zoom
+ * ({@link GlanceShot.whole} false). The camera's slide from her to it is what
+ * shows her which way to go.
+ *
+ * While the camera is the glance's, **nothing is selected** (`Game`'s
+ * `selectionBlocked`): the owl is talking, and a press mid-script does
+ * nothing, so her "Say hello!" chip must not show — and it is her bubble over
+ * it that normally puts it away, which is not drawn while the camera looks at
+ * a book she is out of shot of (seen in headless Chrome: the chip clamped to
+ * the bottom of a phone's screen, offering a press that would do nothing).
  *
  * Kept outside the park closure (`scripts/lib/park-source-hash.mjs`): only
  * `Game` and the checks import it, so a camera move cannot change a park.
@@ -96,7 +104,7 @@ export interface GlanceShot {
   /** The world point the camera orbits — the middle of the framed box, at the height the camera orbited her at when the glance took it. */
   readonly focus: Vector3;
   readonly zoom: number;
-  /** She, the owl and the book all fitted at {@link zoom}; false — the book first, and as much of the way back to her as fits (see the module doc). */
+  /** She, the owl and the book all fitted at {@link zoom}; false — the book itself, in the middle, at her own zoom (see the module doc). */
   readonly whole: boolean;
 }
 
@@ -253,22 +261,14 @@ export class BookGlance {
     const up = camera.screenUpAxis;
     const all = screenBox(this.points, right, up, this.everything);
     const bookBox = screenBox(this.bookPoints, right, up, this.bookBox);
-    // How much the frame holds, with the margin, at zoom 1: `zoomToFit` asked of a unit half-extent on each axis.
-    const holdsW = camera.zoomToFit(1, 0, GLANCE_MARGIN);
-    const holdsH = camera.zoomToFit(0, 1, GLANCE_MARGIN);
-    const fit = Math.min(holdsW / Math.max((all.maxR - all.minR) / 2, 1e-6), holdsH / Math.max((all.maxU - all.minU) / 2, 1e-6));
+    const fit = camera.zoomToFit((all.maxR - all.minR) / 2, (all.maxU - all.minU) / 2, GLANCE_MARGIN);
     const nearest = Math.max(CAMERA_ZOOM_MIN, this.zoomBefore * GLANCE_DRAW_BACK);
-    const zoom = Math.max(nearest, Math.min(this.zoomBefore, fit));
     const whole = fit >= nearest;
-    // The middle of everything — or, when everything does not fit, the nearest middle that still holds the
-    // book and its beacon whole: the frame slides from her middle towards the book just far enough.
-    let midR = (all.minR + all.maxR) / 2;
-    let midU = (all.minU + all.maxU) / 2;
-    if (!whole) {
-      midR = towards(midR, bookBox.maxR - holdsW / zoom, bookBox.minR + holdsW / zoom);
-      midU = towards(midU, bookBox.maxU - holdsH / zoom, bookBox.minU + holdsH / zoom);
-    }
-    if (!onScreenAxes(this.focus, right, up, midR, midU, this.focusHeight)) return null;
+    // Everything, round its middle — or, when everything does not fit, the book and its beacon round
+    // theirs, at her own zoom.
+    const box = whole ? all : bookBox;
+    const zoom = whole ? Math.min(this.zoomBefore, fit) : this.zoomBefore;
+    if (!onScreenAxes(this.focus, right, up, (box.minR + box.maxR) / 2, (box.minU + box.maxU) / 2, this.focusHeight)) return null;
     return { bookId: placed.book.id, focus: this.focus, zoom, whole };
   }
 }
@@ -296,12 +296,6 @@ function screenBox(points: readonly Vector3[], right: Readonly<Vector3>, up: Rea
     out.maxU = Math.max(out.maxU, u);
   }
   return out;
-}
-
-/** `value` moved the least distance into `[low, high]` — or, the range empty (it cannot hold), to its middle. */
-function towards(value: number, low: number, high: number): number {
-  if (low > high) return (low + high) / 2;
-  return Math.min(high, Math.max(low, value));
 }
 
 /**

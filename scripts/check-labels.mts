@@ -188,22 +188,24 @@ scene.add(player.group);
 quietly(() => world.attachPlayer(player));
 const input = new InputSystem();
 
+/**
+ * The owl's glance at the book she recommends (`bookGlance.ts`): `Game.tick` applies it after the player
+ * and before the camera, its claim the camera's focus override — so here, so the labels of the library
+ * scene are laid out on the camera the game draws while the owl names her book and the camera shows it.
+ * And while it holds nothing is selected (`Game.selectionBlocked`), so here too. The frames it held are
+ * counted ({@link glanceFrames}), and the frames a chip was drawn while it held ({@link glanceChipFrames}).
+ */
+const bookGlance = new BookGlance(world.library);
+let glanceFrames = 0;
+let glanceChipFrames = 0;
 const canvas = document.createElement('div') as unknown as HTMLCanvasElement;
 const selection = new Selection(player, camera, canvas, {
   zones: () => world.interactZones(),
-  blocked: () => false,
+  blocked: () => bookGlance.active,
   walkTo: () => {},
   walking: () => false,
   flash: () => {},
 });
-/**
- * The owl's glance at the book she recommends (`bookGlance.ts`): `Game.tick` applies it after the player
- * and before the camera, its claim the camera's focus override — so here, so the labels of the library
- * scene are laid out on the camera the game draws while the owl names her book and it draws back to show
- * it. The frames it held are counted ({@link glanceFrames}).
- */
-const bookGlance = new BookGlance(world.library);
-let glanceFrames = 0;
 const uiRoot = document.createElement('div') as unknown as HTMLElement;
 const chips = new ActionChips(uiRoot, selection, () => camera.camera, () => player.riding);
 world.labels.add(chips);
@@ -547,6 +549,7 @@ function step(): void {
   });
   world.labels.resolve(view, DT);
   audit();
+  if (bookGlance.active && isDrawn(chips)) glanceChipFrames += 1;
   frame += 1;
 }
 
@@ -739,7 +742,7 @@ process.stderr.write(
     `a shelf book's chip ${libraryRead ? 'up' : 'NOT up'}, story time on ${storyFrames} frames (${readingFrames} reading) with her ${seatedForStory ? 'sat on her cushion' : 'NOT seated'}: ` +
     `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
     `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
-    `the owl's glance at her book held the camera on ${glanceFrames} frames. ` +
+    `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -757,6 +760,13 @@ if (owlSelected < 2) coverageGaps.push(`the library owl was selected on only ${o
 if (!cardGiven) coverageGaps.push('the library owl never handed over her card');
 if (!recommended) coverageGaps.push('the library owl never recommended a book');
 if (glanceFrames === 0) coverageGaps.push("the owl's glance at the book she recommended never took the camera, so no label was laid out under it");
+if (glanceChipFrames > 0) {
+  fail(
+    'C precedence',
+    `a chip was drawn on ${glanceChipFrames} of the ${glanceFrames} frames the owl's glance held the camera — the owl is mid-script and nothing may be selected then ` +
+      `(Game.selectionBlocked), and her "Say hello!" would be a press that does nothing`,
+  );
+}
 if (!libraryRead) coverageGaps.push("no library shelf book's chip was ever up");
 if (!seatedForStory) coverageGaps.push('she never sat on a story cushion for story time');
 if (storyFrames === 0) coverageGaps.push('library story time never ran');

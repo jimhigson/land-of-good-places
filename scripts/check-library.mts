@@ -2397,7 +2397,8 @@ const roomOccluders = (): Mesh[] => {
  * in clear view of the camera (a ray from the eye reaching it past every opaque mesh of the room and its
  * children, taken that frame); whether the owl's bubble can be drawn (its anchor in shot, the bubble's own
  * gate: `SpeechBubble.updateScreenSize`) and whether the child is on the screen, feet and head — on the
- * frames the glance holds everything (`GlanceShot.whole`); and how big a beacon's sparkle is drawn there
+ * frames the glance holds everything (`GlanceShot.whole`); whether the case's top over the book is drawn in
+ * the middle half of the screen — on the frames it looks at the book itself; and how big a beacon's sparkle is drawn there
  * (`BEACON_SCALE` across, at the case's top, through the camera as it is), against how big it was drawn
  * through the camera on the frame before the glance took it. After the
  * last line: how many frames until the glance has let go, the zoom she had is back, and the camera
@@ -2415,6 +2416,9 @@ interface RecommendWatch {
   lowest: number;
   /** Glow-line frames the glance held everything — her, the owl and the book — and of them, the frames she and the owl's bubble's anchor were in shot. */
   wholeFrames: number;
+  /** Glow-line frames the glance looked at the book itself, and of them, the frames the case's top over it was drawn in the middle half of the screen. */
+  bookFrames: number;
+  centredFrames: number;
   bubbleFrames: number;
   childFrames: number;
   glanceFrames: number;
@@ -2449,6 +2453,8 @@ const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendW
     hidden: 0,
     lowest: Infinity,
     wholeFrames: 0,
+    bookFrames: 0,
+    centredFrames: 0,
     bubbleFrames: 0,
     childFrames: 0,
     glanceFrames: 0,
@@ -2492,15 +2498,19 @@ const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendW
     if (!owl.speaking || owl.lastSaid !== LIBRARY_LINES.owl.recommendGlow) continue;
     watch.glowFrames += 1;
     watch.shot = bookGlance.shot;
+    watch.beaconPx = Math.min(watch.beaconPx, sparklePx());
+    if (caseTopAt) watch.beaconAt = pointOn(caseTopAt, screen);
     if (bookGlance.shot?.whole) {
       watch.wholeFrames += 1;
       const feet = pointOn(player.position, screen);
       const head = pointOn(player.position.clone().setY(player.position.y + player.topHeight), screen);
       if (feet.on && head.on) watch.childFrames += 1;
       if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.bubbleFrames += 1;
+    } else if (bookGlance.shot) {
+      watch.bookFrames += 1;
+      const at = watch.beaconAt;
+      if (at && Math.abs(at.x - screen.width / 2) <= screen.width / 4 && Math.abs(at.y - screen.height / 2) <= screen.height / 4) watch.centredFrames += 1;
     }
-    watch.beaconPx = Math.min(watch.beaconPx, sparklePx());
-    if (caseTopAt) watch.beaconAt = pointOn(caseTopAt, screen);
     camera.camera.updateMatrixWorld();
     eye.setFromMatrixPosition(camera.camera.matrixWorld);
     const meshes = roomOccluders();
@@ -2545,7 +2555,7 @@ const watchSays = (book: LibraryBook, watch: RecommendWatch): string =>
   `'${book.id}' on '${watch.caseId}' (${watch.caseTop.toFixed(2)} m): seen on ${watch.seenFrames} of ${watch.glowFrames} frames of the glow line ` +
   `(${watch.seenSprites} sparkle-frames; ${watch.hidden} hidden by the room; the lowest at ${Number.isFinite(watch.lowest) ? watch.lowest.toFixed(2) : '—'} m)` +
   `${watch.beaconAt ? `, its case's top drawn at (${Math.round(watch.beaconAt.x)}, ${Math.round(watch.beaconAt.y)})${watch.beaconAt.on ? '' : ' OFF THE SCREEN'}` : ''}; ` +
-  `the glance on ${watch.glanceFrames} frames${watch.shot ? `, zoom ${watch.shot.zoom.toFixed(2)}${watch.shot.whole ? ', everything in shot' : ', the book first (everything did not fit)'}` : ', NO SHOT'}; ` +
+  `the glance on ${watch.glanceFrames} frames${watch.shot ? `, zoom ${watch.shot.zoom.toFixed(2)}${watch.shot.whole ? ', everything in shot' : `, the book itself (everything did not fit), its case's top in the middle half of the screen on ${watch.centredFrames} of ${watch.bookFrames}`}` : ', NO SHOT'}; ` +
   `a sparkle drawn ${watch.beaconPx.toFixed(1)} px across at its smallest (${watch.beaconPxBefore.toFixed(1)} px before the glance; ${GLANCE_DRAW_BACK} of it wanted)`;
 
 console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl's order, and it glows until it is read:");
@@ -2608,7 +2618,12 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
     `and while it holds everything, she and the owl are in the picture: on the ${watched.wholeFrames} of the glow line's ${watched.glowFrames} frames the glance held everything, ` +
       `the child was on the screen, feet and head, on ${watched.childFrames}, and the owl's bubble's anchor in shot (so her words can be drawn) on ${watched.bubbleFrames} — every one wanted`,
   );
-  if (watched.wholeFrames === 0) note("RECOMMEND: the owl's first pick was shown book first on every frame of the glow line, so 'she and the owl are in the picture' asserted nothing here");
+  say(
+    watched.centredFrames === watched.bookFrames,
+    `and when it looks at the book itself, the book is in the middle: its case's top drawn in the middle half of the screen on ${watched.centredFrames} of the ${watched.bookFrames} frames it did — every one wanted`,
+  );
+  if (watched.wholeFrames === 0) note("RECOMMEND: the owl's first pick was shown book itself on every frame of the glow line, so 'she and the owl are in the picture' asserted nothing here");
+  if (watched.bookFrames === 0) note("RECOMMEND: the owl's first pick was shown with everything in shot on every frame of the glow line, so 'the book is in the middle' asserted nothing here; FOUND FROM THE DESK asks it of the books that are shown book first");
   say(
     watched.beaconPx >= watched.beaconPxBefore * GLANCE_DRAW_BACK - 0.05,
     `and it never draws back so far the glow is lost: a beacon's sparkle (${BEACON_SCALE} m) drawn ${watched.beaconPx.toFixed(1)} px across at its smallest on the glow line, ` +
@@ -5130,7 +5145,7 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
   for (const { screen, book, watch, recommended } of rows) {
     say(
       recommended === book.id && watch.glowFrames > 0 && watch.seenFrames >= watch.glowFrames * 0.8 && watch.childFrames === watch.wholeFrames && watch.bubbleFrames === watch.wholeFrames &&
-        watch.beaconPx >= watch.beaconPxBefore * GLANCE_DRAW_BACK - 0.05 && (watch.followedAt === null || watch.homeAfter >= 0),
+        watch.centredFrames === watch.bookFrames && watch.beaconPx >= watch.beaconPxBefore * GLANCE_DRAW_BACK - 0.05 && (watch.followedAt === null || watch.homeAfter >= 0),
       `${screen.what} (${screen.width}×${screen.height}): ${watchSays(book, watch)} — 80% wanted; of the ${watch.wholeFrames} frames it held everything, she on the screen on ${watch.childFrames}, ` +
         `the owl's bubble's anchor in shot on ${watch.bubbleFrames} (all wanted); the camera home ${watch.homeAfter >= 0 ? `${watch.homeAfter} frames after` : 'NOT within 2 s of'} her last line` +
         `${recommended === book.id ? '' : ` — SHE RECOMMENDED '${recommended ?? 'nothing'}', NOT '${book.id}': the store was not set as this clause meant`}`,
@@ -5143,7 +5158,7 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
   const zooms = rows.map((row) => row.watch.shot?.zoom ?? Number.NaN).filter(Number.isFinite);
   note(
     `FOUND FROM THE DESK: ${rows.length} recommendations (${BOOKS.length} books × 2 screens); the child, the owl and the book all in one shot on ${fitted(LAPTOP.what)} and ${fitted(PHONE.what)} ` +
-      `(the rest book first); the glance's zoom ${Math.min(...zooms).toFixed(2)}..${Math.max(...zooms).toFixed(2)}`,
+      `(the rest the book itself); the glance's zoom ${Math.min(...zooms).toFixed(2)}..${Math.max(...zooms).toFixed(2)}`,
   );
   // Put back as found: the store as it was (above), and her recommendation — the owl's own rule on it.
   child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
