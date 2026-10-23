@@ -23,6 +23,8 @@
  * LIBRARY_CHECK_REMOVE='the baby dragon' pnpm run check:library  # the dragon alone not solid, its nest still there: CREATURES must go red
  * LIBRARY_CHECK_REMOVE='the library cat' pnpm run check:library  # the cat alone not solid, her pile still there: CREATURES must go red
  * LIBRARY_CHECK_MUTATE=wide-creature-tops pnpm run check:library  # the dragon's and the cat's tops made whole: a jump lands her on one, must go red
+ * LIBRARY_CHECK_REMOVE='den wall (north)' pnpm run check:library  # the den's north wall's body out: THE DEN, DRAWN and DEN WALLS must go red
+ * LIBRARY_CHECK_MUTATE=undrawn-den-wall pnpm run check:library  # the Artist's north wall taken out of the drawn den: THE DEN, DRAWN must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -56,9 +58,13 @@
  *     past the corner rounding its capsules leave. Every box is the **model's**
  *     drawn footprint (`libraryAssets.ts`), never the collider's own. Then
  *     DEN WALLS — bodies in the den marched at its three walls never leave it
- *     but by its doorway — and LINTEL — a flier over the shut secret shelf
- *     stops at the lintel, at every height, and with the shelf's colliders out
- *     a walker passes under it.
+ *     but by its doorway — THE DEN, DRAWN — the den is the Artist's Blender
+ *     kit, every drawn wall stands on its body (solid just behind its drawn
+ *     face, clear just in front), the lintel inside its band, the floor slab
+ *     the room's paint and under her feet, every niche book behind a wall's
+ *     face and the lanterns out of every reach — and LINTEL — a flier over the
+ *     shut secret shelf stops at the lintel, at every height, and with the
+ *     shelf's colliders out a walker passes under it.
  *  6. LANDING — her feet, asked the way `Player` asks them
  *     (`world/standing.ts`), find every solid's top under them everywhere
  *     across its drawn footprint (the chairs, the desk, the bins, the
@@ -140,7 +146,9 @@
 import './headless-canvas.mjs';
 import { BackSide, Box3, Color, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshToonMaterial, Sprite, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { Player } from '../src/entities/Player.ts';
+import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
+import { LIBRARY_DEN_LANTERN_NODES, LIBRARY_DEN_ROOM_NODES, libraryDenPart } from '../src/art/models/libraryDenKit.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { CollisionWorld, JUMP_CLEARANCE_GRACE, type BoxCollider } from '../src/world/Collision.ts';
@@ -273,7 +281,10 @@ const note = (line: string): void => {
  * added with the harness); `wide-creature-tops` is CREATURES' (#719, plan
  * Step 13 on the engine: the dragon's and the cat's measured narrow tops made
  * whole, so the real child's jumps must land her on them — the control that
- * the jump sweep can see a child standing on a creature at all); the rest are
+ * the jump sweep can see a child standing on a creature at all);
+ * `undrawn-den-wall` is THE DEN, DRAWN's (#719, the den from the Artist's
+ * kit: the drawn north wall taken out of the den, its body left, so the clause
+ * that holds every drawn wall to its body must see one missing); the rest are
  * the plan's (Steps 3-14).
  */
 const MUTATIONS = [
@@ -290,6 +301,7 @@ const MUTATIONS = [
   'resident-in-den',
   'block-walk',
   'wide-creature-tops',
+  'undrawn-den-wall',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -797,6 +809,210 @@ console.log("\nDEN WALLS — bodies in the secret den, marched at its three wall
       `(at most ${RESOLVER_SLACK}, and some body within 0.05 of every face)`,
   );
   note(`the den's floor x ${x0.toFixed(2)}..${x1.toFixed(2)}, z ${z0.toFixed(2)}..${z1.toFixed(2)} (body centres); its walls' inner faces x ${inner.west.toFixed(2)}, z ${inner.north.toFixed(2)} and ${inner.south.toFixed(2)}`);
+}
+
+/**
+ * **THE DEN, DRAWN** (#719, the den from the Artist's Blender kit) — what is
+ * drawn of the den is `libraryDen.glb`'s, and it stands on its bodies:
+ *
+ * - every mesh of the drawn den, and the lintel hung in the west wall, is a
+ *   node of the kit (its own geometry, not a copy, not a primitive), its ink
+ *   outline, or the niche books;
+ * - each of the three walls, measured off its own mesh in the room: its face
+ *   to the den is the layout's inner face, and at stations along it a point
+ *   just behind the drawn face is solid and one just in front is clear — the
+ *   wall is where it is drawn, and drawn where it is;
+ * - the lintel's drawn box lies inside its body's band and plan;
+ * - the floor slab's top is the room's floor, its paint the room floor's own
+ *   (LIGHT measures the den's floor with that paint), and her feet find it
+ *   all across the den;
+ * - every niche book stands behind a far wall's drawn face, none in the open
+ *   den; the lanterns hang over her head at the top of her highest jump, and
+ *   nothing in the den is a light.
+ *
+ * `LIBRARY_CHECK_REMOVE='den wall (north)'` takes the north wall's body out
+ * (the drawn wall stands on nothing); `LIBRARY_CHECK_MUTATE=undrawn-den-wall`
+ * takes the drawn north wall out of the den (the body stands for nothing).
+ */
+console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body, the lintel in its band, the floor under her feet, the books in the walls, the lanterns out of reach:");
+{
+  const shellOfDen = library.denShell;
+  const model = shellOfDen.model;
+  if (mutating('undrawn-den-wall')) {
+    model.walls.north.removeFromParent();
+    note("TOOK the Artist's drawn north wall out of the den, its body left, on purpose — this run must go red");
+  }
+  library.roomRoot.updateMatrixWorld(true);
+  const isOutline = (mesh: Mesh): boolean => mesh.material instanceof MeshBasicMaterial && mesh.material.side === BackSide;
+  // Every mesh drawn for the den is the kit's own.
+  const kitNodes = new Set<string>([...LIBRARY_DEN_ROOM_NODES, ...LIBRARY_DEN_LANTERN_NODES]);
+  let kitMeshes = 0;
+  let outlines = 0;
+  const strangers: string[] = [];
+  const drawnOf = new Map<string, Mesh>();
+  for (const root of [model.root, model.lintel]) {
+    root.traverse((part) => {
+      if (!(part instanceof Mesh)) return;
+      if (part === shellOfDen.books) return;
+      if (isOutline(part)) {
+        outlines += 1;
+        return;
+      }
+      if (kitNodes.has(part.name) && part.geometry === libraryDenPart(part.name).geometry) {
+        kitMeshes += 1;
+        if (!drawnOf.has(part.name)) drawnOf.set(part.name, part);
+        return;
+      }
+      strangers.push(part.name || '(unnamed)');
+    });
+  }
+  say(
+    strangers.length === 0 && kitMeshes >= LIBRARY_DEN_ROOM_NODES.length && model.lintel.parent === library.westWall,
+    `the den is drawn from the Artist's kit: ${kitMeshes} meshes, each a libraryDen.glb node's own geometry (${LIBRARY_DEN_ROOM_NODES.length} room nodes, ${shellOfDen.lanterns.length} lanterns), ` +
+      `${outlines} ink outline(s), the niche books, and ${strangers.length} anything else${strangers.length > 0 ? ` (${strangers.slice(0, 4).join(', ')})` : ''}; ` +
+      `the lintel hangs in the west wall's group (${model.lintel.parent === library.westWall})`,
+  );
+
+  /** A mesh's own geometry, room-local — its outline and children left out. */
+  const roomBox = (mesh: Mesh): Box3 => {
+    mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld);
+    box.min.x -= OX;
+    box.max.x -= OX;
+    box.min.y -= LIBRARY_FLOOR_Y;
+    box.max.y -= LIBRARY_FLOOR_Y;
+    box.min.z -= OZ;
+    box.max.z -= OZ;
+    return box;
+  };
+  const inner = LIBRARY_DEN_INNER;
+  const PROBE_IN = 0.05;
+  const PROBE_R = 0.02;
+  // Each wall: its face to the den, off its own mesh; the stretch of that face
+  // the den sees (between the other walls' faces, or the room wall's); which
+  // way is into the den.
+  const walls = [
+    { node: 'den-wallWest', what: 'west', axis: 'x' as const, face: (b: Box3): number => b.max.x, laidOut: inner.west, intoDen: 1, from: inner.north, to: inner.south },
+    { node: 'den-wallNorth', what: 'north', axis: 'z' as const, face: (b: Box3): number => b.max.z, laidOut: inner.north, intoDen: 1, from: inner.west, to: -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) },
+    { node: 'den-wallSouth', what: 'south', axis: 'z' as const, face: (b: Box3): number => b.min.z, laidOut: inner.south, intoDen: -1, from: inner.west, to: -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) },
+  ];
+  let stations = 0;
+  for (const wall of walls) {
+    const mesh = drawnOf.get(wall.node);
+    if (!mesh) {
+      say(false, `the den's ${wall.what} wall is not drawn (no '${wall.node}' in the den) — its body stands for nothing a child can see`);
+      continue;
+    }
+    const box = roomBox(mesh);
+    const face = wall.face(box);
+    const behindSolid: string[] = [];
+    const frontClear: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const along = wall.from + 0.4 + ((wall.to - wall.from - 0.8) * i) / 4;
+      const at = (offset: number): [number, number] => (wall.axis === 'x' ? [face + offset * wall.intoDen, along] : [along, face + offset * wall.intoDen]);
+      const [bx, bz] = at(-PROBE_IN);
+      const [fx, fz] = at(PROBE_IN);
+      stations += 1;
+      if (collision.isClearCircle(OX + bx, OZ + bz, PROBE_R)) behindSolid.push(`(${bx.toFixed(2)}, ${bz.toFixed(2)})`);
+      if (!collision.isClearCircle(OX + fx, OZ + fz, PROBE_R)) frontClear.push(`(${fx.toFixed(2)}, ${fz.toFixed(2)})`);
+    }
+    say(
+      Math.abs(face - wall.laidOut) <= 0.005 && behindSolid.length === 0 && frontClear.length === 0,
+      `the den's ${wall.what} wall, drawn: its face to the den at ${wall.axis} ${face.toFixed(3)} (the layout's ${wall.laidOut.toFixed(3)}, within 5 mm); at 5 stations along it ` +
+        `${PROBE_IN} m behind the drawn face is solid (${behindSolid.length === 0 ? 'every one' : `NOT at ${behindSolid.join(' ')}`}) ` +
+        `and ${PROBE_IN} m in front is clear (${frontClear.length === 0 ? 'every one' : `NOT at ${frontClear.join(' ')}`}); drawn ${box.max.y.toFixed(2)} m tall`,
+    );
+  }
+  // The lintel: its drawn box inside its body — the band from its base to its
+  // top, the capsule's flat run over the doorway, its half-thickness either
+  // side of the wall's centre line.
+  {
+    const lintelMesh = drawnOf.get('den-lintel');
+    const body = library.lintel;
+    if (!lintelMesh) {
+      say(false, "the lintel over the den's doorway is not drawn (no 'den-lintel')");
+    } else {
+      const box = roomBox(lintelMesh);
+      const centreX = body.x1 - OX;
+      const [z1, z2] = [Math.min(body.z1, body.z2) - OZ, Math.max(body.z1, body.z2) - OZ];
+      const over = Math.max(
+        body.baseHeight - LIBRARY_FLOOR_Y - box.min.y,
+        box.max.y - (body.topHeight - LIBRARY_FLOOR_Y),
+        Math.abs(box.min.x - centreX) - body.halfThickness,
+        Math.abs(box.max.x - centreX) - body.halfThickness,
+        z1 - box.min.z,
+        box.max.z - z2,
+      );
+      say(
+        over <= 0.005,
+        `the lintel, drawn y ${box.min.y.toFixed(2)}..${box.max.y.toFixed(2)}, x ${box.min.x.toFixed(2)}..${box.max.x.toFixed(2)}, z ${box.min.z.toFixed(2)}..${box.max.z.toFixed(2)}, ` +
+          `lies inside its body's band ${(body.baseHeight - LIBRARY_FLOOR_Y).toFixed(2)}..${(body.topHeight - LIBRARY_FLOOR_Y).toFixed(2)} m over z ${z1.toFixed(2)}..${z2.toFixed(2)} ` +
+          `(the furthest any drawn edge stands outside it ${over.toFixed(3)} m, at most 0.005)`,
+      );
+    }
+  }
+  // The floor: the room's own boards, at the room's floor, under her feet all across the den.
+  {
+    const slab = drawnOf.get('den-floor');
+    const roomFloor = library.roomRoot.getObjectByName('library.floor');
+    if (!slab || !(roomFloor instanceof Mesh)) {
+      say(false, `the den's floor slab (${slab ? 'drawn' : 'NOT drawn'}) or the room's floor (${roomFloor ? 'found' : 'NOT found'}) is missing — nothing measured`);
+    } else {
+      const box = roomBox(slab);
+      let feet = 0;
+      let off = 0;
+      for (let i = 0; i < 3; i += 1) {
+        for (let j = 0; j < 3; j += 1) {
+          const x = inner.west + 0.3 + ((-(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - inner.west - 0.6) * i) / 2;
+          const z = inner.north + 0.3 + ((inner.south - inner.north - 0.6) * j) / 2;
+          feet += 1;
+          if (Math.abs(surfaces.sample(OX + x, OZ + z, LIBRARY_FLOOR_Y + 1) - LIBRARY_FLOOR_Y) > 1e-6) off += 1;
+        }
+      }
+      say(
+        Math.abs(box.max.y) <= 0.001 && slab.material === roomFloor.material && off === 0,
+        `the den's floor slab is drawn with its top at the room's floor (${box.max.y.toFixed(4)} m), in the room floor's own paint (${slab.material === roomFloor.material}: LIGHT's den cells measure that paint), ` +
+          `x ${box.min.x.toFixed(2)}..${box.max.x.toFixed(2)}, z ${box.min.z.toFixed(2)}..${box.max.z.toFixed(2)}; her feet find it at ${feet - off} of ${feet} points across the den`,
+      );
+    }
+  }
+  // The niche books: behind a far wall's drawn face, every one.
+  {
+    const books = shellOfDen.books;
+    books.geometry.computeBoundingBox();
+    const instance = new Matrix4();
+    let inOpen = 0;
+    let nearest = -Infinity;
+    for (let i = 0; i < books.count; i += 1) {
+      books.getMatrixAt(i, instance);
+      const box = books.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(books.matrixWorld, instance));
+      const maxX = box.max.x - OX;
+      const maxZ = box.max.z - OZ;
+      // How far past its wall's drawn face the book reaches into the den (negative: behind it).
+      const past = Math.min(maxX - inner.west, maxZ - inner.north);
+      nearest = Math.max(nearest, past);
+      if (past > 0) inOpen += 1;
+    }
+    say(
+      books.count >= 300 && inOpen === 0,
+      `${books.count} books line the den's niches (at least 300 wanted), ${inOpen} standing in the open den: the nearest any comes to its wall's drawn face is ${(-nearest).toFixed(3)} m behind it`,
+    );
+  }
+  // The lanterns: over her head at the top of her highest jump; and nothing in the den is a light.
+  {
+    const head = JUMP_APEX_HEIGHT + KID_HEIGHT;
+    const lowest = Math.min(...shellOfDen.lanterns.map((lantern) => new Box3().setFromObject(lantern).min.y - LIBRARY_FLOOR_Y));
+    let lights = 0;
+    library.denRoot.traverse((part) => {
+      if ((part as { isLight?: boolean }).isLight) lights += 1;
+    });
+    say(
+      shellOfDen.lanterns.length === 2 && lowest > head && lights === 0,
+      `${shellOfDen.lanterns.length} lanterns hang with their lowest point ${lowest.toFixed(2)} m up, over her head at the top of her highest jump (${JUMP_APEX_HEIGHT.toFixed(2)} + ${KID_HEIGHT.toFixed(2)} = ${head.toFixed(2)} m): ` +
+        `out of every reach, so drawn with no body; ${lights} light(s) in the den (the room's pools are spent)`,
+    );
+  }
+  note(`THE DEN, DRAWN: ${stations} face stations on 3 walls; the walls' bodies are the layout's (libraryDenPlacement holds the kit to it within 5 mm as it loads)`);
 }
 
 console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every height nobody slips between it and the shut shelf, and a walker passes under it:");
