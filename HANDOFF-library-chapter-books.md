@@ -25,7 +25,7 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
       `.parks/` before the full `check` / `test:procgen`
 - [x] targeted local checks (table below), all exit 0
 - [ ] full `pnpm run check` (seed 5) and `pnpm run test:procgen` (16 seeds)
-- [ ] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk)
+- [x] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk) — below
 - [ ] PR opened, stacked on #733
 - [ ] CI green on the PR head
 - [ ] preview deep links checked and in the PR body
@@ -104,6 +104,38 @@ The books' own files are byte-identical to `origin/feat/library-v2-books` after 
 (`git diff --stat origin/feat/library-v2-books HEAD -- chapterBooks/ final.json storyProps.glb
 storyPropsGlb.ts reader/ books.ts readBooks.ts shelfBooks.ts bookKinds.ts test/library/` is empty):
 "as-is" by construction.
+
+## The look (16ee9be8; scratch `chapter-books/look/`)
+
+My own vite dev server (`node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 6741 --strictPort`,
+**pid 25748, killed by PID, port free after**) on the honest seed-5 park; Jim's installed Chrome,
+headless, `chromium.launch` (a throwaway temp profile, never the MCP's), every context closed.
+`look/look.mjs` takes every chapter book **off the big readers' shelf as a child does**:
+`/library?at=<its stand>&facing=270&seed=5`, waits for the game's own selection to hold
+`library-book:<id>`, clicks the real **"Read it!"** chip, then turns every page with the reader's own
+next button — every spread at 1280x800, every face at 390x844 — then a picture book
+(*RiPika's Balloon*, off north-2) and the owl's desk front (`/library?at=6,8.7&facing=180`, "Get a library
+card!" pressed). `look/look-run.log` + `look/shots-owl/look.log`: **every book opened by its chip on the
+right book, read to its end (6 spreads; 12 faces upright), `pagesFit` true, no upright card, no page
+error, at both sizes**; the owl greeted at both sizes, no page error. (The first pass's owl visit looked
+for her chip once while her arrival line had it put away — a script fault; it now waits, and passed.)
+
+**All 139 screenshots opened**, and what each showed is in `look/NOTES.txt` (written while each was
+open): every page's words inside the page, every picture drawn, the coral *Shush*, Nimbus grey then
+white, The End on every book. The known, accepted faces are as reported (Trilla's eyes under her
+tummy patch in *Shush*, Trilla surprised throughout *Chicken*, Grandpa Tock's cream-disc face on
+*Footprints* p6–p8). **Nothing the merge broke.**
+
+One thing seen and run down, **not the merge's**: a faint rainbow-edged pill across the first spread
+just after the chip is clicked (*Shush* spread 00, *RiPika's Balloon* spread 00). `look/recheck/`
+reopened both and sampled `.action-chips` at 0/60/120/300/1000 ms after the click: opacity 0.87 → 0 by
+~245 ms (its 140 ms fade), the pill gone by ~1 s, on the picture book (part 4's own content) exactly as on
+the chapter book. It is part 4's chip-press transient caught by screenshot timing; this merge changes
+no reader, chip or highlight code (`git diff --stat origin/feat/library-v2 HEAD -- src/`: 19 files, the
+books', the kit and the reader's picture code only).
+
+Also run against that server: `CHECK_BOOK_READER_URL=http://127.0.0.1:6741 pnpm run check:book-reader`
+→ exit 0, 2806 ok, "check:book-reader passed".
 
 ## Taking over at zero notice
 
