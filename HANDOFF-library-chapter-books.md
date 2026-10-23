@@ -19,9 +19,12 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
 - [x] package.json step-set proof (parsed) — PROOF OK, control red
 - [x] part 4 moved (66549d88, LABELS.md + its handoff, docs only): merged → **16ee9be8**; park hash
       unchanged 53dde20f…; step-set proof re-run, PROOF OK
-- [ ] parks hydrated for the merged source hash (honest seed-5 solve running, hash 53dde20f…;
-      `chapter-books/parks-fresh.sh` says FRESH/STALE before every World-building check)
-- [ ] local checks (table below)
+- [x] parks: the honest seed-5 solve of this tree (below); `chapter-books/parks-fresh.sh` says
+      FRESH/STALE before every World-building check
+- [ ] 16-seed solve for `test:procgen` running into `.parks/all16/` (gitignored); swap it into
+      `.parks/` before the full `check` / `test:procgen`
+- [x] targeted local checks (table below), all exit 0
+- [ ] full `pnpm run check` (seed 5) and `pnpm run test:procgen` (16 seeds)
 - [ ] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk)
 - [ ] PR opened, stacked on #733
 - [ ] CI green on the PR head
@@ -77,6 +80,25 @@ parents' text. **Control** (the pre-merge HEAD as the "result"): exit 1, `5 PROB
 | `check:assets` | 0 | 167 assets check out, 28 still carry recorded drift |
 | `check:flat-primitives` | 0 | 109 flat-ok sites, "no new flat primitives, and no stale baseline entries" |
 | vitest `test/library` + `test/store/library-card` | 0 | 4 files, 21 passed, 0 skipped (pageCurl 4, big-reader 8, chapter-books 5, card 4) |
+| vitest `test/library test/store` (as the books' join ran it) | 0 | **9 files, 63 passed** (the join's own figure) |
+| `check:library` | 0 | **210 ✓, 0 ✗**, "All clauses passed." (part 4's count: READABLE's `<=` became `===`, no clause added); `✓ 6 big readers' slots for the 6 chapter books`; `READABLE: 18 books (BOOKS.length), 18 slots, 18 zones pressed through a stub opener`; 76 keep-outs (74 room + 2 den); no WAIT note |
+| `check:brevity` | 0 | `12 picture books, 6 chapter books (60 chapter pages)`; the Library 57 lines (36 templates × the 18 titles), 10 titles; **434 pieces** short enough (the join's 432 + part 4's 2), 6 recorded exceptions; 10 CONTROLs ok; seed 5 hydrated from its prebuilt file |
+| `check:labels` | 0 | 15983 frames at 390x844, library 3413; 55 labels; the owl's 2 of 2 visits, story time 1800 frames (1138 reading), bubble/Get up/both 1138; no overlap |
+| `check:tap-spacing` | 0 | 10 spaces, **152 zones**, 27 bands; the library **21 zones** (Talk + 18 Read + 2 Sit; part 4 had 15), 1 band, 21 zone-band, **12 close zone-zone pairs**, each a warning "… overlap but both say 'Read' — harmless ambiguity, left alone" (neighbouring chapter books on west-4, 0.6 m apart, within the 1.13 m finger); 32 same-action warnings in all (part 4: 20). Not a failure; the shelf's layout as the books ship it — reported, not changed |
+| `check:exits` | 0 | "check:exits OK"; the library 795 exits, 155 off the lattice, 0 nowhere; both Sit chips "→ its own Get up chip"; 64 placement sites, 54 driven |
+| `check:jitter` | 0 | 34 children, 9000 frames, worst own step 0.177 m (Luca), bound 1 m; worst speed 4.983 m/s |
+| `check:crowd` | 0 | trace `frames=90000 children=12`, `covered climbs=9 trips=61 chats=369 paints=4 …`; npc-perch, separation, dispersal, presence OK |
+| `check:served-book-reader` (port 6743) | 0 | "check:book-reader passed", **2806 ok, 0 FAIL**; `6 real chapter book(s) measured, 164 worded chapter face(s) held to their boxes`; chapter books' thinnest pictures 53.5 / 52.2 / 51.6 / 54.0 / 51.0 / 18.0 % (the join's figures exactly); every picture model drawn, all 63; section 8 (goodnightPark completes the dex) and 10 (off the shelf) ok; vite pid 23929 stopped, port free after |
+| `pnpm run build` | 0 | built in 736 ms |
+
+**The honest park.** `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` at 4333fc84 (hash
+`53dde20f5ea285c66810d5912e470269bd1ba38f1afb143e33c2a2e08f8aa453`; 16ee9be8 and later handoff commits
+leave it unchanged): exit 0 in 514 s; restart 0 rejected by check:coplanar (231 s); **restart 1
+accepted as shipped (134 measures, 507 s), proven, digest 9c7a86e2b266ca08**; control (cruiser
++0.5 m) f02667cfadc338d5 differs. Against part 4's seed-5 file: `format`, `build`, `seed`, `restart`,
+`measures`, `features`, `planOrder` byte-identical; only `acceptance` (its source hash) and `digest`
+moved — the books move nothing in the park, but the digest is this tree's own, so a restamped part-4
+file would NOT have been this tree's park.
 
 The books' own files are byte-identical to `origin/feat/library-v2-books` after the merge
 (`git diff --stat origin/feat/library-v2-books HEAD -- chapterBooks/ final.json storyProps.glb
