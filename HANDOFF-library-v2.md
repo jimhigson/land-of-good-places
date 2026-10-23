@@ -491,3 +491,68 @@ not clear, away from her own cushion. A child squeezed there **by another child 
 `SEPARATION`) is the crowd's push-apart, `check:npc-separation`'s ground — reported as `squeezed`, not a lean
 (at central[4] on the way back Juno is squeezed 142 frames against the west armchair as Lark passes; moving
 her waypoint 15 cm east did not change it, so the plan's (0.5, −8.3) stands).
+
+## Restart: the part-4 milestone (23 Oct 2026, Opus 5.5) — Step 9 verified, Step 10, main merged, PR #733 moved
+
+**What changed in the plan (23 Oct):** PR #722 (the engine) is merged into main (6d70f695, a true merge
+of fccadf8b). Library v2 now ships as **two PRs**: **#733 is part 4** (#718: the owl, the card, the
+recommendation, the shush, the three children, the cushions, story time; base `main`, head
+`feat/library-v2-pr`), and **part 5** (#719's den, dragon and cat, and the six chapter books) follows
+on `feat/library-v2b`, stacked on #733, built by other engineers. This section is the part-4 restart.
+Scratch: `.claude/library-build-scratch/fin/` (logs end `exit=N`; `byhand.py`/`reds-step9.py` for
+by-hand reds, which revert and restamp themselves).
+
+### Step 9 (story time, 1adbe142..65d1c029) — verified
+
+Read: `storyTime.ts` (clock 40 s then 150 s, inside only, waits for the owl's script; gathering →
+reading on all seated/gave up + perched, or 40 s; dispersing; `abort()`), `LibraryOwl.flyTo/owlFlightPose/
+owlPerch/putSolidBack`, `NpcCharacter` hops (0.4 s, seated throughout), `Library` wiring (stepped first in
+`update`, aborted in `standOutside` and `releasePlayer`), `/library?story=now` (`parseLibraryLink` →
+`Game.enterLibrarySpawn(at, story)`), the Story listener row. `check:library` at 65d1c029 (seed 5 honest
+park, restamped 91b0be94): **exit 0, 203 ✓, "All clauses passed."** in 27 s (`fin/library-baseline.log`).
+STORY: 'Fireflies at Night' read, called 0.0 s, reading 15.5 s after, last word 21.9 s later; Juno 9.5 s,
+Lark 10.1 s, Fenn 15.9 s on their cushions, 0.000 m off; longest child step 0.065 m; perched 0.000 m off
+`owlPerch()` (4.00, 0.36, −11.19); 0 of 3460 owl points touchable; 3 pets out over 2437 frames, 0 seated;
+the card; all up 0.4 s after, the owl home 3.2 s. FLIGHT: 448 of 802 samples over a solid, least margin
+0.60 m (desk → chair t 0.485 at (5.04, 3.80, −2.57) over a 3.20 m top); live owl 0.00 cm off.
+CLOCK 40.02 s. ABORT left at 'gathering'.
+
+Reds the earlier engineer proved (logs `st9/`, geometry: seed 5, room at (−600, −600), cushion-1 room
+(2.1, −8), the owl's spot (6, 5.3), the story chair's perch (4.00, 0.36, −11.19), the stacks 3.20 m):
+`no-story` → 11 ✗ incl. `✗ STORY ASSERTS NOTHING: story time never reached 'reading' in 150 s (phases seen: idle)`;
+`block-cushion` → 1 ✗ `Juno NEVER on cushion-4` (the story still read); cruise − 1 by hand → `✗ … her feet at
+least -1.00 m over its top (0.3 wanted …) her cruise 2.20 m against the stacks' 3.20 m`; perch on the seat
+centre → `✗ … 99 of her 3460 visible points … e.g. (4.06, 1.15 up, -10.53) from a child at (4.00, -9.90)`;
+no card → `✗ … Story listener card: false`; `STORY_SIT_SECONDS = 0` → `✗ … the longest step … 1.019 m (0.1 allowed …)`;
+the solid put straight back on landing → `✗ … the child was moved 0.600 m (0.01 allowed)`; the deep link without
+`requestStoryTime` → `check:deep-links FAILED … story=now (startFresh): inside, but story time did not start within 5 s (phase idle)`.
+
+**CLOCK and ABORT had no red. Proved now** (`fin/red-*.log`, each reverted and restamped):
+- `clock -= dt * 2` (storyTime.ts idle) → exit 1, 202 ✓ 1 ✗: `✗ with the clock let go, a fresh visit's first story is called 20.00 s in (STORY_FIRST_AFTER 40 s; the clock started at 40 s)`.
+- `abort()` without the children's `endSeated`/`setDown` → exit 1, 202 ✓ 1 ✗: `✗ left by the door mid-story (it was 'gathering', a child sitting: true): … nobody left sitting (Juno SEATED, Lark returning, Fenn returning) …`.
+- `standOutside` without `owl.leave()` → exit 1, 202 ✓ 1 ✗: `✗ left by the door mid-story … the owl home behind her desk (at desk false, flying false, perched true) and solid there (false) …`.
+- `standOutside` without `storyTime.abort()` → exit 1, 201 ✓ 2 ✗: CLOCK `called NaN s in (… the clock started at 150 s)` and ABORT `(it was 'idle', a child sitting: false) … the next visit's clock at 64.97 s` — the clock never restarted.
+
+Fixed on the way: `Library.ts`' `playerIsSeated` doc comment had been split from its getter by story time's
+getters, and `update()` carried two overlapping order comments (476b3afd, comments only).
+
+### The three reviews' findings — each verified on this head
+
+Integration: (1) the primitive picture vocabulary (`pictureProps.ts`, `createStoryCloud`, `'prop'`/`'stormCloud'`)
+is **unreachable in the game at this head** — `git grep` finds it only in `check-book-reader`'s model sheet and
+fixtures; `CHAPTER_BOOKS` is `[]` and no picture book names either model. Track D's cece064a replaces it with the
+Artist's story-props kit in the **part-5 PR**; not edited here, because a second edit of the same hunks would
+conflict with the stacked branch. Recorded as a decision in the PR body. (2) Get up on the cushion's top:
+`standUp()` → `endRide({ y: LIBRARY_FLOOR_Y + libraryCushionSize().top })`; red `st9/red-getup-floor.log`
+(157 ✓ 1 ✗, 1.250 m). (3) The den shell (Step 11's floor, walls and lintel) is primitive and **hidden** at this
+head (`denRoot.visible = false`; the lintel is drawn flush in the west wall's own paint); the den kit replaces
+it in the part-5 PR — a decision line in the PR body. (4) The jet-pack pocket: the question for Jim says it is
+invisible. (5) The PR body's look-at links are rewritten for part 4.
+Owl: (1) `standingReach` over every desk pose, measured apart in the check; reds `st9/red-owl-radius-0.8.log`
+(158 ✓ 3 ✗), `-rest-only` (160 ✓ 1 ✗), `-flap-sideways` (159 ✓ 2 ✗). (2) `talk()`'s guard: red
+`st9/red-owl-talk-no-guard.log` (156 ✓ 5 ✗).
+Children: (2) `dismiss()` returns in `'returning'` (libraryKidDriver.ts:315), red `red-kids-double-dismiss-2.log`;
+(3) the still-player gathering, reds `red-kids-no-way-round-2.log` (176 ✓ 6 ✗), `-unchecked-lines-2` (172 ✓ 10 ✗),
+`-no-wait` (181 ✓ 1 ✗); (4) the way back resumes its declared leg, red `red-kids-giveup-strolls.log`; (5)
+`endSeated`'s comment; (6) `residentLook(rng)` draws skin, hair, outfit, hair style, backpack, its colour in the
+hotel's old order (diffed), `KID_ROUTE_ARRIVE = ARRIVE_RADIUS` (exported). (1) jitter/crowd: re-run below.
