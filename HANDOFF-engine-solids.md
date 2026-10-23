@@ -501,6 +501,22 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
 - Sixteen parks at 8adc1ea3: 12 green; red 6 (awning), 9 (walk-off squeeze), 11 (awning + walk-off squeeze), 15 (bench).
 
 ## Round four, restart (23 Oct 2026 from 04:40 BST, Opus 5.5) — resume here
+**STATE at 08:15 BST**: PR head `feat/engine-solids-pr` = **fccadf8b**; CI run **39911387184: success** (Checks + Procgen
+invariants green, every seed builds, entrance road, coplanar, swept bus, walk reach, PR preview; park jobs skipped on a
+cache hit from run 39905508749, restarts 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:0 10:9 11:4 12:0 13:6 14:8 15:4 at source
+7acd3093); Update adoption 39911387195 success. Preview https://pr-722-fccadf8-land-of-good-places.blockstack.workers.dev
+PR body rewritten for round four (decisions 1–7 as questions for Jim, invisible blockers, proofs, the 16-park table);
+comment issuecomment-6359285799 (plays + frames, qa-screenshots a54af1ce `pr722-r4/`). The work branch is ahead of the PR
+head by handoff commits only. NEXT: one combined review + QA pass on fccadf8b, then Jim's yes and the merge.
+**Plays on that preview** (`/tmp/es-qa/plays9.mjs`, frames `/tmp/es-qa/r9/`, every frame opened): 1 fence hop, the train
+stood short of her and her pet 10 s → 120 s, hopped off, it went on; 2 the tunnel walked through (−19.6,54.3 → −19.8,40.4);
+3 `?pets=3`: Get on at Sunny Side, a 72 s lap, Get off at Sunny Side, off at the stand (first person cannot show her
+backpack; the counts are clause 8's / check:exits'); 4a on the line ahead of Bluebell Halt, it stood short, she walked
+2.0 m into its nose and stopped, 0.0 m more pushing; 4b stood on carriage 2 at Bluebell Halt 15 s, the train waited;
+back on the platform, **her pet had followed her onto the carriage and stayed in it, and the train waited for it** (by the
+rule; decision 6 asks Jim). A replay of 3 (`/tmp/es-qa/r9b`) stuck her at a canopy post off the platform's corner
+(−19.0, 13.7): "Get on" showed there but did nothing — main's requestBoard asks she stands on the platform; play-script
+walking, not a regression.
 The Fable agent below died after its gate run at bf7b1c8b (04:32) without recording it; its orphaned servers (vite preview
 5737, dev 5738, both PPID 1, in this worktree) were killed by PID at 04:43.
 - Verified at bf7b1c8b: all nine check shards exit 0 (`/tmp/es-sh-r5-*.log`, snapshot worktree; clauses 8 and 13 all ✓,
