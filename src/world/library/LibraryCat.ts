@@ -81,6 +81,9 @@ const CAT_TAIL_RATE = 0.9;
 const CAT_BUBBLE_OVER = 0.45;
 const CAT_HEARTS_OVER = 0.1;
 
+/** Her Pet zone's id (`Library.ts` builds the zone) — the item her purr's bubble answers. */
+export const CAT_ZONE_ID = 'library-cat';
+
 /** The two solids' names — what `LIBRARY_CHECK_REMOVE` takes out by. */
 export const CAT_SOLID = 'the library cat';
 export const CAT_PILE_SOLID = "the cat's pile of books";

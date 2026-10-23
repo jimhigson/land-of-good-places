@@ -30,8 +30,8 @@ import { furnishReadingRoom, StackFader, type FurnishedShelfBook } from './furni
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
 import { SecretLeaf } from './secretShelf';
-import { LibraryDen } from './LibraryDen';
-import { LibraryCat } from './LibraryCat';
+import { DRAGON_ZONE_ID, LibraryDen } from './LibraryDen';
+import { CAT_ZONE_ID, LibraryCat } from './LibraryCat';
 import {
   buildLibraryDenShell,
   buildReadingRoomShell,
@@ -207,13 +207,11 @@ const SIT_STAND_RADIUS = 1.6;
  */
 const PULL_STAND_RADIUS = 2;
 
-/** The library cat's zone (#719): its id, its pick (the curled cat is 0.6 m across) and its reach from her stand. */
-export const CAT_ZONE_ID = 'library-cat';
+/** The library cat's zone (#719, its id `LibraryCat.ts`'s): its pick (the curled cat is 0.6 m across) and its reach from her stand. */
 const CAT_PICK_RADIUS = 0.8;
 const CAT_STAND_RADIUS = 1.6;
 
-/** The baby dragon's zone (#719): its id, its pick (the dragon on its nest is a metre and more across) and its reach from her stand. */
-export const DRAGON_ZONE_ID = 'library-dragon';
+/** The baby dragon's zone (#719, its id `LibraryDen.ts`'s): its pick (the dragon on its nest is a metre and more across) and its reach from her stand. */
 const DRAGON_PICK_RADIUS = 1.0;
 const DRAGON_STAND_RADIUS = 2.2;
 

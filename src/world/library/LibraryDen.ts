@@ -112,6 +112,9 @@ const DRAGON_BREATH_RATE = 1.7;
 /** Its words' bubble hangs this far over the top of its horns. */
 const DRAGON_BUBBLE_OVER = 0.45;
 
+/** Its Say hi zone's id (`Library.ts` builds the zone) — the item its words' bubble answers. */
+export const DRAGON_ZONE_ID = 'library-dragon';
+
 /** The Cute-o-dex card for meeting it — `state/secrets.ts`'s row. */
 export const DRAGON_FRIEND_SECRET = 'secret.babyDragon';
 
