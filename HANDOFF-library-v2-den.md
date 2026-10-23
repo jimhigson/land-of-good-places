@@ -1,14 +1,256 @@
-# HANDOFF — Library v2, track C: the secret leaf (plan Step 12)
+# HANDOFF — Library v2, track C: the secret leaf (plan Step 12) and the dragon and the cat (plan Step 13)
 
 Branch `feat/library-v2-den`, cut from the integration head **33bcc361** (`feat/library-v2`);
-worktree `.claude/worktrees/library-v2-den`. Engineer, Claude Fable 5.1, 22–23 Oct 2026. Epic
-#714, part #719. The plan is `docs/library-build/PLAN-parts-4-5.md` (Step 12); Step 11 (the den's
-walls, the lintel, the walled pocket) came onto the integration branch from the old den track —
-its record is `HANDOFF-library-den.md`, still accurate for what it built. Steps 13 (the dragon and
-the cat) and 14 (links, tap spacing, kids out of the den, docs) are this track's next steps and are
-**not started**.
+worktree `.claude/worktrees/library-v2-den`. Epic #714, part #719. The plan is
+`docs/library-build/PLAN-parts-4-5.md` (Steps 12 and 13). Step 11 (the den's walls, the lintel,
+the walled pocket) came onto the integration branch from the old den track — its record is
+`HANDOFF-library-den.md`, still accurate for what it built. Step 12: Claude Fable 5.1, 22–23 Oct.
+Step 13: Claude Opus 5.5, 23 Oct (a restart: the first Step 13 agent left only scratch measures,
+nothing committed). Step 14 (links, tap spacing, kids out of the den, docs) is this track's next step
+and is **not started**.
 
-Scratch logs: `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/den12/`.
+Scratch logs: `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scratch/den12/` (Step 12) and
+`…/den13/` (Step 13). Scratch instruments (gitignored, in the worktree so they load its own three.js):
+`.claude/scratch/creature-play.mts` (the real child's jumps at the creatures, `WIDE=1` its control).
+**Run any scratch script that imports `src/` with `LGP_PARK_FILE=$PWD/.parks/5.json`**: without it a
+module load starts the seed-5 acceptance loop for the new source hash (20 minutes) — it did once
+here, and was killed by PID.
+
+# Step 13 — the baby dragon and the sleeping cat
+
+## Status (Step 13)
+- [x] **6ab48113** `secrets.ts`: `secret.babyDragon` 'Dragon friend' 🐉 'You found the baby dragon in the den!' (its own commit).
+- [x] **16eb161a** `layout.ts`: `LIBRARY_CAT_PILE` (9.6, 7.2) facing 45; `LIBRARY_CAT_STAND` (9.6, 8.8) facing 180, in `libraryStandSpots()` (a keep-out).
+- [x] **d17a4ee4 / 83de8771 / fd4cda15** `LibraryDen.ts`, `LibraryCat.ts` (new), `props.ts` (`posedFootprint`, `sweep`), `Library.ts` (wiring).
+- [x] **3c62d674** `docs/design/LABELS.md`: the creatures' bubble row.
+- [x] **d57a9f12 / 9dc39dd9** `check-library.mts`: CREATURES, DEN WALLS sets the creatures' two grid spots apart, mutation `wide-creature-tops`.
+- [x] Green: `check:library` **166 ✓, 0 ✗, exit 0** (`den13/green-2.log`; Step 12 left it at 139 — CREATURES is the 27); every red below proved at **9dc39dd9** and reverted.
+- [ ] Step 14 (not this step).
+
+The park source hash at 9dc39dd9 is **b0bd865753ecf9c4844d17d8573c0d7836061e4ac24865dbdac3ae5a2eb98615**
+(every src file here is in the closure). No park was re-solved: `.parks/5.json` is the integration
+branch's honest seed 5 (digest d6721090fb3f1d3a), hydrated whatever the hash with `LGP_PARK_FILE`. The
+creatures change nothing the park plan reads (`parkManifest.ts` takes the library's footprint from
+`layout.ts`'s room figures, untouched); the CI solve belongs to the PR.
+
+## What Step 13 built
+
+**The engine's real shapes, not the plan's blocker.** The plan gave the dragon on its nest one
+`'wall'` disc and the cat's pile a `'wall'` box ("nobody jumps onto a dragon or a cat"). `'wall'` tops
+are gone (PR #722), so there are **four bodies, each its own shape, each measured off the built
+model**, and the narrow-top rule (a top under `FOOT_HALF_WIDTH` either side holds nobody) is what keeps
+her off the creatures — physics, no flag, no blocker:
+
+| body (`LibrarySolid.what`) | shape, room-local | top | top width | |
+|---|---|---|---|---|
+| `the dragon's nest of books` | disc r 0.834 (its drawn reach, ink incl.) at (−22.6, −6.3) | 0.190 (measured) | whole disc | a step |
+| `the baby dragon` | box 1.224 × 1.141 at (−22.570, −6.327) facing 45 — over every pose | 1.045 (pad 0.145 + its 0.900) | **0.015** | holds nobody |
+| `the cat's pile of books` | box 0.909 × 0.678 at (9.613, 7.213) facing 45 (its drawn plan, ink incl.) | 0.900 | 0.221 | jumpable |
+| `the library cat` | box 0.638 × 0.532 at (9.630, 7.227) facing 45 — over every pose | 1.250 (pile + her 0.350) | **0.018** | holds nobody |
+
+**`src/world/library/LibraryDen.ts`** (`class LibraryDen`, seed `0x0b00d1`): the nest and the dragon
+(`createLibraryDragonNest`, `createLibraryDragon`, Step 3's Blender creatures) in one group under
+`denRoot` at `LIBRARY_DRAGON_NEST`, the dragon at the pad's top. The dragon's box is
+`props.posedFootprint` over 81 poses (head turn 9 × nod 3 × tail 3, breath at its widest) — 6–16 ms to
+build. Life: breath on `body.scale` (`1 + 0.6b, 1 − b, 1 + 0.6b`, b = 0.03·sin(1.7t + phase), the
+owl's shape), blink via `createFaceLife` (resting `'surprised'` = the puff face while puffing, `'happy'`
+within `DRAGON_LOOK_RADIUS` 3 m in the den, else `'neutral'`), a tail wag every 5–9 s (±0.25 over 0.8 s),
+the head damped to her bearing (clamped ±0.6) with a 0.05 rad nod while she is near. Puff (1.2 s; idle
+every 9–14 s, and on meeting and Say hi): belly emissive `DRAGON_BELLY_REST_GLOW` + 1.0·sin(πu), four
+`PALETTE.fairyWarm` sprites from the measured mouth (followed through the turned head) — no
+`PointLight`. Meeting: the first frame of a visit she is in the den, the leaf open, within
+`DRAGON_MEET_RADIUS` 2.2 m of the nest → `discoverSecret('secret.babyDragon')`, firstHello (never met)
+or hello, a puff. `sayHi()`: the card (idempotent), the next of `dragon.hi`, a puff; it counts as
+meeting. `leave()` (the Library calls it on leaving): the next visit says hello again. Exported:
+`DRAGON_ZONE_ID 'library-dragon'`, `DRAGON_SOLID`, `DRAGON_NEST_SOLID`, `DRAGON_FRIEND_SECRET` and every
+number above.
+
+**`src/world/library/LibraryCat.ts`** (`class LibraryCat`, seed `0x0b00d3`): the pile and the cat in
+one group (`library.catAndPile`, what the rainbow rings) under `roomRoot` at `LIBRARY_CAT_PILE`, the
+cat at the pile's measured top. Her box is `posedFootprint` over 45 poses (lift 3 × ears 5 × tail 3,
+breath at its widest). Asleep: breath (0.025, rate 1.1 rad/s), tail sway 0.08. `pet()`: ignored within
+`PET_GUARD_SECONDS` 0.5; else `PET_SECONDS` 2.2 s — ears ±0.3·sin(5πt/0.6) mirrored for 0.6 s, head
+`rotation.x` → `CAT_HEAD_LIFT` −0.25 over 0.3 s, held, eased back over the last 0.6 s, face happy then
+asleep, three pink hearts (`SpritePuffs(roomRoot, 6)`), `playPurr()`, the next purr line. Exported:
+`CAT_ZONE_ID 'library-cat'`, `CAT_SOLID`, `CAT_PILE_SOLID`, `PET_SECONDS`, `PET_GUARD_SECONDS`, …
+
+**`props.ts`**: `posedFootprint(root, poses, at, facing)` — the box over every visible point (outlines
+included) in every pose; `sweep(from, to, count)` — a pose range.
+
+**`Library.ts`**: `den`, `cat`, `creatureBubble` (`SpeechBubble` 'library-creature-says',
+`actionFeedback`, `PALETTE.markerLemon`, in `roomRoot`), `lastCreatureLine`; `sayCreature(item, text,
+at)` (item = the zone it answers, held `lineSeconds`); `screenLabels = [nameLabel, creatureBubble]`;
+zones `library-cat` ('the library cat', pick 0.8, stand `LIBRARY_CAT_STAND` r 1.6, verb Pet, 'Pet the
+cat!' 🐈) and `library-dragon` ('the baby dragon', pick 1.0, stand `LIBRARY_DRAGON_STAND` r 2.2, verb
+Say hi, 'Say hi!' 🐉, **only once the shelf has landed open**), both with the Read and Pull zones (not
+while she rides); `update`: leaf + guard → `updateCreatures` (the cat; the dragon while the den is
+drawn; the bubble's hold) → the stacks' fades; `leaveCreatures()` from `standOutside` and
+`releasePlayer`. `chime.ts`'s `playPurr` was already there (the shared track's): unchanged.
+
+## The check — CREATURES (`check:library`, 166 ✓ 0 ✗ exit 0 at 9dc39dd9, `den13/green-2.log`)
+Counts off the screen:
+- DEX: `GUARD's walk into the den at (-21, -5), 2.06 m from the nest (the meeting's 2.2), already met the
+  baby dragon` → the entry taken back out (check-side); `CONTROL: 60 frames at the arrival with the leaf
+  shut, the baby dragon is not met …, says nothing new, and its Say hi zone is not offered`; `stood beside
+  the baby dragon (1.84 m from the nest, inside 2.2), one frame later it is met: Dragon friend discovered
+  (count 1), it says 'Oh, a visitor for me!' … and puffs (1); the guard opened the leaf the same frame`;
+  the zone `offers 'Say hi!' …, verb 'Say hi', its stand 0.000 m off the layout's, … the rainbow rings the
+  dragon`; `Say hi twice: 'I love my books!', then 'I keep books, not gold!' (its answers, in order), and
+  still one discovery (count 1)`; a visit later `'Hello again, friend!'`.
+- PUFF: `the belly's warm glow reaches 1.200 within 0.7 s … and is back to 0.200 3 s on`; `warm sprites
+  … up to 8 showing at once`; `the first idle puff 10.5 s after the last, 1 in 20 s`; the head `turns 0.500
+  rad, to the other -0.500 … 3.61 m away … it looks straight ahead (-0.000)`.
+- SOLID: four bodies (disc, box, box, box); the tops line above (`its crest 0.015 m … 0.018 either side
+  — … neither holds anybody`); `drawn is solid: the dragon's furthest drawn point over 276 sampled frames
+  of its life … is -0.0000 m outside its body; the nest reaches 0.834 m (its disc 0.834); the pile 0.0000
+  and the cat -0.0006 m outside theirs (at most 0.002)`; `the fill from the arrival reaches none of their
+  middles: 4 of 4 unreached`; marches (deepest step of the way): nest 10 (11 skipped) 0.000; dragon from
+  up on the nest 10 −0.004; pile 28 (2 skipped) 0.000; cat from up on the pile 28 −0.001 (allowance 0.071).
+- NOBODY STANDS ON A DRAGON OR A CAT: `12 real jumps at it from 16 bearings, from beside it and from a
+  sprint (20 starts skipped: in a wall or another solid) — 0 stood her on its top, 0 left her wedged, 0
+  left her in the air, 0 ended inside it`; the cat: 30 jumps (2 skipped), 0/0/0/0. Note: `the dragon's
+  nest held her 2 frame(s) in 2 of 12 jumps before its dragon pushed her off; the cat's pile 0 frame(s) in
+  0 of 30; 0 jump(s) carried her out of the room`.
+- CAT: `'library-cat' offers 'Pet the cat!' …, verb 'Pet', … the rainbow rings the cat and her pile`;
+  `asleep before (asleep); Pet the cat! counts (1) and within 0.5 s an ear twitches 0.300 rad off its rest
+  (over 0.1) and she lifts her face 6.1 cm (over 2)`; `happy at 1.0 s (true) and asleep again by 3 s
+  (true)`; `she purrs 'Prrrrr…' … and pink hearts rise (up to 3 at once)`; `a second press 0.2 s in, inside
+  her 0.5 s guard, changes nothing`; `her furthest drawn point over 64 sampled frames is -0.0002 m outside
+  her body`.
+- DEN WALLS: `10 of 12 bodies stood in the den (2 spot(s) under the baby dragon and its nest set apart, at
+  most 2: (-23.08, -6.78) (-21.76, -6.78)), 60 marches … 0 ended outside the den and the room` — the first
+  run on the creatures (`den13/library-1.log`, 3 ✗) failed exactly there, on those two spots.
+- The rest unchanged by the creatures: REACHABILITY 79 solids, `every keep-out in the reading room is
+  reachable: 76 of 76` (the cat's stand the new one), `the one pocket is the secret den: 268 clear cells`
+  (was 326: the nest and the dragon fill its corner); LANDING `52 tops, 7732 landings … 0 fell through`
+  (the nest's 0.19 and the pile's 0.90 among them); SECRET SHELF `zero pockets with the leaf open: 0 clear
+  cell(s) unreached of 9032`, `a fill seeded beside the baby dragon reaches the arrival and the way out's
+  centre`.
+
+## Reds (each proved at 9dc39dd9, seed 5 restart 1, digest d6721090fb3f1d3a, hydrated; by hand ones reverted with `git checkout`)
+Geometry: the four bodies in the table above; the dragon's stand (−21.3, −5.0), 1.84 m from the nest;
+the cat's stand (9.6, 8.8); the den's inner faces x −23.90, z −7.60 / −2.00; the real child at 60 fps.
+- **`LIBRARY_CHECK_REMOVE='dragon'`** (the dragon and its nest) → exit 1, **9 FAILED** (161 ✓;
+  `red-remove-dragon-2.log`): LANDING `✗ the dragon's nest of books at (-22.60, -6.30): landed at 0.000, its
+  top is 0.190` ×4 + `37 fell through`; `✗ … reaches none of their middles: the baby dragon IS reached, the
+  dragon's nest IS reached`; `✗ 10 marches at the dragon's nest, from the floor … 1.438 m`; `✗ 10 marches at
+  the dragon, up on its nest's top (0.19 m) … 1.167 m`; `✗ nobody stands on the baby dragon: … 4 ended inside
+  it; first: a jump from beside it from (-21.10, -6.30): … ended at (-23.28, -6.30)`.
+- **`LIBRARY_CHECK_REMOVE='the baby dragon'`** (its nest still there) → exit 1, **3 FAILED** (163 ✓;
+  `red-remove-the-baby-dragon-2.log`): the middles (both reached — the nest is a step), the march from up on
+  the nest 1.167 m, the jumps (4 ended inside it).
+- **`LIBRARY_CHECK_REMOVE='cat'`** (the cat and her pile) → exit 1, **8 FAILED** (162 ✓;
+  `red-remove-cat-2.log`): LANDING `✗ the cat's pile of books at (9.06, 7.29): landed at 0.000, its top is
+  0.900` ×4 + `169 fell through`; `✗ … the cat's pile IS reached, the library cat IS reached`; `✗ 28 marches at
+  the cat's pile, from the floor … 0.959 m`; `✗ 28 marches at the cat, up on her pile's top (0.90 m) … 0.885 m`.
+- **`LIBRARY_CHECK_REMOVE='the library cat'`** (her pile still there) → exit 1, **1 FAILED** (165 ✓;
+  `red-remove-the-library-cat-2.log`): `✗ 28 marches at the cat, up on her pile's top (0.90 m) … deepest a
+  body's edge got into its drawn plan 0.885 m, allowance 0.071`. **Found by this red, not planted:** its
+  first run (`red-remove-the-library-cat.log`, at d57a9f12) was **exit 0, 166 ✓** — the marches read only
+  where a march ended, and a body that walked straight through the missing cat ended a metre past her, on
+  the far side (−0.006 m "outside"). 9dc39dd9 reads the deepest step of the way.
+- **`LIBRARY_CHECK_MUTATE=wide-creature-tops`** (both narrow tops made whole, just for the jumps) → exit 1,
+  **2 FAILED** (164 ✓; `red-wide-creature-tops-2.log`): `✗ nobody stands on the baby dragon: 12 real jumps …
+  9 stood her on its top, … 8 ended inside it; first: a jump from beside it from (-21.10, -6.30): 149 frame(s)
+  standing on its top`; `✗ nobody stands on the library cat: 30 real jumps … 12 stood her on its top …;
+  first: a jump from beside it from (10.84, 7.20): 4 frame(s) standing on its top`. The control that the
+  jump sweep can see a child on a creature (the scratch instrument's own control first: `play-2-wide.log`).
+- **By hand, `DRAGON_MEET_RADIUS = 0.5`** → exit 1, **2 FAILED** (163 ✓; `red-byhand-meet-radius.log`):
+  `✗ stood beside the baby dragon (1.84 m from the nest, inside 0.5), one frame later it is met: Dragon friend
+  discovered (count 0), it says 'null' …`; `✗ a visit later, … it says 'Prrrrr…' (wanted 'Hello again,
+  friend!')`. (GUARD's cross-check steps aside, as it must: 2.06 m is outside 0.5.)
+- **By hand, `PET_SECONDS = 0`** → exit 1, **2 FAILED** (164 ✓; `red-byhand-pet-seconds.log`): `✗ … within
+  0.5 s an ear twitches 0.000 rad off its rest (over 0.1) and she lifts her face 0.1 cm (over 2)`; `✗ she is
+  happy at 1.0 s (false) and asleep again by 3 s (true)`.
+- **By hand, the dragon's body measured at rest only** (`posedFootprint(this.dragon.root, [], …)`) → exit 1,
+  **2 FAILED** (164 ✓; `red-byhand-rest-only.log`): `✗ drawn is solid: the dragon's furthest drawn point over
+  276 sampled frames of its life … is 0.0797 m outside its body`; `✗ 10 marches at the dragon, up on its
+  nest's top … 0.075 m` — the head turned to her is 8 cm outside a rest-pose box.
+
+## Other checks at 9dc39dd9 (exit codes read; logs `den13/gate-*.log`)
+| check | exit | off the screen |
+|---|---|---|
+| `pnpm exec tsc --noEmit` | 0 | |
+| `pnpm run typecheck:test` | 0 | |
+| scripts typecheck instrument (`den12/tsconfig.scripts.json`) | 2 | **56 messages, as at Step 12**; the message sets diff empty — none new (the one in check-library.mts is the old environmental `process.exit`) |
+| `check:brevity` | 0 | `the secrets — 7 names and 7 lines`; `356 pieces of copy are short enough` |
+| `check:tap-spacing` | 0 | 10 spaces, **147 zones** (+1, the cat; the dragon's is open-only), 27 bands, 247 zone-band and 20 close zone-zone pairs, 20 same-action overlaps; OK |
+| `check:exits` | 0 | the library: 802 exits (795 at Step 12: the cat's stand), 156 off the lattice, 0 with nowhere; the guard fired once on the den band's walk, as at Step 12 |
+| `check:solids` (core) | 0 | `the library: 13 tops reached, 0 region(s) she can drop into, 732 jumps simulated` (664 at Step 12: the nest's and the pile's tops aimed at, neither reached — the census agrees with the jumps above); `no jump or walk-off of 732 leaves her wedged` |
+| `check:assets` | 0 | 135 assets check out (the five creatures among them since Step 3) |
+| `check:labels` | 0 | `55 labels registered` (the creature bubble among them; scene 5 is the join's) |
+| `check:cycle-tdz` | 0 | the same 5 sites as the baseline |
+| vitest `test/library`, `test/store/library-card.test.ts` | 0 | 4 files, 20 passed |
+| `pnpm run build` | 0 | |
+| `check:flat-primitives` | 1 | **the same two pre-existing sites as Step 12**, neither this track's (see Step 12's "Found, not mine"); 845 files, none of mine |
+
+## Decisions (Step 13, with reasons) — Jim is away; each belongs in the PR body too
+1. **Four bodies in their own shapes, and the narrow-top rule, instead of the plan's two blockers.** The
+   plan's `'wall'` disc and box ("nobody jumps onto a dragon or a cat") need a to-the-ceiling top that no
+   longer exists (PR #722), and the track's brief: real shapes plus the narrow-top rule, no flag, no blocker.
+   The dragon's and the cat's measured crests (0.015, 0.018 m either side) are under `FOOT_HALF_WIDTH`, so
+   nothing stands on them — 42 real jumps, 0 on either, with the control showing the same jumps land on them
+   once the tops are whole.
+2. **Each creature's body covers it in every pose it is drawn in** (`posedFootprint` over sampled ranges,
+   every 0.15 rad of the dragon's head turn — a horn beside the pivot is furthest out part-way round), so
+   drawn is solid on every frame, not just at rest: measured live, ≤ 0.6 mm, and 8 cm out with a rest-only box.
+3. **The nest's top is its whole disc** (no `topHalf`): the ring of books measures 0.12 m either side, wide
+   enough for her feet; the engine's alternative for a disc — a top round its *centre* — would be the pad
+   under the dragon. In play the dragon's body keeps her off it anyway (2 frames in 12 jumps).
+4. **The dragon's and the cat's bodies stand from the floor, not banded on their seats.** Inside the nest's
+   disc and the pile's box the two read the same; but every floor-level query — the fill, `isClearCircle`,
+   the lattice — asks a point at her feet, to which a banded body reads as absent, and the dragon's middle
+   would have been "reachable".
+5. **The creature bubble holds its line `lineSeconds`** (`ui/speechTiming.ts`, the one rule the hotel's and
+   the owl's lines follow), not the reptile house's private 1.6 + 0.07·characters the plan names: two
+   speakers in one room on two timing rules is the two-definitions bug.
+6. **The zone ids live with their creatures** (`DRAGON_ZONE_ID` in `LibraryDen`, `CAT_ZONE_ID` in
+   `LibraryCat`), so `check:library` reads them without importing `Library.ts`.
+7. **The cat's and the dragon's zones are hidden while she rides**, with the Read and Pull zones (the room
+   offers a sitting child nothing to walk to); the plan's "always offered inside" is read as against the
+   dragon's "only while the leaf is open".
+8. **A visit runs from the park in to the park out**: the dragon's hello is once a visit, reset by
+   `LibraryDen.leave()` on `standOutside` and `releasePlayer` — so a link typed from inside the room is not a
+   new visit (the owl's rule), and nothing had to change in `enterRoom`. Saying hi counts as meeting it.
+9. **The cat's breath at 1.1 rad/s**: the plan's "1.1 Hz" read as the dragon's own formula's rate; a 1.1 Hz
+   breath is 66 a minute — a pant, not a sleeping cat.
+10. **The head lift is measured at her face** (the head's front-most point: 6.1 cm), where the plan says "the
+    head's top": at −0.25 the head's top-most point, an ear tip near the pivot, rises under a centimetre.
+    The sign is the model's, read by the check (`faceRise > 0.02`).
+11. **DEX's control needed a child who has never met it**: GUARD's walk into the den at (−21, −5), 2.06 m
+    from the nest, meets it first (asserted when GUARD's spot is inside the radius), so CREATURES takes the
+    entry back out of the store's collection, check-side, before its control.
+12. **A new mutation, `wide-creature-tops`**, in the one allow-list: the jump sweep's control (a sweep that
+    could not see a child on a creature would pass for ever).
+13. **The creature marches read the deepest step of the way** (found by the cat's REMOVE red, above).
+14. **Merge-friendly placement**: the cat's layout block sits after the den's, its stand appended after the
+    dragon's in `libraryStandSpots`, and the LABELS.md row after the wild bunny's — clear of the lines the
+    owl track rewrote; the stale doc lists they share are left for the join (below).
+
+## For the join (Step 13)
+- **Track A (owl)**: `screenLabels` → `[nameLabel, owl.bubble, creatureBubble]`; `interactZones()` merges the
+  owl's Talk zone into the not-riding list beside `pullZone` and the creatures; `update` keeps the owl
+  before the seat and the creatures after the leaf; the owl's `enter()`/`leave()` sit beside
+  `leaveCreatures()` in `standOutside`/`releasePlayer`; both LABELS.md rows stay (move the creatures' under
+  the owl's if you like). **Add the cat's stand to the stand-spot doc lists** (`layout.ts`
+  `libraryStandSpots`, `props.ts` header, REACHABILITY's keep-out note) — the owl track rewrote those lines.
+  The owl's shush in the den (Step 12's item) still stands.
+- **Track B (kids)**: KIDS sweeps every leg against the real collision world, which now holds the four
+  creature bodies (no kid route passes the cat at (9.6, 7.2) today); `SECRETS` gains 'Story listener' at the
+  same place as 'Dragon friend' (both after 'Big reader': a one-hunk conflict, keep both).
+- **`check-labels` scene 5**: `visit(cat, true, 3)`, then `world.library.openDenInstantly(); run(1);
+  visit(dragon, true, 3)` (`library-cat`, `library-dragon`; the creature bubble is registered already).
+- **Step 14**: `/library?at=9.6,8.8&facing=180` lands at `LIBRARY_CAT_STAND`; tap-spacing's open-den snapshot
+  takes the dragon zone in; the dragon and the cat are in the open area the put-down rule reads.
+
+## Questions for Jim (Step 13; no blocker was added)
+- **Nothing unkind was found**: in 42 real jumps she never stood on the dragon or the cat. But the cat's
+  0.9 m pile and the dragon's nest look climbable and are not — the creature on each pushes her off before
+  she lands (the nest held her 2 frames in 12 jumps, the pile never). If you would like her to sit up on
+  the books beside the sleeping cat, the pile would have to be a body's width wider than the cat; nothing
+  invisible would be needed. Your call.
+
+# Step 12 — the secret leaf (Claude Fable 5.1; unchanged by Step 13 except where noted)
 
 ## Status
 - [x] Worktree from 33bcc361, `pnpm install --frozen-lockfile` (pnpm/12.1.0, node v26.5.0), pushed.
