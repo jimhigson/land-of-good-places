@@ -24,7 +24,11 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
 - [ ] 16-seed solve for `test:procgen` running into `.parks/all16/` (gitignored); swap it into
       `.parks/` before the full `check` / `test:procgen`
 - [x] targeted local checks (table below), all exit 0
-- [ ] full `pnpm run check` (seed 5) and `pnpm run test:procgen` (16 seeds)
+- [x] full `pnpm run check` (seed 5): exit 0, 2708 s
+- [ ] `pnpm run test:procgen` (16 seeds) + `check:coplanar`, `check:walk-reach`, `check:swept-bus`
+      (`check:all`'s extra steps; CI jobs of their own) once `.parks/all16/` is complete and swapped in
+- [ ] PR held until #733's CI run 39953269843 finishes, so its final gate is not queued behind my
+      parks jobs (the account runs ~40 jobs at once; #733 alone had 28 parks runners going)
 - [x] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk) — below
 - [ ] PR opened, stacked on #733
 - [ ] CI green on the PR head
@@ -90,6 +94,7 @@ parents' text. **Control** (the pre-merge HEAD as the "result"): exit 1, `5 PROB
 | `check:crowd` | 0 | trace `frames=90000 children=12`, `covered climbs=9 trips=61 chats=369 paints=4 …`; npc-perch, separation, dispersal, presence OK |
 | `check:served-book-reader` (port 6743) | 0 | "check:book-reader passed", **2806 ok, 0 FAIL**; `6 real chapter book(s) measured, 164 worded chapter face(s) held to their boxes`; chapter books' thinnest pictures 53.5 / 52.2 / 51.6 / 54.0 / 51.0 / 18.0 % (the join's figures exactly); every picture model drawn, all 63; section 8 (goodnightPark completes the dex) and 10 (off the shelf) ok; vite pid 23929 stopped, port free after |
 | `pnpm run build` | 0 | built in 736 ms |
+| **`SERVED_CHECKS_PORT=6747 pnpm run check`** (the full chain, at d9b4a56c = 16ee9be8's code, seed 5's honest park) | **0** | **2708 s**; `check:chain-coverage`: 108 check:* scripts, 99 leaves all reachable from CI, "check" is 9 shards / 84 distinct steps. Parsed from package.json, all 88 distinct leaves of `check` (counted with raw commands) ran: 86 by their `$` line in the log, `tsc --noEmit` by sequence (between deck-fallthrough at log line 344 and `typecheck:test` at 633 in one `&&` chain), the crowd trace by its output (`frames=90000 children=12`, `trace=0eae0c9c`). 41 `dismount: no clear, open spot` lines are logged by passing steps — reptile-house 6, labels 2, exhibit-camera 33 — **exactly part 4's own counts** in its sweep logs (`fin/runs/`): pre-existing, not the books' |
 
 **The honest park.** `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` at 4333fc84 (hash
 `53dde20f5ea285c66810d5912e470269bd1ba38f1afb143e33c2a2e08f8aa453`; 16ee9be8 and later handoff commits
