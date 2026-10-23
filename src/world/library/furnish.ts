@@ -46,6 +46,7 @@ import {
   type BookcaseKind,
   type LampHandle,
 } from '../../art/models/libraryAssets';
+import type { LibraryDenNiche } from '../../art/models/libraryDenKit';
 import { KID_REACH_HEIGHT } from '../../art/models/kid';
 import type { LibraryProps } from './props';
 import type { PoolSpot } from './lighting';
@@ -183,22 +184,56 @@ export function bookSpot(kind: BookcaseKind, shelf: number, along: number, bookD
 }
 
 /**
+ * **The rows a shelf holds, in its own frame** (front +Z, centred on X, the
+ * floor at 0): each board's top, the clear height over it, the half-width a
+ * row fits in, and the boards' front edge. A case's (`libraryBookcaseSize`)
+ * and a book niche in the secret den's walls (#719, `LIBRARY_DEN_PLAN.niches`,
+ * measured off the Artist's kit in the same terms) are both this, so one loop
+ * fills either.
+ */
+export interface ShelfRows {
+  readonly shelfTops: readonly number[];
+  readonly shelfClear: readonly number[];
+  readonly innerHalf: number;
+  readonly boardFront: number;
+}
+
+/**
  * The books on one face of one case, in the case's own frame (front +Z).
  * `back` puts them on the far face, spines out the other way. `pullBookGap`
  * leaves the secret shelf's pull book (#719, `LIBRARY_SECRET_BOOK`) its gap in
  * the row, exactly as every readable slot gets one.
  */
 function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonly BookShape[], pullBookGap = false): PlacedBook[] {
-  const size = libraryBookcaseSize(spec.kind);
+  const slots = back ? [] : LIBRARY_READABLE_SLOTS.filter((slot) => slot.bookcase === spec.id);
+  return shelveRows(libraryBookcaseSize(spec.kind), back, rng, shapes, (shelf) => {
+    const gaps = slots.filter((slot) => slot.shelf === shelf).map((slot) => [slot.along - SLOT_HALF, slot.along + SLOT_HALF] as const);
+    if (pullBookGap && shelf === LIBRARY_SECRET_BOOK.shelf) gaps.push([LIBRARY_SECRET_BOOK.along - SLOT_HALF, LIBRARY_SECRET_BOOK.along + SLOT_HALF] as const);
+    return gaps;
+  });
+}
+
+/**
+ * **One shelf's rows of books**, in its own frame: on every board a book of
+ * some height fits on, a row from end to end with a short gap now and then,
+ * leaving `gapsOn(shelf)` clear — a case's face ({@link shelveFace}) or a den
+ * niche ({@link shelveDenNiches}). Every number it draws comes off `rng` in a
+ * fixed order, so the same stream fills the same rows on every load.
+ */
+function shelveRows(
+  size: ShelfRows,
+  back: boolean,
+  rng: Rng,
+  shapes: readonly BookShape[],
+  gapsOn: (shelf: number) => readonly (readonly [number, number])[],
+): PlacedBook[] {
   const books: PlacedBook[] = [];
   const spineZ = size.boardFront - SPINE_INSET;
-  const slots = back ? [] : LIBRARY_READABLE_SLOTS.filter((slot) => slot.bookcase === spec.id);
   size.shelfTops.forEach((shelfY, shelf) => {
     const clear = size.shelfClear[shelf] ?? 0;
     const fits = shapes.map((shape, index) => ({ shape, index })).filter(({ shape }) => shape.height <= clear - 0.04);
     if (fits.length === 0) return;
-    const gaps = slots.filter((slot) => slot.shelf === shelf).map((slot) => [slot.along - SLOT_HALF, slot.along + SLOT_HALF] as const);
-    if (pullBookGap && shelf === LIBRARY_SECRET_BOOK.shelf) gaps.push([LIBRARY_SECRET_BOOK.along - SLOT_HALF, LIBRARY_SECRET_BOOK.along + SLOT_HALF] as const);
+    const gaps = gapsOn(shelf);
     let x = -size.innerHalf + ROW_END_GAP;
     const end = size.innerHalf - ROW_END_GAP;
     while (x < end) {
@@ -225,6 +260,34 @@ function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonl
     }
   });
   return books;
+}
+
+/** A seed for the den's books, of its own (#719): the room's are drawn from {@link BOOK_SEED}'s stream, and a den that took from it would reshuffle every case. */
+const DEN_BOOK_SEED = 0x0b00d7;
+
+/**
+ * **The secret den's niche books** (#719): every row of every book niche the
+ * Artist cut into the den's far walls, filled exactly as a case's face is
+ * ({@link shelveRows}) — a niche is measured in a case's own terms
+ * (`LibraryDenNiche`: its boards' tops, the clear over each, its half-width,
+ * its boards' front) — from a seed of the den's own, so no book in the reading
+ * room moves. One `InstancedMesh` for the lot, in the den kit's own frame (the
+ * frame `LIBRARY_DEN_PLAN` measures in, its floor `floorTop` up): the den is
+ * shown and hidden whole and its walls never fade, so its books share the
+ * room's book paint.
+ */
+export function shelveDenNiches(niches: readonly LibraryDenNiche[], floorTop: number): InstancedMesh {
+  const rng = new Rng(DEN_BOOK_SEED);
+  const shapes = libraryBookShapes();
+  const books: PlacedBook[] = [];
+  for (const niche of niches) {
+    const place = placement(niche.centre.x, floorTop, niche.centre.z, niche.facing);
+    for (const book of shelveRows(niche, false, rng, shapes, () => [])) books.push({ ...book, matrix: new Matrix4().multiplyMatrices(place, book.matrix) });
+  }
+  if (books.length === 0) throw new Error(`Library: the secret den's ${niches.length} book niche(s) took no books — the Artist's niches no longer fit the kit's book blocks`);
+  const instanced = bookInstances(books, shapes, libraryBookMaterial());
+  instanced.name = 'library.den.books';
+  return instanced;
 }
 
 /**
