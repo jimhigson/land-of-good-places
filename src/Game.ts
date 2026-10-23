@@ -1635,10 +1635,14 @@ export class Game {
   /**
    * `/library` and `/library?at=x,z&facing=deg` (#716): into the Library's
    * reading room, at that room-local spot or just in from the door — from
-   * anywhere, the room included (`Library.requestEnter`).
+   * anywhere, the room included (`Library.requestEnter`). `story` (the link's
+   * `&story=now`, #718) asks for story time at once: it begins on her first
+   * frame inside.
    */
-  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
-    return this.world.library.requestEnter(at);
+  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }, story = false): boolean {
+    const entered = this.world.library.requestEnter(at);
+    if (entered && story) this.world.library.requestStoryTime();
+    return entered;
   }
 
   start(): void {

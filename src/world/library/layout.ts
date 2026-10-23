@@ -273,9 +273,8 @@ export const LIBRARY_SECRET_BOOKCASE: BookcaseSpec = (() => {
  * - `doormat` — inside the way out, across the doorway's own width: the south
  *   wall is drawn hidden so the camera can look in, so this is what tells a
  *   child where the door is from across the room.
- * - `cushion` — a floor cushion on the rug: soft, so a platform she steps up
- *   onto rather than a wall she bumps (the hotel beds' "a prop that is its
- *   own floor is placed soft").
+ * - `cushion` — a floor cushion on the rug: a low solid she steps up onto
+ *   (PR #722: every solid's top is landable) and sits on at story time.
  * - `sconce` — a wall light above the cases at {@link LIBRARY_SCONCE_HEIGHT},
  *   out of reach: drawn, lit, no collider, because nothing at that height can
  *   meet her.
@@ -388,6 +387,18 @@ export const LIBRARY_STORY_CHAIR: FurnitureSpec = (() => {
 export function libraryFacingStoryChair(from: LocalPoint): number {
   const degrees = (Math.atan2(LIBRARY_STORY_CHAIR.at.x - from.x, LIBRARY_STORY_CHAIR.at.z - from.z) * 180) / Math.PI;
   return (degrees + 360) % 360;
+}
+
+/**
+ * **A point of a piece of furniture's own frame, in the room**: `(x, z)` in
+ * the piece's model frame, turned by its `facing` (three.js's `rotation.y`,
+ * in degrees here) about its spot. The one owner of that turn — the
+ * furniture's colliders (`furnish.ts`) and the owl's perch on the story chair
+ * (`LibraryOwl.ts`) both ask it.
+ */
+export function pieceToRoom(piece: FurnitureSpec, x: number, z: number): LocalPoint {
+  const yaw = (piece.facing * Math.PI) / 180;
+  return { x: piece.at.x + x * Math.cos(yaw) + z * Math.sin(yaw), z: piece.at.z - x * Math.sin(yaw) + z * Math.cos(yaw) };
 }
 
 // ===========================================================================

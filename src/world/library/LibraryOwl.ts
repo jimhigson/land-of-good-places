@@ -1,6 +1,7 @@
 import { Vector3, type Group } from 'three';
-import { angleDelta, clamp, damp, Rng } from '../../core/mathUtils';
+import { angleDelta, clamp, clamp01, damp, lerp, Rng, smoothstep } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
+import { PLAYER_RADIUS } from '../../core/constants';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { gameStore } from '../../state';
 import type { Player } from '../../entities/Player';
@@ -13,13 +14,14 @@ import { createFaceLife, type FaceLife } from '../../art/style/faceLife';
 import { visibleReachXZ } from '../../art/style/measure';
 import { SpritePuffs } from '../../art/effects/spritePuffs';
 import { createLibraryOwl, type OwlHandle } from '../../art/models/libraryCreatures';
+import { libraryArmchairSize, libraryBookcaseSize } from '../../art/models/libraryAssets';
 import type { LibraryProps } from './props';
 import type { FurnishedShelfBook } from './furnish';
 import { LIBRARY_LINES } from './libraryLines';
 import { giveLibraryCard, hasLibraryCard } from './libraryCard';
 import { recommendFor } from './recommendation';
 import { isBookRead } from './readBooks';
-import { LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, type StandSpot } from './layout';
+import { LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, pieceToRoom, type StandSpot } from './layout';
 
 /**
  * **The owl librarian at her desk** (#718, plan Step 6) — Jim, 13 October
@@ -73,9 +75,21 @@ import { LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, type StandS
  * (the right holds her book), the face goes wide for a moment, and then she
  * waits {@link SHUSH_COOLDOWN_SECONDS} before the next one. **No penalty of
  * any kind** — Jim's rule, and a six-year-old's delight is in making her say
- * it. Two conditions wait for other tracks (recorded in the handoff): she does
- * not shush while the child is in the secret den, and she does not shush
- * while she is perched at story time.
+ * it. She shushes from her desk and from the story chair, never on the wing;
+ * mid-story only her wing and face answer (a story is a script). Not while the
+ * child is in the secret den: that condition is the den track's (#719), which
+ * owns `libraryDenContains`.
+ *
+ * ## Story time (plan Step 9)
+ *
+ * `storyTime.ts` flies her to the story chair and back ({@link flyTo}): a
+ * straight line in plan, eased, over the stacks at her measured cruise
+ * ({@link owlFlightPose}, pure, so `check:library`'s FLIGHT measures the very
+ * path she flies). Her desk solid is taken out as she takes off and put back
+ * when she lands — **never onto a child**: if the child is standing where she
+ * lands, it waits until she has stepped out of it ({@link solidWaiting}).
+ * She perches on the chair's seat ({@link owlPerch}), where the chair's own
+ * solids hold her.
  */
 export const OWL_ZONE_ID = 'library-owl';
 
@@ -112,6 +126,78 @@ export const GLOW_SWING = 0.35;
 export const GLOW_RATE = 2.4;
 /** A pair of warm twinkles rises off the glowing book this often (seconds). */
 export const TWINKLE_EVERY = 1.4;
+
+/** How long one flight takes, desk to story chair or back (seconds) — the plan's 3.2. */
+export const OWL_FLIGHT_SECONDS = 3.2;
+/** How far over the stacks' measured top her feet cruise (metres). */
+export const OWL_CRUISE_OVER_STACKS = 0.6;
+/** She is up at her cruise from this share of a flight … */
+export const OWL_CLIMBED_BY = 0.2;
+/** … until this one, and then comes down. */
+export const OWL_DESCEND_AT = 0.8;
+/** Her wings' beat in flight: this far about each wing's own z (radians), at {@link OWL_WING_BEAT_RATE}. */
+export const OWL_WING_BEAT = 0.6;
+/** How fast her wings beat (radians a second). */
+export const OWL_WING_BEAT_RATE = 9;
+/**
+ * How far back of the story chair's seat centre she sits (metres, along the
+ * chair's own −Z, into it): measured, so that her face and glasses stay over
+ * the chair's seat, inside its solids, where a child standing at the chair's
+ * front cannot touch them — on the seat centre itself they reach 8 cm past
+ * its front edge. `check:library`'s STORY measures her perched.
+ */
+export const OWL_PERCH_BACK = 0.12;
+
+/** Her cruise height over the room's floor: the stacks' measured top and {@link OWL_CRUISE_OVER_STACKS} — never typed. */
+export function owlCruiseHeight(): number {
+  return libraryBookcaseSize('stack').height + OWL_CRUISE_OVER_STACKS;
+}
+
+/** A point of the reading room's own frame: metres east, up from its floor, and toward the camera. */
+export interface RoomPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * **Where the owl's feet are at `t` of a flight** (0 at take-off, 1 on
+ * landing), room-local — the plan's path, pure, so the check measures the
+ * very line she flies. In plan, straight from `from` to `to`, eased in and out
+ * (`s = smoothstep(0, 1, t)`); in height, the line between the two ends'
+ * heights lifted to `cruise` by a bump that rises by {@link OWL_CLIMBED_BY}
+ * and falls from {@link OWL_DESCEND_AT}, so she is up over the stacks for the
+ * middle of the flight and comes down almost straight onto where she lands.
+ * Writes `out` (allocating nothing) and returns it.
+ */
+export function owlFlightPose(
+  from: Readonly<RoomPoint>,
+  to: Readonly<RoomPoint>,
+  t: number,
+  out: RoomPoint = { x: 0, y: 0, z: 0 },
+  cruise: number = owlCruiseHeight(),
+): RoomPoint {
+  const u = clamp01(t);
+  const s = smoothstep(0, 1, u);
+  out.x = lerp(from.x, to.x, s);
+  out.z = lerp(from.z, to.z, s);
+  const base = lerp(from.y, to.y, s);
+  const bump = smoothstep(0, OWL_CLIMBED_BY, u) * (1 - smoothstep(OWL_DESCEND_AT, 1, u));
+  out.y = base + (cruise - base) * bump;
+  return out;
+}
+
+/**
+ * **Where the owl perches to read** (plan Step 9): the story chair's measured
+ * seat centre (`libraryArmchairSize().seatCentre`), {@link OWL_PERCH_BACK}
+ * further into the chair, turned by its facing (`pieceToRoom`), on its seat's
+ * measured top, facing the chair's own way — at the rug. Room-local.
+ */
+export function owlPerch(): Readonly<RoomPoint> & { readonly facing: number } {
+  const size = libraryArmchairSize();
+  const at = pieceToRoom(LIBRARY_STORY_CHAIR, size.seatCentre.x, size.seatCentre.z - OWL_PERCH_BACK);
+  return { x: at.x, y: size.seat, z: at.z, facing: LIBRARY_STORY_CHAIR.facing };
+}
 
 /** Breathing: `body.scale` sways by this share, at this rate (radians a second). */
 export const BREATH_DEPTH = 0.02;
@@ -161,6 +247,21 @@ export function standingReach(handle: OwlHandle): number {
   handle.head.rotation.y = 0;
   handle.body.scale.set(1, 1, 1);
   return reach;
+}
+
+/** A flight under way: from where she took off, to where she lands, how far through, and how she faces on landing. */
+interface Flight {
+  readonly from: RoomPoint;
+  readonly to: RoomPoint;
+  /** Her facing on take-off and on landing, radians (`rotation.y`). */
+  readonly startYaw: number;
+  readonly landYaw: number;
+  /** The way she travels in plan, radians — she faces it between take-off and landing. */
+  readonly travelYaw: number;
+  /** 0 at take-off, 1 on landing. */
+  t: number;
+  /** Lands at her desk (her solid goes back) rather than on the story chair. */
+  readonly home: boolean;
 }
 
 /** A run of lines being said: which is up, how long it has left, and which one carries the cheer. */
@@ -219,13 +320,21 @@ export class LibraryOwl {
   private wasAirborne = false;
   private shushCount = 0;
   private flapFor = 0;
-  /** At her desk (true until story time flies her, plan Step 9): her zone and her shush are offered only here. */
+  /** At her desk: her Talk zone is offered only here. Story time flies her away from it (plan Step 9). */
   private atDeskFlag = true;
+  /** On the story chair, reading. */
+  private perchedFlag = false;
+  private flight: Flight | null = null;
+  /** Landed at her desk with the child standing where her solid goes: it goes back once she has stepped out. */
+  private solidWaitingFlag = false;
+  private readonly props: LibraryProps;
+  private readonly pose: RoomPoint = { x: 0, y: 0, z: 0 };
 
   constructor(roomRoot: Group, props: LibraryProps, shelfBooks: readonly FurnishedShelfBook[], controls: InteriorControls) {
     this.roomRoot = roomRoot;
     this.controls = controls;
     this.shelfBooks = shelfBooks;
+    this.props = props;
 
     this.handle = createLibraryOwl();
     // Measured before she is moved: her reach about her own origin, in her own frame.
@@ -246,9 +355,29 @@ export class LibraryOwl {
 
   // --------------------------------------------------------------- state
 
-  /** At her desk — where her Talk zone is offered and her shush is heard. */
+  /** At her desk — where her Talk zone is offered. */
   get atDesk(): boolean {
     return this.atDeskFlag;
+  }
+
+  /** On the story chair (plan Step 9). */
+  get perched(): boolean {
+    return this.perchedFlag;
+  }
+
+  /** On the wing, between her desk and the story chair. */
+  get flying(): boolean {
+    return this.flight !== null;
+  }
+
+  /** Back at her desk with her solid still out, waiting for the child to step out of where it goes. */
+  get solidWaiting(): boolean {
+    return this.solidWaitingFlag;
+  }
+
+  /** Where her feet are, room-local — the check reads her against {@link owlFlightPose}. */
+  get feet(): Readonly<Vector3> {
+    return this.handle.root.position;
   }
 
   /** Saying something — a script or a one-liner. */
@@ -283,12 +412,78 @@ export class LibraryOwl {
     if (!hasLibraryCard(gameStore.get())) this.say([LIBRARY_LINES.owl.welcome], -1, true);
   }
 
-  /** The child has left: whatever the owl was saying stops with her, and nothing of a run carries over. */
+  /**
+   * The child has left: whatever the owl was saying stops with her, nothing of
+   * a run carries over, and she is back behind her desk — a flight or a story
+   * is not left hanging for the next visit ({@link snapHome}).
+   */
   leave(): void {
     this.clearSpeech();
     this.shushFor = 0;
     this.runningFor = 0;
     this.flapFor = 0;
+    this.snapHome();
+  }
+
+  // --------------------------------------------------------------- story time
+
+  /**
+   * **A script of her own lines** — story time's call, and a whole story read
+   * aloud: never interrupted (a press is not offered away from her desk, and a
+   * shush mid-script moves only her wing and face).
+   */
+  tell(lines: readonly string[]): void {
+    this.say(lines, -1, false);
+  }
+
+  /** Stops whatever she is saying. */
+  hush(): void {
+    this.clearSpeech();
+  }
+
+  /** Warm sparkles over a room-local spot — story time's Story listener card, over the child. */
+  sparkleOver(x: number, y: number, z: number, count: number): void {
+    this.puffs.puff(x, y, z, this.fx, count);
+  }
+
+  /**
+   * **Off she flies** — to the story chair ({@link owlPerch}), or home to her
+   * desk (`home`). From wherever she is: her desk (her solid is taken out as
+   * she takes off), the chair, or mid-flight (she turns round where she is).
+   */
+  flyTo(home: boolean): void {
+    const root = this.handle.root;
+    if (this.atDeskFlag) {
+      this.props.detach([this.capsule]);
+      this.atDeskFlag = false;
+    }
+    this.solidWaitingFlag = false;
+    this.perchedFlag = false;
+    const perch = owlPerch();
+    const to: RoomPoint = home ? { x: this.spot.x, y: 0, z: this.spot.z } : { x: perch.x, y: perch.y, z: perch.z };
+    const landYaw = ((home ? this.spot.facing : perch.facing) * Math.PI) / 180;
+    const from: RoomPoint = { x: root.position.x, y: root.position.y, z: root.position.z };
+    const travelYaw = Math.atan2(to.x - from.x, to.z - from.z);
+    this.flight = { from, to, startYaw: root.rotation.y, landYaw, travelYaw, t: 0, home };
+  }
+
+  /**
+   * **Back behind her desk at once** — story time abandoned, or the child
+   * gone: no flight, no perch, her solid back (it is waited for only while the
+   * child stands in it; with her gone, it goes straight back).
+   */
+  snapHome(): void {
+    const root = this.handle.root;
+    this.flight = null;
+    this.perchedFlag = false;
+    root.position.set(this.spot.x, 0, this.spot.z);
+    root.rotation.y = (this.spot.facing * Math.PI) / 180;
+    this.handle.wingL.rotation.z = 0;
+    this.handle.wingR.rotation.z = 0;
+    this.atDeskFlag = true;
+    this.solidWaitingFlag = false;
+    this.props.attach([this.capsule]);
+    this.anchorBubble();
   }
 
   // --------------------------------------------------------------- the press
@@ -353,6 +548,8 @@ export class LibraryOwl {
    * `SpaceManager.isChanging` — mid-iris nobody is shushed.
    */
   update(dt: number, elapsed: number, player: Player, changing: boolean, camera: IsoCamera): void {
+    this.updateFlight(dt, elapsed);
+    this.putSolidBack(player);
     this.updateSpeech(dt);
     this.noticeShush(player, dt, changing);
     this.live(dt, elapsed, player);
@@ -417,7 +614,7 @@ export class LibraryOwl {
     const airborne = player.isAirborne;
     const jumped = !this.wasAirborne && airborne && player.verticalSpeed > 0;
     this.wasAirborne = airborne;
-    if (changing || player.riding || !this.atDeskFlag) {
+    if (changing || player.riding || !(this.atDeskFlag || this.perchedFlag)) {
       this.runningFor = 0;
       return;
     }
@@ -457,6 +654,11 @@ export class LibraryOwl {
     head.rotation.y = damp(head.rotation.y, target, HEAD_TURN_HALF_LIFE, dt);
 
     wingL.rotation.x = damp(wingL.rotation.x, this.shushFor > 0 ? SHUSH_WING_X : 0, WING_HALF_LIFE, dt);
+    // On the wing they beat (`updateFlight` writes them); landed, they fold back.
+    if (!this.flight) {
+      wingL.rotation.z = damp(wingL.rotation.z, 0, WING_HALF_LIFE, dt);
+      wingR.rotation.z = damp(wingR.rotation.z, 0, WING_HALF_LIFE, dt);
+    }
     if (this.flapFor > 0) {
       this.flapFor = Math.max(0, this.flapFor - dt);
       const t = (FLAP_SECONDS - this.flapFor) / FLAP_SECONDS;
@@ -497,6 +699,58 @@ export class LibraryOwl {
     const at = placed.mesh.getWorldPosition(this.scratch);
     this.roomRoot.worldToLocal(at);
     this.puffs.puff(at.x, at.y + TWINKLE_RISE, at.z, this.fx, 2);
+  }
+
+  /**
+   * One frame of a flight: her feet on {@link owlFlightPose}; she turns from
+   * her facing to the way she travels as she climbs, and to her landing
+   * facing as she comes down; her wings beat, opening as she lifts off and
+   * folding as she lands. On landing: perched, or home — where her solid goes
+   * back ({@link putSolidBack}).
+   */
+  private updateFlight(dt: number, elapsed: number): void {
+    const flight = this.flight;
+    if (!flight) return;
+    flight.t = Math.min(1, flight.t + dt / OWL_FLIGHT_SECONDS);
+    const { root, wingL, wingR, head } = this.handle;
+    owlFlightPose(flight.from, flight.to, flight.t, this.pose);
+    root.position.set(this.pose.x, this.pose.y, this.pose.z);
+    const climb = smoothstep(0, OWL_CLIMBED_BY, flight.t);
+    const land = smoothstep(OWL_DESCEND_AT, 1, flight.t);
+    const yaw =
+      land > 0
+        ? flight.travelYaw + angleDelta(flight.travelYaw, flight.landYaw) * land
+        : flight.startYaw + angleDelta(flight.startYaw, flight.travelYaw) * climb;
+    root.rotation.y = yaw;
+    head.rotation.y = damp(head.rotation.y, 0, HEAD_TURN_HALF_LIFE, dt);
+    const open = smoothstep(0, 0.1, flight.t) * (1 - smoothstep(0.92, 1, flight.t));
+    const beat = Math.sin(elapsed * OWL_WING_BEAT_RATE) * OWL_WING_BEAT * open;
+    wingL.rotation.z = beat;
+    wingR.rotation.z = -beat;
+    if (flight.t < 1) return;
+    this.flight = null;
+    root.rotation.y = flight.landYaw;
+    if (flight.home) {
+      this.atDeskFlag = true;
+      this.solidWaitingFlag = true;
+    } else {
+      this.perchedFlag = true;
+    }
+  }
+
+  /**
+   * **Her desk solid back — never onto a child.** Landed home, her solid goes
+   * back the first frame the child is not standing where it goes (a body of
+   * her size clear of its disc); until then she stands drawn but not solid
+   * where the child is, rather than the child being shoved out of a collider
+   * that appeared round her.
+   */
+  private putSolidBack(player: Player): void {
+    if (!this.solidWaitingFlag) return;
+    const apart = Math.hypot(player.position.x - (LIBRARY_ORIGIN_X + this.spot.x), player.position.z - (LIBRARY_ORIGIN_Z + this.spot.z));
+    if (apart < this.radius + PLAYER_RADIUS) return;
+    this.props.attach([this.capsule]);
+    this.solidWaitingFlag = false;
   }
 
   /** The bubble's tail over the top of her head, wherever she is. */

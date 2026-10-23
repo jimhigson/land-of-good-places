@@ -32,6 +32,7 @@ import { LibraryOwl, OWL_ZONE_ID } from './LibraryOwl';
 import { hasLibraryCard } from './libraryCard';
 import { gameStore } from '../../state';
 import { libraryResidents, type LibraryResident } from './LibraryKids';
+import { StoryTime, type StoryListenerView, type StoryPhase } from './storyTime';
 import type { LibraryKidDriver } from './libraryKidDriver';
 import {
   buildLibraryDenShell,
@@ -306,6 +307,14 @@ export class Library implements GameSystem {
   private readonly bookZones: readonly InteractZone[];
   /** The owl's Talk zone, built once: offered only while she is at her desk (`Selection` caches her box there). */
   private readonly owlZone: InteractZone;
+  /**
+   * **Story time** (#718, plan Step 9, `storyTime.ts`): the clock, the owl's
+   * flight to the story chair, the children's gathering, the reading, the
+   * dispersal. Stepped first in {@link update}.
+   */
+  readonly storyTime: StoryTime;
+  /** What story time asks about her, kept here and written in place — no allocation a frame. */
+  private readonly listenerView = { seated: false, feet: { x: 0, y: 0, z: 0 } };
   /** What a Read chip opens a book with ({@link attachBookReader}); null until `Game` attaches it, and headless. */
   private bookOpener: LibraryBookOpener | null = null;
 
@@ -358,6 +367,7 @@ export class Library implements GameSystem {
     this.kidsRoot.visible = false;
     // Each child plans her way round a player standing still in her way against the real world.
     this.kids = libraryResidents(this.kidsRoot, (x, z, radius) => collision.isClearCircle(x, z, radius));
+    this.storyTime = new StoryTime(this.owl, () => this.kidsAttached, () => this.listener());
 
     // ------------------------------------------------------- the building
     const plot = deps.plot;
@@ -432,6 +442,19 @@ export class Library implements GameSystem {
    * gets her up" and for the checks. True only while the cushion still has
    * her: a ride ended by anything else is not a seat.
    */
+  /** Where story time is: `'idle'`, `'gathering'`, `'reading'` or `'dispersing'`. */
+  get storyPhase(): StoryPhase {
+    return this.storyTime.phase;
+  }
+
+  /**
+   * **A story, now** — the `/library?story=now` link (`Game.enterLibrarySpawn`):
+   * begun on the first frame she is inside and the owl is free.
+   */
+  requestStoryTime(): void {
+    this.storyTime.requestStoryTime();
+  }
+
   get playerIsSeated(): boolean {
     return this.seatedOn !== null && (this.player?.riding ?? false);
   }
@@ -610,6 +633,9 @@ export class Library implements GameSystem {
     if (!player) return;
     // The owl before the seat (the plan's order: story → owl → glow → seated
     // jump): her words, her shush, her life and the recommended book's glow.
+    // Story time first (the plan's order: story → owl → glow → seated jump),
+    // so a story begun this frame flies this frame.
+    this.storyTime.update(dt, this.inside);
     if (this.inside) this.owl.update(dt, context.elapsed, player, this.spaces.isChanging, this.deps.camera);
     if (this.seatedOn !== null) this.updateSeated(player, context);
     if (this.inside) this.fadeStacks(player, dt);
@@ -796,6 +822,7 @@ export class Library implements GameSystem {
     if (!this.inside) return;
     this.inside = false;
     this.showRoom(false);
+    this.storyTime.abort();
     this.owl.leave();
   }
 
@@ -806,6 +833,7 @@ export class Library implements GameSystem {
     this.standUp();
     this.inside = false;
     this.showRoom(false);
+    this.storyTime.abort();
     this.owl.leave();
     this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
     const mat = this.doormat;
@@ -825,6 +853,19 @@ export class Library implements GameSystem {
   private showRoom(visible: boolean): void {
     this.roomRoot.visible = visible;
     this.kidsRoot.visible = visible;
+  }
+
+  /** Story time's view of her: on one of her cushions, and where her feet are, room-local. */
+  private listener(): StoryListenerView {
+    const view = this.listenerView;
+    view.seated = this.playerIsSeated;
+    const at = this.player?.position;
+    if (at) {
+      view.feet.x = at.x - LIBRARY_ORIGIN_X;
+      view.feet.y = at.y - LIBRARY_FLOOR_Y; // flat-ok: her height above the reading room's own flat floor, in its own space off the sphere
+      view.feet.z = at.z - LIBRARY_ORIGIN_Z;
+    }
+    return view;
   }
 
   /**

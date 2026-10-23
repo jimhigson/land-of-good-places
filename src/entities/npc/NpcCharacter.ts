@@ -5,7 +5,7 @@ import {
   PLAYER_BOB_HEIGHT,
   PLAYER_TURN_SPEED,
 } from '../../core/constants';
-import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
+import { clamp01, damp, lerp, smoothstep, TAU, turnTowards } from '../../core/mathUtils';
 import { separatedByHeight, type CollisionWorld } from '../../world/Collision';
 import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { terrainHeight } from '../../world/terrain';
@@ -75,6 +75,9 @@ const GRAVITY = 17;
  * mover doing the whole job alone is allowed to do it faster, not just more.
  */
 const SCRIPTED_ENCOUNTER_SPEED_FACTOR = 2.4;
+
+/** How high a child lifts at the middle of her hop onto a seat or off it (metres): a hop, not a slide. */
+export const SEAT_HOP_LIFT = 0.12;
 
 export class NpcCharacter {
   readonly avatar: NpcAvatar;
@@ -156,6 +159,18 @@ export class NpcCharacter {
   private seatedFlag = false;
   /** Added to `elapsed` for her pose, so each sitter sways on her own clock. */
   private seatedPhase = 0;
+  /**
+   * A hop onto her seat, or off it, under way ({@link beginSeated} and
+   * {@link endSeated} with a glide): from where, to where, how long, how far
+   * through — and whether she stands up at its end. Seated the whole hop, so
+   * nothing collides with it; moved by her own `update`, so it is one owner
+   * of her position, a few centimetres a frame.
+   */
+  private readonly glideFrom = new Vector3();
+  private readonly glideTo = new Vector3();
+  private glideSeconds = 0;
+  private glideAt = 0;
+  private glideThenStand = false;
 
   private readonly collision: CollisionWorld;
 
@@ -370,15 +385,26 @@ export class NpcCharacter {
    * from where she stopped walking to the cushion's centre is never read back
    * as speed.
    */
-  beginSeated(x: number, y: number, z: number, facing: number, phase: number): void {
+  beginSeated(x: number, y: number, z: number, facing: number, phase: number, glideSeconds = 0): void {
     this.seatedFlag = true;
     this.seatedPhase = phase;
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
-    this.position.set(x, y, z);
-    this.previousPosition.copy(this.position);
     this.facing = facing;
+    if (glideSeconds > 0) {
+      // A hop onto the seat from where her walk ended, over `glideSeconds`
+      // (`update`'s seated branch moves her): never a snap of a metre.
+      this.glideFrom.copy(this.position);
+      this.glideTo.set(x, y, z);
+      this.glideSeconds = glideSeconds;
+      this.glideAt = 0;
+      this.glideThenStand = false;
+    } else {
+      this.glideSeconds = 0;
+      this.position.set(x, y, z);
+      this.previousPosition.copy(this.position);
+    }
     this.avatar.rig.root.position.copy(this.position);
     faceOnGround(this.avatar.rig.root, facing);
   }
@@ -391,10 +417,27 @@ export class NpcCharacter {
    * resolver carries her out of it as it escorts any body out of a solid, at
    * `NPC_RADIUS / 2` a frame: about a metre in four frames, before her own
    * driver walks her away. A caller that wants her up somewhere else first
-   * puts her there with {@link setDown}.
+   * puts her there with {@link setDown} — or hands this the spot, and she hops
+   * off to it over `glideSeconds` (still seated, so nothing collides with the
+   * hop), standing up there: story time's way, out of the cushion's disc
+   * without the resolver's four-frame slide.
    */
-  endSeated(): void {
+  endSeated(standX?: number, standZ?: number, glideSeconds = 0): void {
+    if (this.seatedFlag && standX !== undefined && standZ !== undefined && glideSeconds > 0) {
+      this.glideFrom.copy(this.position);
+      this.glideTo.set(standX, this.position.y, standZ);
+      this.glideSeconds = glideSeconds;
+      this.glideAt = 0;
+      this.glideThenStand = true;
+      return;
+    }
+    this.glideSeconds = 0;
     this.seatedFlag = false;
+  }
+
+  /** A hop onto her seat or off it under way ({@link beginSeated}, {@link endSeated}). */
+  get hopping(): boolean {
+    return this.glideSeconds > 0;
   }
 
   /** True while a ride is carrying this character instead of `move()` walking it. */
@@ -532,8 +575,10 @@ export class NpcCharacter {
     } else if (this.seatedFlag) {
       // Sitting on a cushion — see beginSeated. She stays exactly where she was
       // sat: no `move()`, no gravity. Only the walk cycle winds down, so the
-      // legs never pedal on the spot.
+      // legs never pedal on the spot — and a hop onto the seat or off it
+      // carries her there.
       this.gait = damp(this.gait, 0, 0.07, dt);
+      if (this.glideSeconds > 0) this.hop(dt);
     } else if (this.carriedFlag) {
       this.rideAlong(dt);
     } else {
@@ -627,6 +672,27 @@ export class NpcCharacter {
     this.position.z -= nz;
     other.position.x += nx;
     other.position.z += nz;
+  }
+
+  /**
+   * One frame of a hop onto her seat or off it: eased along the floor, lifted
+   * a little at its middle ({@link SEAT_HOP_LIFT}), standing up at the end of
+   * a hop off.
+   */
+  private hop(dt: number): void {
+    this.glideAt += dt;
+    const u = Math.min(1, this.glideAt / this.glideSeconds);
+    const s = smoothstep(0, 1, u);
+    this.previousPosition.copy(this.position);
+    this.position.lerpVectors(this.glideFrom, this.glideTo, s);
+    this.position.y += Math.sin(Math.PI * u) * SEAT_HOP_LIFT;
+    this.avatar.rig.root.position.copy(this.position);
+    if (u < 1) return;
+    this.glideSeconds = 0;
+    if (this.glideThenStand) {
+      this.glideThenStand = false;
+      this.seatedFlag = false;
+    }
   }
 
   /** Re-seats the model after any position change made outside `update`. */

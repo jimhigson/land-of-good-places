@@ -1846,6 +1846,11 @@ const child: RealChild = (() => {
   };
 })();
 
+// Story time (plan Step 9) calls itself forty seconds into a visit. The clauses before STORY measure
+// the owl and the children at other things, over minutes of the room's time, so its clock is held
+// until STORY — which asks for its story, and then lets the clock go and measures the call itself.
+library.storyTime.holdClock(true);
+
 console.log('\nWITH A REAL CHILD — a real Player, from the arrival, walks up the central aisle on the stick:');
 {
   child.enter();
