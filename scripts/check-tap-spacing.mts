@@ -163,12 +163,17 @@ for (const room of ROOMS) {
 
 let pairsChecked = 0;
 let bandsChecked = 0;
+/** What was measured in each space, so a space's own counts can be quoted (written to stderr below). */
+const perSpace: { name: string; zones: number; bands: number; zoneBand: number; close: number }[] = [];
 for (const space of spaces) {
+  const measured = { name: space.name, zones: space.zones.length, bands: space.bands.length, zoneBand: 0, close: 0 };
+  perSpace.push(measured);
   for (const zone of space.zones) {
     for (const band of space.bands) {
       if (band.ownZoneId === zone.id) continue;
       if (!sameStorey(zone.y, band.y)) continue;
       bandsChecked += 1;
+      measured.zoneBand += 1;
       const clearance = zoneBandClearance(zone, band);
       if (clearance < TAP_FINGER_METRES) {
         problems.push(
@@ -191,6 +196,7 @@ for (const space of spaces) {
       const separation = zoneSeparation(one, two);
       if (separation >= TAP_FINGER_METRES) continue;
       pairsChecked += 1;
+      measured.close += 1;
       if (differentActions(one, two)) {
         problems.push(
           `${space.name}: '${one.id}' (${zoneVerb(one)}) and '${two.id}' (${zoneVerb(two)}) ` +
@@ -216,6 +222,11 @@ console.log(
     `overlaps (warnings).`,
 );
 for (const warning of warnings) console.log(`  ~ ${warning}`);
+for (const space of perSpace) {
+  process.stderr.write(
+    `  ${space.name}: ${space.zones} zones, ${space.bands} portal band(s); ${space.zoneBand} zone-band and ${space.close} close zone-zone pairs measured\n`,
+  );
+}
 
 if (problems.length > 0) {
   for (const problem of problems) console.error(`  ✗ ${problem}`);
