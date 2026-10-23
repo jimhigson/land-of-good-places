@@ -107,8 +107,8 @@ export const biscuitStorm: LibraryBook = {
           // Sitting in the fountain's water, up to his tummy.
           { model: 'biscuit', mood: 'surprised', pose: 'armsUp', at: [-0.3, -0.38, 0.55] },
           { model: 'sandwich', size: 1.6, at: [-1.3, 1.35, 0.2], turn: 40 },
-          { model: 'sandwich', size: 1.6, at: [0.5, 1.85, 0], turn: -30 },
-          { model: 'sandwich', size: 1.6, at: [1.2, 1.15, 0.35], turn: 70 },
+          { model: 'sandwich', size: 1.6, at: [0.95, 2.15, 0.2], turn: -30 },
+          { model: 'sandwich', size: 1.6, at: [1.3, 1.15, 0.35], turn: 70 },
           { model: 'jamTart', size: 1.8, at: [-0.75, 0.95, 0.6] },
           { model: 'jamTart', size: 1.8, at: [0.55, 1.2, 0.7] },
           { model: 'cake', at: [1.15, 0, 1.0] },
@@ -193,9 +193,10 @@ export const biscuitStorm: LibraryBook = {
         cast: [
           { model: 'battlement', at: [-1.25, 0, -2.8] },
           { model: 'battlement', at: [1.25, 0, -2.8] },
-          { model: 'stormCloud', mood: 'surprised', size: 0.9, at: [0.4, 1.55, -1.9] },
-          // The burp: a rainbow arching out of the cloud.
-          { model: 'rainbowArch', size: 0.3, at: [1.32, 1.82, -1.45] },
+          // Her 'oh' mouth is the burp.
+          { model: 'stormCloud', mood: 'surprised', size: 0.9, at: [0.1, 1.55, -1.9] },
+          // The rainbow it popped out, arching away from her side.
+          { model: 'rainbowArch', size: 0.3, at: [1.8, 1.75, -2.15] },
           { model: 'biscuit', mood: 'surprised', pose: 'armsUp', at: [-1.0, 0, 0.5], turn: 20 },
           // The three empty candy-floss sticks, held up in his paws.
           { model: 'flossStick', size: 2, at: [-1.33, 0.55, 0.62], turn: -10 },

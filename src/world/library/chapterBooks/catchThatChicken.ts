@@ -1,4 +1,4 @@
-import type { LibraryBook } from '../books';
+import type { LibraryBook, PictureActor } from '../books';
 
 /**
  * **Catch That Chicken!** — chapter book 6, shelf place 6 (the big readers'
@@ -24,6 +24,27 @@ import type { LibraryBook } from '../books';
  * her moments here — the gasp, the chase, the hideout, the nest, the lights,
  * space — and a Trilla with a face beats a happy one with none.
  */
+
+/**
+ * Chicken-looter's nest, full of shiny things — spoons, keyrings, the hotel's
+ * disco ball and, for some reason, a biscuit — at `size` with its middle at
+ * (`x`, `z`). Every piece is placed against the nest, so the hoard scales with it.
+ */
+function hoard(size: number, x: number, z: number): PictureActor[] {
+  const k = size / 1.5;
+  return [
+    { model: 'twigNest', size, at: [x, 0, z] },
+    { model: 'discoBall', size: 0.9 * k, at: [x, 0.15 * k, z - 0.25 * k] },
+    { model: 'keychain', variant: 'star', size: 3 * k, at: [x - 0.7 * k, 0.3 * k, z + 0.15 * k], turn: 15 },
+    { model: 'keychain', variant: 'heart', size: 3 * k, at: [x + 0.7 * k, 0.3 * k, z + 0.05 * k], turn: -20 },
+    { model: 'keychain', variant: 'strawberry', size: 3 * k, at: [x + 0.4 * k, 0.32 * k, z + 0.4 * k], turn: -5 },
+    { model: 'spoon', size: 1.8 * k, at: [x - 0.4 * k, 0.45 * k, z + 0.45 * k], turn: 50 },
+    { model: 'spoon', size: 1.8 * k, at: [x + 0.85 * k, 0.42 * k, z + 0.35 * k], turn: -60 },
+    { model: 'spoon', size: 1.8 * k, at: [x - 0.85 * k, 0.4 * k, z - 0.2 * k], turn: 100 },
+    { model: 'biscuitTreat', size: 1.8 * k, at: [x, 0.46 * k, z + 0.55 * k], turn: 20 },
+  ];
+}
+
 export const catchThatChicken: LibraryBook = {
   id: 'catchThatChicken',
   kind: 'chapter',
@@ -70,11 +91,11 @@ export const catchThatChicken: LibraryBook = {
       text: 'Then you spotted him, bobbing above the trees with the golden star tucked under his wing. ‘Shiny, shiny, MINE!’ clucked Chicken-looter. And off he floated, giggling, towards the setting sun.',
       picture: {
         cast: [
-          { model: 'lollipopTree', size: 0.6, at: [0.7, 0, -1.6] },
-          { model: 'lollipopTree', variant: 'blossom', size: 0.65, at: [2.0, 0, -2.0] },
-          { model: 'balloon', variant: 'chicken', mood: 'happy', size: 1.2, at: [1.4, 1.0, -0.8], turn: 60 },
+          { model: 'lollipopTree', size: 0.55, at: [0.9, 0, -1.4] },
+          { model: 'lollipopTree', variant: 'blossom', size: 0.6, at: [2.0, 0, -1.9] },
+          { model: 'balloon', variant: 'chicken', mood: 'happy', size: 1.6, at: [1.3, 0.5, -0.4], turn: 60 },
           // Tucked under his wing.
-          { model: 'star', colour: 'flowerYellow', at: [1.75, 2.3, -0.55], turn: 60 },
+          { model: 'star', colour: 'flowerYellow', size: 1.3, at: [1.75, 2.25, -0.1], turn: 60 },
           { model: 'kid', mood: 'surprised', pose: 'wave', at: [-1.2, 0, 0.7], turn: 25 },
           { model: 'trilla', mood: 'surprised', at: [-0.1, 0, 1.0], turn: 10 },
         ],
@@ -113,17 +134,9 @@ export const catchThatChicken: LibraryBook = {
       text: 'You followed him down to the roof of the Land Hotel, and there was his nest. It was full of shiny things: spoons, keyrings, the hotel’s disco ball and, for some reason, a biscuit.',
       picture: {
         cast: [
-          { model: 'twigNest', size: 1.5, at: [0.3, 0, -0.5] },
-          { model: 'discoBall', size: 0.9, at: [0.3, 0.15, -0.75] },
-          { model: 'keychain', variant: 'star', size: 3, at: [-0.4, 0.3, -0.35], turn: 15 },
-          { model: 'keychain', variant: 'heart', size: 3, at: [1.0, 0.3, -0.45], turn: -20 },
-          { model: 'keychain', variant: 'strawberry', size: 3, at: [0.7, 0.32, -0.1], turn: -5 },
-          { model: 'spoon', size: 1.8, at: [-0.1, 0.45, -0.05], turn: 50 },
-          { model: 'spoon', size: 1.8, at: [1.15, 0.42, -0.15], turn: -60 },
-          { model: 'spoon', size: 1.8, at: [-0.55, 0.4, -0.7], turn: 100 },
-          { model: 'biscuitTreat', size: 1.8, at: [0.3, 0.46, 0.05], turn: 20 },
-          { model: 'kid', mood: 'surprised', jetpack: 'off', at: [-1.65, 0, 0.5], turn: 30 },
-          { model: 'trilla', mood: 'surprised', jetpack: 'off', at: [2.05, 0, 0.4], turn: -30 },
+          ...hoard(2, 0.2, -0.4),
+          { model: 'kid', mood: 'surprised', jetpack: 'off', at: [-1.75, 0, 0.6], turn: 35 },
+          { model: 'trilla', mood: 'surprised', jetpack: 'off', at: [2.0, 0, 0.6], turn: -35 },
         ],
         sky: 'skySunsetBottom',
         ground: 'glassTint',

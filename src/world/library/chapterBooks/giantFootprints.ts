@@ -96,15 +96,15 @@ export const giantFootprints: LibraryBook = {
       text: 'Next morning there were more footprints, by the big wheel and the slide. ‘A giant!’ gasped Sir Hopsalot. ‘A monster!’ squeaked the mouse. ‘A GIANT HAMSTER!’ wailed Biscuit, from under a bench.',
       picture: {
         cast: [
-          print([-1.9, 0, 1.4], 95),
-          print([-0.6, 0, 1.6], 90),
-          print([0.7, 0, 1.45], 85),
-          print([2.0, 0, 1.3], 80),
-          // A bench big enough for a bear to hide under; he sits on the grass beneath it.
-          { model: 'parkBench', size: 2.6, at: [0.6, 0, -0.9], turn: -35 },
-          { model: 'biscuit', mood: 'surprised', pose: 'sit', size: 0.85, at: [0.6, -0.15, -0.8], turn: -35 },
-          { model: 'bunny', mood: 'surprised', at: [-1.6, 0, 0.2], turn: 30 },
-          { model: 'mouse', mood: 'surprised', at: [-0.55, 0, 0.6], turn: 20 },
+          print([-1.9, 0, 1.2], 95),
+          print([-0.6, 0, 1.35], 90),
+          print([0.7, 0, 1.2], 85),
+          // A bench big enough for a bear to hide under: its seat's underside (the kit's
+          // 0.246, at size 3) clears Biscuit sitting on the grass (0.98 of his size).
+          { model: 'parkBench', size: 3, at: [1.1, 0, -0.5], turn: -20 },
+          { model: 'biscuit', mood: 'surprised', pose: 'sit', size: 0.72, at: [0.9, -0.11, -0.25], turn: -20 },
+          { model: 'bunny', mood: 'surprised', at: [-1.6, 0, 0.5], turn: 30 },
+          { model: 'mouse', mood: 'surprised', at: [-0.55, 0, 0.8], turn: 20 },
         ],
         sky: 'skyDayBottom',
         ground: 'grassLight',
@@ -136,7 +136,8 @@ export const giantFootprints: LibraryBook = {
           print([-1.2, 0, 1.2], 100),
           print([-0.2, 0, 1.05], 100),
           { model: 'tortoise', mood: 'blink', size: 1.8, at: [1.1, 0, -0.6], turn: -6 },
-          { model: 'petal', colour: 'flowerYellow', size: 4, at: [0.95, 1.0, 1.0], turn: -6 },
+          // Across the front of his head, where the camera can see it: a petal lying on top is a sliver.
+          { model: 'petal', colour: 'flowerYellow', size: 6, at: [0.92, 0.98, 1.2], turn: 84 },
           { model: 'kid', mood: 'surprised', at: [-1.9, 0, 0.1], turn: 55 },
           { model: 'ripika', mood: 'surprised', at: [-0.75, 0, 0.55], turn: 40 },
         ],
