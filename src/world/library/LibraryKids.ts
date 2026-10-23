@@ -1,11 +1,9 @@
 import type { Object3D } from 'three';
-import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
-import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CharacterModel } from '../../entities/CharacterModel';
 import { characterModelAvatar, type ResidentSpec } from '../../entities/npc';
 import { PLAYER_SEPARATION, SEPARATION } from '../../entities/npc/NpcSystem';
-import { GUEST_PACE, HAIR_STYLES, HAIRS, OUTFITS } from '../../entities/npc/residentLooks';
+import { GUEST_PACE, residentLook } from '../../entities/npc/residentLooks';
 import { LibraryKidDriver } from './libraryKidDriver';
 import {
   LIBRARY_FLOOR_Y,
@@ -77,25 +75,9 @@ export function libraryResidents(parent: Object3D): LibraryResident[] {
   return LIBRARY_KID_PLANS.map((plan, i): LibraryResident => {
     const seed = LIBRARY_KID_SEED + i * LIBRARY_KID_SEED_STRIDE;
     const rng = new Rng(seed);
-    // Drawn in this order, one statement each, because the order is the child.
-    const skin = (KID_SKIN_TONES[rng.int(0, KID_SKIN_TONES.length - 1)] ?? KID_SKIN_TONES[1])!.colour;
-    const hair = rng.pick(HAIRS);
-    const outfit = rng.pick(OUTFITS);
-    const model = new CharacterModel(
-      {
-        skin,
-        hair,
-        outfit,
-        // A resident's arms match her shirt — the hotel's plain, single-colour look.
-        outfitArms: outfit,
-        shoe: PALETTE.shoe,
-      },
-      {
-        hairStyle: rng.pick(HAIR_STYLES),
-        backpack: rng.chance(0.5),
-        backpackColour: rng.pick(OUTFITS),
-      },
-    );
+    // Her look, drawn in the hotel's one fixed order from her own stream (`residentLook`).
+    const look = residentLook(rng);
+    const model = new CharacterModel(look.colours, look.options);
     model.root.name = `library.kid.${plan.name}`;
     parent.add(model.root);
     const resident: LibraryResident = {

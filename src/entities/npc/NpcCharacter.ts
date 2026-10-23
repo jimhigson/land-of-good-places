@@ -384,10 +384,14 @@ export class NpcCharacter {
   }
 
   /**
-   * Stands her up, where she sat. Nothing else is touched: the next frame's
-   * `move()` resamples the ground under her, so she steps up onto the
-   * cushion's plate and off it again — a visible "getting up" rather than a
-   * snap — and her own driver walks her away.
+   * Stands her up, where she sat. Nothing else is touched: the flag clears,
+   * and the next frame's `move()` walks her again. A seat that is a solid —
+   * a library story cushion is a filled disc with a top (PR #722), and the
+   * crowd never climbs a solid — then holds her inside its disc, so the
+   * resolver carries her out of it as it escorts any body out of a solid, at
+   * `NPC_RADIUS / 2` a frame: about a metre in four frames, before her own
+   * driver walks her away. A caller that wants her up somewhere else first
+   * puts her there with {@link setDown}.
    */
   endSeated(): void {
     this.seatedFlag = false;

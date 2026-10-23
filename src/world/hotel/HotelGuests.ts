@@ -1,8 +1,6 @@
 import type { Object3D } from 'three';
-import { PALETTE } from '../../core/palette';
 import { NPC_RADIUS } from '../../core/constants';
 import { Rng } from '../../core/mathUtils';
-import { KID_SKIN_TONES } from '../../art/models/kid';
 import { createPet, type PetKind } from '../../art/models/pets';
 import { CharacterModel } from '../../entities/CharacterModel';
 import {
@@ -11,7 +9,7 @@ import {
   type ResidentSpec,
   type Waypoint,
 } from '../../entities/npc';
-import { GUEST_PACE, HAIR_STYLES, HAIRS, OUTFITS } from '../../entities/npc/residentLooks';
+import { GUEST_PACE, residentLook } from '../../entities/npc/residentLooks';
 import { BREAKFAST, CORRIDOR, LOBBY, type HotelRoom } from './layout';
 import type { RoomKeepOut } from './place';
 
@@ -146,30 +144,10 @@ export function hotelResidents(
       index += 1;
       const seed = 0x6035 + index * 977;
       const rng = new Rng(seed);
-      // Drawn in this order, one statement each, because the order is the
-      // guest: swap two of these lines and every child in the hotel is wearing
-      // somebody else's clothes.
-      const skin =
-        (KID_SKIN_TONES[rng.int(0, KID_SKIN_TONES.length - 1)] ?? KID_SKIN_TONES[1])!.colour;
-      const hair = rng.pick(HAIRS);
-      const outfit = rng.pick(OUTFITS);
-      const model = new CharacterModel(
-        {
-          skin,
-          hair,
-          outfit,
-          // A guest's arms match their shirt — the plain, single-colour look
-          // `createKid` gave these children before `CharacterModel` (which asks
-          // for both) took over building them.
-          outfitArms: outfit,
-          shoe: PALETTE.shoe,
-        },
-        {
-          hairStyle: rng.pick(HAIR_STYLES),
-          backpack: rng.chance(0.5),
-          backpackColour: rng.pick(OUTFITS),
-        },
-      );
+      // Her look is drawn in one fixed order from her own stream — the order is
+      // the guest (`residentLook`, the one owner, shared with the library).
+      const look = residentLook(rng);
+      const model = new CharacterModel(look.colours, look.options);
       parent.add(model.root);
       residents.push({
         name: GUEST_NAMES[(index - 1) % GUEST_NAMES.length] ?? 'Guest',

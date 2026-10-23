@@ -4,7 +4,7 @@ import { NPC_RADIUS } from '../../core/constants';
 import { createBlinkClock, type BlinkClock } from '../../art/style/faceLife';
 import { libraryCushionSize } from '../../art/models/libraryAssets';
 import type { CharacterDriver, CharacterIntent, DriverContext } from '../../entities/npc/driver';
-import { WaypointDriver, type Waypoint } from '../../entities/npc/waypointDriver';
+import { ARRIVE_RADIUS, WaypointDriver, type Waypoint } from '../../entities/npc/waypointDriver';
 import { Errand, NO_LIMIT } from '../../entities/npc/activities/errand';
 import type { Activity, ActivityHost, Rejoin } from '../../entities/npc/activities/activity';
 import { GUEST_PACE } from '../../entities/npc/residentLooks';
@@ -41,13 +41,17 @@ import {
  *
  * `stroll` → ({@link summon}) `walking` → `arrived` → ({@link markSeated})
  * `seated` → ({@link dismiss}) `returning` → `stroll`. A leg that takes too
- * long is given up: on the way to the rug that is `gaveUp` — she stands where
- * she is and listens from there, which is graceful by design (plan, "Risks")
- * — and on the way back it is straight to a fresh stroll from wherever she is.
+ * long is given up on the way to the rug: that is `gaveUp` — she stands where
+ * she is and listens from there, which is graceful by design (plan, "Risks").
+ * On the way back a leg that takes too long is **begun again**: she keeps to
+ * her declared way, waiting her turn behind whoever is in it (a child standing
+ * still is furniture to the crowd), and never cuts across the room to her
+ * aisle on a line nobody swept. A summons on the way back turns her round
+ * along the same way ({@link summon}); a dismissal on it changes nothing.
  * Nothing here moves her body: she is walked by intent like every other
  * character, so a wall or a child in her way stops her exactly as it stops the
  * crowd, and `Errand`'s rails (a timeout, a sidestep when wedged) are what
- * save her from pushing at it for ever.
+ * keep her from pushing blindly at it.
  *
  * ## The route, and who owns it
  *
@@ -56,8 +60,11 @@ import {
  * (`libraryKidAisle`), then the declared way from the exit node to her cushion
  * (`libraryKidRugRoute`). The dismissal walks the declared part back to the
  * exit node, then a **fresh** `WaypointDriver` takes up the circuit — which
- * works because every circuit starts at its exit node. Every leg she can ever
- * walk is therefore one `check:library`'s KIDS sweeps.
+ * works because every circuit starts at its exit node. Given up on the way
+ * there before the exit node, she is still on her own aisle, and the fresh
+ * stroll walks her along it. Every leg she can ever walk is therefore one
+ * `check:library`'s KIDS sweeps — and KIDS also rehearses the dismissal twice
+ * over, the summons on the way back and a way back held up past the timeout.
  *
  * ## The seat is a solid
  *
@@ -75,8 +82,8 @@ import {
 /** How briskly a summoned child walks to the rug: a fraction of the house pace — brisker than her stroll ({@link GUEST_PACE}), short of a run. */
 export const KID_SUMMON_PACE = 0.7;
 
-/** How close counts as arriving at a point on the way — `WaypointDriver`'s own arrival, so a route node is reached the way a stroll node is. */
-export const KID_ROUTE_ARRIVE = 0.45;
+/** How close counts as arriving at a point on the way — `WaypointDriver`'s own arrival (imported, one owner), so a route node is reached the way a stroll node is. */
+export const KID_ROUTE_ARRIVE = ARRIVE_RADIUS;
 
 /**
  * How much nearer than touching the cushion's rim counts as having arrived at
@@ -193,11 +200,17 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
   }
 
   /**
-   * **Story time: come to the rug.** From her stroll only — a child already on
-   * her way, waiting or sitting is left to it. The route is built on the next
-   * frame, from where she stands then.
+   * **Story time: come to the rug.** From her stroll — the route is built on
+   * the next frame, from where she stands then — or on her way back from the
+   * last story, when she turns round where she is and walks the same declared
+   * way back to her cushion ({@link turnBack}). A child already on her way,
+   * waiting or sitting is left to it.
    */
   summon(): void {
+    if (this.modeValue === 'returning') {
+      this.turnBack();
+      return;
+    }
     if (this.modeValue !== 'stroll') return;
     this.modeValue = 'walking';
     this.routeWanted = true;
@@ -221,10 +234,13 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
    * exit node from the furthest point she reached — all of it from her seat,
    * part of it if she gave up on the way — then a fresh stroll from the exit
    * node. Given up before the exit node, or never routed, she strolls from
-   * where she is. From her stroll, nothing to do.
+   * where she is (her own aisle). From her stroll, or already on her way back,
+   * nothing to do: a second dismissal must never turn her way back round
+   * (story time's `abort` dismisses whoever is in the room, whatever she is
+   * doing).
    */
   dismiss(): void {
-    if (this.modeValue === 'stroll') return;
+    if (this.modeValue === 'stroll' || this.modeValue === 'returning') return;
     const back = this.route.slice(this.exitIndex, Math.min(this.next, this.route.length - 1)).reverse();
     this.routeWanted = false;
     this.walk.clearSidestep();
@@ -313,10 +329,34 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
       if (this.next >= this.route.length) this.endRoute(context);
       return;
     }
-    // Given up: on the way there she stands and listens from here; on the way
-    // back she strolls from here.
+    // Given up: on the way there she stands and listens from here. On the way
+    // back she begins the same leg again — her declared way is the only way
+    // she walks — keeping whichever way round the sidestep was working.
     if (this.modeValue === 'walking') this.modeValue = 'gaveUp';
-    else this.resumeStroll();
+    else this.legBegun = false;
+  }
+
+  /**
+   * **Summoned on her way back: round she turns.** Her way back is the
+   * declared rug route walked backwards, so the point she last passed is on it
+   * and every point from there to her cushion is a leg KIDS sweeps: she walks
+   * to that point and on to the seat, on the whole rug route (exit node first,
+   * so a dismissal from there walks back all the way to the exit node again).
+   */
+  private turnBack(): void {
+    const rug = this.rugRouteWorld;
+    // On the way back, `route[i]` is `rug[route.length − 1 − i]`; heading for
+    // `route[next]`, she last passed `rug[route.length − next]` — or, before the
+    // first target, she is between it and the seat (`rug[route.length]`).
+    const from = Math.min(rug.length - 1, Math.max(0, this.route.length - this.next));
+    this.route = rug;
+    this.exitIndex = 0;
+    this.next = from;
+    this.legBegun = false;
+    this.routeWanted = false;
+    this.walk.clearSidestep();
+    this.toSeat.clearSidestep();
+    this.modeValue = 'walking';
   }
 
   /** Stood still, looking at the storyteller's chair, happy. */

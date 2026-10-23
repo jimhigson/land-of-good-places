@@ -44,8 +44,8 @@ import type { CharacterDriver, CharacterIntent, DriverContext } from './driver';
  *   and a guest leaning on a chair forever is the failure that buys.
  */
 
-/** How close counts as having arrived. */
-const ARRIVE_RADIUS = 0.45;
+/** How close counts as having arrived — a stroll node's, and (by import) a library child's route node's. */
+export const ARRIVE_RADIUS = 0.45;
 
 /** How long a character dawdles on arriving somewhere. */
 const PAUSE_RANGE: readonly [number, number] = [0.7, 2.9];
