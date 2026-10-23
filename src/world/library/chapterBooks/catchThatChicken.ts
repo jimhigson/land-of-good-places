@@ -17,12 +17,12 @@ import type { LibraryBook, PictureActor } from '../books';
  * keyrings, the disco ball, the trees, the surprise egg and the alien are the
  * park's own.
  *
- * **Trilla wears her `surprised` face on every page.** Her tummy patch stands
- * proud of her face, and from the picture camera's low angle it covers her
- * eyes in every mood but `surprised` and `frown` (measured on the served
- * reader: `happy`, `sad` and `blink` draw no eye at all). Wide eyes fit each of
- * her moments here — the gasp, the chase, the hideout, the nest, the lights,
- * space — and a Trilla with a face beats a happy one with none.
+ * **Trilla's moods are the story's** (the editor's, page by page), even though
+ * today she shows only `surprised`'s: the puff's tummy patch covers her eyes
+ * (`art/models/pets.ts`; measured in the served reader, `happy`, `sad` and
+ * `blink` draw no eye at all). That defect has one owner, the puff model; when
+ * it is fixed these pages smile with no edit here, which a book written round
+ * the defect would not.
  */
 
 /**
@@ -110,7 +110,7 @@ export const catchThatChicken: LibraryBook = {
         cast: [
           // Side on, so both jet packs show, firing.
           { model: 'kid', mood: 'happy', pose: 'armsUp', jetpack: 'on', at: [-0.7, 0.5, 0.2], turn: 75 },
-          { model: 'trilla', mood: 'surprised', jetpack: 'on', at: [1.0, 0.1, 0.3], turn: 85 },
+          { model: 'trilla', mood: 'happy', jetpack: 'on', at: [1.0, 0.1, 0.3], turn: 85 },
         ],
         sky: 'skySunsetBottom',
         decor: ['speed', 'clouds'],
@@ -123,7 +123,7 @@ export const catchThatChicken: LibraryBook = {
           // His head in the cloud, his feathery bottom (and his string) hanging out of it.
           { model: 'fluffyCloud', size: 1.3, at: [0, 1.62, -0.5] },
           { model: 'balloon', variant: 'chicken', size: 1.2, at: [0.4, 0, -0.45], turn: 150 },
-          { model: 'trilla', mood: 'surprised', jetpack: 'on', size: 0.85, at: [2.0, 0.4, 0.6], turn: -50 },
+          { model: 'trilla', mood: 'happy', jetpack: 'on', size: 0.85, at: [2.0, 0.4, 0.6], turn: -50 },
           { model: 'kid', mood: 'happy', pose: 'wave', jetpack: 'on', size: 0.85, at: [-2.1, 0.25, 0.4], turn: 65 },
         ],
         sky: 'skySunsetBottom',
@@ -153,7 +153,7 @@ export const catchThatChicken: LibraryBook = {
           // Settled low in the nest like a hen on an egg (his string tucked away under him).
           { model: 'balloon', variant: 'chicken', mood: 'sad', at: [0, -0.5, -0.45] },
           { model: 'kid', mood: 'sad', at: [-1.5, 0, 0.5], turn: 30 },
-          { model: 'trilla', mood: 'surprised', at: [1.6, 0, 0.6], turn: -30 },
+          { model: 'trilla', mood: 'sad', at: [1.6, 0, 0.6], turn: -30 },
         ],
         sky: 'skyNightBottom',
         ground: 'glassTint',
@@ -173,7 +173,7 @@ export const catchThatChicken: LibraryBook = {
           // In her raised hand.
           { model: 'star', colour: 'flowerYellow', size: 1.3, at: [0.1, 0.95, 0.68], turn: 20 },
           { model: 'discoBall', size: 0.7, at: [0.25, 0, 1.0] },
-          { model: 'trilla', mood: 'surprised', at: [-1.9, 0, 0.8], turn: 25 },
+          { model: 'trilla', mood: 'happy', at: [-1.9, 0, 0.8], turn: 25 },
         ],
         sky: 'skyNightBottom',
         ground: 'glassTint',
@@ -187,7 +187,7 @@ export const catchThatChicken: LibraryBook = {
         cast: [
           { model: 'storyWheel', lit: true, at: [0, 0, -1.8] },
           { model: 'kid', mood: 'happy', pose: 'armsUp', jetpack: 'on', at: [1.55, 1.35, -0.8], turn: -70 },
-          { model: 'trilla', mood: 'surprised', at: [-0.6, 0, 1.0], turn: 10 },
+          { model: 'trilla', mood: 'happy', at: [-0.6, 0, 1.0], turn: 10 },
           { model: 'balloon', variant: 'chicken', mood: 'happy', size: 1.3, at: [-1.8, 0, 0.7], turn: 25 },
         ],
         sky: 'skyNightBottom',
@@ -202,7 +202,7 @@ export const catchThatChicken: LibraryBook = {
         cast: [
           { model: 'alienSaucer', size: 0.32, at: [1.7, 1.9, -3.5] },
           { model: 'kid', mood: 'happy', pose: 'wave', at: [-1.0, 0, 0.5], turn: 20 },
-          { model: 'trilla', mood: 'surprised', at: [0.25, -0.35, 0.9] },
+          { model: 'trilla', mood: 'happy', at: [0.25, -0.35, 0.9] },
           { model: 'balloon', variant: 'chicken', mood: 'happy', at: [1.45, -0.2, 0.3], turn: -15 },
           // Just laid, just below him.
           { model: 'surpriseEgg', colour: 'blossomPink', accent: 'markerSky', size: 1.3, at: [1.68, 0.1, 0.5] },
