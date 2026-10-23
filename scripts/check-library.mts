@@ -2923,8 +2923,16 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
     reachedMiddles.length === 0,
     `with the leaf open the fill from the arrival reaches none of their middles: ${reachedMiddles.map((middle) => `${middle.what} IS reached`).join(', ') || `${middles.length} of ${middles.length} unreached`}`,
   );
-  /** Bodies marched at a drawn plan from sixteen bearings at both strides, with her feet at `feet`: the deepest a body's edge got into it, by `depth`. */
-  const marchedAt = (centre: LocalPoint, reach: number, feet: number, depth: (end: LocalPoint) => number): { marches: number; skipped: number; deepest: number } => {
+  /**
+   * Bodies marched at a drawn plan from sixteen bearings at both strides, with
+   * her feet at `feet`: the deepest a body's edge got into it, by `depth`,
+   * **at any step of the way** — not only where the march ended. These plans
+   * are small: a body that walks straight through a missing solid ends a
+   * metre past it, clear on its far side, and an end-only reading would call
+   * that a pass (it did, the first time `LIBRARY_CHECK_REMOVE='the library
+   * cat'` was run).
+   */
+  const marchedAt = (centre: LocalPoint, reach: number, feet: number, depth: (at: LocalPoint) => number): { marches: number; skipped: number; deepest: number } => {
     let marches = 0;
     let skipped = 0;
     let deepest = -Infinity;
@@ -2939,8 +2947,13 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
       }
       for (const step of [0.05, PLAYER_LONGEST_STEP]) {
         marches += 1;
-        const end = march(collision, new Vector3(OX + sx, LIBRARY_FLOOR_Y + feet, OZ + sz), new Vector3(OX + centre.x, LIBRARY_FLOOR_Y + feet, OZ + centre.z), step, out + 1);
-        deepest = Math.max(deepest, depth({ x: end.x - OX, z: end.z - OZ }));
+        const body = new Vector3(OX + sx, LIBRARY_FLOOR_Y + feet, OZ + sz);
+        const ux = (centre.x - sx) / out;
+        const uz = (centre.z - sz) / out;
+        for (let t = 0; t < out + 1; t += step) {
+          collision.resolveMovement(body, ux * step, uz * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+          deepest = Math.max(deepest, depth({ x: body.x - OX, z: body.z - OZ }));
+        }
       }
     }
     return { marches, skipped, deepest };
