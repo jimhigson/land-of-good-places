@@ -683,3 +683,90 @@ PR #733 retitled "The Library, part two: the owl librarian, the children and sto
 visual QA, checks; frames on `qa-screenshots` @ 858434dc, `733-library-part-two/`). **Head moved by fast-forward
 b438b695..118468c3** (`git push origin feat/library-v2:feat/library-v2-pr`). CI run **39943305407** (and Update
 adoption 39943305406) started on 118468c3 — not waited for. Everything after 118468c3 on this branch is handoff only.
+
+## CI round 1 (23 Oct 2026, Opus 5.5) — the review of the join judged, then #733's CI to green
+
+Scratch: `.claude/library-build-scratch/r1/` (`runs/<tag>/<check>.log` ending `exit=N seconds=S`; `run-checks.sh`;
+`byhand.py <tag> <check> <file> <old> <new> …` applies a by-hand mutation, restamps, runs, reverts, restamps;
+`compare-scripts.mjs`, the parsed step-set comparison). Geometry for every red below: seed 5's honest park
+(restart 1, digest d6721090fb3f1d3a) restamped to each tree's hash; the reading room at (−600, −600); cushion 1 at
+room (2.1, −8); the owl's desk spot (6, 5.3); her perch (4.00, 0.36, −11.19); check:library's screen 1280×720,
+check:labels' 390×844. Baseline at e994f322: check:library exit 0, 204 ✓; check:labels exit 0, 15983 frames.
+
+### The three findings, judged — all three real, all fixed
+
+1. **No check saw the child miss the owl's story words (major) — real.** Read: `LibraryOwl.update` anchors the bubble
+   only while she speaks; STORY's bubble clause measured whatever sprite was there and only *noted* a 0-of-45 result;
+   check:labels scene 5's coverage asked only that the reading was reached. **Fixed (4ae3835a):** STORY resolves the
+   label manager every frame (`world.labels.resolve(view, CHILD_DT)`, Game.tick's order) and asserts (a) **her bubble
+   follows her** — on every frame she speaks, the tail read off the bubble (`worldAnchor`) is within 0.02 m of
+   `OWL_BUBBLE_OVER_HEAD` (now exported, one owner) over her live head: control 191 frames on the wing, 1333 on the
+   chair, 0.000 m; (b) **the child can read the story** — drawn on 1316 of the 1316 frames she reads aloud; (c) the
+   depth clause passes only for her own bubble (tail over her head, drawn). check:labels scene 5 counts, while she
+   reads, the frames her bubble / the Get up chip / both were drawn (1138/1138/1138) and her bubble on the wing (152
+   of 191); a coverage gap if any is 0. Reds (each reverted):
+   - `LibraryOwl.update` without `this.anchorBubble();` → check:library exit 1, **203 ✓ 3 ✗**: `✗ her bubble follows
+     her: … its tail was at most 16.615 m from 0.42 m over her head (0.02 allowed), the worst on the chair 3.2 s in,
+     the owl's feet at room (4.00, -11.19)`, `✗ … drew the owl's bubble on 0 of the 1316 frames she read aloud`,
+     `✗ … hers, its tail 16.615 m off over her head (0.02 allowed), drawn false: 0 of 45 points …`
+     (`r1/red-f1-anchor-lib.log`); check:labels exit 1, `FAIL E coverage: 3 occasion(s). First: the library owl's
+     bubble was never drawn while she read the story` — bubble 0, chip 1138, both 0, wing 0 of 191
+     (`red-f1-anchor-labels.log`).
+   - Sit zones `selectableWhileRiding: false` (no Get up chip) → check:labels exit 1, `FAIL E coverage: 2
+     occasion(s). First: the story cushion's Get up chip was never drawn while the owl read` — bubble 1138, chip 0,
+     both 0 (`red-f1-no-getup-labels.log`).
+2. **Only the first half of the story clock was checked (minor) — real.** `grep`-free: read CLOCK/ABORT/STORY;
+   nothing reads `nextIn` after a landing or a second story. **Fixed (56a72882):** STORY asserts story time idle
+   with one more story told (0 → 1) and its clock at STORY_EVERY (150 s); CLOCK lets the clock go after that landing
+   and asserts the next call **150.00 s** on (2 frames allowed) reading **a different book** ('fountainWish' after
+   'fireflies'); and **whole rounds**: the real `StoryTime` with a stand-in owl (always free, perched, quiet; no
+   children; four frames a story), 14 stories each for three recommendations (STORY's book all along; nothing; the
+   order's last book from story 12): the first 12 all different and every story-time book among them, the
+   recommended one first, never the same twice running. Reds (each reverted):
+   - `this.clock = 5` at the landing → exit 1, **207 ✓ 2 ✗**: `✗ … the next story's clock set to 5 s (STORY_EVERY
+     150 s)`, `✗ … the next story is called 5.02 s on (STORY_EVERY 150 s; the clock stood at 5 s)` (`red-f2-every-5s.log`).
+   - the plan's old pick rule (`recommended ?? ORDER[storiesTold % n]`) → exit 1, **208 ✓ 2 ✗**: `✗ and it reads a
+     different book: 'fireflies' after STORY's 'fireflies'` and the rounds clause `fireflies → fireflies → …` ×14
+     (`red-f2-old-pick-rule-rounds.log`).
+   - the new round without holding back the last book → exit 1, **209 ✓ 1 ✗**: `recommending 'duckBars' from
+     story 12: … ripikaBalloon → duckBars → duckBars → fountainWish (TWICE RUNNING: 12→13 'duckBars')`
+     (`red-f2-no-last-guard.log`).
+3. **The over-the-scenery choice was made outside SpeechBubble (minor) — real.** `LibraryOwl` wrote
+   `bubble.sprite.material.depthTest = false` though `SpeechBubble.material` is private, and cited a LABELS.md rule
+   that is not there. **Fixed (d14252b6):** `SpeechBubble`'s third argument `{ overScenery?: boolean }` (default off:
+   every other bubble stays depth-tested and looks as before); the owl passes it; LABELS.md gains "Drawn over the
+   scenery" (who uses it, why, and that extending it is a visible change for Jim), and its check:labels section
+   now says five scenes and the Library's coverage. STORY's depth clause is the guard. Red: the option removed by hand
+   → exit 1, **203 ✓ 1 ✗**, `… 6 of 45 points … behind 'library.books.2' … it is drawn DEPTH-TESTED, so it is cut there`
+   (`red-f3-no-overscenery.log`).
+
+### Decision (Jim away; also in the PR body)
+
+8. **Story time reads a different story every time.** Measuring the second story found the plan's rule
+   (`recommended ?? ORDER[storiesTold % 12]`, Step 9) reading "Fireflies at Night" twice running, and — while a book
+   glows — at **every** story time (the red above: fireflies ×14). Now: the recommended book if no story has read it
+   this round, else the first of the owl's order not read this round; a round ends when every book has been read
+   once, and the next never begins with the one just heard (`storyTime.ts`, `pickBook`). The first story of a visit is
+   unchanged (still the glowing book), so every first-story check reads as before. Reason: a six-year-old enjoys a
+   new story more than the same one again, and the plan's own words are "the recommended book, else the next in the
+   seeded order".
+
+### Checks at 56a72882 (exit codes read, counts off the screen)
+
+| check | exit | off the screen |
+|---|---|---|
+| `tsc --noEmit` · `typecheck:test` | 0 · 0 | |
+| scripts typecheck instrument (`r1/tsconfig.scripts.r1.json`, the reviewer's 18 scripts) | 2, as at e994f322 | 63 messages, the same set (positions ignored) — none new |
+| `check:library` | 0 | **210 ✓, 0 ✗** in 32 s (204 + bubble follows her + can read the story + idle at landing + next call + different book + whole rounds) |
+| `check:labels` | 0 | 15983 frames; library: bubble 1138, Get up chip 1138, both 1138 of 1138 reading; wing 152 of 191 |
+| `check:flat-primitives` | 0 | "no new flat primitives, and no stale baseline entries" |
+| `check:chain-coverage` | 0 | "every one of the 98 check:* leaf scripts is reachable from CI" |
+| `check:seed-coverage` | 0 | "every one of the 16 parks a child can be given is built by a merge-blocking check" |
+| `check:speech-bubbles` · `check:brevity` | 0 · 0 | 1110 crowd-bubble sightings, 3 set-once probes · 356 pieces, 6 exceptions |
+
+**package.json, parsed (`r1/compare-scripts.mjs`, never grepped):** HEAD vs `origin/feat/engine-solids`: 179 names,
+added [], removed [], changed [] — every step set EQUAL: `check` 9, `check:shard-1` 26, `-2` 4, `-3` 17, `-4` 15,
+`-5` 8, `-6` 4, `-7` 6, `-8` 1, `-9` 2, `check:all` 6, `check:crowd` 5. Part 4 adds no script. `origin/main` and
+the PR head 118468c3 are the same 179. `git diff --stat origin/feat/library-v2-pr...HEAD`: 7 files, every one this
+round's (LABELS.md, check-labels, check-library, SpeechBubble, LibraryOwl, storyTime, this handoff); vs main 19 A,
+38 M, no deletion.
