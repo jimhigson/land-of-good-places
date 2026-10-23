@@ -440,3 +440,54 @@ Reds (seed 5; the owl at room (6, 5.3) facing 0, the desk at (6, 6.8), its front
 - the old sideways flap (`wingR.rotation.z = …`) → exit 1, 159 ✓ 2 ✗: `✗ … she flapped the wing that holds her book forward, over her desk: rotation.x down to 0.00`,
   `✗ her wings at their widest … reach 0.889 m from her middle; past her solid (r 0.668) at bearings -90 … -50, 40, 45, 50°, and a child can stand against her solid at 4 of them (-90, -85, -80, -75°): a wing through a child`.
 - `talk()` without `if (this.midScript) return;` → exit 1, 156 ✓ 5 ✗: `✗ pressed again mid-ceremony ('Say hello!'), she carries on: still "Hello again, little reader!" (mid-script true), nothing recommended (fountainWish), 1 card`, and the card lines, the flap, the glow and the mid-card shush lines after it.
+
+### The review of Step 8 (the library children), judged
+
+1. **check:jitter / check:crowd red (blocker) — real, inherited, already fixed upstream and merged.** Both
+   reds were the engine's (0807890d `offTheLine` set-down, 7ce1deae crowd trips); this branch carries them
+   since 679c3b31 (round four). After merging B: `check:jitter` exit 0 (34 children, worst own step 0.177 m,
+   Luca), `check:crowd` exit 0 (`trips=61`, no NOT EXERCISED). 8a48066b (a still player is furniture) is in.
+2. **A second dismissal reversed the way back (major) — real, fixed (26cb76cf).** `dismiss()` is a no-op in
+   `'returning'`. Red: the old early return (`stroll` only) → exit 1, 171 ✓ 2 ✗
+   (`st9/red-kids-double-dismiss-2.log`): `✗ dismissed at her cushion, and again 2 s into the way back … the
+   longest any stayed up against a solid Juno 101, Lark 76, Fenn 393 frame(s) (60 allowed …); furthest off her
+   ways Juno 3.33 m, Lark 1.29 m, Fenn 0.72 m` and the turn-back clause (Fenn 1346 frames, 2.80 m).
+3. **The gathering failed with her standing still where she most likely stands (major) — real, fixed
+   (4e8be41a, then the wait):** measured on this tree first, with 8a48066b in: at central[5] Lark gave up; at
+   central[4] Juno and Lark gave up (36 s). A child held off a point by a player standing still (stood still
+   1 s; the point's arrival disc inside her `PLAYER_SEPARATION`) now walks on **along lines asked of the real
+   world** — straight to the next point, or round the player by places on a ring 0.3 m outside her distance
+   (Dijkstra, 24 places, neighbour steps), each line swept at KIDS' 0.55 m body and kept outside her distance
+   (the driver is handed `CollisionWorld.isClearCircle` by `Library`). No way round: she **waits, looking at
+   the player** (never pushing into her and the furniture beside her), and on the way to the rug settles to
+   listen within `KID_NO_WAY_SECONDS` (5); her own cushion with the player on it: she listens at once.
+   KIDS stands her still at the desk (CONTROL: 8.3/10.4/13.9 s), central[5] (8.4/10.1/13.9), central[4]
+   (9.4/10.8/15.4), and in the two gaps with no way round — between the west armchair and cushion 4 (1.4, −9.5)
+   (Juno settles at 12.8 s) and between the stacks and cushion 2 (3.0, −6.4) (Lark at 14.5 s): everyone at her
+   cushion or listening within the control's slowest + 6 s, nobody leans on furniture (≤ 60 frames; Fenn's
+   20-frame brush past the east armchair's corner on her declared leg is in the control too), the way back
+   past her measured too, she is never shoved (0.000 m). Reds (each `st9/red-*.log`):
+   - no way round (held never seen) → 176 ✓ 6 ✗: `Lark NEVER` at central[5]; `Juno NEVER, Lark NEVER` at
+     central[4]; the armchair gap `within 34.8 s`; leans of 363 and 356 frames.
+   - unchecked lines (`lineClear` always true) → 172 ✓ 10 ✗: leans 295/590 frames, children never back to
+     their stroll, the gather over the bound.
+   - no waiting (pushes on with no way round) → 181 ✓ 1 ✗: `Juno 369 frame(s)` against the armchair.
+4. **A give-up on the way back started an unswept stroll (minor) — real, fixed (26cb76cf):** the same declared
+   leg is begun again. KIDS holds Juno's way back up past the timeout with a 0.5 m disc on (0.5, −8.3) for
+   35 s: still `'returning'` a second past the timeout, then on along her way. Red (the old `resumeStroll()`)
+   → 171 ✓ 2 ✗: `… a second past the timeout she is still 'stroll' …`, `… 2.21 m off her circuit five seconds on`.
+   The driver's header no longer claims more than KIDS sweeps; KIDS also rehearses the dismissal mid-walk and
+   once at the cushion (CONTROL: 0 frames, ≤ 0.30 m off), and a summons on the way back (`turnBack`: every
+   child back at her cushion in 2.1 s). **A summons on the way back now turns her round** along the declared
+   way (it was ignored until she strolled — a story called as the last one's children walk off would have
+   started without them).
+5. **endSeated's comment (minor) — real, fixed:** it describes the solid cushion and points at `setDown`.
+6. **Two owners (minor) — real, fixed:** `residentLook(rng)` in `residentLooks.ts` draws the six in the hotel's
+   order for both (check:hotel re-run below); `KID_ROUTE_ARRIVE` imports `WaypointDriver`'s exported
+   `ARRIVE_RADIUS`.
+
+**The instrument, and one call it makes (decision):** "up against a solid" = a body of `NPC_RADIUS + 0.01`
+not clear, away from her own cushion. A child squeezed there **by another child passing** (another within
+`SEPARATION`) is the crowd's push-apart, `check:npc-separation`'s ground — reported as `squeezed`, not a lean
+(at central[4] on the way back Juno is squeezed 142 frames against the west armchair as Lark passes; moving
+her waypoint 15 cm east did not change it, so the plan's (0.5, −8.3) stands).
