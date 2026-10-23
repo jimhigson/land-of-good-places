@@ -283,7 +283,7 @@ function strapJetpack(handle: AssetHandle, firing: boolean): void {
   if (!Number.isFinite(back)) return;
   const pack = createJetpack(PET_JETPACK_SCALE);
   pack.setThrust(firing ? 1 : 0);
-  pack.root.position.set(0, low + (high - low) * 0.42, back + 0.04);
+  pack.root.position.set(0, low + (high - low) * 0.42, back + 0.04); // flat-ok: a pet's own local bounds on the picture's flat stage
   handle.root.add(pack.root);
 }
 
