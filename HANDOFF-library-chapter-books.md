@@ -301,3 +301,15 @@ list above and carry on from the first unticked box. `.parks/` holds all 16 hone
 - Park-free checks on a9729328, all exit 0: cycle-tdz (5 = baseline), flat-primitives (109 flat-ok, no
   new), chain-coverage (99 leaves reachable), assets, story-props-glb, library-glb, vitest test/library +
   library-card **4 files, 22 tests** (chapter-books 6: case 5 included).
+- On a9729328 (hash eaa23002, honest seed 5 restart 1, digest 9c7a86e2b266ca08 — unchanged by part 4's
+  owl fixes): check:library **256 ✓ 0 ✗** (SHELF WALK 21/21, 10/10, sway 0; NEVER INSIDE HER in), and
+  tap-spacing (62 pairs, 0 not letting go), labels, exits, brevity, hotel, reptile-house, keyring-view,
+  jitter, crowd, served-book-reader (2808 ok, item 11 in), served-walking, served-deep-links,
+  served-menu-reach — **all exit 0**; every served port free after.
+- Part 4 kept moving: merged **7965e947** (69ba3716; the card's sparkles; LibraryOwl + check-library;
+  hash 797d5c0b, seed 5 re-solved: restart 1, same digest) → PR head fast-forwarded 83b72db8..69ba3716,
+  CI 39994583659 started; then part 4 pushed **a79c265f** (the glowing book's beacon, LibraryOwl +
+  check-library) and **4a72c49b** (its handoff: QA round 1's minors done) — merged (e03200d5, clean,
+  PROOF OK, tsc 0, hash **2b2fe559**), PR head fast-forwarded 69ba3716..**e03200d5** (that cancels
+  39994583659 — superseded, not red); **CI 39995947413 + Update adoption 39995947169** on e03200d5.
+  Seed 5 re-solving locally for 2b2fe559; then the targeted checks on e03200d5.
