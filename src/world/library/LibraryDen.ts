@@ -15,7 +15,7 @@ import {
 import { measureTop } from '../measuredTop';
 import { LIBRARY_LINES } from './libraryLines';
 import { LIBRARY_DRAGON_NEST, type LocalPoint } from './layout';
-import { posedFootprint, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
+import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
 
 /**
  * **The baby dragon on its nest of books** (#719, plan Step 13) — Jim, 13
@@ -111,6 +111,8 @@ const DRAGON_BREATH_RATE = 1.7;
 
 /** Its words' bubble hangs this far over the top of its horns. */
 const DRAGON_BUBBLE_OVER = 0.45;
+/** How many head turns across its range its body is measured over: every 0.15 rad of the 1.2 (see the constructor). */
+const POSE_TURN_STEPS = 9;
 
 /** Its Say hi zone's id (`Library.ts` builds the zone) — the item its words' bubble answers. */
 export const DRAGON_ZONE_ID = 'library-dragon';
@@ -184,13 +186,16 @@ export class LibraryDen {
     this.dragonTop = this.nest.padTop + dragonTop.top;
     this.dragonTopHalf = dragonTop.topHalf;
 
-    // The dragon's body covers it in every pose it is drawn in: the head turned
-    // either way and nodding, the tail flicked either way, the breath drawn in.
+    // The dragon's body covers it in every pose it is drawn in: the head
+    // turned anywhere across its range and nodding, the tail anywhere across
+    // its flick, the breath drawn in (its widest). The turn is sampled every
+    // 0.15 rad, not only at its ends: a point to the side of the head's pivot
+    // (a horn) is furthest out part-way round, never at either end.
     const { head, tail, body } = this.dragon;
     const poses: (() => void)[] = [];
-    for (const turn of [-DRAGON_HEAD_TURN_LIMIT, 0, DRAGON_HEAD_TURN_LIMIT]) {
-      for (const nod of [-DRAGON_NOD, DRAGON_NOD]) {
-        for (const flick of [-DRAGON_TAIL_FLICK, DRAGON_TAIL_FLICK]) {
+    for (const turn of sweep(-DRAGON_HEAD_TURN_LIMIT, DRAGON_HEAD_TURN_LIMIT, POSE_TURN_STEPS)) {
+      for (const nod of sweep(-DRAGON_NOD, DRAGON_NOD, 3)) {
+        for (const flick of sweep(-DRAGON_TAIL_FLICK, DRAGON_TAIL_FLICK, 3)) {
           poses.push(() => {
             head.rotation.set(nod, turn, 0);
             tail.rotation.y = this.tailRest + flick;

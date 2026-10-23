@@ -365,6 +365,12 @@ export function posedFootprint(root: Object3D, poses: readonly (() => void)[], a
   };
 }
 
+/** `count` values evenly from `from` to `to`, both ends included — a range of poses to measure a body over ({@link posedFootprint}). */
+export function sweep(from: number, to: number, count: number): number[] {
+  if (count < 2) return [from];
+  return Array.from({ length: count }, (_, i) => from + ((to - from) * i) / (count - 1));
+}
+
 /** XZ distance from `p` to the segment `a`-`b`. */
 export function segmentDistance(a: LocalPoint, b: LocalPoint, p: LocalPoint): number {
   const dx = b.x - a.x;

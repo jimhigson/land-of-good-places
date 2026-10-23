@@ -6,7 +6,7 @@ import { playPurr } from '../../ui/chime';
 import { measureTop } from '../measuredTop';
 import { LIBRARY_LINES } from './libraryLines';
 import { LIBRARY_CAT_PILE } from './layout';
-import { posedFootprint, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
+import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
 
 /**
  * **The library cat, asleep on a pile of books by the desk** (#719, plan
@@ -149,12 +149,13 @@ export class LibraryCat {
       halfLength: (plan.maxX - plan.minX) / 2,
       halfDepth: (plan.maxZ - plan.minZ) / 2,
     };
-    // Her body covers her in every pose she is drawn in: her breath drawn in,
-    // her ears twitched either way, her head down and lifted.
+    // Her body covers her in every pose she is drawn in: her breath drawn in
+    // (its widest), her ears anywhere across their twitch, her head anywhere
+    // from down to lifted, her tail anywhere across its sway.
     const poses: (() => void)[] = [];
-    for (const lift of [0, CAT_HEAD_LIFT]) {
-      for (const twitch of [-CAT_EAR_TWITCH, CAT_EAR_TWITCH]) {
-        for (const sway of [-CAT_TAIL_SWAY, CAT_TAIL_SWAY]) {
+    for (const lift of sweep(0, CAT_HEAD_LIFT, 3)) {
+      for (const twitch of sweep(-CAT_EAR_TWITCH, CAT_EAR_TWITCH, 5)) {
+        for (const sway of sweep(-CAT_TAIL_SWAY, CAT_TAIL_SWAY, 3)) {
           poses.push(() => {
             head.rotation.x = this.rest.head + lift;
             earL.rotation.z = this.rest.earL + twitch;
