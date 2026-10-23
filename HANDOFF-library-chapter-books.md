@@ -137,6 +137,14 @@ books', the kit and the reader's picture code only).
 Also run against that server: `CHECK_BOOK_READER_URL=http://127.0.0.1:6741 pnpm run check:book-reader`
 → exit 0, 2806 ok, "check:book-reader passed".
 
+**The two "What to look at" links, dry-run on a production build** (`vite build --outDir /tmp/lcb-dist`,
+so `dist/` was not touched under the running check chain; `vite preview` pid 28662 on 6749, killed by
+PID; `look/preview.mjs`, which reads only the DOM because a production build has no `window.game`):
+`/book?id=sirHopsalot` (+`&seed=5`, the only seed solved locally) opens *Duck, Sir Hopsalot!* and turns;
+`/library?at=-16.1,5.5&facing=270` stands her at the big readers' shelf with **"Read it!"** up, and the
+chip opens the book — both at 1280x800 and 390x844, HTTP 200, no page error, all 10 frames opened. On
+the PR preview the same script runs without the seed suffix (step 9).
+
 ## Taking over at zero notice
 
 `cd .claude/worktrees/library-chapter-books && pnpm install --frozen-lockfile`. Read the Status
