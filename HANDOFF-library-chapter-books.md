@@ -21,8 +21,13 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
       unchanged 53dde20f…; step-set proof re-run, PROOF OK
 - [x] parks: the honest seed-5 solve of this tree (below); `chapter-books/parks-fresh.sh` says
       FRESH/STALE before every World-building check
-- [ ] 16-seed solve for `test:procgen` running into `.parks/all16/` (gitignored); swap it into
-      `.parks/` before the full `check` / `test:procgen`
+- [x] 16-seed solve for `test:procgen`: `LGP_PARKS_OUT=.parks/all16 LGP_LANES=3 LGP_RESTART_LANES=2
+      pnpm run build:parks` at hash 53dde20f… → **exit 0, 4663 s, "16 park(s) proven"**; restarts
+      `0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:0 10:9 11:4 12:0 13:6 14:8 15:4` — **identical to #733's
+      CI** (run 39953269843, `merge-parks` at source c7182d44): the books change no park's acceptance on
+      any seed. Seed 5's digest 9c7a86e2b266ca08 again (the separate seed-5 solve's: deterministic).
+      Swapped into `.parks/` (the seed-5-only set kept at `.parks/seed5-only/`); parks-fresh: FRESH,
+      16 seeds
 - [x] targeted local checks (table below), all exit 0
 - [x] full `pnpm run check` (seed 5): exit 0, 2708 s
 - [ ] `pnpm run test:procgen` (16 seeds) + `check:coplanar`, `check:walk-reach`, `check:swept-bus`
