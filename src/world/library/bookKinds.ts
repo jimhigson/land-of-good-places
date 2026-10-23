@@ -10,10 +10,12 @@
  *   lines"*): a picture and a paragraph of about thirty words a page, 8–10
  *   pages, on the big readers' shelf.
  *
- * Its own tiny file because `layout.ts` is inside the prebuilt parks' source
- * closure and `books.ts` is not: the layout importing the kind from here keeps
- * every book's words out of the closure, so editing a story never re-solves a
- * park.
+ * Its own tiny file so that `layout.ts` can name a slot's kind without
+ * importing the books. (It was also meant to keep the books' words out of the
+ * prebuilt parks' source closure; that no longer holds — the library's lines
+ * and its shelf books import `books.ts` from inside the closure, through
+ * `parkFacts.ts` → `World.ts` → `Library.ts`, so a story edit moves the park
+ * hash like any other library edit.)
  */
 export const BOOK_KINDS = ['picture', 'chapter'] as const;
 

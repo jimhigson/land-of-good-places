@@ -2,7 +2,9 @@
 
 Branch `feat/library-v2-books`, worktree `.claude/worktrees/library-v2-books`, cut from the
 integration head `feat/library-v2` @ 33bcc361 (engine + the four tracks + the API adaptation).
-Engineer, Claude Fable 5.1, 22–23 Oct 2026. Scratch logs: `.claude/library-build-scratch/books/`.
+Engineer, Claude Fable 5.1, 22–23 Oct 2026; **restarted 23 Oct 04:3x by Claude Opus 5.5** (the
+first agent stopped with the handoff's red transcripts and the index's doc uncommitted — both
+verified against the tree and committed as found). Scratch logs: `.claude/library-build-scratch/books/`.
 Plan: `docs/library-build/PLAN-parts-4-5.md`; the old base's record is `HANDOFF-library-books2.md`
 (items 1–6, merged into the integration at a30e7b96); the kit's record is `HANDOFF-art-story-props.md`.
 
@@ -24,7 +26,14 @@ engineers never build a visible item out of three.js primitives; a sprite or par
       `pnpm run check:story-props-glb`; four scripts added (`check:story-props-glb`, `pack:`, `blend:`,
       `render:story-props`); every other script byte-identical (179 → 183 names).
 - [x] item 7, the picture vocabulary, on the kit (see "What changed" below) — tsc 0, typecheck:test 0
-- [ ] the file layout for the two book engineers, written down (below) and in `chapterBooks/index.ts`
+- [x] the file layout for the two book engineers, written down (below) and in `chapterBooks/index.ts`:
+      the six ids/files/titles/slots table, and two shelf blocks (places 1–3, 4–6) in both the
+      imports and the list, so the two book branches merge without a conflict — proved in a scratch
+      repo (`git -c rerere.enabled=false merge --no-ff` of an a-branch adding three under block 1
+      and a b-branch adding three under block 2: both clean, the list in shelf order)
+- [x] `bookKinds.ts`'s stale claim (books.ts outside the parks' closure) corrected: measured with
+      `parkSourceClosure`, `books.ts`, `chapterBooks/index.ts` and `bookKinds.ts` are all IN
+      (`parkFacts.ts` → `World.ts` → `Library.ts` → `libraryLines.ts` → `books.ts` → the index)
 - [ ] runs: check:brevity, check:library (hydrated park), check:served-book-reader, vitests,
       check:story-props-glb, check:assets, build — exit codes read
 - [ ] items 1–6 re-verified on the engine with their reds re-proved
@@ -108,7 +117,13 @@ src/world/library/chapterBooks/
   as the picture books use them; `grab` (mini), `keyring: false` (kid), `jetpack: 'on' | 'off'`
   (kid or pet), `nibbled: true` (flower), `lit: true` (storyWheel). Decor: the existing eleven plus
   `confetti` and `rain`.
-- Every book joins by one `import` and one entry in `index.ts`'s list, in shelf order. The World
+- Every book joins by one `import` and one entry in `index.ts`'s list, in shelf order, each under
+  its own block's comment line: places 1–3 (book engineer a: sirHopsalot, detectiveBiscuit,
+  loudestShush) under `// Shelf places 1–3 …`, places 4–6 (book engineer b: giantFootprints,
+  biscuitStorm, catchThatChicken) under `// Shelf places 4–6 …` — in the imports AND in the list.
+  Two branches that do this merge cleanly (proved, see Status).
+- Every chapter-book file is inside the parks' source closure: every edit moves the park hash, so
+  restamp `.parks/manifest.json` (see "Parks, locally") before any World-building check. The World
   throws at load for a book in the wrong list or a shared id, and `shelfBooks.ts` throws for a
   picture book on a chapter slot. While fewer than six are in, the last slots WAIT (check:library
   says so on stderr); when all six are in, make READABLE's `CHAPTER_BOOKS.length <= chapterSlots`
@@ -147,7 +162,73 @@ src/world/library/chapterBooks/
 
 ## Red transcripts (with the geometry or input each was proved against)
 
-(filled in as each is run — see the structured output and the sections below)
+Every mutation below was made in this worktree at 8796bff0 and reverted with `git checkout`;
+the tree was clean (`git status --short` empty) and `.parks/manifest.json` back on the tree's hash
+after each. **A mutation of a closure file (books.ts, readBooks.ts, furnish.ts, …) moves the park
+hash, and check:brevity builds the library to walk its words, so it needs the manifest restamped
+to the MUTATED tree before the red run and back after** — the first attempt, without the restamp,
+started a 12-minute acceptance solve instead of a 60-second check (killed by PID). The same bit
+check:library and the dev server when my own commit moved the hash after the first restamp:
+restamp after EVERY src edit, mutation or not.
+
+**Items 1–6 on the engine (books2's reds, re-proved here):**
+
+- **check:brevity, the carve-out does not leak** (real data: `books.ts` ripikaBalloon page 1
+  `'RiPika has a spotty balloon.'` → `'RiPika has a balloon. It is spotty.'`, manifest restamped to
+  the mutated tree 89be7eee…) → exit 1:
+  ```
+  check:brevity CONTROL ok   a picture-book page with two sentences goes red (the carve-out does not leak) — 2 sentences; a line is one
+  check:brevity CONTROL ok   a picture-book page of a chapter page's thirty words goes red — 150 characters, 100 over the line limit of 50; 2 sentences; a line is one
+  bookPage:ripikaBalloon#1                line    35   2  SENTENCES
+  BREVITY RULE (GAME_DESIGN.md): 1 problem across 354 pieces of copy.
+      2 sentences; a line is one
+  ```
+  Reverted → exit 0, `BREVITY RULE: 354 pieces of copy are short enough; 6 still carry a recorded exception`.
+- **vitest, Big reader has one owner** (`readBooks.ts` `bigReaderEarned`: `chapterBooks.every(` →
+  `chapterBooks.some(`; `pnpm exec vitest run test/library/big-reader.test.ts
+  test/library/chapter-books.test.ts`) → exit 1, **`Tests 2 failed | 10 passed (12)`**:
+  `× is not discovered until the last chapter book is read, in any order` — `Big reader with a
+  chapter book still unread: expected true to be false`; `× is never earned by picture books,
+  however many` — `Big reader for picture books: expected true to be false`. Reverted → 12 passed.
+- **vitest, the story-time predicate** (`books.ts` `storyTimeMayRead` → `return true;`;
+  `test/library/chapter-books.test.ts`) → exit 1, **`Tests 1 failed | 3 passed (4)`**: `× lets
+  story time read picture books, and never a chapter book` — `story time would read a chapter page
+  aloud: expected true to be false` (the fixture is PICTURE_BOOKS[0] re-tagged `chapter`).
+  Reverted → 4 passed; the three library vitest files together `16 passed (16)`.
+- **check:library, the big readers' shelf is measured** (`LIBRARY_CHECK_REMOVE='bookcase west-4'`,
+  seed 5 restart 1 hydrated under hash f1ac5997…, the reading room at (−600, −600); west-4 is the
+  wall case at x −17.7..−17.1, z 2..6, top 3.20) → exit 1, **99 ✓ 7 ✗**: `✗ bookcase west-4: a
+  body's edge got 0.600 m into it (allowance 0.071)`, `✗ 43 drawn boxes, 560 marches; deepest a
+  body's edge got into one: 0.600 m (bookcase west-4), allowance 0.071`, `✗ bookcase west-4 at
+  (-17.69, 5.96): landed at 0.000, its top is 3.200` (×4 landings), `✗ 50 tops, 7526 landings
+  across their drawn footprints: 169 fell through`. Unmutated → exit 0, 101 ✓ 0 ✗.
+- **check:book-reader item 9, the over-long page** (`CHECK_BOOK_READER_CHAPTER=overlong`, the
+  fixture's 152-word page 9 at the laptop 1280×800 and the phone 375×667, Baloo 2 bold 0.488 em a
+  character, seed 5; its own dev server on port 6434) → exit 1, **1067 ok, 6 FAIL**: `FAIL laptop
+  checkChapterFixture only a phone held on its side may be asked to turn — here every page must
+  fit`, `FAIL laptop checkChapterFixture face 10 (story page 9) the words stay inside their box —
+  block [48,263–711,1184] in box [48,263–720,972], 24 line(s) of 38.4 px`, `… no ink in the margins
+  — 1757 ink pixel(s), the first at (51, 976) below the words`, and the phone-portrait three (37
+  line(s) of 57.6 px, 5249 ink pixel(s)) — the figures books2 recorded, unchanged on the engine.
+
+**Item 7's own (this branch):**
+
+- **check:book-reader 9b, every model is drawn** (`scripts/check-book-reader.mts`: the line
+  `{ model: 'parkBench', at: [-1.3, 0, -0.9], turn: 15 }` removed from the model sheet's Detective
+  page; its own dev server on port 6435) → exit 1, **1053 ok, 1 FAIL**: `FAIL every picture model
+  is drawn on a page this check opens — never drawn: parkBench`. Reverted (`git checkout`).
+- **`assertDrawsSomething`, a model that draws nothing**: see the next entry (run after shard-1).
+
+**Found red, not planted — check:shard-1 at cece064a** (`check:flat-primitives`, `scripts/
+check-flat-primitives.mts`, baseline 310 expressions, 102 flat-ok sites): exit 1, **5 new flat
+primitive(s)** — `src/entities/Player.ts:1845 [Y_DIFFERENCE] p.y - this.hoverAt.y` (the engine's
+hover rescue, 97444d7f; `origin/feat/engine-solids` @ 7ce1deae carries the same line against the
+same baseline, so the engine head is red on shard-1 too — nobody had run it since), `src/world/
+library/reader/pagePictures.ts:320 [Y_DIFFERENCE] high - low` (books2's `strapJetpack`, merged
+into the integration unrun), and my `pagePictures.ts:577` `box.max.y - box.min.y` / `box.max.y` /
+`box.min.y` (the star fitted to the wheel's bracket). Each is a difference in one body's own local
+frame (the hover: the same body a moment later, plan drift tested first) and carries a
+`// flat-ok: <reason>` now (8796bff0) → exit 0, `107 site(s) carry an explicit // flat-ok: reason`.
 
 ## For the join (feat/library-v2)
 
