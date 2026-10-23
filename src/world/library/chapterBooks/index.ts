@@ -4,6 +4,9 @@ import { sirHopsalot } from './sirHopsalot';
 import { detectiveBiscuit } from './detectiveBiscuit';
 import { loudestShush } from './loudestShush';
 // Shelf places 4–6: one import a book, in shelf order, below this line.
+import { giantFootprints } from './giantFootprints';
+import { biscuitStorm } from './biscuitStorm';
+import { catchThatChicken } from './catchThatChicken';
 
 /**
  * **The chapter books, in shelf order** — the big readers' shelf (track D of
@@ -91,4 +94,7 @@ export const CHAPTER_BOOKS: readonly LibraryBook[] = [
   detectiveBiscuit,
   loudestShush,
   // Shelf places 4–6, in shelf order, below this line.
+  giantFootprints,
+  biscuitStorm,
+  catchThatChicken,
 ];
