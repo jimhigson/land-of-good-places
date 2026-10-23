@@ -22,7 +22,7 @@ import { applyRidePose, type RidePosture } from './ridePose';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
-import { terrainHeight } from '../world/terrain';
+import { altitudeAt, terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
 import { STEP_DOWN_ASKED, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, nearestFit, riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep, wedgeDepth } from '../world/standing';
 import { faceOnGround } from '../world/up';
@@ -1068,6 +1068,23 @@ export class Player implements GameSystem {
   }
 
   /**
+   * **Standing still, on her own feet**: nothing asks her to move — no stick,
+   * no tap route, no script walking her — and she has come to rest. Not
+   * riding (a ride is placing her) and not in the air.
+   *
+   * Asked by the crowd (`NpcSystem.separateFromPlayer`): a child walking past
+   * a child who is standing still goes round her, and does not shove her.
+   * Waiting on a platform for the train, children walking up to their own
+   * waiting spots used to push her, a centimetre a frame, a metre across the
+   * platform into the train's way — and the train, which stops for anybody in
+   * its way, stood short of the station for her (22 Oct 2026, check:solids).
+   * One owner, so "standing still" means one thing wherever it is asked.
+   */
+  get isStandingStill(): boolean {
+    return !this.ridingFlag && !this.airborne && this.scriptedWalkSpeed === 0 && this.desiredVelocity.lengthSq() === 0 && this.velocity.lengthSq() < 1e-6;
+  }
+
+  /**
    * True where she may actually take off: a jet pack is on her back **and**
    * there is room here to use it.
    *
@@ -1825,7 +1842,9 @@ export class Player implements GameSystem {
     if (this.airborne && !this.flying) {
       this.landedFor = 0;
       const p = this.position;
-      if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(p.y - this.hoverAt.y) > HOVER_SPAN) {
+      // Her height is her altitude over the ground in her own column, never a
+      // world-y difference between two columns (mostly planet, not height).
+      if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(altitudeAt(p.x, p.y, p.z) - altitudeAt(this.hoverAt.x, this.hoverAt.y, this.hoverAt.z)) > HOVER_SPAN) {
         this.hoverAt.copy(p);
         this.hoverFor = dt;
       } else {

@@ -500,7 +500,207 @@ height without Jim's approval — ask the coordinator (where/why/what it blocks)
   (commit 9b3a0b2f). PR body updated (/tmp/es-pr-body4.md); comment issuecomment-6265606013.
 - Sixteen parks at 8adc1ea3: 12 green; red 6 (awning), 9 (walk-off squeeze), 11 (awning + walk-off squeeze), 15 (bench).
 
-## PAUSED 19 Oct 2026 (Jim: token usage at 92%) — resume here
+## Round four, restart (23 Oct 2026 from 04:40 BST, Opus 5.5) — resume here
+**STATE at 08:15 BST**: PR head `feat/engine-solids-pr` = **fccadf8b**; CI run **39911387184: success** (Checks + Procgen
+invariants green, every seed builds, entrance road, coplanar, swept bus, walk reach, PR preview; park jobs skipped on a
+cache hit from run 39905508749, restarts 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:0 10:9 11:4 12:0 13:6 14:8 15:4 at source
+7acd3093); Update adoption 39911387195 success. Preview https://pr-722-fccadf8-land-of-good-places.blockstack.workers.dev
+PR body rewritten for round four (decisions 1–7 as questions for Jim, invisible blockers, proofs, the 16-park table);
+comment issuecomment-6359285799 (plays + frames, qa-screenshots a54af1ce `pr722-r4/`). The work branch is ahead of the PR
+head by handoff commits only. NEXT: one combined review + QA pass on fccadf8b, then Jim's yes and the merge.
+**Plays on that preview** (`/tmp/es-qa/plays9.mjs`, frames `/tmp/es-qa/r9/`, every frame opened): 1 fence hop, the train
+stood short of her and her pet 10 s → 120 s, hopped off, it went on; 2 the tunnel walked through (−19.6,54.3 → −19.8,40.4);
+3 `?pets=3`: Get on at Sunny Side, a 72 s lap, Get off at Sunny Side, off at the stand (first person cannot show her
+backpack; the counts are clause 8's / check:exits'); 4a on the line ahead of Bluebell Halt, it stood short, she walked
+2.0 m into its nose and stopped, 0.0 m more pushing; 4b stood on carriage 2 at Bluebell Halt 15 s, the train waited;
+back on the platform, **her pet had followed her onto the carriage and stayed in it, and the train waited for it** (by the
+rule; decision 6 asks Jim). A replay of 3 (`/tmp/es-qa/r9b`) stuck her at a canopy post off the platform's corner
+(−19.0, 13.7): "Get on" showed there but did nothing — main's requestBoard asks she stands on the platform; play-script
+walking, not a regression.
+The Fable agent below died after its gate run at bf7b1c8b (04:32) without recording it; its orphaned servers (vite preview
+5737, dev 5738, both PPID 1, in this worktree) were killed by PID at 04:43.
+- Verified at bf7b1c8b: all nine check shards exit 0 (`/tmp/es-sh-r5-*.log`, snapshot worktree; clauses 8 and 13 all ✓,
+  check:exits companions on 13 holders, check:pet-slide one companion); test:procgen exit 0 (46 files, 2154 passed, 0 skipped,
+  250 s); build exit 0. origin/main has not moved (d7fde7bd = merge base).
+- PR head moved 8e8d318a..bf7b1c8b (fast-forward) at 04:53 BST. CI run 39897430858: **success** (88 jobs success, 1
+  skipped: Deploy); Update adoption 39897430909: success. Parks at source 581ed3c1: restarts 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5
+  8:1 9:0 10:9 11:4 12:0 13:6 14:8 15:4 — round three's, unchanged. Preview https://pr-722-bf7b1c8-land-of-good-places.blockstack.workers.dev
+- Played on that preview (`/tmp/es-qa/plays7.mjs`, frames `/tmp/es-qa/r7a/`): the fence hop and the train standing short
+  of her and her pet, then going on once she hopped off; the tunnel walked through (-15.0,53.8 → -19.9,40.7); the ride's
+  "Get off" click landed on a chip fading out as the train came in, so she rode on (a play-script bug: plays8.mjs waits
+  for a drawn chip and a train standing a second); the jump meant to land on carriage 1 at Sunny Side carried her over
+  it to the far side (plays8.mjs walks into carriage 3 instead: its rim is 0.45 m over the platform, a step).
+- **906510e8 (code) gate, local**: nine shards exit 0 (`/tmp/es-sh-r7-*.log`, snapshot), test:procgen exit 0 (46 files,
+  2154 tests, 274 s), build exit 0; clauses 8/12/13 on all 16 parks: 15 green, seed 6 one line (`/tmp/es-seeds13`);
+  the 11 train proofs red at 906510e8 (`/tmp/es-proofs12`, riders-sit-on-her on seed 2).
+- **PR head moved bf7b1c8b..1655d287 at 06:23 BST**; CI run 39905508749 (+ Update adoption 39905508638). ParkTrain.ts is
+  in the parks' source closure, so CI re-solves all 16.
+- Plays: `/tmp/es-qa/plays9.mjs` (lib `/tmp/es-qa/lib.mjs`, coordinates from `es-r7-geom.mts`, untracked scratch):
+  1 fence+train (west stretch), 2 tunnel, 3 ride with `?pets=3` (frames in the open off Sunny Side's canopy; "Get off"
+  only once a drawn chip and a train standing a second), 4a walk into the nose at Bluebell Halt (on the line 3.5 m
+  ahead of where it stops), 4b stand on carriage 2 at Bluebell Halt (the platform is level with the rims there).
+  Calibrated on bf7b1c8's preview: 3 rode a lap and got off; 4b stood on carriage 2, the train waited 10 s.
+- Full census on all 16 parks at 906510e8 (`/tmp/es-census13/<seed>.log`): green 0 1 3 5 7 8 10 12 13 14; red 2 and 4
+  (one run-and-jump wedge each) and 11 (three new + the known walk-off), all between the fence and the train's carriages
+  standing where the park was built — none there at 8e8d318a (seed 11 at 8e8d318a: only the known walk-off). Fix
+  b78789c6: the static clauses ask the park without the train (its bodies stood out of the park until clause 8's first
+  frame; ParkTrain.moveBodies puts them back every frame). After it: seeds 2, 4, 5 green, 11 back to the known walk-off,
+  core OK. Known, unchanged: 9 and 11 walk-off squeezes, 15 bench lean, 6 carriage rim (decision 7).
+- Full census on all 16 at b78789c6 (`/tmp/es-census15/<seed>.log`, `--part=park`, census on): 12 green; red 6 (the carriage
+  rim, decision 7), 9 and 11 (the walk-off squeezes since round three), 15 (the bench lean since round one).
+  Census proofs re-run red at b78789c6 (`/tmp/es-proofs13`): no-crack-rules 25 wedged, sealed-line 59 points with no way
+  off, stranded, low-roof; train-ignores-on-top and riders-sit-on-her (seed 2) too.
+
+| seed | tops | regions | the line: points (walk / hop / tunnel / search) | wall faces | tunnels | stops short on the loop (m) | result |
+|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 753 | 150 | 85 (24 / 59 / 2 / 0) | 161 | 1 | 1.44 | green |
+| 1 | 798 | 158 | 73 (25 / 46 / 2 / 0) | 270 | 1 | 1.47 | green |
+| 2 | 822 | 176 | 77 (23 / 52 / 2 / 0) | 257 | 1 | 1.42 | green |
+| 3 | 721 | 146 | 102 (25 / 75 / 2 / 0) | 157 | 1 | 1.58 | green |
+| 4 | 751 | 119 | 83 (26 / 55 / 2 / 0) | 122 | 1 | 1.44 | green |
+| 5 | 722 | 156 | 89 (25 / 62 / 2 / 0) | 181 | 1 | 1.54 | green |
+| 6 | 785 | 165 | 102 (26 / 74 / 2 / 0) | 180 | 1 | 1.51 | red: the carriage rim at the step's limit (decision 7) |
+| 7 | 721 | 156 | 85 (23 / 60 / 2 / 0) | 142 | 1 | 1.38 | green |
+| 8 | 816 | 157 | 93 (24 / 67 / 2 / 0) | 152 | 1 | 1.40 | green |
+| 9 | 797 | 154 | 87 (24 / 61 / 2 / 0) | 213 | 1 | 1.47 | red: 1 walk-off squeeze (since round three) |
+| 10 | 715 | 161 | 110 (25 / 83 / 2 / 0) | 177 | 1 | 1.67 | green |
+| 11 | 784 | 142 | 69 (26 / 40 / 3 / 0) | 291 | 1 | 1.42 | red: 1 walk-off squeeze (since round three) |
+| 12 | 798 | 170 | 103 (25 / 76 / 2 / 0) | 271 | 1 | 1.63 | green |
+| 13 | 856 | 178 | 88 (22 / 64 / 2 / 0) | 212 | 1 | 1.64 | green |
+| 14 | 766 | 157 | 93 (22 / 69 / 2 / 0) | 197 | 1 | 1.45 | green |
+| 15 | 798 | 169 | 108 (27 / 79 / 2 / 0) | 169 | 1 | 1.62 | red: the far station bench, 0.20 m (since round one) | Plan: when run
+  39905508749's "Parks / Parks" finishes, move the PR head to b78789c6+ (check-only: same park source hash 7acd3093…,
+  so the new run takes the parks from that one), then play plays9.mjs on its preview.
+- **The previous CI run, 39249030666 on 8e8d318a, FAILED and nobody recorded it**: 14 of 16 seeds solved no park ("no block
+  accepted a restart (restarts 0..63 all rejected)"; only 5 and 15 built), so Procgen invariants and Checks failed for want
+  of parks. Cause, from the block logs: seed 0 restart 3 (main's) "rejected by check:park rail.walkable" — the tunnel commit's
+  bug that 5dffa34e fixed (a route ending on a deck over the tunnel mouth read as the track reached). Watch run 39897430858's
+  park blocks: each restart prints "rejected by <check>".
+- **Every proof red at bf7b1c8b** — 38 runs, `/tmp/es-proofs11/run` = `one.sh` + `jobs.txt` (7 at a time, 976 s), in the
+  detached worktree `.claude/worktrees/engine-solids-proofs` (bf7b1c8b, `.parks` copied + restamped). All exit 1, each on its
+  own clause (lines below). The pet-slide reds are a scratch wrapper there, `scripts/es-proof-petslide.mts` (never committed),
+  that breaks `Parade.embark`/`disembark` as check:exits' proofs do, then imports check-pet-slide.
+- Seed 6 (seen in the feet-judged proof run, census on): clause 8 "✗ once her line has followed her off it, the train goes on
+  past where they stood — it never did in 40 s" and clause 13 "✗ walking into it standing at Sunny Side … at the carriage
+  197.5 m round: 0.03 m inside it". Not from the mutation (it touches only the census sim). CI's chain runs seed 5 only.
+- **Clauses 8 and 13 on all 16 parks** (census skipped, `/tmp/es-seeds11/<seed>.log` at bf7b1c8b): red on 10 (0 1 3 4 6
+  7 8 10 13 14). Diagnosed one by one (failure messages now carry who holds the train, where she walked, her put-down):
+  one game defect — a boarding child took the seat in the carriage she stood on and, as furniture to her, shouldered
+  her off the far side (seed 2, once the others were fixed) → `ParkTrain.upOn` in `claimSeat`, proof `riders-sit-on-her`
+  (seed 2); the rest the clauses' own choreography (her hop-out blocked a metre past the fence; a slantwise walk off a
+  carriage's end; the holder 3 m ahead letting the train creep into her; wedges measured from the walk sampler while
+  she stood on a carriage's top; her line left at her trail's point beside a carriage). Commit 906510e8. After it:
+  15 of 16 clean (`/tmp/es-seeds12`, census skipped); **seed 6 still red** — see the next item.
+- **Seed 6, Sunny Side, the carriage 197.5 m round (KNOWN GAP, not fixed)**: the carriage's rim stands 0.576–0.595 m over
+  the platform there (its tilt on the planet), straddling the step's limit (0.62 − 0.03 = 0.59). Walking into its side she
+  starts up onto it (0.13 m in, frames 15–19, at 0.576), then is set back 0.23 m in one frame and stands pressed at 0.594
+  (not a step). The clause sees 0.031 m inside it on the frame at 0.5906. Platform 0.34 m and rim CAR_FLOOR_Y + 0.48 =
+  1.06 m put every carriage within a centimetre or two of the limit on every park; only the lean decides. A visible
+  change to either height is Jim's call — question for Jim in the PR body.
+- The 38 reds at bf7b1c8b (geometry: seed 5's park, source hash 581ed3c1…, CI's parks restamped; feet-judged on seed 6;
+  round-four train proofs with SOLIDS_SKIP_CENSUS=1, the rest with the census; core = the buildings):
+  - `solids-train-ignores-her`: ✗ at every station (2 of 2): on the line 2.2 m past its nose as it waits, the train stays at least her own width (1.24 m) short of her and stands the 14 s — Sunny Side: it stays 1.08 m short of her and stands 12.8 s of 14; Bluebel
+  - `solids-train-ignores-pets`: ✗ her line on the line: 2 of her companions left on the track behind her as she hopped the fence, the train comes up and stops -39.23 m short of the nearest (1.24 asked), standing 4.0 s
+  - `solids-train-ignores-npcs`: ✗ a child of the crowd: 20 m ahead of it, through World's own wiring, the train stops -23.07 m short of them (1.24 asked), standing 8.0 s
+  - `solids-platform-holds-train`: ✗ at every station: up on the platform where its chip stands her, with her line about her, it leaves — Sunny Side: with her on its platform at (-20.7, 14.2) it never left in 20 s (3 of her line on the line); Bluebell Halt: it never came to stand there (its nos
+  - `solids-pets-count-aboard`: ✗ the ride, with her 3 pets out: aboard, 1 beside her and 2 in her backpack; it left in never, went 0 of its 212 m lap and never offered "Get off"; she could NOT get off, 1 of 3 back out (1 on the line or in something), and it wen
+  - `solids-pets-stay-out`: ✗ the ride, with her 3 pets out: aboard, 0 beside her and 0 in her backpack; it left in never, went 0 of its 212 m lap and never offered "Get off"; she could NOT get off, 3 of 3 back out (3 on the line or in something), and it wen
+  - `solids-ghost-train`: ✗ walking into it standing at Sunny Side, from the platform at 3 carriage(s): she bumps its side, or steps up onto it where the platform is a step below its rim — never inside it, never through it — at the carriage 34.6 m round: t
+  - `solids-frozen-train`: ✗ walking into it standing at Sunny Side, from the platform at 3 carriage(s): she bumps its side, or steps up onto it where the platform is a step below its rim — never inside it, never through it — at the carriage 34.6 m round: t
+  - `solids-train-ignores-on-top`: ✗ standing on it: put on carriage 2 at Bluebell Halt (at Sunny Side, nowhere beside the platform with room for her and no child of the crowd in it) (on its top, -15.93), it moved 1.31 m in 30 s; she stepped off onto the platform, 
+  - `solids-put-down-ignores-train`: ✗ put down beside it: 9 exits asked inside it, in the slot beyond it and between its cars at Bluebell Halt — none puts her inside it or wedged, as put down or a second later — in the slot beyond the carriage 106.9 m round: put dow
+  - `exits-pets-stay-out`: ✗ her companions on the Rail Race: 3 of her 3 out, 0 in a seat beside her — wanted one out, in its seat beside her, the rest in her backpack
+  - `exits-pets-stay-in`: ✗ the cat bus, ridden to the gate (10 s): only 0 of the 3 of her line out before the ride came back out of her backpack
+  - `exits-pets-count-aboard`: ✗ the train: with her aboard and her line out, it never left the platform (15 s allowed)
+  - `petslide-pets-stay-out`: - line: 3 of her 3 companions were out on ridden frame 121, against 1 — the front of her line rides, the rest in her backpack
+  - `petslide-pets-stay-in`: - regroup: 1 of her 3 companions were out 3 s after the ride — the rest never came back out of her backpack
+  - `solids-infinite`: ✗ 3716 solids, 3715 with a real top, 1 without one: proof: a pillar with no top [relative top] ×1
+  - `solids-too-tall`: ✗ a castle bench (top 0.44 m): no run at it from any side came down on it
+  - `solids-trap`: ✗ the castle's mall: every one of 3 region(s) she can drop into, she can get out of again — trapped: a hop over crate from (585.4, 612.1) → /castle?deck=0&at=-16.9,9.7&seed=5
+  - `solids-ghost`: ✗ 408 marches at 16 new kinds of solid: 15 got a body into one below its top:
+  - `solids-no-bounds`: ✗ 256 bodies pushed 12 m outward at 64 bearings, from the grass to 10 m up: 206 got past the edge — 0° at 0 m up: -1.89 m from the edge; 0° at 1.5 m up: -6.70 m from the edge; 0° at 4 m up: -9.37 m from the edge; 0° at 10 m up: -9
+  - `solids-new-roof`: ✗ 14 kinds named like a roof in the built park and its buildings: 6 roofs the census asserts, 4 open-air canopies (ordinary tops), 3 not roofs, with their reasons — and 1 neither: proof: a garage roof
+  - `solids-narrow-wedges`: ✗ the library: no jump or walk-off of 687 leaves her wedged — 2: a run-and-jump from (-586.08, 0.00, -605.77) at (-586.08, -609.16), jumping 2.22 m out, came down at /library?at=13.6,-9.3&seed=5; a run-and-jump from (-596.68, 0.36
+  - `solids-single-step`: ✗ 532 pushes into the tops she steps up onto, 8 bearings each: 165 stood her on the top, 316 walked her across it or held her at its face, 51 shuttled her — fireside bench in the castle's great hall from (890.1, 589.0): 8 swings i
+  - `solids-drawn-feet`: ✗ 532 pushes into the tops she steps up onto, 8 bearings each: 168 stood her on the top, 298 walked her across it or held her at its face, 66 shuttled her — roof trough in the castle's roof garden from (1185.2, 588.2): 8 swings in
+  - `solids-sealed-line`: ✗ the line: from every one of 89 points along it, 2.4 m apart on the track bed, she gets off it again (17 walking, 1 with a hop over its fence, 11 walking along it — through a tunnel — and hopping off, 60 by her own search) — 59 w
+  - `solids-parapets-to-ground`: ✗ 1 tunnel(s) under 1 bridge(s), walked both ways along the line's middle: 2 stopped, wedged or through the soffit — the tunnel at 209.5–2.2 m round the loop, walked with the train from /spawn?pos=-18.0,53.8&seed=5: stopped after 
+  - `solids-drawn-step`: ✗ 181 faces of 66 hoppable walls, both sides, every metre (67 a step high, 114 a hop), each walked into at a walk and a sprint on 6 frame clocks: 2 stopped her dead — stone garden wall at (-50.0, 61.6), 0.49 m over where she meets
+  - `solids-feet-judged`: ✗ of those a step high, 2 hopped her over instead of stepping up — stone garden wall at (21.9, 0.5), 0.59 m over where she meets it, from /spawn?pos=21.9,-1.7&seed=6 (60 fps); stone garden wall at (22.9, 0.5), 0.58 m over where sh
+  - `solids-no-crack-rules`: ✗ the park: no jump or walk-off of 36783 leaves her wedged — 25: walking off stone garden wall at (-36.15, -11.00), came down at /spawn?pos=-35.6,-3.31,-11.6&facing=72&seed=5; a run-and-jump from (-35.90, -2.89, -10.47) at (-39.90
+  - `solids-tall-top`: ✗ 345 landings on solids measured against the drawn scene: 1 more than 0.15 m off the drawn top, by kind:
+  - `solids-low-roof`: ✗ the park: no roof reached — 1: the castle's roof, e.g. /spawn?pos=1.9,-6.04,52.1&facing=-178&seed=5
+  - `solids-low-exhibit`: ✗ the park: no enclosure reached — 1: proof's enclosure, e.g. /spawn?pos=1.9,-6.04,52.1&facing=-178&seed=5
+  - `solids-stranded`: ✗ the park: every one of 159 region(s) she can drop into, she can get out of again — trapped: a hop over proof: the ring round the pit from the top of bridge parapet → /spawn?pos=-1.5,-3.50,43.3&facing=178&seed=5
+  - `solids-no-headroom`: ✗ 722 reached tops: 1 with something over them lower than her head — e.g. dodgems tree at (-50.8, 36.5)
+  - `solids-reptile-roof`: ✗ the park: no roof reached — 1: the reptile house's roof, e.g. /spawn?pos=1.9,-6.04,52.1&facing=-178&seed=5
+  - `solids-every-roof`: ✗ the park: no roof reached — 6: the castle's roof, the library's roof, the reptile house's roof, the roof garden pavilion's roof, a roof garden turret's top, a hotel bathroom nook's roof, e.g. /spawn?pos=3.5,-5.96,51.6&facing=-17
+  - `solids-blind-hop`: ✗ 68 walks along 338 wall tops and rims she reaches, end to end at a walk: 33 hopped her off — along wooden garden wall in the park from (-23.9, -36.2): hopped off at (-23.9, -36.2); along stone garden wall in the park from (-51.9
+  - `solids-spawn-highest`: ✗ 3163 spawn points over 7 kinds of roof (reptile house roof, library roof, stall parasol, castle roof deck, stall awning, station canopy, bus shelter canopy): 3163 stood her on one — reptile house roof at /spawn?pos=46.1,-2.7&see
+
+## Round four finished (22–23 Oct 2026, Fable 5.1)
+State: work branch feat/engine-solids at bf7b1c8b (see the restart section above for the PR head, CI and preview).
+Local parks: `.parks` hydrated with CI's seed 0–15 parks, restamped to the tree's hash by `/tmp/es-restamp-current.sh <worktree>`
+(a stale manifest makes every harness hang at 0% CPU — restamp after ANY src edit). Gate runner: `/tmp/es-shards5.sh <tag> 1..9`
+runs the nine shards in parallel in the detached snapshot worktree `.claude/worktrees/engine-solids-snap` (never edited; checkout
+--detach the commit, copy .parks, restamp). Proof batch: `/tmp/es-proofs10/run.sh solids|exits` (logs alongside, head.txt).
+Done this round (each its own commit, pushed):
+- 5edb5b81 the census (lib/solidReach.mts) leaves the train's 15 moving bodies out (neither aimed at nor hopped over);
+  clauses 5, 9, 10 and the jet-pack report too; the stderr note names every clause they are out of. Clause 8 asks EVERY
+  station: on the line 2.2 m past the nose it stays; then up on the platform at the chip's spot it leaves within 20 s. Proof
+  `platform-holds-train` (her platform counted as the line). The "her line on the line" case hops out square across the line
+  (the old "away from the middle" was the position vector, which on a radial stretch walked her along the track). Clause 13
+  lets go of its holder NPC when it finds nowhere to stand on the train (its own bookkeeping had failed the later cases).
+- 8a48066b DECISION (Jim away; question for him in the PR body): a player standing still is furniture to the crowd —
+  `Player.isStandingStill` (one owner), `NpcSystem.separateFromPlayer`: the child takes the whole correction. Reason: at a
+  platform the crowd walking to its waiting spots (1.28 m from the stand spot, inside the 1.52 m separation) pushed her a
+  metre across the platform in 10 s to within 1.18 m of the line; the train, which stops for anybody in its way, stood
+  1.5 m short of the station for her, then she was pushed off the platform's edge onto the track. Found by clause 13
+  "put down beside it" — green on one run, red on the next (phase of the lap), so flaky = failing, fixed at the root.
+- 7ce1deae clause 13 asks the put-down spot AS CHOSEN (the rule's own answer must be clear of the train), not a second later
+  when the resolver/wedge rescue may have mended it — proof `put-down-ignores-train` was red at Bluebell Halt and green at
+  Sunny Side before. `scripts/trace-npc-driver.mts` (check:crowd, shard 1): its stub `TrainStop`s had no waitX/waitZ since
+  3443b9e8 → every walk aimed at NaN → "NOT EXERCISED: trips" (CI shard 1 would have been RED). Fixed; trips=76.
+- (this commit) `Player.ts` hover rescue: `p.y - this.hoverAt.y` was a new flat primitive (check:flat-primitives RED in
+  shard 1, from 97444d7f) → `altitudeAt` difference. check:jitter RED (shard 3, pre-existing since 3443b9e8/4715101a): a
+  waiting child (Theo, Sunny Side) was shoved off the platform onto the track by children walking to the SAME waiting spot
+  (PLATFORM_ARRIVE 0.6 → two cannot both arrive; the first there got half the overlap a frame: 2.6 → 1.17 m from the line
+  in 1 s, off the edge at f1910), then after 3 s `offTheLine` set him down 2.74 m away in one frame — an "own step" of
+  2.743 (bound 1). Fixes: (a) each platform has TWO places to wait (`TrainStop.waits`, a child's width apart on the open
+  end, far one first; `Station.WAIT_ALONGS` 2.7 and 0.9 — the nearer is 1.0 m from the chip's stand spot, so a child
+  walking up to it while the player stands there is held 1.52 m from her, 0.5 m short of the spot, inside the 0.6 m
+  arrival radius: she waits there instead of walking into the player's back for a minute), one child to a place
+  (`TrainService.claimWait/releaseWait`; the trip claims at commitment, releases on boarding/abandon; full → no trip
+  this time); (b) a waiting child holds her
+  ground (`GroundHolder.holdsGround` on the driver, `NpcCharacter.holdsGround`; furniture in `separateFrom` and to the
+  walking player); (c) the set-down is a declared write `NpcCharacter.setDown` (via stepThroughDoor), hooked by
+  check:jitter like stepThroughDoor. check:labels RED (shard 4) after 8a48066b: a crowd path change surfaced a label
+  flicker — Jasper's name pill came up 3 px below Wren's (older incumbent), drifted into it at 1 px/frame, went down 11
+  frames later (D). Fix in `LabelManager`: `LABEL_ENTRY_CUSHION_PX` 24 — a label comes up only with that much room beyond
+  the margin, stays up to the margin (rule 3's hysteresis on the way up); check:labels' C clause asks the same room for a
+  label that was down. Sanity: with the standing-still rule disabled check:labels was green, so the flicker is path-
+  sensitive, not a manager regression — the cushion fixes the class.
+Local gate at 7ce1deae (snapshot, /tmp/es-sh-r4-*.log): shards 2,5,6,7,8,9 exit 0; 1 (flat-primitives), 3 (jitter), 4
+(labels) red as above → fixed in the next commit; re-run recorded below. test:procgen exit 0 (46 files, 2154 tests); build
+exit 0; tsc exit 0; check:exits/pet-slide/solids core+park (census) exit 0 at 8a48066b.
+Red proofs at 8a48066b (/tmp/es-proofs10, SOLIDS_SKIP_CENSUS=1 LGP_SEED=5; the two census-skipped clause-9/11 "0 walks"
+lines are red in every skip-census run and are not the proof):
+- platform-holds-train: ✗ at every station: … it leaves — Sunny Side: with her on its platform at (-20.7, 14.2) it never
+  left in 20 s (3 of her line on the line); Bluebell Halt: it never came to stand there (its nose at 40.8 m round)
+- train-ignores-her: ✗ at every station (2 of 2): Sunny Side 1.08 m short, Bluebell Halt 0.99 m short (1.24 asked);
+  ✗ on the loop 1.03 m; ✗ in a tunnel (209.5–2.2 m round) 1.00 m
+- train-ignores-pets: ✗ her line on the line: … stops -39.23 m short of the nearest; train-ignores-npcs: ✗ -23.07 m
+- train-ignores-on-top: ✗ standing on it: carriage 2 at Sunny Side, it moved 1.38 m in 30 s
+- pets-count-aboard / pets-stay-out: ✗ the ride … it left in never, went 0 of its 212 m lap
+- ghost-train / frozen-train: ✗ walking into it standing at Sunny Side … carriage 34.6 m round: through to its far side
+- put-down-ignores-train (at 7ce1deae): ✗ put down beside it … slot beyond the carriage 34.6 m round: put down 0.76 m
+  inside it, wedged 0.76; 31.6 m round: 0.31 / 0.31
+- exits: pets-count-aboard ✗ the train never left the platform (15 s allowed); pets-stay-in 18 FAILED exits (companions
+  missing); pets-stay-out ✗ her companions on the Rail Race/coaster/ferris/slide/lift: 3 of 3 out, 0 in a seat
+Questions for Jim (also in the PR body): (1) a child standing still is not shoved by the crowd — keep? (2) two places to
+wait per platform, one child each (a third wonders again later) — keep? (3) the label entry cushion (24 px) — keep?
+
+## PAUSED 19 Oct 2026 (Jim: token usage at 92%) — superseded by the section above
 - The engineer was stopped mid-task; the worktree was clean and everything is pushed (feat/engine-solids @ 23680ecf).
   PR #722's head (feat/engine-solids-pr) is still 8e8d318a, which predates round four. The tunnel commits and all
   of round four are unverified by QA.

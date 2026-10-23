@@ -391,6 +391,10 @@ export function reachWithJumps(options: ReachOptions): ReachResult {
   collision.forEachSolid((solid) => {
     if (!solid.topIsAbsolute || !Number.isFinite(solid.topHeight)) return;
     if (!options.inSpace(solid.centreX, solid.centreZ)) return;
+    // A body that moves (the train's engine and carriages) is never where this
+    // census would find it: neither a top she is aimed at nor a thing she is
+    // hopped over. `check:solids` clause 13 asks the train, standing and moving.
+    if (solid.moving) return;
     overable.push(solid);
     // A top too narrow for her feet is never somewhere she lands.
     if (!solid.standsAt(solid.centreX, solid.centreZ)) return;

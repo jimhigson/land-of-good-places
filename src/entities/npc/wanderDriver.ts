@@ -346,6 +346,11 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     return this.train.trainSeat;
   }
 
+  /** Standing at a place to wait for the train — see the structural `GroundHolder` in `driver.ts`. */
+  get holdsGround(): boolean {
+    return this.train.holdsGround;
+  }
+
   update(context: DriverContext, intent: CharacterIntent): void {
     const { dt } = context;
 

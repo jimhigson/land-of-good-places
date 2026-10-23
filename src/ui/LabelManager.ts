@@ -73,6 +73,18 @@ export type LabelKind = keyof typeof LABEL_PRECEDENCE;
 export const LABEL_MARGIN_PX = 4;
 
 /**
+ * **The room a label needs to come up**, over and above {@link LABEL_MARGIN_PX},
+ * in CSS pixels. A label that is up stays up until it touches another at the
+ * margin; one that is down comes up only with this much more room, so that it
+ * does not pop up into a gap it is about to close. Name pills over a walking
+ * crowd drift about a pixel a frame, and rule 3's hold is 21 frames at 60 Hz:
+ * a pill that came up 3 px clear of the one it was walking towards went down
+ * again 11 frames later (22 Oct 2026, `check:labels` D, the castle shops), a
+ * flicker to a child watching. Rule 3's hysteresis, applied on the way up.
+ */
+export const LABEL_ENTRY_CUSHION_PX = 24;
+
+/**
  * How long a label that lost an overlap stays down after the overlap last
  * held, in seconds. Long enough that two pills drifting past each other do not
  * strobe; short enough that a name comes back promptly once there is room.
@@ -229,7 +241,8 @@ export class LabelManager {
     this.contenders.sort((a, b) => (this.precedes(a, b) ? -1 : this.precedes(b, a) ? 1 : 0));
     this.accepted.length = 0;
     for (const entry of this.contenders) {
-      if (this.collides(entry, this.accepted)) {
+      // Up, it keeps its place to the margin; down, it needs the room to stay.
+      if (this.collides(entry, this.accepted, entry.wasShown ? LABEL_MARGIN_PX : LABEL_MARGIN_PX + LABEL_ENTRY_CUSHION_PX)) {
         entry.verdict = 'overlap';
         entry.heldUntil = this.clock + this.holdSeconds();
         continue;
@@ -282,9 +295,9 @@ export class LabelManager {
     return a.seq < b.seq;
   }
 
-  private collides(entry: Entry, accepted: readonly Entry[]): boolean {
+  private collides(entry: Entry, accepted: readonly Entry[], margin: number): boolean {
     for (const other of accepted) {
-      if (rectsTouch(entry.rect, other.rect, LABEL_MARGIN_PX)) return true;
+      if (rectsTouch(entry.rect, other.rect, margin)) return true;
     }
     return false;
   }

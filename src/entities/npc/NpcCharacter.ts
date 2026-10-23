@@ -13,7 +13,7 @@ import { faceOnGround } from '../../world/up';
 import { carryReference } from '../../world/building/stepReach';
 import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
-import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
+import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent, type GroundHolder } from './driver';
 import type { NpcAvatar } from './npcAvatar';
 import { applyRidePose, type RidePosture } from '../ridePose';
 
@@ -246,6 +246,22 @@ export class NpcCharacter {
     this.facing = facing;
     this.avatar.rig.root.position.copy(this.position);
     faceOnGround(this.avatar.rig.root, facing);
+  }
+
+  /**
+   * **Set down somewhere else by the park** — off the railway, where the train
+   * says is clear (`NpcSystem.offTheLine`). A jump, not a move, exactly as
+   * {@link stepThroughDoor} is, and told to everything that remembers
+   * continuity the same way; she keeps facing the way she faced. A declared
+   * write, so `check:jitter` can tell it from a child moved by two owners.
+   */
+  setDown(x: number, y: number, z: number): void {
+    this.stepThroughDoor(x, y, z, this.facing);
+  }
+
+  /** Standing somewhere on purpose — see the structural `GroundHolder` in `driver.ts`. */
+  get holdsGround(): boolean {
+    return (this.driver as Partial<GroundHolder>).holdsGround === true;
   }
 
   /** Gives the character back to the wander driver, standing wherever it now is. */
@@ -564,8 +580,15 @@ export class NpcCharacter {
     // **A seated child is treated exactly the same way** (`beginSeated`): she
     // is sitting on a cushion and cannot step aside, so two sitters are left
     // where they sat and a walker who brushes one is the one who moves.
-    const thisFixed = this.scriptedFlag || this.seatedFlag;
-    const otherFixed = other.scriptedFlag || other.seatedFlag;
+    //
+    // **And a child standing at her place to wait for the train**
+    // ({@link holdsGround}): the children walking up to their own places go
+    // round her. Sent to one spot, they used to push the first there half the
+    // overlap a frame — a metre across the platform in a second, and off its
+    // edge onto the track within a minute, where the train she was waiting
+    // for stood for her (22 Oct 2026, check:jitter: Theo at Sunny Side).
+    const thisFixed = this.scriptedFlag || this.seatedFlag || this.holdsGround;
+    const otherFixed = other.scriptedFlag || other.seatedFlag || other.holdsGround;
     if (thisFixed && otherFixed) return;
     // A scripted child cannot react at all, so the free one takes the *whole*
     // correction (`pushAway`, never the halved one below) at a faster rate
