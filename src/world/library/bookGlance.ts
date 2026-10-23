@@ -122,7 +122,13 @@ export class BookGlance {
   private focusHeight = 0;
   private readonly anchor = new Vector3();
   private current: GlanceShot | null = null;
+  /** Her feet and head, the owl's head, her bubble, the book, the beacon's base and the top of its column — in that order. */
   private readonly points: Vector3[] = Array.from({ length: 7 }, () => new Vector3());
+  /** The last three of {@link points}, the same vectors: the book alone. */
+  private readonly bookPoints: readonly Vector3[] = this.points.slice(4);
+  /** The focus of the whole shot and of the book alone — kept, so a frame of the glance allocates nothing. */
+  private readonly wholeFocus = new Vector3();
+  private readonly aloneFocus = new Vector3();
 
   constructor(library: GlanceLibrary) {
     this.library = library;
@@ -136,11 +142,6 @@ export class BookGlance {
   /** The camera is the glance's this frame. */
   get active(): boolean {
     return this.current !== null;
-  }
-
-  /** The zoom she had when the glance took the camera — given back when it ends. For the checks. */
-  get zoomToGiveBack(): number {
-    return this.zoomBefore;
   }
 
   /**
@@ -234,20 +235,21 @@ export class BookGlance {
     column.y += GLANCE_BEACON_COLUMN;
 
     const height = this.focusHeight;
-    const whole = this.frame(camera, this.points, height);
-    if (whole && whole.zoom >= CAMERA_ZOOM_MIN) return { bookId: placed.book.id, focus: whole.focus, zoom: whole.zoom, whole: true };
-    const alone = this.frame(camera, [book, base, column], height);
-    if (!alone) return null;
-    return { bookId: placed.book.id, focus: alone.focus, zoom: Math.max(CAMERA_ZOOM_MIN, alone.zoom), whole: false };
+    const whole = this.frame(camera, this.points, height, this.wholeFocus);
+    if (whole !== null && whole >= CAMERA_ZOOM_MIN) return { bookId: placed.book.id, focus: this.wholeFocus, zoom: whole, whole: true };
+    const alone = this.frame(camera, this.bookPoints, height, this.aloneFocus);
+    if (alone === null) return null;
+    return { bookId: placed.book.id, focus: this.aloneFocus, zoom: Math.max(CAMERA_ZOOM_MIN, alone), whole: false };
   }
 
   /**
    * The box round `points` along the camera's screen axes: its middle as a
-   * world point at `height` (the camera orbits it), and the zoom that holds
-   * it with {@link GLANCE_MARGIN} — never closer than she had it. Null on a
-   * camera not yet aimed (its screen axes are zero until its first frame).
+   * world point at `height`, written into `focus` (the camera orbits it), and
+   * the zoom that holds it with {@link GLANCE_MARGIN} — never closer than she
+   * had it — returned. Null on a camera not yet aimed (its screen axes are
+   * zero until its first frame).
    */
-  private frame(camera: IsoCamera, points: readonly Vector3[], height: number): { focus: Vector3; zoom: number } | null {
+  private frame(camera: IsoCamera, points: readonly Vector3[], height: number, focus: Vector3): number | null {
     const right = camera.screenRightAxis;
     const up = camera.screenUpAxis;
     let minR = Infinity;
@@ -268,8 +270,7 @@ export class BookGlance {
     const midU = (minU + maxU) / 2 - height * up.y;
     const det = right.x * up.z - right.z * up.x;
     if (!(Math.abs(det) > 1e-6)) return null;
-    const focus = new Vector3((midR * up.z - right.z * midU) / det, height, (right.x * midU - midR * up.x) / det);
-    const zoom = Math.min(this.zoomBefore, camera.zoomToFit((maxR - minR) / 2, (maxU - minU) / 2, GLANCE_MARGIN));
-    return { focus, zoom };
+    focus.set((midR * up.z - right.z * midU) / det, height, (right.x * midU - midR * up.x) / det);
+    return Math.min(this.zoomBefore, camera.zoomToFit((maxR - minR) / 2, (maxU - minU) / 2, GLANCE_MARGIN));
   }
 }
