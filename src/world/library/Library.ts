@@ -437,11 +437,6 @@ export class Library implements GameSystem {
     return this.inside;
   }
 
-  /**
-   * Sitting on one of her story cushions (#718) — for `Game`'s "a tap anywhere
-   * gets her up" and for the checks. True only while the cushion still has
-   * her: a ride ended by anything else is not a seat.
-   */
   /** Where story time is: `'idle'`, `'gathering'`, `'reading'` or `'dispersing'`. */
   get storyPhase(): StoryPhase {
     return this.storyTime.phase;
@@ -455,6 +450,11 @@ export class Library implements GameSystem {
     this.storyTime.requestStoryTime();
   }
 
+  /**
+   * Sitting on one of her story cushions (#718) — for `Game`'s "a tap anywhere
+   * gets her up" and for the checks. True only while the cushion still has
+   * her: a ride ended by anything else is not a seat.
+   */
   get playerIsSeated(): boolean {
     return this.seatedOn !== null && (this.player?.riding ?? false);
   }
@@ -631,10 +631,9 @@ export class Library implements GameSystem {
     this.updateNameLabel();
     const player = this.player;
     if (!player) return;
-    // The owl before the seat (the plan's order: story → owl → glow → seated
-    // jump): her words, her shush, her life and the recommended book's glow.
-    // Story time first (the plan's order: story → owl → glow → seated jump),
-    // so a story begun this frame flies this frame.
+    // The plan's order: story → owl → glow → seated jump. Story time first, so
+    // a story begun this frame flies this frame; then the owl (her words, her
+    // shush, her life and the recommended book's glow), then the seat.
     this.storyTime.update(dt, this.inside);
     if (this.inside) this.owl.update(dt, context.elapsed, player, this.spaces.isChanging, this.deps.camera);
     if (this.seatedOn !== null) this.updateSeated(player, context);
