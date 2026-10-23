@@ -62,6 +62,14 @@ export const SECRETS: readonly Secret[] = [
     icon: '🐍',
     done: 'You found all five hiding baby snakes!',
   },
+  // The Library's story time (#718): sat on a story cushion from before the
+  // owl's first word to her last — awarded by `world/library/storyTime.ts`.
+  {
+    id: 'secret.storyTime',
+    name: 'Story listener',
+    icon: '📖',
+    done: 'You sat and listened to a whole story!',
+  },
   // The Library's big readers' shelf (track D of #714): every chapter book
   // read to its end. Awarded by `world/library/readBooks.ts`'s `markBookRead`,
   // the one owner of that rule. The picture books keep their own prize.
