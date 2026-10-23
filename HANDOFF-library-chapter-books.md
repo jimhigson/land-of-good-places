@@ -280,3 +280,24 @@ list above and carry on from the first unticked box. `.parks/` holds all 16 hone
   **CONTROL on the old preview pr-734-83b72db** (pre-fix): 11 presses, **1 of 11 right** — every press
   after the first opened the previous book (north) or the next one (south): QA's bug exactly, all 22
   frames opened by eye and agreeing with the colours (`look/walk-83b72db/`).
+- **Full `pnpm run check` on the fix** (code = 0e0f9da7's, park 53dde20f): **exit 0, 2467 s**; all 88
+  leaves accounted for (86 by their `$` line, tsc by sequence, the crowd trace by its output); SHELF
+  WALK 21/21 + 10/10 and rule 3's 62 pairs inside it; 41 dismount warnings = part 4's own count.
+- **Overseer (~17:40):** ignore agent a01b801898cba05c5's message (a duplicate of part 4's fixer, stopped);
+  never write to library-v2; merge the newest origin/feat/library-v2 before the final CI run.
+- **Merge b1d8dce9** = origin/feat/library-v2 @ cbe0b608 (8 commits: the owl solid wherever she is
+  drawn, NEVER INSIDE HER, Big reader listed only with a chapter book, the card at full strength).
+  **One conflict, `test/library/chapter-books.test.ts`**: both sides had added a "case 4" (the books'
+  cover colours; part 4's "lists Big reader … only while there is a chapter book"). Both kept, imports
+  unioned (PALETTE, SECRETS), header describes both, part 4's renumbered **case 5** (with six books its
+  assertion reads "Big reader is listed": passes). `state/secrets.ts` (auto-merged) now imports
+  `chapterBooks/index` into the state module; its comment said the index's "one import is a type" —
+  with the books in it imports six data files, each importing only types: comment corrected (still
+  data only; check:cycle-tdz: the same 5 sites as its baseline). Auto-merged, both sides present:
+  check-library (SHELF WALK + NEVER INSIDE HER), check-book-reader (1–10 + part 4's 11), check-labels.
+  package.json: PROOF OK. Then **merge a9729328** = 9a2fe385 (check-book-reader item 11, scripts only).
+  Park hash now **eaa23002…** (Library/LibraryOwl/Collision/World/storyTime/secrets in the closure);
+  the 53dde20f sets kept at `.parks/r1-53dde20f/`, `.parks/all16/`, `.parks/seed5-only/`.
+- Park-free checks on a9729328, all exit 0: cycle-tdz (5 = baseline), flat-primitives (109 flat-ok, no
+  new), chain-coverage (99 leaves reachable), assets, story-props-glb, library-glb, vitest test/library +
+  library-card **4 files, 22 tests** (chapter-books 6: case 5 included).
