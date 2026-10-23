@@ -1,6 +1,7 @@
 import { Group, Vector3, type BufferAttribute, type Mesh, type MeshToonMaterial, type Texture } from 'three';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../style/materials';
+import { dropHiddenOutlineFaces } from '../style/outlineHiddenFaces';
 import { visibleBounds, visiblePoints, visibleReachXZ } from '../style/measure';
 import type { AssetHandle, CreatureHandle } from '../style/asset';
 import type { Expression } from '../style/faces';
@@ -199,6 +200,15 @@ function frontMost(name: string): Vector3 {
 }
 
 /**
+ * The way a creature model rests, in its own unplaced frame — down, onto the
+ * plane its base stands on (`y = 0`): the floor, the nest's pad, a pile's top.
+ * The faces it rests on keep no copy in its ink lines
+ * (`dropHiddenOutlineFaces`): each would be a line's width inside what
+ * it rests on, a hidden face a hair off a seen one.
+ */
+const RESTS_DOWN = new Vector3(0, -1, 0); // flat-ok: down in a creature model's own unplaced frame, object-local
+
+/**
  * **The baby dragon** — mint, with a cream tummy that glows warm, two stubby
  * horns and little lilac wings: the same dragon as the storybook's, its
  * colours read from the same `LIBRARY_GLB_STYLES` rows. 0.9 m to its horns.
@@ -229,6 +239,8 @@ export function createLibraryDragon(): DragonHandle {
 
   const mouth = frontMost('dragon-head');
   const mouthInHead = mouth.clone().sub(head.position);
+  // It sits on its nest's pad: its tail's underside rests there.
+  dropHiddenOutlineFaces(root, RESTS_DOWN, 0);
 
   let showing: DragonFace = 'neutral';
   const setFace = (next: DragonFace): void => {
@@ -270,6 +282,8 @@ export function createLibraryDragonNest(): DragonNestHandle {
   for (const name of ['dragonNest-pad', 'dragonNest-coversA', 'dragonNest-coversB', 'dragonNest-coversC', 'dragonNest-pages']) {
     root.add(libraryKitMesh(name));
   }
+  // Its pad and its books rest on the floor and on one another.
+  dropHiddenOutlineFaces(root, RESTS_DOWN, 0);
   return { root, height: visibleBounds(root).top, padTop: kitBounds(['dragonNest-pad']).maxY, radius: visibleReachXZ(root) };
 }
 
@@ -358,6 +372,8 @@ export function createLibraryBookPile(): BookPileHandle {
   for (const name of ['bookPile-cover1', 'bookPile-cover2', 'bookPile-cover3', 'bookPile-cover4', 'bookPile-cover5', 'bookPile-pages']) {
     root.add(libraryKitMesh(name));
   }
+  // Each book rests on the one below it, the bottom one on the floor.
+  dropHiddenOutlineFaces(root, RESTS_DOWN, 0);
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;

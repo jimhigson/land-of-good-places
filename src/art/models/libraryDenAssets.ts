@@ -2,6 +2,7 @@ import { Group, Mesh, Vector3, type Material, type MeshToonMaterial } from 'thre
 import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
 import { markShared, toonMaterial } from '../style/materials';
+import { dropHiddenOutlineFaces } from '../style/outlineHiddenFaces';
 import { visibleBounds } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
 import { dressGlbPart, type LampHandle, type PartStyle } from './libraryAssets';
@@ -193,6 +194,9 @@ export function createLibraryDenLantern(): LampHandle {
   const root = new Group();
   root.name = 'library.denLantern';
   for (const name of LIBRARY_DEN_LANTERN_NODES) root.add(libraryDenMesh(name));
+  // Its back plate rests on the wall it hangs on (z = 0): that face keeps no
+  // copy in its ink line, a line's width inside the wall.
+  dropHiddenOutlineFaces(root, new Vector3(0, 0, -1), 0);
   const glow = denKitBounds(['denLantern-glow']);
   return {
     root,
@@ -235,6 +239,9 @@ export function createLibrarySecretBook(): SecretBookHandle {
     if (name === 'secretBook-star') star = mesh;
     root.add(mesh);
   }
+  // It stands on a shelf's board (y = 0): its underside keeps no copy in its
+  // ink line, a line's width inside the board.
+  dropHiddenOutlineFaces(root, new Vector3(0, -1, 0), 0); // flat-ok: down in the book's own unplaced frame, object-local
   if (!star) throw new Error('libraryDenAssets: the secret book has no star');
   return { root, height: visibleBounds(root).top, star, starMaterial };
 }
