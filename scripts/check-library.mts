@@ -879,8 +879,8 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
     const box = mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld);
     box.min.x -= OX;
     box.max.x -= OX;
-    box.min.y -= LIBRARY_FLOOR_Y;
-    box.max.y -= LIBRARY_FLOOR_Y;
+    box.min.y -= LIBRARY_FLOOR_Y; // flat-ok: heights over the reading room's own flat floor, off the sphere
+    box.max.y -= LIBRARY_FLOOR_Y; // flat-ok: as above
     box.min.z -= OZ;
     box.max.z -= OZ;
     return box;
@@ -920,6 +920,7 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
       Math.abs(face - wall.laidOut) <= 0.005 && behindSolid.length === 0 && frontClear.length === 0,
       `the den's ${wall.what} wall, drawn: its face to the den at ${wall.axis} ${face.toFixed(3)} (the layout's ${wall.laidOut.toFixed(3)}, within 5 mm); at 5 stations along it ` +
         `${PROBE_IN} m behind the drawn face is solid (${behindSolid.length === 0 ? 'every one' : `NOT at ${behindSolid.join(' ')}`}) ` +
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
         `and ${PROBE_IN} m in front is clear (${frontClear.length === 0 ? 'every one' : `NOT at ${frontClear.join(' ')}`}); drawn ${box.max.y.toFixed(2)} m tall`,
     );
   }
@@ -936,7 +937,9 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
       const centreX = body.x1 - OX;
       const [z1, z2] = [Math.min(body.z1, body.z2) - OZ, Math.max(body.z1, body.z2) - OZ];
       const over = Math.max(
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
         body.baseHeight - LIBRARY_FLOOR_Y - box.min.y,
+        // flat-ok: as above
         box.max.y - (body.topHeight - LIBRARY_FLOOR_Y),
         Math.abs(box.min.x - centreX) - body.halfThickness,
         Math.abs(box.max.x - centreX) - body.halfThickness,
@@ -945,6 +948,7 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
       );
       say(
         over <= 0.005,
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
         `the lintel, drawn y ${box.min.y.toFixed(2)}..${box.max.y.toFixed(2)}, x ${box.min.x.toFixed(2)}..${box.max.x.toFixed(2)}, z ${box.min.z.toFixed(2)}..${box.max.z.toFixed(2)}, ` +
           `lies inside its body's band ${(body.baseHeight - LIBRARY_FLOOR_Y).toFixed(2)}..${(body.topHeight - LIBRARY_FLOOR_Y).toFixed(2)} m over z ${z1.toFixed(2)}..${z2.toFixed(2)} ` +
           `(the furthest any drawn edge stands outside it ${over.toFixed(3)} m, at most 0.005)`,
@@ -970,7 +974,9 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
         }
       }
       say(
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
         Math.abs(box.max.y) <= 0.001 && slab.material === roomFloor.material && off === 0,
+        // flat-ok: as above
         `the den's floor slab is drawn with its top at the room's floor (${box.max.y.toFixed(4)} m), in the room floor's own paint (${slab.material === roomFloor.material}: LIGHT's den cells measure that paint), ` +
           `x ${box.min.x.toFixed(2)}..${box.max.x.toFixed(2)}, z ${box.min.z.toFixed(2)}..${box.max.z.toFixed(2)}; her feet find it at ${feet - off} of ${feet} points across the den`,
       );
@@ -1001,6 +1007,7 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
   // The lanterns: over her head at the top of her highest jump; and nothing in the den is a light.
   {
     const head = JUMP_APEX_HEIGHT + KID_HEIGHT;
+    // flat-ok: heights over the reading room's own flat floor, off the sphere
     const lowest = Math.min(...shellOfDen.lanterns.map((lantern) => new Box3().setFromObject(lantern).min.y - LIBRARY_FLOOR_Y));
     let lights = 0;
     library.denRoot.traverse((part) => {
@@ -2548,7 +2555,7 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
       for (let i = 0; i < row.count; i += 1) {
         row.getMatrixAt(i, instance);
         const book = row.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(new Matrix4().multiplyMatrices(toLeaf, row.matrixWorld), instance));
-        if (book.max.y > goldBox.min.y + 1e-6 && book.min.y < goldBox.max.y - 1e-6) sameShelf.push(book);
+        if (book.max.y > goldBox.min.y + 1e-6 && book.min.y < goldBox.max.y - 1e-6) sameShelf.push(book); // flat-ok: heights in the secret leaf's own frame, object-local
       }
     }
     /** How far apart along the row (leaf +X) a book and the gold book stand: negative where they pass through each other. */
@@ -2562,10 +2569,12 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
     );
     // Inside the leaf's own box: x along its length, y up its height, z
     // through its depth to the front its colliders stop at.
+    // flat-ok: heights in the secret leaf's own frame, object-local
     const inside = Math.min(goldBox.min.x, size.length - goldBox.max.x, goldBox.min.y, size.height - goldBox.max.y, goldBox.min.z, size.depth - goldBox.max.z);
     say(
       !goldBox.isEmpty() && inside >= 0,
       `the whole drawn gold book stands inside the leaf's own ${size.length.toFixed(2)} x ${size.height.toFixed(2)} x ${size.depth.toFixed(2)} box, the box its shut and open colliders are: ` +
+        // flat-ok: heights in the secret leaf's own frame, object-local
         `y ${goldBox.min.y.toFixed(3)}..${goldBox.max.y.toFixed(3)}, z ${goldBox.min.z.toFixed(3)}..${goldBox.max.z.toFixed(3)} (its front ${(size.depth - goldBox.max.z).toFixed(3)} m inside the case's), ` +
         `${inside.toFixed(3)} m clear of the box at its nearest`,
     );

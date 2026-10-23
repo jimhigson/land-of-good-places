@@ -182,7 +182,7 @@ function trianglesOverlap(p: readonly [Vector2, Vector2, Vector2], q: readonly [
     for (let i = 0; i < 3; i += 1) {
       const from = shape[i]!;
       const to = shape[(i + 1) % 3]!;
-      const nx = -(to.y - from.y);
+      const nx = -(to.y - from.y); // flat-ok: a plan Vector2's second axis, not a height
       const ny = to.x - from.x;
       const length = Math.hypot(nx, ny);
       if (length < 1e-12) continue;
