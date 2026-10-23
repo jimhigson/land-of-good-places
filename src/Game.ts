@@ -58,6 +58,7 @@ import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
 import { BookReader } from './world/library/reader/BookReader';
 import { markBookRead } from './world/library/readBooks';
+import { BookGlance } from './world/library/bookGlance';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -202,6 +203,14 @@ export class Game {
   private keychainShopWasOpen = false;
   private zoomBeforeKeychainShop = 1;
 
+  /**
+   * The owl's glance at the book she recommends (`world/library/bookGlance.ts`):
+   * while she names it and says it is glowing, the camera draws back until
+   * the child, the owl and the glowing book are all in shot. A claimant on the
+   * one `focusClaim` in `tick`, like the exhibit camera; built with the world.
+   */
+  private readonly bookGlance: BookGlance;
+
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   private readonly uiRoot: HTMLElement;
@@ -268,6 +277,7 @@ export class Game {
     this.world.reptileHouse.adoptRestoredPlayer();
     // …and the Library's reading room (#716).
     this.world.library.adoptRestoredPlayer();
+    this.bookGlance = new BookGlance(this.world.library);
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -1951,6 +1961,16 @@ export class Game {
     // hold at once — one is in the park and the other in the hall.
     const exhibitClaim = this.world.reptileHouse.exhibitCamera.apply(this.camera);
     if (exhibitClaim) focusClaim = exhibitClaim;
+
+    // The Library's owl showing her the book she recommends: while the owl
+    // names it and says it is glowing, the camera draws back until the child,
+    // the owl and the glowing book are all in shot, and comes back to her when
+    // the owl is done or the moment she moves (`world/library/bookGlance.ts`).
+    // It writes its own zoom and claims the focus like the others; it can
+    // never hold with the exhibit shot or the keychain rack — one is in the
+    // reading room and they are in the hall and the park.
+    const glanceClaim = this.bookGlance.apply(this.camera, this.player);
+    if (glanceClaim) focusClaim = glanceClaim;
 
     // The keychain rack's zoomed picker (#331): the camera orbits the centre of
     // everything that must be in shot (`KeychainShop.viewFocus`) instead of the
