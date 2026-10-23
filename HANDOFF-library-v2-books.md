@@ -11,6 +11,17 @@ see "Final runs" and the red transcripts' first paragraph). Scratch logs: `.clau
 Plan: `docs/library-build/PLAN-parts-4-5.md`; the old base's record is `HANDOFF-library-books2.md`
 (items 1–6, merged into the integration at a30e7b96); the kit's record is `HANDOFF-art-story-props.md`.
 
+## THE BOOKS' JOIN (23 Oct, Claude Opus 5.5) — in progress; read this first
+
+The two book branches are merged here (`git -c rerere.enabled=false merge --no-ff`): **7d30cb3c**
+(`feat/library-v2-books-a` @ 68b593f2, books 1–3) then **15e0760a** (`-b` @ 54dfbd11, books 4–6).
+Both clean; the index lists the six in `final.json`'s shelf order (scratch `join/verbatim.mts`: the
+order and all 60 pages verbatim; its order CONTROL goes red). Then: **10bab3ff** — both branches had
+chosen `trampolinePad`, so *The Loudest Shush* is now `flowerRed` and a new vitest case holds every
+book to a cover colour of its own; **a80be87c** — READABLE's `<=` is `===` and the WAIT note is gone.
+Scratch: `.claude/library-build-scratch/books-v2/join/`. Still to do: the full check runs, reading
+all six books in headless Chrome, removing the two book worktrees, this handoff's final form.
+
 Jim's rulings that bind this track: the chapter books (14 Oct, *"~30 words per page … jokes,
 adventure, adversaries, conflict, but resolve well"*; the twelve picture books unchanged) and Blender
 (22 Oct, *"model in Blender as much as is needed, in preference to coding geometric primitives to
