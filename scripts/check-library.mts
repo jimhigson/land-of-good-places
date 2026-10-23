@@ -1398,13 +1398,9 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
       (wrongKind.length > 0 ? ` — wrong: ${wrongKind.map(({ book, slot }) => `${book.id} (${book.kind}) on ${slot ? `a ${slot.kind} slot` : 'no slot'}`).join(', ')}` : ''),
   );
   say(pictureSlots.length === PICTURE_BOOKS.length, `${pictureSlots.length} picture-book slots for the ${PICTURE_BOOKS.length} picture books`);
-  say(CHAPTER_BOOKS.length <= chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
-  if (CHAPTER_BOOKS.length < chapterSlots.length) {
-    note(
-      `${chapterSlots.length - CHAPTER_BOOKS.length} of the ${chapterSlots.length} big readers' slots wait for their chapter books — ` +
-        `BOOKS (${BOOKS.length}) and LIBRARY_READABLE_SLOTS (${LIBRARY_READABLE_SLOTS.length}) must be equal before track A's shelf books are paired with them`,
-    );
-  }
+  // The six chapter books are all on the shelf (the books' join), so no big
+  // readers' slot waits any more: one missing goes red here, never a WAIT.
+  say(CHAPTER_BOOKS.length === chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
   const shelves = libraryBookcaseSize('wall').shelfTops;
   say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
 
@@ -1414,18 +1410,7 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // naming the books.
   const shift = mutating('shift-books') ? 1 : 0;
   if (shift > 0) note('SHIFTED the pairing this check expects by one on purpose (slot i must hold BOOKS[i+1]) — this run must go red, naming the books');
-  // A slot past the last book waits for one (the big readers' shelf, until its
-  // chapter books land): it holds nothing, and nothing below asks it to.
-  const expected = LIBRARY_READABLE_SLOTS.map((slot, i): { slot: (typeof LIBRARY_READABLE_SLOTS)[number]; book: (typeof BOOKS)[number] | null } => ({
-    slot,
-    book: i < BOOKS.length ? BOOKS[(i + shift) % BOOKS.length]! : null,
-  }));
-  const waiting = expected.filter(({ book }) => book === null);
-  note(
-    waiting.length === 0
-      ? `every one of the ${LIBRARY_READABLE_SLOTS.length} slots holds a book`
-      : `${waiting.length} slot(s) WAIT for their books, so nothing is asserted about what stands in them: ${waiting.map(({ slot }) => `slot ${slot.index + 1} (${slot.bookcase}, shelf ${slot.shelf}, ${slot.along} m along)`).join(', ')}`,
-  );
+  const expected = LIBRARY_READABLE_SLOTS.map((slot, i) => ({ slot, book: BOOKS[(i + shift) % BOOKS.length]! }));
 
   // Every `library.book.<id>` mesh in the room (an outline is `<…>.outline`).
   const named = new Map<string, Mesh[]>();
@@ -1451,7 +1436,6 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   let worstOut = { what: 'none', by: -Infinity };
   let placedOk = 0;
   for (const { slot, book } of expected) {
-    if (!book) continue;
     const mesh = named.get(book.id)?.[0];
     const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
     const box = boxes.get(`bookcase ${slot.bookcase}`);
@@ -1548,7 +1532,6 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // Each zone in its slot, read against the expected pairing.
   let zonesOk = 0;
   for (const { slot, book } of expected) {
-    if (!book) continue;
     const zone = zones.find((candidate) => candidate.id === shelfBookZoneId(book.id));
     const mesh = named.get(book.id)?.[0];
     if (!zone || !mesh) {

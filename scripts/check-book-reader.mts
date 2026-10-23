@@ -109,7 +109,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { chromium, type Page } from 'playwright-core';
-import { BOOKS, BOOK_PAGE_COUNTS, PICTURE_MODELS, bookCollectionId, type LibraryBook, type PictureActor } from '../src/world/library/books.ts';
+import { BOOKS, BOOK_PAGE_COUNTS, PICTURE_MODELS, bookCollectionId, type LibraryBook } from '../src/world/library/books.ts';
 import {
   CHAPTER_MIN_PICTURE_SCALE,
   PAGE_CANVAS_HEIGHT,
@@ -148,10 +148,17 @@ const MIN_COVERAGE = 0.02;
  */
 const SHELF_STAND_TOLERANCE = 0.1;
 
-/** The book the deep link opens, the one read to the end, and the one that completes the dex. */
+/**
+ * The book the deep link opens, the one read to the end, and the one that
+ * completes the dex. `LAST` is the last **picture** book: section 8 reads it
+ * to complete the dex *and* the picture books, so both celebrations wait for
+ * it. A chapter book on the end of `BOOKS` would leave every picture book
+ * among the entries the section files first, and the library's celebration
+ * would be showing before any book opened.
+ */
 const FIRST = BOOKS[0]?.id ?? '';
 const READ_THROUGH = BOOKS[3]?.id ?? FIRST;
-const LAST = BOOKS[BOOKS.length - 1]?.id ?? FIRST;
+const LAST = BOOKS.filter((book) => book.kind === 'picture').at(-1)?.id ?? FIRST;
 const FIRST_BOOK = BOOKS.find((book) => book.id === FIRST);
 if (!FIRST_BOOK) throw new Error('check:book-reader: the library has no books at all');
 
@@ -742,108 +749,27 @@ async function uprightCard(page: Page): Promise<{ fits: boolean; shown: boolean;
 
 /**
  * **The picture models' sheet** — a book that lives here, one page per few of
- * the models the chapter books brought (`books.ts`'s `PICTURE_MODELS`, the
- * mini to the `prop`), posed the ways their pages ask for: the mini's grab,
- * Grandpa Tock asleep, stretched and tucked in, the owl's shush, a jet pack
- * on the reader and on Trilla, the primitive props. Item 9b opens it and
- * holds every picture to having drawn its models, and asserts every model in
- * the list is on it, so a model no book uses yet is still drawn on every run;
- * its screenshots are the book engineers' sheet to compose from.
+ * the models the chapter books brought (`books.ts`'s `PICTURE_MODELS`: the
+ * park's additions and the Artist's story-props kit), posed the ways their
+ * pages ask for: the mini's grab, Grandpa Tock asleep, stretched and tucked
+ * in, the owl's shush, a jet pack on the reader and on Trilla, Nimbus grey
+ * and white, a nibbled flower, the lit wheel with its star back; and the two
+ * decor the chapter books add, confetti and rain. Item 9b opens it and holds
+ * every picture to having drawn its models, and asserts every model in the
+ * list is on it (or on a real book's page), so a model no book uses yet is
+ * still drawn on every run; its screenshots are the book engineers' sheet to
+ * compose from. Nothing on it is a primitive: a page may name only a model.
  */
-const MAGNIFYING_GLASS: PictureActor = {
-  model: 'prop',
-  at: [0.55, 0.9, 0.3],
-  parts: [
-    { shape: 'ring', size: [0.26, 0.035, 0], at: [0, 0.2, 0], colour: 'woodDark' },
-    { shape: 'cylinder', size: [0.21, 0.01, 0.21], at: [0, 0.2, 0], tilt: [90, 0], colour: 'skyDayBottom', outline: false },
-    { shape: 'cylinder', size: [0.045, 0.2, 0.045], at: [0, 0, 0], colour: 'woodDark' },
-  ],
-};
-const BENCH: PictureActor = {
-  model: 'prop',
-  at: [-1.2, 0, -0.4],
-  parts: [
-    { shape: 'box', size: [1.3, 0.08, 0.42], at: [0, 0.46, 0], colour: 'woodLight' },
-    { shape: 'box', size: [1.3, 0.3, 0.06], at: [0, 0.72, -0.19], colour: 'woodLight' },
-    { shape: 'box', size: [0.08, 0.44, 0.38], at: [-0.55, 0.22, 0], colour: 'woodDark' },
-    { shape: 'box', size: [0.08, 0.44, 0.38], at: [0.55, 0.22, 0], colour: 'woodDark' },
-  ],
-};
-const FOOTPRINTS: PictureActor = {
-  model: 'prop',
-  at: [0, 0, 0.6],
-  parts: [0, 1, 2, 3].flatMap((i): NonNullable<PictureActor['parts']> => [
-    { shape: 'ball', size: [0.42, 0.03, 0.48], at: [-1.2 + i * 0.8, 0.01, (i % 2) * 0.35], colour: 'pathSandDark', outline: false },
-    ...[-0.13, -0.045, 0.045, 0.13].map((dx) => ({ shape: 'ball' as const, size: [0.08, 0.03, 0.08] as const, at: [-1.2 + i * 0.8 + dx, 0.012, (i % 2) * 0.35 - 0.3] as const, colour: 'pathSandDark' as const, outline: false })),
-  ]),
-};
-const RUBBER_DUCK: PictureActor = {
-  model: 'prop',
-  at: [0.9, 0, 0.3],
-  parts: [
-    { shape: 'ball', size: [0.3, 0.22, 0.38], at: [0, 0.11, 0], colour: 'flowerYellow' },
-    { shape: 'ball', size: [0.17, 0.17, 0.17], at: [0, 0.29, 0.1], colour: 'flowerYellow' },
-    { shape: 'cone', size: [0.07, 0.1, 0.07], at: [0, 0.27, 0.22], tilt: [90, 0], colour: 'markerLemon' },
-  ],
-};
-const RAINBOW_ARCH: PictureActor = {
-  model: 'prop',
-  at: [0, 0, -1.6],
-  parts: (['markerPink', 'slideChute', 'markerLemon', 'markerMint', 'markerSky', 'markerLilac'] as const).map((colour, band) => ({
-    shape: 'ring' as const,
-    size: [3.2 - band * 0.22, 0.12, 0] as const,
-    colour,
-    arc: 180,
-  })),
-};
-const PICNIC: PictureActor = {
-  model: 'prop',
-  at: [0, 0, 0.2],
-  parts: [
-    { shape: 'box', size: [1.4, 0.02, 1], at: [0, 0.01, 0], colour: 'flowerRed', outline: false },
-    { shape: 'cylinder', size: [0.26, 0.1, 0.26], at: [-0.35, 0.07, 0.1], sides: 3, colour: 'signBoard' },
-    { shape: 'cylinder', size: [0.26, 0.1, 0.26], at: [-0.1, 0.07, -0.15], sides: 3, turn: 40, colour: 'signBoard' },
-    { shape: 'cylinder', size: [0.36, 0.14, 0.36], at: [0.35, 0.09, 0], colour: 'blossomPink' },
-    { shape: 'cylinder', size: [0.3, 0.1, 0.3], at: [0.35, 0.21, 0], colour: 'blossomWhite' },
-  ],
-};
-const UMBRELLA: PictureActor = {
-  model: 'prop',
-  at: [-0.9, 0, 0],
-  parts: [
-    { shape: 'cylinder', size: [0.04, 1.2, 0.04], at: [0, 0.6, 0], colour: 'woodDark' },
-    { shape: 'cone', size: [0.9, 0.4, 0.9], at: [0, 1.25, 0], tilt: [180, 0], colour: 'markerSky' },
-  ],
-};
-const FERRIS_STAND_IN: PictureActor = {
-  model: 'prop',
-  at: [0, 0, -2],
-  parts: [
-    { shape: 'ring', size: [4, 0.14, 0], at: [0, 2.3, 0], colour: 'markerLilac' },
-    ...[0, 30, 60, 90, 120, 150].map((angle) => ({ shape: 'cylinder' as const, size: [0.06, 3.8, 0.06] as const, at: [0, 2.3, 0] as const, tilt: [0, angle] as const, colour: 'stoneGrey' as const })),
-    ...[0, 60, 120, 180, 240, 300].map((angle) => ({
-      shape: 'box' as const,
-      size: [0.4, 0.34, 0.34] as const,
-      at: [Math.cos((angle * Math.PI) / 180) * 1.95, 2.3 + Math.sin((angle * Math.PI) / 180) * 1.95 - 0.25, 0.1] as const,
-      colour: 'markerSky' as const,
-    })),
-    ...[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => ({
-      shape: 'ball' as const,
-      size: [0.12, 0.12, 0.12] as const,
-      at: [Math.cos((angle * Math.PI) / 180) * 2.05, 2.3 + Math.sin((angle * Math.PI) / 180) * 2.05, 0.08] as const,
-      colour: 'flowerYellow' as const,
-      glow: true,
-      outline: false,
-    })),
-    { shape: 'cylinder', size: [0.16, 2.3, 0.16], at: [-0.7, 1.15, -0.1], tilt: [0, -17], colour: 'stoneGrey' },
-    { shape: 'cylinder', size: [0.16, 2.3, 0.16], at: [0.7, 1.15, -0.1], tilt: [0, 17], colour: 'stoneGrey' },
-  ],
-};
 const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
   {
     text: 'A mini grabs a star by the pink wall.',
     picture: {
-      cast: [{ model: 'pinkWall', at: [0, 0, -1] }, { model: 'mini', mood: 'surprised', grab: 1, at: [-0.4, 0, 0.2] }, { model: 'star', colour: 'flowerYellow', size: 1.2, at: [0.7, 0, 0.3] }],
+      cast: [
+        { model: 'pinkWall', at: [0, 0, -1] },
+        { model: 'lollipopTree', at: [-2.2, 0, -1.4] },
+        { model: 'mini', mood: 'surprised', grab: 1, at: [-0.4, 0, 0.2] },
+        { model: 'star', colour: 'flowerYellow', size: 1.2, at: [0.7, 0, 0.3] },
+      ],
       sky: 'skyDayBottom',
       ground: 'grassLight',
     },
@@ -855,6 +781,9 @@ const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
         { model: 'tortoise', mood: 'blink', at: [-1.4, 0, 0] },
         { model: 'tortoise', mood: 'happy', pose: 'stretch', at: [0, 0, 0.2] },
         { model: 'tortoise', pose: 'tuck', at: [1.4, 0, 0] },
+        { model: 'giantFootprint', at: [-0.7, 0, 1.1] },
+        { model: 'giantFootprint', at: [0.7, 0, 1.3], turn: 25 },
+        { model: 'petal', at: [0.1, 0, 1.6] },
       ],
       sky: 'skyDayBottom',
       ground: 'grassLight',
@@ -864,9 +793,14 @@ const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
     text: 'The owl says shush to Mrs Crumpet.',
     picture: {
       cast: [
+        { model: 'bookcase', at: [0.4, 0, -1.6] },
+        { model: 'libraryDesk', at: [-1.9, 0, -0.6], turn: 30 },
+        { model: 'readingLamp', at: [2.6, 0, -0.4] },
         { model: 'owl', mood: 'surprised', at: [-0.6, 0, -0.2], turn: 25 },
         { model: 'book', colour: 'markerMint', size: 3, at: [0.8, 0, 0] },
         { model: 'kitten', mood: 'blink', at: [0.8, 0.3, 0] },
+        { model: 'openBook', colour: 'markerSky', at: [1.9, 0, 0.6], turn: -20 },
+        { model: 'loosePage', at: [2.3, 0.4, 0.9], turn: 40 },
       ],
       sky: 'buildingFloor',
       ground: 'woodLight',
@@ -879,6 +813,9 @@ const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
         { model: 'candyFloss', variant: 'pink', at: [-0.5, 0, 0], size: 2 },
         { model: 'candyFloss', variant: 'blue', at: [0, 0, 0.1], size: 2 },
         { model: 'candyFloss', variant: 'rainbow', at: [0.5, 0, 0], size: 2 },
+        { model: 'flossStick', at: [1.1, 0, 0.1], size: 2, turn: 10 },
+        { model: 'flossStick', at: [1.3, 0, 0.3], size: 2, turn: -15 },
+        { model: 'jetpack', at: [-1.4, 0, 0.3] },
       ],
       sky: 'skyDayBottom',
       ground: 'grassLight',
@@ -887,42 +824,98 @@ const SHEET_PAGES: readonly LibraryBook['pages'][number][] = [
   {
     text: 'Up you zoom with Trilla, jet packs on!',
     picture: {
-      cast: [{ model: 'kid', mood: 'happy', pose: 'armsUp', jetpack: 'on', at: [-0.6, 0.4, 0], turn: 30 }, { model: 'trilla', mood: 'happy', jetpack: 'on', at: [0.8, 0.6, 0], turn: 30 }],
+      cast: [
+        { model: 'fluffyCloud', at: [1.6, 1.6, -2.4] },
+        { model: 'kid', mood: 'happy', pose: 'armsUp', jetpack: 'on', at: [-0.6, 0.4, 0], turn: 30 },
+        { model: 'trilla', mood: 'happy', jetpack: 'on', at: [0.8, 0.6, 0], turn: 30 },
+      ],
       sky: 'skySunsetBottom',
       decor: ['clouds', 'speed'],
     },
   },
   {
-    text: 'A disco ball, a tree and a surprise egg.',
+    text: 'A nest on the roof, a biscuit and an egg.',
     picture: {
       cast: [
-        { model: 'lollipopTree', at: [-1.5, 0, -1] },
-        { model: 'discoBall', at: [0.2, 0, 0] },
-        { model: 'surpriseEgg', colour: 'blossomPink', accent: 'markerSky', size: 3, at: [1.2, 0, 0.3] },
-        { model: 'jetpack', at: [-0.6, 0, 0.6] },
+        { model: 'twigNest', at: [-1.2, 0, -0.4] },
+        { model: 'discoBall', at: [0.2, 0, -0.2] },
+        { model: 'surpriseEgg', colour: 'blossomPink', accent: 'markerSky', size: 3, at: [1.3, 0, 0.2] },
+        { model: 'biscuitTreat', at: [-0.3, 0, 0.7], turn: 20 },
+        { model: 'spoon', at: [0.6, 0, 0.9], turn: 60 },
+        { model: 'feather', at: [-1, 0, 1], turn: 30 },
+        { model: 'feather', colour: 'flowerRed', at: [1, 0, 1.1], turn: -40 },
       ],
-      sky: 'skyDayBottom',
-      ground: 'grassLight',
+      sky: 'skySunsetBottom',
+      ground: 'glassTint',
+      decor: ['sparkles'],
     },
   },
   {
-    text: 'A cloud frowns and an alien waves.',
+    text: 'A cloud frowns at the window in the rain.',
     picture: {
-      cast: [{ model: 'stormCloud', mood: 'frown', at: [-0.8, 1, 0] }, { model: 'stormCloud', colour: 'blossomWhite', mood: 'happy', at: [1.4, 1.2, -0.5] }, { model: 'alienSaucer', size: 0.3, at: [0.4, 0, 0.5] }],
-      sky: 'skyDayBottom',
+      cast: [
+        { model: 'stormCloud', mood: 'frown', at: [-0.8, 1.4, -0.6] },
+        { model: 'stormCloud', colour: 'blossomWhite', mood: 'happy', at: [1.8, 1.8, -1.2], size: 0.7 },
+        { model: 'windowFrame', at: [0.6, 0, -0.2] },
+        { model: 'battlement', at: [0, 0, -2.6] },
+        { model: 'umbrellaInsideOut', at: [-1.6, 0, 0.6], turn: 15 },
+        { model: 'puddle', at: [0.4, 0, 0.9] },
+        { model: 'alienSaucer', size: 0.3, at: [1.4, 0, 0.6] },
+      ],
+      sky: 'stoneGreyLight',
+      ground: 'grassLight',
+      decor: ['clouds', 'rain'],
     },
   },
   {
     text: 'Detective Biscuit finds some footprints.',
-    picture: { cast: [{ model: 'biscuit', mood: 'frown', pose: 'wave' }, MAGNIFYING_GLASS, BENCH, FOOTPRINTS], sky: 'skyDayBottom', ground: 'grassLight' },
+    picture: {
+      cast: [
+        { model: 'parkBench', at: [-1.3, 0, -0.9], turn: 15 },
+        { model: 'biscuit', mood: 'frown', pose: 'wave', at: [0.2, 0, -0.2] },
+        { model: 'magnifyingGlass', at: [0.9, 0, 0.2], turn: -30 },
+        { model: 'pancakeFootprint', at: [-0.6, 0, 0.8] },
+        { model: 'pancakeFootprint', at: [0, 0, 1.1], turn: 15 },
+        { model: 'pancakeFootprint', at: [0.6, 0, 0.8], turn: -10 },
+        { model: 'flatStone', at: [1.6, 0, 0.9] },
+        { model: 'stick', at: [1.9, 0, 0.3] },
+        { model: 'flower', colour: 'blossomPink', at: [-2.1, 0, 0.2] },
+        { model: 'flower', colour: 'flowerBlue', at: [-1.7, 0, 0.6], turn: 20 },
+        { model: 'flower', colour: 'flowerYellow', nibbled: true, at: [-2.3, 0, 0.8] },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'pathSand',
+    },
   },
   {
     text: 'RiPika has a duck, a picnic and a rainbow.',
-    picture: { cast: [RAINBOW_ARCH, { model: 'ripika', mood: 'happy', pose: 'wave' }, RUBBER_DUCK, PICNIC, UMBRELLA], sky: 'skyDayBottom', ground: 'grassLight' },
+    picture: {
+      cast: [
+        { model: 'rainbowArch', at: [0, 0, -2.4] },
+        { model: 'queuePosts', at: [-2.2, 0, -0.8], turn: 20 },
+        { model: 'ripika', mood: 'happy', pose: 'wave', at: [-0.9, 0, 0.1] },
+        { model: 'rubberDuck', at: [-0.2, 0, 0.9], turn: -20 },
+        { model: 'picnicBlanket', at: [1.3, 0, 0.3] },
+        { model: 'sandwichTower', at: [1, 0, -0.1] },
+        { model: 'sandwich', at: [1.7, 0, 0.6], turn: 40 },
+        { model: 'jamTart', at: [1.2, 0, 0.8] },
+        { model: 'cake', at: [2, 0, 0] },
+        { model: 'sandwichHeap', at: [3.2, 0, -0.6] },
+      ],
+      sky: 'skyDayBottom',
+      ground: 'grassLight',
+      decor: ['confetti'],
+    },
   },
   {
     text: 'The great wheel lights up for the night.',
-    picture: { cast: [FERRIS_STAND_IN, { model: 'kid', mood: 'surprised', keyring: false, turn: 150, at: [0.8, 0, 1] }], sky: 'skyNightBottom', night: true, ground: 'grassDark', decor: ['stars'] },
+    picture: {
+      cast: [{ model: 'storyWheel', lit: true, at: [0, 0, -2] }, { model: 'kid', mood: 'surprised', keyring: false, turn: 150, at: [0.8, 0, 1] }],
+      sky: 'skyNightBottom',
+      night: true,
+      ground: 'grassDark',
+      decor: ['stars'],
+    },
   },
 ];
 const MODEL_SHEET: LibraryBook = {
@@ -949,7 +942,6 @@ function fixtureColourProblems(books: readonly LibraryBook[]): string[] {
       for (const actor of picture.cast) {
         check(`${book.id} picture ${index} ${actor.model}`, actor.colour);
         check(`${book.id} picture ${index} ${actor.model} accent`, actor.accent);
-        for (const part of actor.parts ?? []) check(`${book.id} picture ${index} prop ${part.shape}`, part.colour);
       }
     }
   }
