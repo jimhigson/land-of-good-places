@@ -506,7 +506,14 @@ The Fable agent below died after its gate run at bf7b1c8b (04:32) without record
 - Verified at bf7b1c8b: all nine check shards exit 0 (`/tmp/es-sh-r5-*.log`, snapshot worktree; clauses 8 and 13 all ✓,
   check:exits companions on 13 holders, check:pet-slide one companion); test:procgen exit 0 (46 files, 2154 passed, 0 skipped,
   250 s); build exit 0. origin/main has not moved (d7fde7bd = merge base).
-- PR head moved 8e8d318a..bf7b1c8b (fast-forward) at 04:53 BST. CI run 39897430858 (CI) + 39897430909 (Update adoption).
+- PR head moved 8e8d318a..bf7b1c8b (fast-forward) at 04:53 BST. CI run 39897430858: **success** (88 jobs success, 1
+  skipped: Deploy); Update adoption 39897430909: success. Parks at source 581ed3c1: restarts 0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5
+  8:1 9:0 10:9 11:4 12:0 13:6 14:8 15:4 — round three's, unchanged. Preview https://pr-722-bf7b1c8-land-of-good-places.blockstack.workers.dev
+- Played on that preview (`/tmp/es-qa/plays7.mjs`, frames `/tmp/es-qa/r7a/`): the fence hop and the train standing short
+  of her and her pet, then going on once she hopped off; the tunnel walked through (-15.0,53.8 → -19.9,40.7); the ride's
+  "Get off" click landed on a chip fading out as the train came in, so she rode on (a play-script bug: plays8.mjs waits
+  for a drawn chip and a train standing a second); the jump meant to land on carriage 1 at Sunny Side carried her over
+  it to the far side (plays8.mjs walks into carriage 3 instead: its rim is 0.45 m over the platform, a step).
 - **The previous CI run, 39249030666 on 8e8d318a, FAILED and nobody recorded it**: 14 of 16 seeds solved no park ("no block
   accepted a restart (restarts 0..63 all rejected)"; only 5 and 15 built), so Procgen invariants and Checks failed for want
   of parks. Cause, from the block logs: seed 0 restart 3 (main's) "rejected by check:park rail.walkable" — the tunnel commit's
