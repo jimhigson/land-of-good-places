@@ -34,6 +34,7 @@ cannot float over anything.
 | The hotel receptionist's script | `world/hotel/Hotel.ts` → `SpeechBubble` | `actionFeedback` | `hotel-reception` |
 | The Reptile House's answers — blurbs, "peep!", "ribbit!", "Hisss-ello!", "3 of 5 babies found!", the Noodle-o-meter reading | `world/reptileHouse/ReptileHouse.ts` (`say`) → `SpeechBubble` | `actionFeedback` | the pressed zone's id (`reptile:<exhibit>`, `reptile:baby:<n>`, `reptile:meter`) |
 | "a wild bunny appears!" on the castle roof | `world/building/WildPets.ts` → `SpeechBubble` | `speech` | `wildPet:<uid>` (its catch chip's item) |
+| The Library's creatures' answers — the baby dragon's hello and "I keep books, not gold!", the cat's purr | `world/library/Library.ts` (`sayCreature`) → `SpeechBubble` | `actionFeedback` | the pressed zone's id (`library-dragon`, `library-cat`) |
 | Dodgems: "TWEET!?" | `minigames/dodgems/tree.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:tree` |
 | Dodgems: giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:giggle:<n>` |
 | Water fight: "YOU" | `minigames/waterFight/child.ts` → `NameLabel` | `playerName` | `player` |
