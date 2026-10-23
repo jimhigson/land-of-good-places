@@ -46,8 +46,11 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
       only: `git push origin feat/library-chapter-books:feat/library-chapter-books-pr`), base
       `feat/library-v2-pr`; body from `chapter-books/pr-body.md` (`gh pr edit 734 --body-file …`);
       first CI run 39964056493 (+ Update adoption 39964056536) on d063e876
-- [ ] CI green on the PR head
-- [ ] preview deep links checked and in the PR body
+- [x] part 4 moved again (2c9c1fca, its handoff only: CI round 1 green on 66549d88): merged with rerere
+      off, park hash unchanged 53dde20f…, step-set proof PROOF OK (`merge-scripts-proof-final.log`)
+- [ ] the PR head fast-forwarded to this branch once run 39964056493's Parks job has saved the parks
+      cache for 53dde20f… (so the final run's Parks is a cache hit), then that run green on every job
+- [ ] preview deep links checked on the newest "Deploy PR preview" host and put in the PR body
 
 ## The merge (4333fc84)
 
@@ -168,4 +171,18 @@ the PR preview the same script runs without the seed suffix (step 9).
 ## Taking over at zero notice
 
 `cd .claude/worktrees/library-chapter-books && pnpm install --frozen-lockfile`. Read the Status
-list above and carry on from the first unticked box.
+list above and carry on from the first unticked box. `.parks/` holds all 16 honest parks for hash
+53dde20f… (check with `chapter-books/parks-fresh.sh`; a src edit inside the closure makes it STALE).
+
+- **Never** push to `feat/library-v2` or `feat/library-v2-pr`; the PR head moves only by
+  `git push origin feat/library-chapter-books:feat/library-chapter-books-pr` (fast-forward). A push to
+  the PR head cancels the PR's running CI run (concurrency group `ci-<ref>`), so push it only for a real
+  change or the final head.
+- If `origin/feat/library-v2` moves: `git -c rerere.enabled=false merge --no-ff origin/feat/library-v2`,
+  then `node .claude/library-build-scratch/chapter-books/merge-scripts-proof.mjs $PWD HEAD^1 HEAD^2 HEAD`,
+  and if the park hash moved, re-solve (`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks`). If
+  #733 has merged: merge `origin/main` instead and `gh pr edit 734 --base main`.
+- Step 9: take the host from the PR's newest "Deploy PR preview" comment (it must name the head sha),
+  then `node .claude/library-build-scratch/chapter-books/look/preview.mjs <host> <outDir>` (headless
+  Chrome, throwaway profile; no seed suffix on the preview), open every frame, and put the two links
+  in `chapter-books/pr-body.md`'s "What to look at" → `gh pr edit 734 --body-file …`.
