@@ -675,3 +675,11 @@ a jump's "Shhh!", story time from cushion 1 (call, gathering, reading, dispersal
   check-library's own room-local heights need `flat-ok`, and nothing else here catches it.
 - Story time, the cushions, the owl and the children are part 4's and on main once #733 merges; Step 12's guard is
   what answers the jet-pack question above.
+
+### The milestone
+
+PR #733 retitled "The Library, part two: the owl librarian, the children and story time", body rewritten for part 4
+(`Closes #718` only; the den, dragon, cat and chapter books named as the next, stacked PR; decisions, questions,
+visual QA, checks; frames on `qa-screenshots` @ 858434dc, `733-library-part-two/`). **Head moved by fast-forward
+b438b695..118468c3** (`git push origin feat/library-v2:feat/library-v2-pr`). CI run **39943305407** (and Update
+adoption 39943305406) started on 118468c3 — not waited for. Everything after 118468c3 on this branch is handoff only.
