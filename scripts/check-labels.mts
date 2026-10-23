@@ -35,17 +35,18 @@
  *  5. **The Library** (#718). The owl at her desk: her card handed over, then
  *     a book recommended, her bubble over her own chip; a shelf book's
  *     "Read it!" chip; then story time with her sat on her story cushion —
- *     the owl's call, her flight over the stacks to the big chair with her
- *     bubble going with her, the children walking to the rug, and the first
- *     pages read over the rug, the cushion's "Get up" chip up below them.
- *     Each visit is asked what it was for (the card held, a book
- *     recommended, her seated, the reading reached), not only whether a chip
- *     was up — and story time is asked what it showed: the frames the owl's
- *     bubble was drawn on the wing, and, while she read, the frames her
- *     bubble, the Get up chip, and both together were drawn. None may be
- *     zero (the review of the join: with her bubble left over her desk,
- *     17 m away, no word of the story was drawn over the rug, and the
- *     scene's other counts did not change).
+ *     the owl's call from her desk, her silent flight over the stacks to the
+ *     big chair (she calls first and flies when it is said: browser QA round
+ *     1 found the call's bubble hiding her whole flight), the children
+ *     walking to the rug, and the first pages read over the rug, the
+ *     cushion's "Get up" chip up below them. Each visit is asked what it was
+ *     for (the card held, a book recommended, her seated, the reading
+ *     reached), not only whether a chip was up — and story time is asked what
+ *     it showed: the frames the owl's bubble was drawn while she called from
+ *     her desk, and, while she read, the frames her bubble, the Get up chip,
+ *     and both together were drawn. None may be zero (the review of the join:
+ *     with her bubble left over her desk, 17 m away, no word of the story was
+ *     drawn over the rug, and the scene's other counts did not change).
  *
  * ## What is asserted, every frame
  *
@@ -625,8 +626,8 @@ let reptileVisited = 0;
 }
 
 // 5 — the Library (#718): the owl hands over her card and recommends a book, a shelf book's chip is up,
-// and story time is called with her sat on her story cushion — the owl's bubble flies over the stacks
-// with her and reads from the big chair over the rug, while the cushion's 'Get up' chip is up below it.
+// and story time is called with her sat on her story cushion — the owl calls from her desk, flies over the
+// stacks silent, and reads from the big chair over the rug, while the cushion's 'Get up' chip is up below it.
 scene_ = 'library';
 let owlSelected = 0;
 let cardGiven = false;
@@ -639,9 +640,11 @@ let readingFrames = 0;
 let readingBubbleFrames = 0;
 let readingChipFrames = 0;
 let readingBothFrames = 0;
-/** On the wing, the call still in her bubble: the frames she spoke, and the frames her bubble was drawn. */
+/** The call, said from her desk before she flies: the frames she spoke it, and the frames her bubble was drawn. */
+let callSpeakingFrames = 0;
+let callBubbleFrames = 0;
+/** The frames she spoke on the wing — none: her flights are silent (`storyTime.ts`). */
 let wingSpeakingFrames = 0;
-let wingBubbleFrames = 0;
 {
   // The Reptile House's last press may have left her on its tortoise: off it first, as a tap would.
   if (player.riding) quietly(() => player.rideHolder?.letGo());
@@ -683,10 +686,11 @@ let wingBubbleFrames = 0;
       if (chipUp) readingChipFrames += 1;
       if (bubbleUp && chipUp) readingBothFrames += 1;
     }
-    if (owlNow.flying && owlNow.speaking) {
-      wingSpeakingFrames += 1;
-      if (bubbleUp) wingBubbleFrames += 1;
+    if (world.library.storyPhase === 'gathering' && owlNow.atDesk && owlNow.speaking) {
+      callSpeakingFrames += 1;
+      if (bubbleUp) callBubbleFrames += 1;
     }
+    if (owlNow.flying && owlNow.speaking) wingSpeakingFrames += 1;
   }
   quietly(() => world.library.standUp());
   run(0.5);
@@ -709,7 +713,7 @@ process.stderr.write(
     `library: the owl selected ${owlSelected} of 2 visits (her card ${cardGiven ? 'handed over' : 'NOT handed over'}, a book ${recommended ? 'recommended' : 'NOT recommended'}), ` +
     `a shelf book's chip ${libraryRead ? 'up' : 'NOT up'}, story time on ${storyFrames} frames (${readingFrames} reading) with her ${seatedForStory ? 'sat on her cushion' : 'NOT seated'}: ` +
     `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
-    `on the wing her bubble drawn on ${wingBubbleFrames} of the ${wingSpeakingFrames} frames she spoke. ` +
+    `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -733,7 +737,7 @@ if (readingFrames === 0) coverageGaps.push('library story time never reached its
 if (readingBubbleFrames === 0) coverageGaps.push("the library owl's bubble was never drawn while she read the story");
 if (readingChipFrames === 0) coverageGaps.push("the story cushion's Get up chip was never drawn while the owl read");
 if (readingBothFrames === 0) coverageGaps.push("the owl's bubble and the cushion's Get up chip were never drawn together while she read");
-if (wingBubbleFrames === 0) coverageGaps.push(`the owl's bubble was never drawn on the wing (${wingSpeakingFrames} frames she spoke flying to the story chair)`);
+if (callBubbleFrames === 0) coverageGaps.push(`the owl's bubble was never drawn while she called story time from her desk (${callSpeakingFrames} frames she said it)`);
 for (const gap of coverageGaps) fail('E coverage', `${gap} — the assertions above would be vacuous`);
 
 if (failures.size > 0) {

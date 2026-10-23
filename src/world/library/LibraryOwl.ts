@@ -1,6 +1,7 @@
 import { Vector3, type Group } from 'three';
 import { angleDelta, clamp, clamp01, damp, lerp, Rng, smoothstep } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
+import { BUILDING_STEP_UP } from '../../core/constants';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { gameStore } from '../../state';
 import type { Player } from '../../entities/Player';
@@ -10,7 +11,7 @@ import { SpeechBubble } from '../../ui/SpeechBubble';
 import { lineSeconds } from '../../ui/speechTiming';
 import { playSurpriseChime } from '../../ui/chime';
 import { createFaceLife, type FaceLife } from '../../art/style/faceLife';
-import { visibleReachXZ } from '../../art/style/measure';
+import { visibleBounds, visibleReachXZ } from '../../art/style/measure';
 import { SpritePuffs } from '../../art/effects/spritePuffs';
 import { createLibraryOwl, type OwlHandle } from '../../art/models/libraryCreatures';
 import { libraryArmchairSize, libraryBookcaseSize } from '../../art/models/libraryAssets';
@@ -48,7 +49,8 @@ import { LIBRARY_FLOOR_Y, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIG
  * put back as the same object. **On the story chair** she has one of her own
  * too ({@link perchCapsule}: her reach over every pose she holds perched —
  * where her wings stay down, a shush there being her face alone). Each top is
- * her measured head, like every solid's since PR #722: a top is where a jump
+ * her head at the top of a breath ({@link owlTop}), like every solid's real top
+ * since PR #722: a top is where a jump
  * lands, and a jump that reaches the top of her head lands on it — physics,
  * not a flag. `LIBRARY_LIBRARIAN_SPOT` therefore left
  * `libraryStandSpots()`: it is a place a child bumps into now, not one she
@@ -278,6 +280,25 @@ export function standingReach(handle: OwlHandle): number {
 }
 
 /**
+ * **Her drawn top at her tallest** — the top of every solid of hers: her head
+ * at the top of a breath, when `body.scale.y` stretches to 1 + {@link
+ * BREATH_DEPTH} (her head rides her body), 3 cm over her rest pose's measured
+ * height. A child stood on her head stands there, so a breath in never pushes
+ * her ear tufts up through the child's feet (`check:library`'s NEVER INSIDE
+ * HER found exactly that, with her solid's top at the rest pose). The handle
+ * is left at rest.
+ */
+export function owlTop(handle: OwlHandle): number {
+  let top = 0;
+  for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
+    handle.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
+    top = Math.max(top, visibleBounds(handle.root).top);
+  }
+  handle.body.scale.set(1, 1, 1);
+  return top;
+}
+
+/**
  * **Her plan reach across every pose she holds perched on the story chair** —
  * the radius of her solid there: her head straight (she watches the child
  * only from her desk) and her breath at rest or at either extreme, the
@@ -336,6 +357,8 @@ export function flightReach(handle: OwlHandle): number {
  * one object may be handed out again for the next.
  */
 export interface OwlBystander {
+  /** Who: "the child", a library child's name, "a pet" — what a check or a reader of {@link LibraryOwl.waitingFor} is told. */
+  what: string;
   x: number;
   y: number;
   z: number;
@@ -345,6 +368,18 @@ export interface OwlBystander {
 
 /** Everybody the owl must keep clear of right now — the Library lists them (`Library.owlBystanders`). */
 export type OwlBystanders = () => Iterable<Readonly<OwlBystander>>;
+
+/**
+ * **The headroom she keeps over anybody's head, waiting over them** — one
+ * step (`BUILDING_STEP_UP`). A child's walk up onto anything within a step
+ * asks for her head's room over it; an owl hovering a hand over the child's
+ * hair took that room, the step became a wall, and the child stood on the
+ * story chair's seat edge (half in its arm, which is a step) was judged wedged
+ * and put down on a cushion a metre and a quarter away (`check:library`'s
+ * NEVER INSIDE HER, measured). A step clear over her, nothing about where she
+ * stands changes.
+ */
+export const OWL_HEADROOM = BUILDING_STEP_UP;
 
 /** A flight under way: from where she took off, to where she lands, how far through, and how she faces on landing. */
 interface Flight {
@@ -385,11 +420,13 @@ export class LibraryOwl {
   readonly radius: number;
   /**
    * Her solid at the desk: a zero-length capsule (a filled disc of
-   * {@link radius}, top at her measured height) registered as `'the owl'`.
+   * {@link radius}, top {@link top}) registered as `'the owl'`.
    * Story time (plan Step 9) takes it out as she leaves the ground and puts the
    * same object back as she lands (`props.detach` / `props.attach`).
    */
   readonly capsule: WallCollider;
+  /** Her drawn top at her tallest breath ({@link owlTop}), over her feet: the top of every solid of hers. */
+  readonly top: number;
   /** Her plan reach over every pose she holds perched ({@link perchReach}): the radius of {@link perchCapsule}. */
   readonly perchRadius: number;
   /**
@@ -446,6 +483,8 @@ export class LibraryOwl {
   private restSolid: WallCollider | null;
   /** How long she has waited, this flight, for somebody to get out of her way (seconds). */
   private waitedSeconds = 0;
+  /** Who she is waiting for this frame, or '' — the bystander her next step would have touched. */
+  private waitingForWhat = '';
   private readonly props: LibraryProps;
   private readonly pose: RoomPoint = { x: 0, y: 0, z: 0 };
 
@@ -467,16 +506,17 @@ export class LibraryOwl {
     this.handle = createLibraryOwl();
     // Measured before she is moved: her reach about her own origin, in her own frame.
     this.radius = standingReach(this.handle);
+    this.top = owlTop(this.handle);
     this.perchRadius = perchReach(this.handle);
     this.flightRadius = flightReach(this.handle);
     this.handle.root.position.set(this.spot.x, 0, this.spot.z);
     this.handle.root.rotation.y = (this.spot.facing * Math.PI) / 180;
     roomRoot.add(this.handle.root);
-    this.capsule = props.wall('the owl', this.spot, this.spot, this.radius, this.handle.height);
+    this.capsule = props.wall('the owl', this.spot, this.spot, this.radius, this.top);
     this.restSolid = this.capsule;
     // The story chair's: held to every keep-out like the desk's, then out of the world until she perches.
     const perch = owlPerch();
-    this.perchCapsule = props.wall('the owl on the story chair', perch, perch, this.perchRadius, perch.y + this.handle.height);
+    this.perchCapsule = props.wall('the owl on the story chair', perch, perch, this.perchRadius, perch.y + this.top);
     props.detach([this.perchCapsule]);
     // On the wing: registered once, out of the world until she leaves the ground (`updateFlight`).
     this.body = collision.addMovingBox(
@@ -485,7 +525,7 @@ export class LibraryOwl {
       0,
       0,
       0,
-      LIBRARY_FLOOR_Y + this.handle.height,
+      LIBRARY_FLOOR_Y + this.top,
       LIBRARY_FLOOR_Y,
       this.flightRadius,
     );
@@ -535,6 +575,11 @@ export class LibraryOwl {
   /** How long she has waited, on this flight or her last, for somebody to get out of her way (seconds). */
   get waited(): number {
     return this.waitedSeconds;
+  }
+
+  /** Who she is waiting for right now ("the child", a library child's name, "a pet"), or '' — she is not. */
+  get waitingFor(): string {
+    return this.waitingForWhat;
   }
 
   /** Where her feet are, room-local — the check reads her against {@link owlFlightPose}. */
@@ -620,6 +665,7 @@ export class LibraryOwl {
     this.atDeskFlag = false;
     this.perchedFlag = false;
     this.waitedSeconds = 0;
+    this.waitingForWhat = '';
     const perch = owlPerch();
     const to: RoomPoint = home ? { x: this.spot.x, y: 0, z: this.spot.z } : { x: perch.x, y: perch.y, z: perch.z };
     const landYaw = ((home ? this.spot.facing : perch.facing) * Math.PI) / 180;
@@ -643,6 +689,7 @@ export class LibraryOwl {
     this.handle.wingL.rotation.z = 0;
     this.handle.wingR.rotation.z = 0;
     this.atDeskFlag = true;
+    this.waitingForWhat = '';
     this.collision.removeBox(this.body);
     this.props.detach([this.perchCapsule]);
     this.props.attach([this.capsule]);
@@ -888,6 +935,7 @@ export class LibraryOwl {
     if (this.wouldTouch(this.pose)) {
       this.waitedSeconds += dt;
     } else {
+      this.waitingForWhat = '';
       if (this.restSolid) {
         this.props.detach([this.restSolid]);
         this.restSolid = null;
@@ -900,7 +948,7 @@ export class LibraryOwl {
         LIBRARY_ORIGIN_X + this.pose.x,
         LIBRARY_ORIGIN_Z + this.pose.z,
         0,
-        LIBRARY_FLOOR_Y + this.pose.y + this.handle.height,
+        LIBRARY_FLOOR_Y + this.pose.y + this.top,
         LIBRARY_FLOOR_Y + this.pose.y,
       );
     }
@@ -930,21 +978,25 @@ export class LibraryOwl {
    * **Would her moving body at `pose` (room-local feet) touch anybody?** — the
    * child, her pets, the library's children ({@link OwlBystanders}), each an
    * upright cylinder: within {@link flightRadius} and their radius of her in
-   * plan, and their heights overlapping hers. The one question that keeps her
-   * from ever being drawn inside somebody, asked before every step she takes.
+   * plan, and their heights — with {@link OWL_HEADROOM} over their heads —
+   * overlapping hers. The one question that keeps her from ever being drawn
+   * inside somebody, asked before every step she takes.
    */
   private wouldTouch(pose: Readonly<RoomPoint>): boolean {
     const x = LIBRARY_ORIGIN_X + pose.x;
     const feet = LIBRARY_FLOOR_Y + pose.y;
     const z = LIBRARY_ORIGIN_Z + pose.z;
-    const head = feet + this.handle.height;
+    const head = feet + this.top;
     for (const somebody of this.bystanders()) {
       const reach = this.flightRadius + somebody.radius;
       const dx = somebody.x - x;
       const dz = somebody.z - z;
       if (dx * dx + dz * dz >= reach * reach) continue;
       // flat-ok: heights in the reading room's own flat space, off the sphere — her feet and head against theirs
-      if (somebody.y < head && feet < somebody.y + somebody.height) return true;
+      if (somebody.y < head && feet < somebody.y + somebody.height + OWL_HEADROOM) {
+        this.waitingForWhat = somebody.what;
+        return true;
+      }
     }
     return false;
   }

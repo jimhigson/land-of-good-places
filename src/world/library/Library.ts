@@ -304,7 +304,7 @@ export class Library implements GameSystem {
   /** Her line of pets out of the backpack ({@link attachParade}) — the owl keeps clear of them as she does of her. */
   private parade: { standing(): Iterable<Readonly<Vector3>> } | null = null;
   /** The one record {@link owlBystanders} writes and hands out, again and again: the owl reads each at once. */
-  private readonly bystander: OwlBystander = { x: 0, y: 0, z: 0, radius: 0, height: 0 };
+  private readonly bystander: OwlBystander = { what: '', x: 0, y: 0, z: 0, radius: 0, height: 0 };
   private inside = false;
   private readonly from = new Vector3();
   private readonly cameraLocal = new Vector3();
@@ -881,6 +881,7 @@ export class Library implements GameSystem {
     const one = this.bystander;
     const player = this.player;
     if (player) {
+      one.what = 'the child';
       one.x = player.position.x;
       one.y = player.position.y;
       one.z = player.position.z;
@@ -889,6 +890,7 @@ export class Library implements GameSystem {
       yield one;
     }
     for (const kid of this.kidsAttached) {
+      one.what = kid.plan.name;
       one.x = kid.body.position.x;
       one.y = kid.body.position.y;
       one.z = kid.body.position.z;
@@ -898,6 +900,7 @@ export class Library implements GameSystem {
     }
     if (!this.parade) return;
     for (const at of this.parade.standing()) {
+      one.what = 'a pet';
       one.x = at.x;
       one.y = at.y;
       one.z = at.z;
