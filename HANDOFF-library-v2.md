@@ -12,18 +12,19 @@ built.
 
 | branch | what |
 |---|---|
-| `feat/engine-solids` @ 2aa9da02 | the engine (PR #722's work branch) — this branch's base |
-| `feat/engine-solids-pr` | PR #722's head (base of the Library v2 PR) |
+| `feat/engine-solids` @ 003d6489 | the engine (PR #722's work branch), **merged in whole at 679c3b31** (round four; it was 2aa9da02 before — see "Engine round four merged" at the end) |
+| `feat/engine-solids-pr` @ fccadf8b | PR #722's head (base of the Library v2 PR); an ancestor of this branch since 679c3b31 |
 | **`feat/library-v2`** | **this integration branch**: engine + the four tracks + the API adaptation. Tracks A–D cut their branches from its head. |
 | `feat/library-v2-pr` | the draft Library v2 PR's head; moved only at milestones by a fast-forward push (`git push origin feat/library-v2:feat/library-v2-pr`), never force |
 
 **The PR: #733** (draft), head `feat/library-v2-pr` @ b438b695, base `feat/engine-solids-pr`
 (#722's head, 8e8d318a). Body: stacked on #722, what is in, what is still being built, the six
 decisions, the question for Jim, "What to look at", the checks; `Closes #718` / `Closes #719`.
-Raise no other. **`origin/feat/engine-solids` has moved on** (8a48066b at the time of writing;
-this branch's base is 2aa9da02): merge it in at the next milestone with
-`git -c rerere.enabled=false merge --no-ff origin/feat/engine-solids`, rebuilding any
-`package.json` resolution from parsed step sets.
+Raise no other. ~~`origin/feat/engine-solids` has moved on~~ — **done: round four (003d6489)
+is merged at 679c3b31** (no conflicts; see "Engine round four merged" at the end). **#733's CI
+at b438b695 (run 39864355905) is red** on shard 1 (check:flat-primitives) and shard 3
+(check:jitter); both are fixed on this branch at f19cd1fc and green locally — the next
+fast-forward of the PR head takes them.
 
 ## What was merged, in order (each `git -c rerere.enabled=false merge --no-ff`)
 
@@ -199,7 +200,9 @@ lintel band 3.00..5.20 m; the flier at 4.00 m; cushion-1 at room (2.1, −8), ra
 
 ## Parks
 
-The park source hash at this head is **8644cfac6fecd6b08b556edd48ebf031c1cc53f56488e1dc66263e240afcdc6d**
+**Superseded at the round-four merge** — the hash is now 4e30969a… and the live `.parks/` holds
+that tree's honest seed 5 (see "Engine round four merged" below). What follows is 33bcc361's.
+The park source hash at that head was **8644cfac6fecd6b08b556edd48ebf031c1cc53f56488e1dc66263e240afcdc6d**
 (src edits since 81ef26e5 are none; scripts are outside the closure). The honest solve:
 `LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run build:parks` in the detached snapshot worktree
 `.claude/worktrees/library-v2-snap` at 81ef26e5 — restart 0 rejected by check:coplanar (213 s),
@@ -213,7 +216,128 @@ seed (copy it back and restamp). The snapshot worktree has been removed (`git wo
 
 `cd .claude/worktrees/library-v2` (branch `feat/library-v2`), `pnpm install --frozen-lockfile`,
 `pnpm exec node -e "console.log(process.env.npm_config_user_agent)"` → pnpm/12.1.0. `.parks/`
-holds the restamped engine parks (or the honest seed 5 once copied from the snapshot); any src
-edit changes the hash — re-restamp (`node scripts/lib/park-source-hash.mjs`, write it into
+holds the honest seed 5 for this tree (hash 4e30969a…, since the round-four merge); any src
+edit inside the park closure changes the hash — re-restamp (`node scripts/lib/park-source-hash.mjs`, write it into
 `.parks/manifest.json`'s `sourceHash`) or use `LGP_PARK_FILE=$PWD/.parks/5.json`. Every red
 above is reproducible from its mutation name.
+
+## Engine round four merged (23 Oct 2026, Opus 5.5) — tracks, read this before your next merge
+
+**Merge 679c3b31** = `git -c rerere.enabled=false merge --no-ff origin/feat/engine-solids` at
+**003d6489** (round four's last code commit is b78789c6; fccadf8b and 003d6489 are handoff
+commits; PR #722's head is fccadf8b, CI 39911387184 green). Then **f19cd1fc**, one red found and
+fixed (below). PR #733's head `feat/library-v2-pr` was **not** moved (still b438b695; a
+fast-forward to this head is possible). Scratch for all of this: `.claude/library-build-scratch/r4merge/`.
+
+**Conflicts: none.** Since the merge base 2aa9da02 the engine changed 16 files and this branch 38,
+and the two sets are disjoint; ort merged without a conflict. Proved: the merge's diff against
+its first parent is exactly the engine's 16 files, against its second exactly this branch's 38;
+`git diff origin/feat/engine-solids...HEAD` names only those 38. **package.json:** neither side
+touched it since the base; parsed (`r4merge/compare-scripts.mjs`, never grepped) the merged
+`scripts` equals both parents': 179 names, every step set equal (`check` 9, `check:shard-1` 26,
+`-2` 4, `-3` 17, `-4` 15, `-5` 8, `-6` 4, `-7` 6, `-8` 1, `-9` 2, `check:crowd` 5, `check:all` 6).
+
+**What came in** (the engine's 14 commits 5edb5b81..003d6489; the earlier round four — pets into
+her backpack on every ride with one beside her, the solid train, the hover rescue, `offTheLine`,
+check:exits 4c/4d, check:pet-slide — was already here from 2aa9da02):
+1. **`Player.isStandingStill`** (one owner): a player standing still is furniture to the crowd —
+   `NpcSystem.separateFromPlayer` moves the child the whole correction. Walking, she still takes
+   her half; a seated child is still furniture to her (she is nudged); a riding player still
+   moves the child.
+2. **`GroundHolder`** (structural, `entities/npc/driver.ts`): a driver whose `holdsGround` is true
+   is furniture in `NpcCharacter.separateFrom` and to a walking player. `NpcCharacter.holdsGround`,
+   and `NpcCharacter.setDown(x, y, z)` — a declared jump, which check:jitter knows.
+3. **Trains:** `TrainStop.waits` (two places to wait per platform, `Station.WAIT_ALONGS` 2.7 and
+   0.9), `TrainService.claimWait/releaseWait`, `ParkTrain.upOn` (a child of the crowd never sits
+   down in the carriage she is standing on). Any stub `TrainService`/`TrainStop` must grow them
+   (tsc found none in this tree).
+4. **`LabelManager`:** `LABEL_ENTRY_CUSHION_PX` = 24 — a label that is down comes up only with 24 px
+   of room beyond the 4 px margin; check:labels' audit asks the same of a label that was down.
+5. **Player's hover rescue** compares `altitudeAt`, not `p.y − hoverAt.y` (check:flat-primitives).
+6. **check:solids:** the census, clauses 1, 5, 9, 10 and the jet-pack report leave the train's 15
+   moving bodies out (stderr says so every run); every clause before 8 asks the park without the
+   train; clause 8 asks every station; clause 13 asks the put-down as chosen. check:crowd's stub
+   stops have their waits; check:jitter hooks `setDown`.
+
+**Park:** the honest seed-5 solve of this tree, in the detached snapshot
+`.claude/worktrees/library-v2-snap` at 679c3b31 (`LGP_SEEDS=5 LGP_RESTART_LANES=4 pnpm run
+build:parks`, `r4merge/snap-build-parks-5.log`): exit 0 in 463 s; restart 0 rejected by
+check:coplanar (207 s); **restart 1 accepted as shipped (134 measures, 457 s), proven, digest
+d6721090fb3f1d3a** (control, cruiser +0.5 m, 7a4f8585bc0a4707 — differs). The digest is the
+pre-merge honest park's own, and `features`/`measures`/`planOrder`/`restart` are byte-identical to
+the pre-merge park **and** to the engine's seed 5 (source 7acd3093): round four moves nothing in
+the Library's park, and the Library still moves nothing in the engine's. Source hash
+**4e30969ae1eee6d88ab0d01268da44fe07692be659c6f1572e561542872dcbda** at 679c3b31 and f19cd1fc
+(f19cd1fc's file is outside the closure — measured with `parkSourceClosure`, 507 files). The live
+`.parks/` holds it; copies at `r4merge/parks-honest-4e30969a/` (and the old one at
+`r4merge/parks-pre-merge-8644cfac/`). The snapshot worktree has been removed.
+
+**Checks at f19cd1fc** (seed 5, that honest park; logs `r4merge/runs/<tag>/`, exit codes read, counts off the screen):
+
+| check | exit | off the screen |
+|---|---|---|
+| `pnpm exec tsc --noEmit` | 0 | |
+| `pnpm run typecheck:test` | 0 | |
+| scripts typecheck instrument (`r4merge/tsconfig.scripts.*.json`: 22 scripts, now with check-solids, -exits, -labels, -npc-jitter, -pet-slide, trace-npc-driver, lib/solidReach) | 2, as the engine tree | **91 messages vs the engine tree's 92**: the one only there is check-library's `removeWall` on a box (fixed here at 81ef26e5); **none new** |
+| `check:library` | 0 | **101 ✓, 0 ✗**, "All clauses passed."; 77 keep-outs (75 room + 2 den); LINTEL 5.20 m against the wall's 2 spans at 5.20; 202 marches, furthest west x −17.08 (at 3.10 m); SIT 0.00 m from cushion-1's middle, feet 0.360 m up; 'Get up' at (2.96, −7.09); worst lowest point 3.5 mm, sole 3.5, hip 0.0; "6 slot(s) WAIT" |
+| `check:exits` | 0 | "check:exits OK" (191 s); the library: 795 exits, 154 put off the lattice, 0 with nowhere; `library-sit:cushion-1`/`-3` "Sit down" → "Get up", moved 1.25 m each; 64 placement call sites, 54 driven (Library.ts endRide ×2, beginRide ×2, teleportTo ×8 and ×2); companions on 13 holders, all "as declared" |
+| `check:solids` (core) | 0 | **80 ✓, 0 ✗**, "check:solids OK"; "a library cushion (top 0.36 m): a sprint and a hop stands her on it at y 0.36"; the library: 13 tops, 0 drop regions, 664 jumps, no roof, no enclosure, nowhere off its floor, nothing wedged; clause 11: 532 pushes, 189 stood, 343 held or walked across, 0 shuttled; "15 moving bodies … are not in the census" |
+| `check:solids-park` | 0 | **31 ✓, 0 ✗** (218 s); the park: 722 tops, 156 regions, 36931 jumps; the line: 89 points (25 walking, 62 hop, 2 tunnel, 0 search); clause 8 drove the train 319 s through Game's wiring; clause 13: 9 put-downs beside it, none inside it or wedged |
+| shard 1, every one of its 26 steps, each run alone | all 0 | flat-primitives "no new flat primitives, and no stale baseline entries" (103 flat-ok sites); deck-fallthrough 151 s; check:crowd 66 s; speech-bubbles 14 s |
+| shard 3, its other 14 steps, each run alone | all 0 | check:jitter: 31 children, 9000 frames, worst own step 0.177 m (Luca), bound 1 m |
+| `pnpm run build` | 0 | |
+
+**Red found, not planted — check:flat-primitives** at 679c3b31 (`r4merge/flat-primitives.log`,
+exit 1): `NEW FLAT PRIMITIVE src/world/library/reader/pagePictures.ts:286 [Y_DIFFERENCE] high - low
+… baseline allows 0 of this expression in this file; found 1. … 1 new flat primitive(s).` At the
+pre-merge head 33bcc361 (the snapshot checked out there, `r4merge/flat-primitives-premerge-33bcc361.log`,
+exit 1) there were two: `src/entities/Player.ts:1828` (engine 97444d7f's hover rescue) and
+`pagePictures.ts:286` (the books2 WIP's `strapJetpack`). **#733's CI at b438b695 (run
+39864355905) is red on exactly these:** shard 1 stopped at check:flat-primitives on both lines,
+and shard 3 at check:jitter (`worst own step 2.743 m (Theo) bound 1 … frame 2085 … at (-20.94,
+12.72) near Sunny Side` — the engine's own round-four red, fixed by 0807890d). Neither shard ran
+its later steps on CI; every one of them ran here, above. **Fix (f19cd1fc):** `// flat-ok: a
+pet's own local bounds on the picture's flat stage` — `strapJetpack` measures a pet model's own
+points on the reader's flat render stage — character for character the annotation
+`feat/library-v2-books` carries (8796bff0), so that join takes it without a conflict. Player.ts's
+line came in fixed with the engine. After: exit 0.
+
+**For the tracks and the join.** Every track branch was cut from 33bcc361, before this. Trial
+merges of each track's current tip into f19cd1fc (in the snapshot, `--no-commit`, then aborted):
+owl 9aef6809 **clean**, kids fb1cc3ed **clean**, den d209d0df **clean**, books 9325e0f7 **one
+conflict** (below), art/story-props d431a47d clean, art/library-v2-den 0c0fecd0 a conflict in
+`layout.ts` that is the library's, not round four's — the den track already carries that art
+branch (`merge-base --is-ancestor`: yes), as books carries story-props, books-a and books-b, so
+merge the tracks, never the art branches.
+- **Every track:** before your next World-building check, merge `origin/feat/library-v2`
+  (f19cd1fc or later) into your branch with `-c rerere.enabled=false`. Your park hash moves:
+  Player.ts, NpcCharacter.ts, NpcSystem.ts, ParkTrain.ts, station.ts, service.ts and
+  trainTrip.ts are in the closure. The honest seed 5 above fits this exact tree only.
+- **Track A (owl):** your `scripts/check-labels.mts` line (`['the library',
+  world.library.screenLabels]`, at line 214) and the engine's edits to it (the import at 90, the
+  audit at 419) are separate hunks. But the owl's bubble and the creature bubble now come up only
+  with 24 px of room beyond the margin, and the audit asks that of them: re-run check:labels.
+- **Track B (kids):** your `NpcCharacter.animate` edit (facing written again after the pose, near
+  line 857) and the engine's (`setDown`/`holdsGround` near 248, `separateFrom` near 580) are
+  separate hunks. Behaviour: a library child walking to her cushion past a player standing still
+  now goes round her, taking the whole correction (it was half). `LibraryKidDriver` may declare
+  `holdsGround` if a child is to stand somewhere on purpose; a driver that says nothing holds no
+  ground. Re-run KIDS and check:jitter.
+- **Track B, story time (Step 9) — a coverage gap, not a red:** check:exits 4c ("her companions on
+  every holder", 13 holders) never asks the story cushion, because its exit loop presses "Get up"
+  before the 0.3 s at which it asks. So a cushion's `'not a ride'` (her pets keep following, Jim
+  19 Oct) is asserted for the breakfast chair, the bed, the banquet and the tree, and nowhere for
+  the cushion. Story time is the natural owner: sit her through a story with three pets out and
+  assert all three stay out and none is seated.
+- **Track C (den):** no file in common with round four. Its package.json adds
+  `pack:/blend:/render:library-den` (three names, no chain change) on top of the 179.
+- **Books join:** it carries engine commits only to 7ce1deae (through art/story-props).
+  **`src/entities/Player.ts` conflicts** in the hover rescue: 8796bff0 put `// flat-ok: the same
+  body a moment later, with its plan drift tested first …` over `Math.abs(p.y - this.hoverAt.y)`;
+  the engine replaced that line with the `altitudeAt` difference and its own two-line comment
+  (0807890d). **Take the engine's side whole and drop the flat-ok line** — the line it excused is
+  gone — then re-run check:flat-primitives. Its package.json adds `check:story-props-glb`
+  (shard-1 26 → 27) and `pack:/blend:/render:story-props`: rebuild from parsed step sets.
+
+**No new blocker or guard, no new decision for Jim** in this merge; the open question above (the
+den is reachable by a jet pack over the west wall until Step 12's guard) stands as it was.
