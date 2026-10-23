@@ -124,7 +124,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Vector3, type BufferAttribute, type Light, type Object3D, type Texture } from 'three';
+import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Raycaster, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -3391,6 +3391,73 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  */
 /** What the live owl's flights measured against `owlFlightPose` — STORY flies them, FLIGHT reports them. */
 const liveFlight = { frames: 0, worst: 0, flights: 0 };
+
+/**
+ * **How much of the owl's bubble the room stands in front of, from the game's camera** — a grid of 9 × 5
+ * points over its painted pill and tail (`contentBox`, laid out on the camera's own axes exactly as
+ * `LabelManager.measureSprite` lays out its corners), each asked of a ray from the camera: does an opaque,
+ * drawn mesh of the reading room or its children (never the owl herself, never a stack faded for the
+ * camera) stand nearer than the point? A depth-tested bubble is cut wherever one does; a bubble drawn over
+ * the scenery (`depthTest` off) is not. Measured, not assumed: the story chair is backed onto the bookcase
+ * wall, and headless Chrome showed a depth-tested bubble there losing its right side ("A day in the pa…").
+ */
+function owlBubbleBehindTheRoom(): { points: number; behind: number; first: string; depthTested: boolean } {
+  const sprite = library.owl.bubble.sprite;
+  const box = library.owl.bubble.contentBox;
+  sprite.updateWorldMatrix(true, false);
+  const e = sprite.matrixWorld.elements;
+  const scaleX = Math.hypot(e[0]!, e[1]!, e[2]!);
+  const scaleY = Math.hypot(e[4]!, e[5]!, e[6]!);
+  const centre = new Vector3().setFromMatrixPosition(sprite.matrixWorld);
+  const lens = camera.camera;
+  lens.updateMatrixWorld();
+  const c = lens.matrixWorld.elements;
+  const right = new Vector3(c[0]!, c[1]!, c[2]!).normalize();
+  const up = new Vector3(c[4]!, c[5]!, c[6]!).normalize();
+  const eye = new Vector3().setFromMatrixPosition(lens.matrixWorld);
+  const opaque = (material: Material): boolean => material.visible && material.depthWrite && (!material.transparent || material.opacity >= 0.999);
+  const drawn = (node: Object3D): boolean => {
+    for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return false;
+    return true;
+  };
+  const owlRoot = library.owl.handle.root;
+  const meshes: Mesh[] = [];
+  for (const root of [library.roomRoot, library.kidsRoot]) {
+    root.traverse((node) => {
+      if (!(node instanceof Mesh) || !drawn(node)) return;
+      for (let at: Object3D | null = node; at; at = at.parent) if (at === owlRoot) return;
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      if (materials.some(opaque)) meshes.push(node);
+    });
+  }
+  const ray = new Raycaster();
+  let points = 0;
+  let behind = 0;
+  let first = '';
+  for (let i = 0; i <= 8; i += 1) {
+    for (let j = 0; j <= 4; j += 1) {
+      const fx = box.x0 + (box.x1 - box.x0) * (0.05 + 0.9 * (i / 8));
+      const fy = box.y0 + (box.y1 - box.y0) * (0.05 + 0.9 * (j / 4));
+      const point = centre
+        .clone()
+        .addScaledVector(right, (fx - sprite.center.x) * scaleX)
+        .addScaledVector(up, (1 - fy - sprite.center.y) * scaleY);
+      const towards = point.clone().sub(eye);
+      const distance = towards.length();
+      ray.set(eye, towards.normalize());
+      ray.far = distance;
+      points += 1;
+      const hit = ray.intersectObjects(meshes, false)[0];
+      if (!hit) continue;
+      behind += 1;
+      if (!first) {
+        const what = hit.object.name || hit.object.parent?.name || hit.object.type;
+        first = `(${(point.x - OX).toFixed(2)}, ${(point.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(point.z - OZ).toFixed(2)}) behind '${what}', which stands ${(distance - hit.distance).toFixed(2)} m nearer the camera`; // flat-ok: room-local, the reading room's own flat space
+      }
+    }
+  }
+  return { points, behind, first, depthTested: sprite.material.depthTest };
+}
 console.log('\nSTORY — the owl calls, flies to the big chair, the children sit, she reads a whole book, and everyone wanders off:');
 {
   const player = child.player;
@@ -3469,6 +3536,8 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   let petFrames = 0;
   let petsOutLeast = Infinity;
   let petsSeatedMost = 0;
+  /** The owl's bubble against the room, a second into the reading, from her cushion's camera. */
+  let bubbleCut: ReturnType<typeof owlBubbleBehindTheRoom> | null = null;
   const offCushionAt = kids.map(() => Number.NaN);
   let homeAt = Number.NaN;
   let prevFeet = new Vector3().copy(owl.feet);
@@ -3533,6 +3602,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
         perchedTouch = { points, touchable, first };
       }
     }
+    if (!bubbleCut && phase === 'reading' && owl.perched && owl.speaking && t - (phaseAt.reading ?? t) >= 1) bubbleCut = owlBubbleBehindTheRoom();
     if (library.playerIsSeated) {
       petFrames += 1;
       const line = parade.lineNow();
@@ -3614,6 +3684,12 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     `the owl as drawn on the chair: ${perchedTouch?.touchable ?? '?'} of her ${perchedTouch?.points ?? 0} visible points are beyond the chair's solids (by more than ${RESOLVER_SLACK} m) ` +
       `where a child standing on clear floor could touch them${perchedTouch?.first ? ` — e.g. ${perchedTouch.first}` : ''}`,
   );
+  say(
+    !!bubbleCut && (bubbleCut.behind === 0 || !bubbleCut.depthTested),
+    `her bubble as she reads from the chair, seen from her cushion: ${bubbleCut?.behind ?? '?'} of ${bubbleCut?.points ?? 0} points of it stand behind the room's own furniture from the camera` +
+      `${bubbleCut?.first ? ` (e.g. ${bubbleCut.first})` : ''}; it is drawn ${bubbleCut?.depthTested === false ? 'over the scenery (depthTest off), so none of it is cut' : 'DEPTH-TESTED, so it is cut there'}`,
+  );
+  if (bubbleCut && bubbleCut.behind === 0) note("STORY: the owl's bubble cleared the room's furniture from this camera — the bubble clause asserted nothing about its depth on this run");
   const pages = book?.pages.map((page) => page.text) ?? [];
   const missing = [
     ...(book ? [LIBRARY_LINES.owl.storyBegin(book.title)] : ['the title line']),
