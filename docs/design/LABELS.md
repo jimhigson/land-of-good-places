@@ -112,14 +112,17 @@ The manager decides whether a label is drawn. It does not decide what the
 scenery may do to a drawn one. A sprite label is a camera-facing quad at its
 speaker's head, and by default its material is **depth-tested**, like
 everything else in the world: furniture nearer the camera than the quad cuts
-it. Every label in the inventory keeps that default except the ones below.
-The choice has one owner, `SpeechBubble`'s `overScenery` option, which turns
-the depth test off on the bubble's own material. Nothing else writes a label's
-material.
+it. Every label in the inventory keeps that default except the two below.
 
-| bubble | why |
-|---|---|
-| The owl librarian's (`world/library/LibraryOwl.ts`) | She reads story time from the big armchair, which is backed onto the bookcase wall. Her bubble's quad, facing the camera from over the chair, reaches back into the wall cases, and depth-tested it lost its right side behind them ("A day in the pa…", headless Chrome, 23 Oct 2026). `check:library`'s STORY measures it from her cushion's camera: 6 of 45 points of the painted bubble stand behind `library.books.2`, so it fails if the bubble is depth-tested. |
+Who decides it: a `SpeechBubble`'s material is its own, so a speaker asks for
+the bubble's `overScenery` option and nothing reaches through `sprite.material`
+to change it. A `SpriteLabel` wraps a sprite its maker built, so the maker owns
+that sprite's material.
+
+| label | decided by | why |
+|---|---|---|
+| The owl librarian's bubble | `SpeechBubble`'s `overScenery`, asked for by `world/library/LibraryOwl.ts` | She reads story time from the big armchair, which is backed onto the bookcase wall. Her bubble's quad, facing the camera from over the chair, reaches back into the wall cases, and depth-tested it lost its right side behind them ("A day in the pa…", headless Chrome, 23 Oct 2026). `check:library`'s STORY measures it from her cushion's camera: 6 of 45 points of the painted bubble stand behind `library.books.2`, so it fails if the bubble is depth-tested. |
+| The dodgems' giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts`, which builds the sprites its `SpriteLabel`s wrap | Built that way with the dodgems (48bf4bcc, 26 July 2026); no reason is recorded. |
 
 Turning it on for another speaker changes how that speaker's bubble looks: it
 would show through a wall or a tree that stands in front of her. So it is a
@@ -157,9 +160,10 @@ Every frame:
   call to action was put away for its own action's answer, chips pressed in
   the Reptile House, shop counters reached, the receptionist reached; and in
   the Library, each visit's purpose (the card handed over, a book recommended,
-  a shelf book's chip up, her seated, the reading reached) and, while the owl
-  reads, the frames her bubble, the cushion's "Get up" chip, and both together
-  were drawn — none of them may be zero.
+  a shelf book's chip up, her seated, the reading reached), the frames the
+  owl's bubble was drawn on the wing, and, while she reads, the frames her
+  bubble, the cushion's "Get up" chip, and both together were drawn — none of
+  them may be zero.
 
 The chips are DOM and Node lays nothing out, so their row size in this check is
 a **layout model** (`chipRowModel`: words at the TEXT RULE minimum, padding,

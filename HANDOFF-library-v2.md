@@ -770,3 +770,22 @@ added [], removed [], changed [] — every step set EQUAL: `check` 9, `check:sha
 the PR head 118468c3 are the same 179. `git diff --stat origin/feat/library-v2-pr...HEAD`: 7 files, every one this
 round's (LABELS.md, check-labels, check-library, SpeechBubble, LibraryOwl, storyTime, this handoff); vs main 19 A,
 38 M, no deletion.
+
+**LABELS.md corrected before the CI run (2d commit of this round's docs):** the dodgems' giggles are also drawn
+over the scenery (`giggles.ts` builds their sprites with `depthTest: false`, since 48bf4bcc; a `SpriteLabel`'s
+sprite is its maker's), so "Drawn over the scenery" lists two labels and says who decides each — the first text
+said the owl's was the only one.
+
+**Not measured, for whoever owns the owl next:** a Talk press at the desk after a story sets her text outside
+`LibraryOwl.update`, so for that one frame the label manager measures her bubble where it was last anchored
+(the perch, since she flies home silent) at the previous line's scale; the next update re-anchors it. If the perch
+is on screen from the desk, that is a one-frame flash there. Anchoring in `say()` would close it.
+
+### For part 5 (`feat/library-v2b`) — new on this branch since 118468c3
+
+d14252b6 (`SpeechBubble`'s `overScenery`; the owl's constructor; LABELS.md), 4ae3835a (STORY's bubble clauses and
+`world.labels.resolve` in its loop; `OWL_BUBBLE_OVER_HEAD` exported; check-labels scene 5's bubble/chip/wing
+counts), 56a72882 (`storyTime.ts` `pickBook` and its `heard`/`lastHeardId`; STORY's landing clause; CLOCK's next
+story and whole rounds, which now **open** the CLOCK block and let the clock go before the fresh visit). Merge
+`origin/feat/library-v2` with `-c rerere.enabled=false`; the creature bubble (part 5) is depth-tested unless it
+asks for `overScenery` — add it to LABELS.md's table if it does. Re-run check:flat-primitives after merging.
