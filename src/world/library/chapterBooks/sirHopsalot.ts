@@ -27,11 +27,22 @@ import type { LibraryBook } from '../books';
  */
 const ON_SEAT = 0.96;
 
-/** A pet sunk low in a cart's tub, ducking: only its ears and the top of its head show over the rim. */
-const DUCKED = ON_SEAT - 0.5;
+/**
+ * RiPika ducking: sunk into her cart's tub with her eyes just over its rim
+ * (a picture should show her face) and her ear tips 0.2 m under a duck bar
+ * hung at the race's own height for it, so she plainly clears it.
+ */
+const DUCKED = ON_SEAT - 0.3;
 
-/** Ducking just enough to show how, eyes still over the rim: RiPika teaching him (page 7). */
-const HALF_DUCKED = ON_SEAT - 0.18;
+/**
+ * Sir Hopsalot ducking at last (page 8): his face sits lower than RiPika's,
+ * so he sinks less to keep it over the rim — and his tall ears still clear
+ * the bar, just: the editor's "ear tips just under the bar".
+ */
+const BUNNY_DUCKED = ON_SEAT - 0.19;
+
+/** Ducking just a little to show him how (page 7), her face still over the seat back. */
+const HALF_DUCKED = ON_SEAT - 0.12;
 
 export const sirHopsalot: LibraryBook = {
   id: 'sirHopsalot',
@@ -141,7 +152,7 @@ export const sirHopsalot: LibraryBook = {
           { model: 'rainbowArch', at: [0, 0, -11] },
           { model: 'duckBar', at: [0, 0, -7] },
           { model: 'cart', colour: 'markerPink', size: 0.4, at: [-0.75, 0, 0], turn: 180 },
-          { model: 'ripika', mood: 'happy', at: [-0.75, HALF_DUCKED, 0], turn: 30 },
+          { model: 'ripika', mood: 'happy', at: [-0.75, HALF_DUCKED, 0], turn: 70 },
           { model: 'cart', colour: 'markerSky', size: 0.4, at: [0.75, 0, -0.1], turn: 180 },
           { model: 'bunny', mood: 'surprised', at: [0.75, ON_SEAT, -0.1], turn: -50 },
         ],
@@ -158,7 +169,7 @@ export const sirHopsalot: LibraryBook = {
           { model: 'cart', colour: 'markerPink', size: 0.4, at: [-0.86, 0, 0.36], turn: 25 },
           { model: 'ripika', mood: 'happy', at: [-0.86, DUCKED, 0.36], turn: 25 },
           { model: 'cart', colour: 'markerSky', size: 0.4, at: [0.86, 0, -0.36], turn: 25 },
-          { model: 'bunny', mood: 'happy', at: [0.86, DUCKED, -0.36], turn: 25 },
+          { model: 'bunny', mood: 'happy', at: [0.86, BUNNY_DUCKED, -0.36], turn: 25 },
         ],
         sky: 'skyDayBottom',
         ground: 'grassLight',

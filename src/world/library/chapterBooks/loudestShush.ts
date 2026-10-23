@@ -75,7 +75,7 @@ export const loudestShush: LibraryBook = {
           { model: 'openBook', colour: 'markerSky', size: 1.3, at: [0.05, 0, 0.6], turn: 10 },
           { model: 'mouse', mood: 'blink', at: [1.1, 0, -0.1], turn: -15 },
           { model: 'openBook', colour: 'markerLemon', size: 1.3, at: [1.05, 0, 0.6], turn: -10 },
-          { model: 'trilla', mood: 'happy', at: [-1.3, 0.4, 0.3], turn: 25 },
+          { model: 'trilla', mood: 'happy', at: [-1.3, 0, 0.3], turn: 25 },
         ],
         sky: 'buildingFloor',
         ground: 'woodLight',
