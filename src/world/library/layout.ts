@@ -452,7 +452,7 @@ export const LIBRARY_DEN_DOOR_HALF = 2;
  * How far the den runs on north past its doorway's north edge: the far
  * corner the baby dragon's nest is tucked into ({@link LIBRARY_DRAGON_NEST}).
  */
-const DEN_NORTH_PAST_DOOR = 1.6;
+export const DEN_NORTH_PAST_DOOR = 1.6;
 
 /**
  * **The den's three inner wall faces**, room-local. The south face is flush

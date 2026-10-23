@@ -287,7 +287,7 @@ TALLEST_CHILD = ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
 # against, where `TALLEST_CHILD` is the worst case the ceiling checks use.
 # Read, not typed, for the reason the whole file exists: this one was typed as
 # **1.86** in two places, and it was wrong by a quarter of a child.
-CHILD_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+CHILD_HEIGHT = ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
 
 # --- the landmarks the furniture is cut from ---------------------------------
 #

@@ -23,6 +23,7 @@ import { ART } from '../style/artPalette';
 import { addOutline, addSmoothOutline, decal, markShared, solid, toonMaterial, type ToonOptions } from '../style/materials';
 import { visibleBounds, visiblePoints } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
+import type { GlbPart } from '../style/glb';
 import { kitBounds, kitTop, kitTreads, libraryPart, libraryPartNames, LIBRARY_SHELF_FOOTPRINT, LIBRARY_SHELL_NODES } from './libraryKit';
 
 /**
@@ -255,15 +256,32 @@ function styleOf(name: string): PartStyle {
   return style;
 }
 
-/** A node's shape in `material`, its node transform carried across with it, dressed by `style`. */
-function placedKitMesh(name: string, material: Material, style: PartStyle): Mesh {
-  const part = libraryPart(name);
+/** A part's shape in `material`, its node transform carried across with it, dressed by `style`. */
+function placedGlbMesh(part: GlbPart, material: Material, style: PartStyle): Mesh {
   const mesh = new Mesh(part.geometry, material);
-  mesh.name = name;
+  mesh.name = part.name;
   mesh.position.copy(part.position);
   mesh.quaternion.copy(part.quaternion);
   mesh.scale.copy(part.scale);
   return dress(mesh, style);
+}
+
+/** A node's shape in `material`, its node transform carried across with it, dressed by `style`. */
+function placedKitMesh(name: string, material: Material, style: PartStyle): Mesh {
+  return placedGlbMesh(libraryPart(name), material, style);
+}
+
+/**
+ * **One part of any Library kit, dressed by a style row** — this file's one
+ * dresser (the shared paint cache, the ink outline, the shadow flags, the
+ * node transform) offered to the Library's other kit modules
+ * (`libraryDenAssets.ts`, the secret den), so a second kit's table is read by
+ * the same hands as this one's. `material` replaces the row's shared paint for
+ * a part that has to own its material (a star that twinkles); the row's
+ * outline and shadow flags still apply.
+ */
+export function dressGlbPart(part: GlbPart, style: PartStyle, material?: Material): Mesh {
+  return placedGlbMesh(part, material ?? paint(style), style);
 }
 
 /** One node of the kit, dressed, its node transform carried across with its shape. `colour` overrides the table's (a chair's cloth). */

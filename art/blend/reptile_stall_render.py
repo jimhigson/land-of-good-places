@@ -53,7 +53,7 @@ from reptile_constants import (  # noqa: E402
 BLEND = os.path.join(REPO, "art", "blend", "reptile_stall.blend")
 OUT = os.path.join(REPO, "art", "renders", "reptile-stall")
 
-KID_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+KID_HEIGHT = ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
 
 ENGINEER_MODULE = "src/art/models/reptileStallAssets.ts"
 
