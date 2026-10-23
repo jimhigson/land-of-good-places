@@ -3586,7 +3586,13 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   );
   say(
     maxStep <= NPC_RADIUS * 2,
-    `no child's own step in any frame was over ${maxStep.toFixed(3)} m (${(NPC_RADIUS * 2).toFixed(2)} allowed) — the hop onto her cushion and off it (${STORY_SIT_SECONDS} s) included: never a snap`,
+    `no child's own step in any frame was over ${maxStep.toFixed(3)} m (${(NPC_RADIUS * 2).toFixed(2)} allowed, check:jitter's bound) — the hop onto her cushion and off it included`,
+  );
+  /** A hop, never a snap: a walk at the summons' pace is a few centimetres a frame, and a sit from a metre out must be too. */
+  const HOP_STEP = 0.1;
+  say(
+    maxStep <= HOP_STEP,
+    `sitting down and getting up are hops (${STORY_SIT_SECONDS} s), never snaps: the longest step any child took through the story was ${maxStep.toFixed(3)} m (${HOP_STEP} allowed; her walk ends a metre out)`,
   );
   say(
     readingDrift.every((drift) => drift <= 0.05) && anchor.some((at) => at !== null),
