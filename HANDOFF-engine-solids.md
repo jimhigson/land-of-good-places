@@ -530,7 +530,29 @@ The Fable agent below died after its gate run at bf7b1c8b (04:32) without record
   b78789c6: the static clauses ask the park without the train (its bodies stood out of the park until clause 8's first
   frame; ParkTrain.moveBodies puts them back every frame). After it: seeds 2, 4, 5 green, 11 back to the known walk-off,
   core OK. Known, unchanged: 9 and 11 walk-off squeezes, 15 bench lean, 6 carriage rim (decision 7).
-- Full census on all 16 at b78789c6 running for the PR's table: `/tmp/es-census15/<seed>.log`. Plan: when run
+- Full census on all 16 at b78789c6 (`/tmp/es-census15/<seed>.log`, `--part=park`, census on): 12 green; red 6 (the carriage
+  rim, decision 7), 9 and 11 (the walk-off squeezes since round three), 15 (the bench lean since round one).
+  Census proofs re-run red at b78789c6 (`/tmp/es-proofs13`): no-crack-rules 25 wedged, sealed-line 59 points with no way
+  off, stranded, low-roof; train-ignores-on-top and riders-sit-on-her (seed 2) too.
+
+| seed | tops | regions | the line: points (walk / hop / tunnel / search) | wall faces | tunnels | stops short on the loop (m) | result |
+|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 753 | 150 | 85 (24 / 59 / 2 / 0) | 161 | 1 | 1.44 | green |
+| 1 | 798 | 158 | 73 (25 / 46 / 2 / 0) | 270 | 1 | 1.47 | green |
+| 2 | 822 | 176 | 77 (23 / 52 / 2 / 0) | 257 | 1 | 1.42 | green |
+| 3 | 721 | 146 | 102 (25 / 75 / 2 / 0) | 157 | 1 | 1.58 | green |
+| 4 | 751 | 119 | 83 (26 / 55 / 2 / 0) | 122 | 1 | 1.44 | green |
+| 5 | 722 | 156 | 89 (25 / 62 / 2 / 0) | 181 | 1 | 1.54 | green |
+| 6 | 785 | 165 | 102 (26 / 74 / 2 / 0) | 180 | 1 | 1.51 | red: the carriage rim at the step's limit (decision 7) |
+| 7 | 721 | 156 | 85 (23 / 60 / 2 / 0) | 142 | 1 | 1.38 | green |
+| 8 | 816 | 157 | 93 (24 / 67 / 2 / 0) | 152 | 1 | 1.40 | green |
+| 9 | 797 | 154 | 87 (24 / 61 / 2 / 0) | 213 | 1 | 1.47 | red: 1 walk-off squeeze (since round three) |
+| 10 | 715 | 161 | 110 (25 / 83 / 2 / 0) | 177 | 1 | 1.67 | green |
+| 11 | 784 | 142 | 69 (26 / 40 / 3 / 0) | 291 | 1 | 1.42 | red: 1 walk-off squeeze (since round three) |
+| 12 | 798 | 170 | 103 (25 / 76 / 2 / 0) | 271 | 1 | 1.63 | green |
+| 13 | 856 | 178 | 88 (22 / 64 / 2 / 0) | 212 | 1 | 1.64 | green |
+| 14 | 766 | 157 | 93 (22 / 69 / 2 / 0) | 197 | 1 | 1.45 | green |
+| 15 | 798 | 169 | 108 (27 / 79 / 2 / 0) | 169 | 1 | 1.62 | red: the far station bench, 0.20 m (since round one) | Plan: when run
   39905508749's "Parks / Parks" finishes, move the PR head to b78789c6+ (check-only: same park source hash 7acd3093…,
   so the new run takes the parks from that one), then play plays9.mjs on its preview.
 - **The previous CI run, 39249030666 on 8e8d318a, FAILED and nobody recorded it**: 14 of 16 seeds solved no park ("no block
