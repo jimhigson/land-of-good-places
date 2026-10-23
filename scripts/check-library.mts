@@ -138,7 +138,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Sprite, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
+import { Box3, Color, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshToonMaterial, Sprite, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -2298,6 +2298,48 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
     `the gold book '${leaf.pullBook.name}' stands ${(-outsideBox(shut, bookLocal.x, bookLocal.z)).toFixed(3)} m inside the shut case's drawn box at (${bookLocal.x.toFixed(2)}, ${bookLocal.z.toFixed(2)}), ` +
       `its base at ${bookBase.toFixed(3)} m on shelf ${LIBRARY_SECRET_BOOK.shelf} (${shelfTop.toFixed(3)}), painted ${gold ? 'helmetGold' : 'NOT gold'}`,
   );
+
+  // The gold book stands alone in its gap: no book of the row it stands in
+  // passes through it. The furnisher leaves the gap (`shelveFace`'s
+  // `pullBookGap`); nothing else would notice it gone — the row's books and the
+  // gold one are drawn by different owners, and both draw happily through each
+  // other. Measured in the leaf's own frame, off the drawn geometry: every row
+  // book whose height range meets the gold book's is on its shelf.
+  {
+    leaf.leaf.updateMatrixWorld(true);
+    const toLeaf = new Matrix4().copy(leaf.leaf.matrixWorld).invert();
+    /** The leaf-frame box round an object's drawn bodies (its ink outlines left out: they are a line, not the book). */
+    const boxInLeaf = (object: Object3D): Box3 => {
+      const box = new Box3();
+      object.traverse((part) => {
+        if (!(part instanceof Mesh) || part instanceof InstancedMesh || part.name.endsWith('.outline')) return;
+        part.geometry.computeBoundingBox();
+        box.union(part.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(toLeaf, part.matrixWorld)));
+      });
+      return box;
+    };
+    const goldBox = boxInLeaf(leaf.pullBook);
+    const row = leaf.leaf.getObjectByName('library.secretShelf.books');
+    const sameShelf: Box3[] = [];
+    if (row instanceof InstancedMesh) {
+      row.geometry.computeBoundingBox();
+      const instance = new Matrix4();
+      for (let i = 0; i < row.count; i += 1) {
+        row.getMatrixAt(i, instance);
+        const book = row.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(new Matrix4().multiplyMatrices(toLeaf, row.matrixWorld), instance));
+        if (book.max.y > goldBox.min.y + 1e-6 && book.min.y < goldBox.max.y - 1e-6) sameShelf.push(book);
+      }
+    }
+    /** How far apart along the row (leaf +X) a book and the gold book stand: negative where they pass through each other. */
+    const apart = (book: Box3): number => Math.max(book.min.x - goldBox.max.x, goldBox.min.x - book.max.x);
+    const through = sameShelf.filter((book) => book.intersectsBox(goldBox) && apart(book) < -1e-4);
+    const nearest = sameShelf.reduce((least, book) => Math.min(least, apart(book)), Infinity);
+    say(
+      !goldBox.isEmpty() && sameShelf.length >= 10 && through.length === 0 && nearest >= 0,
+      `the gold book stands alone in its gap: ${sameShelf.length} book(s) of its row on shelf ${LIBRARY_SECRET_BOOK.shelf} (at least 10 wanted), ` +
+        `${through.length} pass(es) through it (x ${goldBox.min.x.toFixed(3)}..${goldBox.max.x.toFixed(3)} in the leaf's frame); the nearest stands ${nearest.toFixed(3)} m beside it`,
+    );
+  }
 
   // Press. The swing, frame by frame.
   const homeZ = leaf.pullBook.position.z;
