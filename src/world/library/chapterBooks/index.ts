@@ -1,6 +1,9 @@
 import type { LibraryBook } from '../books';
 // Shelf places 1–3: one import a book, in shelf order, below this line.
 // Shelf places 4–6: one import a book, in shelf order, below this line.
+import { giantFootprints } from './giantFootprints';
+import { biscuitStorm } from './biscuitStorm';
+import { catchThatChicken } from './catchThatChicken';
 
 /**
  * **The chapter books, in shelf order** — the big readers' shelf (track D of
@@ -85,4 +88,7 @@ import type { LibraryBook } from '../books';
 export const CHAPTER_BOOKS: readonly LibraryBook[] = [
   // Shelf places 1–3, in shelf order, below this line.
   // Shelf places 4–6, in shelf order, below this line.
+  giantFootprints,
+  biscuitStorm,
+  catchThatChicken,
 ];
