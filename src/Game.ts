@@ -38,7 +38,8 @@ import {
   WornKeychain,
 } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
-import { NavGrid } from './world/NavGrid';
+import type { NavGrid } from './world/NavGrid';
+import { playerNavGrid } from './world/playerLattice';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
@@ -353,21 +354,11 @@ export class Game {
     this.parade = new Parade(this.player, this.world.collision, this.camera);
     this.engine.scene.add(this.parade.group);
     this.addSystem(this.parade);
-    // The seam a nap uses to send a pet to its own bed — see
-    // `Hotel.PetParadeLink` and `Hotel.sendPetsToBed`, its one caller.
-    // `Parade` satisfies the interface structurally; this is the one place
-    // that holds both a `Parade` and a `Hotel` to introduce them.
-    //
-    // **It is the whole of the wiring, and deliberately one-way.** The parade
-    // owns a pet's body from the line all the way onto the cushion and back;
-    // nothing here hides a pet, moves one, or holds a second copy of one.
-    this.world.hotel.petParade = this.parade;
-    // And the same seam again for the great hall's banquet (#449): she sits
-    // down at the feast, and her companions go and eat at their own little
-    // table. Identical shape, identical reasoning — the building says where
-    // the places are, the parade walks the animals to them and owns their
-    // bodies the whole way, and nothing comes back the other direction.
-    this.world.building.petParade = this.parade;
+    // Introduced to the park in one call: the hotel's beds, the castle's
+    // banquet and slide, the train that stops for her line and the ferris
+    // gondola that seats her companion — see `World.attachParade`. One-way,
+    // every one of them: the parade owns its animals' bodies the whole way.
+    this.world.attachParade(this.parade);
 
     // Every balloon the player owns and has not stowed, held above them on a
     // bending string — see `entities/HeldBalloon.ts`'s doc comment for why
@@ -400,19 +391,10 @@ export class Game {
     // on the P1 where a stuttering frame walked her clean through a wall.
     this.world.collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP);
 
-    this.navGrid = new NavGrid(
-      this.world.collision,
-      PLAYER_RADIUS,
-      JUMP_APEX_HEIGHT,
-      // The declared ways between levels — the lobby's sweeping stair, and
-      // whatever the imperial rebuild declares after it. Read at lattice
-      // build; see NavGrid's header and Decision 11.
-      this.world.routeConnectors,
-      // Every railway bridge's deck and ramps (issue #116, Decision 8) — see
-      // NavGrid's own `bridgeCovers` header. Both are `World`'s, which the
-      // put-down rule's window of this lattice reads too.
-      this.world.routeBridgeCovers,
-    );
+    // Her own lattice — the stairs, the bridges, and every solid she can step
+    // up onto — from its one owner, which `check:hotel` builds too, and whose
+    // windows the put-down rule floods (`world/dismount.ts`).
+    this.navGrid = playerNavGrid(this.world);
 
     // And the same map, handed to the parade — issues #602 and #605, the pets
     // that walked through the bedroom wall to get to bed and warped back

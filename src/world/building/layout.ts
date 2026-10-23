@@ -67,7 +67,7 @@ import {
 } from '../../core/constants';
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
-import { terrainHeight, upAt } from '../terrain';
+import { planetRadiusAt, terrainHeight, upAt, yAtRadius } from '../terrain';
 import { Frame, Geo } from '../geo';
 
 /**
@@ -297,6 +297,17 @@ export function castleSurfaceY(
 }
 const _castleProbe = /* @__PURE__ */ new Vector3();
 const _castleLocal = /* @__PURE__ */ new Vector3();
+
+/**
+ * **The world `y`, in column `(x, z)`, of a castle-local height** — what a solid
+ * on the castle's own frame (its curtain wall, its towers) gives as its real
+ * top: the drawn point's radius from the planet's centre, read back in the
+ * collider's column, so the top is where the leaning stone's is.
+ */
+export function castleTopY(x: number, z: number, localX: number, localY: number, localZ: number): number {
+  castleToWorld(_castleProbe.set(localX, localY, localZ), _castleLocal);
+  return yAtRadius(x, z, planetRadiusAt(_castleLocal.x, _castleLocal.y, _castleLocal.z));
+}
 
 /**
  * Facade-local -> world **on the plan alone**, ignoring the castle's lean.
@@ -1125,6 +1136,10 @@ export const ROOF_PAVILION_HALF_Z = 4.6;
  *  `Shell.ts` draws and by the collider `Building.ts` registers, so the thing
  *  she sees and the thing she is stopped by are one height. */
 export const ROOF_PAVILION_HEIGHT = 2.9;
+
+/** Its pyramid roof: where the cone's middle sits and how tall it is — the apex is the pavilion's top. */
+export const ROOF_PAVILION_ROOF_Y = 4.1;
+export const ROOF_PAVILION_ROOF_HEIGHT = 2.4;
 
 /**
  * How thick the roof garden's parapet is, in plan.

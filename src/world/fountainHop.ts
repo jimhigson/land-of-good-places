@@ -13,7 +13,7 @@
  */
 import type { CollisionWorld } from './Collision';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears } from './Collision';
-import type { Fountain } from './Fountain';
+import { BOWL_RADIUS, type Fountain } from './Fountain';
 import { MAX_ROUTE_WAYPOINTS, NavGrid } from './NavGrid';
 import { PLAYER_RADIUS } from '../core/constants';
 import { JUMP_APEX_HEIGHT } from '../entities/Player';
@@ -75,14 +75,17 @@ export function measureFountainHop(
   let rimSegments = 0;
   let rimHoppable = 0;
   let tallestRimTop = 0;
-  collision.forEachWall((x1, z1, x2, z2, _half, topHeight, autoHoppable) => {
+  // The hop is planned on each segment's own height above the plaza
+  // (`hopHeight`) — its top is a place in the world since the engine rework,
+  // the crest a child can land on, and says nothing about how tall the rim is.
+  collision.forEachWall((x1, z1, x2, z2, _half, _top, autoHoppable, _base, _stamped, _absolute, hopHeight) => {
     // The rim by its geometry rather than by a count typed in here: both ends
     // of a rim segment stand on the rim circle, at the fountain's own radius.
     const onRim = (x: number, z: number): boolean => Math.abs(Math.hypot(x - centreX, z - centreZ) - fountain.rimRadius) < 0.05;
     if (!onRim(x1, z1) || !onRim(x2, z2)) return;
     rimSegments += 1;
-    tallestRimTop = Math.max(tallestRimTop, topHeight);
-    if (autoHoppable && autoHopClears(topHeight, JUMP_APEX_HEIGHT)) rimHoppable += 1;
+    tallestRimTop = Math.max(tallestRimTop, hopHeight);
+    if (autoHoppable && autoHopClears(hopHeight, JUMP_APEX_HEIGHT)) rimHoppable += 1;
   });
   check(rimSegments > 0, `the fountain rim is registered as walls (${rimSegments} segments)`);
   check(
@@ -94,11 +97,21 @@ export function measureFountainHop(
 
   // ------------------------------------------- 2. a tap on the water gets there
 
+  // **The open water** — the ring between the fountain's solid middle (the
+  // bowl, `BOWL_RADIUS`, which a wading child is held off at her shoulders) and
+  // the rim. The middle used to be a ghost, so a tap there walked her into the
+  // column; it is solid now, and a tap on it ends beside it like a tap on any
+  // other solid.
+  const innerWater = BOWL_RADIUS + PLAYER_RADIUS + 0.35;
+  const outerWater = waterRadius - PLAYER_RADIUS - 0.1;
+  const midWater = (innerWater + outerWater) / 2;
   const outsideX = centreX;
   const outsideZ = centreZ + fountain.rimRadius + 4;
-  const inbound = plan(outsideX, outsideZ, centreX, centreZ);
+  const tapX = centreX;
+  const tapZ = centreZ + midWater;
+  const inbound = plan(outsideX, outsideZ, tapX, tapZ);
   check(inbound.reached, `a tap on the water routes into it rather than stopping at the rim (reached=${inbound.reached})`);
-  const wading = sample(centreX, centreZ, 500);
+  const wading = sample(tapX, tapZ, 500);
   check(
     Math.abs(inbound.endY - wading) < 0.01,
     `and the route ends on the wading surface, not on the paving outside ` +
@@ -113,8 +126,8 @@ export function measureFountainHop(
   let worstWhere = '';
   let unreached = 0;
   let goals = 0;
-  for (const ring of [0.4, 1.3, 2.2, 3.1]) {
-    const around = ring < 1 ? 7 : 13;
+  for (const ring of [innerWater, midWater, outerWater]) {
+    const around = 13;
     for (let k = 0; k < around; k += 1) {
       const bearing = (k / around) * Math.PI * 2 + ring;
       const gx = centreX + Math.cos(bearing) * ring;
@@ -141,7 +154,7 @@ export function measureFountainHop(
 
   // --------------------------------------------- 3. and she can get out again
 
-  const outbound = plan(centreX, centreZ, outsideX, outsideZ);
+  const outbound = plan(tapX, tapZ, outsideX, outsideZ);
   check(
     outbound.reached,
     `a child standing in the water can be routed back out of it — the basin is not a trap (reached=${outbound.reached})`,

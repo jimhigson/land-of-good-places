@@ -66,7 +66,7 @@ const route = new Float32Array(4096 * 2);
  * real walker out of anything solid, so a spot it moves is a spot she cannot
  * stand on. The same test `check-park.mts` calls `isStandable`. */
 const standable = (x: number, z: number): boolean => {
-  const probe = new Vector3(x, 0, z);
+  const probe = new Vector3(x, world.building.surfaces.sample(x, z, 0), z);
   collision.resolve(probe, PLAYER_RADIUS);
   return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
 };

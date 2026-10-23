@@ -27,7 +27,7 @@ import {
 import { PALETTE } from '../core/palette';
 import { Rng } from '../core/mathUtils';
 import { grassTexture, pinkStoneTexture } from '../core/textures';
-import { placeOnSphere, terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight, yAtAltitude } from './terrain';
 import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
 import { BOUNDARY_WALL_COLLISION_HALF } from './boundary';
@@ -305,7 +305,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
     matrix.compose(positionVector, quaternion, scale);
     pillars.setMatrixAt(i, matrix);
 
-    flatVector.set(x, ground + 2.15, z);
+    flatVector.set(x, ground + PILLAR_CAP_Y, z);
     placeOnSphere(flatVector, station.yaw, positionVector, quaternion);
     matrix.compose(positionVector, quaternion, SQUASHED_CAP);
     caps.setMatrixAt(i, matrix);
@@ -336,16 +336,42 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
     ...collisionStations,
     opening.ends[0],
   ];
+  //
+  // Its top is the masonry's own: two courses of blocks, a real height she can
+  // jump to. That does not let her out — the soft play boundary holds at every
+  // height, and keeps her middle off the wall's footprint — and each pillar is
+  // solid to the top of its cap. A pillar's solid is the wall's own depth
+  // across it, not the pillar's: the park is laid out to keep its paths and
+  // exits off `BOUNDARY_WALL_COLLISION_HALF`, and a deeper solid there would
+  // reach a spur laid against that promise. (So the pillar's inner 0.3 m is
+  // still walked into, as it always was.)
+  const wallHeight = courses * courseHeight;
+  const wall = (ax: number, az: number, bx: number, bz: number): void => {
+    const top = yAtAltitude((ax + bx) / 2, (az + bz) / 2, wallHeight);
+    collision.ownedBy('boundary wall', () =>
+      collision.kinded('boundary wall', () =>
+        collision.addWall(ax, az, bx, bz, BOUNDARY_WALL_COLLISION_HALF, top, false, true),
+      ),
+    );
+  };
   for (let i = 1; i < chain.length; i += 1) {
     const a = chain[i - 1]!;
     const b = chain[i]!;
-    collision.ownedBy('boundary wall', () => collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF));
+    wall(a.x, a.z, b.x, b.z);
   }
   for (let side = 0; side < 2; side += 1) {
     const end = opening.ends[side]!;
     const pier = opening.piers[side]!;
     if (Math.hypot(pier.x - end.x, pier.z - end.z) < RETURN_MIN_LENGTH) continue;
-    collision.ownedBy('boundary wall', () => collision.addWall(end.x, end.z, pier.x, pier.z, BOUNDARY_WALL_COLLISION_HALF));
+    wall(end.x, end.z, pier.x, pier.z);
+  }
+  for (const station of pillarStations) {
+    const top = yAtAltitude(station.x, station.z, PILLAR_CAP_Y + BOUNDARY_MASONRY_HALF_WIDTH * SQUASHED_CAP.y);
+    collision.ownedBy('boundary wall', () =>
+      collision.kinded('boundary pillar', () =>
+        collision.addBox(station.x, station.z, PILLAR_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF, -station.yaw, 0, top, false, true),
+      ),
+    );
   }
 
   return group;
@@ -595,6 +621,8 @@ export const BOUNDARY_BLOCK_WIDTH = 1.7;
 const PILLAR_HALF_WIDTH = 0.75;
 
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);
+/** Where a pillar's cap sits, over the ground under it. */
+const PILLAR_CAP_Y = 2.15;
 
 /** Metres of ground covered by one repeat of the grass texture. */
 const GRASS_TILE_METRES = 6;

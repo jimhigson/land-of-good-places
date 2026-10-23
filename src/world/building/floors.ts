@@ -187,6 +187,10 @@ export const CASTLE_ROOF = CASTLE_FLOORS[2]!;
  */
 export function castleFloorAt(x: number, z: number): CastleFloor | null {
   const dz = z - INTERIOR_ORIGIN_Z;
+  // Every floor's middle is on this one line of `z`: a point further off it
+  // than a floor's radius is on none of them, and that is almost every point
+  // asked (it is asked for every step she takes, out in the park).
+  if (dz > CASTLE_FLOOR_RADIUS || dz < -CASTLE_FLOOR_RADIUS) return null;
   for (const floor of CASTLE_FLOORS) {
     const dx = x - floor.originX;
     if (dx * dx + dz * dz <= CASTLE_FLOOR_RADIUS * CASTLE_FLOOR_RADIUS) return floor;

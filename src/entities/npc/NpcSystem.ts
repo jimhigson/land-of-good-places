@@ -15,8 +15,11 @@ import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
-import { circleSeparation, MAX_DEPENETRATION_SPEED, type CollisionWorld } from '../../world/Collision';
-import { PLAYER_RADIUS } from '../../core/constants';
+import { circleSeparation, MAX_DEPENETRATION_SPEED, separatedByHeight, type CollisionWorld } from '../../world/Collision';
+import { NPC_RADIUS, PLAYER_RADIUS } from '../../core/constants';
+import type { OnTheLine } from '../../world/train/ParkTrain';
+import { trainService, type TrainPassenger } from '../../world/train/service';
+import { terrainHeight } from '../../world/terrain';
 import type { GroundSampler, Player } from '../Player';
 import { CharacterModel } from '../CharacterModel';
 import { ParadeMember } from '../parade/ParadeMember';
@@ -513,6 +516,8 @@ export class NpcSystem implements GameSystem {
    * instance of exactly this.
    */
   private readonly elsewhere = new Set<NpcCharacter>();
+  /** How long each child of the crowd has stood on the railway — see {@link offTheLine}. */
+  private readonly onLineFor = new Map<NpcCharacter, number>();
   /** Who was marked on the *previous* frame — see the guard in
    *  {@link markWhoIsElsewhere}, which needs a transition, not a state. */
   private readonly wasElsewhere = new Set<NpcCharacter>();
@@ -897,6 +902,20 @@ export class NpcSystem implements GameSystem {
     return this.characters;
   }
 
+  /**
+   * **Every child of the crowd who could be standing on the railway**, for the
+   * train to stop for (Jim, 19 Oct 2026: *"make the train stop if anyone is in
+   * front of it"* — `ParkTrain.keepClearOf`): each at its feet, with its
+   * body's radius. Not one the train is carrying: a rider is on the line by
+   * being on the train.
+   */
+  *onTheLine(): Iterable<OnTheLine> {
+    for (const character of this.characters) {
+      if (onTheTrain(character)) continue;
+      yield { x: character.position.x, y: character.position.y, z: character.position.z, radius: NPC_RADIUS };
+    }
+  }
+
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     if (dt <= 0) return;
@@ -961,6 +980,7 @@ export class NpcSystem implements GameSystem {
 
     this.separate(dt);
     this.separateFromPlayer(dt);
+    this.offTheLine(dt);
 
     for (const character of this.characters) {
       character.syncTransform();
@@ -1080,6 +1100,19 @@ export class NpcSystem implements GameSystem {
    *   children on their cushions): the player takes it all, through
    *   `Player.nudge`, so the child stays exactly on her cushion.
    * - **both**: neither can move, so neither is moved.
+   * - **a child riding the train is furniture** like one on a cushion: the
+   *   train places her in her seat every frame, so a player who has jumped up
+   *   onto the carriage beside her takes the whole correction.
+   * - **a player standing still is furniture** (`Player.isStandingStill`): a
+   *   child walking past her goes round her, and she is not shoved. Waiting
+   *   on a platform for the train, the children walking up to their own
+   *   waiting spots (`TrainStop.waitX`, 1.28 m from where the chip stands
+   *   her, inside the 1.52 m the two keep apart) used to push her half the
+   *   overlap a frame, a metre across the platform in ten seconds, into the
+   *   train's way — and the train, which stops for anybody in its way, stood
+   *   short of the station for her, then she was pushed on off the platform's
+   *   edge onto the track (22 Oct 2026, check:solids clause 13). Walking, she
+   *   takes her half as before: she is in charge of where she goes.
    */
   private separateFromPlayer(dt: number): void {
     const player = this.player;
@@ -1087,6 +1120,7 @@ export class NpcSystem implements GameSystem {
 
     const maxPush = MAX_DEPENETRATION_SPEED * dt;
     const playerRiding = player.riding;
+    const playerStill = player.isStandingStill;
 
     for (const character of this.characters) {
       // A climbing child's (x, z) is the tree it is up, not somewhere it is
@@ -1095,8 +1129,17 @@ export class NpcSystem implements GameSystem {
       // player's own seatmate out through the bodywork beside her.
       if (character.climbing || character.scripted) continue;
       // Two pieces of furniture: nobody can step aside, so nobody is moved.
-      const childSeated = character.seated;
+      const childSeated = character.seated || onTheTrain(character);
       if (childSeated && playerRiding) continue;
+      // A child standing at her place to wait for the train
+      // (`NpcCharacter.holdsGround`) is furniture to the walking player, who
+      // goes round her — but she steps aside for a player standing still (a
+      // link that stood them on one spot), and for one a ride is placing.
+      const childHolding = character.holdsGround && !playerRiding && !playerStill;
+      // One above the other — she is stood on a wall or a table — and so not
+      // in each other's way at all. See `separatedByHeight`.
+      const at = player.position;
+      if (separatedByHeight(character.position.x, character.position.y, character.position.z, at.x, at.y, at.z)) continue;
 
       const push = circleSeparation(
         character.position.x,
@@ -1107,18 +1150,21 @@ export class NpcSystem implements GameSystem {
       );
       if (!push) continue;
 
-      if (childSeated || playerRiding) {
+      if (childSeated || childHolding || playerRiding || playerStill) {
         // One side is furniture, so the other takes the whole correction —
         // both halves `circleSeparation` split between them — at the same cap.
+        // A seated child first: she cannot step aside at all, so a player
+        // standing against her cushion is the one moved; then a child at her
+        // place to wait, whom a walking player goes round.
         const wholeX = push.dx * 2;
         const wholeZ = push.dz * 2;
         const whole = Math.hypot(wholeX, wholeZ);
         const cap = whole > maxPush ? maxPush / whole : 1;
-        if (playerRiding) {
+        if (childSeated || childHolding) {
+          player.nudge(wholeX * cap, wholeZ * cap);
+        } else {
           character.position.x -= wholeX * cap;
           character.position.z -= wholeZ * cap;
-        } else {
-          player.nudge(wholeX * cap, wholeZ * cap);
         }
         continue;
       }
@@ -1131,6 +1177,42 @@ export class NpcSystem implements GameSystem {
       character.position.x -= dx;
       character.position.z -= dz;
       player.nudge(dx, dz);
+    }
+  }
+
+  /**
+   * **A child of the crowd never stays on the railway.** None walks onto it
+   * — no route crosses its corridor — but one can be pushed there: off a
+   * platform's edge by a player running about on it, onto a track bed lower
+   * than she can step back up from. The train stops for anybody on the line
+   * ahead of it (`ParkTrain.wayAhead`), so a child left there would hold it
+   * for ever. After {@link OFF_THE_LINE_SECONDS} there she is set down off it,
+   * where the train says is clear (`TrainService.wayOff`).
+   */
+  private offTheLine(dt: number): void {
+    const service = trainService();
+    if (!service) return;
+    for (const character of this.characters) {
+      if (this.elsewhere.has(character) || onTheTrain(character) || character.climbing || character.scripted || character.seated) {
+        this.onLineFor.delete(character);
+        continue;
+      }
+      const at = character.position;
+      if (!service.downOnTheLine(at.x, at.y, at.z, NPC_RADIUS)) {
+        this.onLineFor.delete(character);
+        continue;
+      }
+      const since = (this.onLineFor.get(character) ?? 0) + dt;
+      if (since < OFF_THE_LINE_SECONDS) {
+        this.onLineFor.set(character, since);
+        continue;
+      }
+      this.onLineFor.delete(character);
+      const off = service.wayOff(at.x, at.z, NPC_RADIUS);
+      // A declared jump (`NpcCharacter.setDown`), never a bare write to her
+      // position: `check:jitter` knows it, and her own movement does not read
+      // it back as speed.
+      character.setDown(off.x, terrainHeight(off.x, off.z), off.z);
     }
   }
 
@@ -1642,3 +1724,12 @@ function pickColours(rng: Rng): KidColours {
     bag: rng.pick(BAG_COLOURS),
   };
 }
+
+/** Is this child riding the train — in a seat it places her in every frame (`ParkTrain.carryPassengers`)? */
+function onTheTrain(character: NpcCharacter): boolean {
+  const seat = (character.driver as Partial<TrainPassenger>).trainSeat;
+  return seat !== null && seat !== undefined;
+}
+
+/** How long a child of the crowd may stand on the railway before she is set down off it — see `NpcSystem.offTheLine`. */
+const OFF_THE_LINE_SECONDS = 3;

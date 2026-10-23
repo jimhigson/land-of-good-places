@@ -90,6 +90,18 @@ export interface CharacterDriver {
   update(context: DriverContext, intent: CharacterIntent): void;
 }
 
+/**
+ * **A driver standing somewhere on purpose** — at its place to wait for the
+ * train (`activities/trainTrip.ts`). To the push-apart it is then furniture,
+ * as a child sat on a cushion is: whoever walks into it goes round, and it is
+ * not shoved off its spot (`NpcCharacter.separateFrom`,
+ * `NpcSystem.separateFromPlayer`). Structural, like `TrainPassenger`: a driver
+ * that says nothing holds no ground.
+ */
+export interface GroundHolder {
+  readonly holdsGround: boolean;
+}
+
 /** A fresh, neutral intent. Allocate one per character, at spawn, never later. */
 export function createIntent(): CharacterIntent {
   return {

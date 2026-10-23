@@ -1,7 +1,4 @@
 import type { CollisionWorld, WallCollider } from '../Collision';
-import type { WalkSurfaces } from '../building/surfaces';
-import { Plate } from '../hotel/place';
-import { JUMP_APEX_HEIGHT } from '../../entities/Player';
 import {
   EXHIBIT_PLACEMENTS,
   HIDDEN_BABY_SPOTS,
@@ -22,12 +19,16 @@ import {
 /**
  * **Putting a thing in the Reptile House is one call, and that call decides
  * whether a child can walk through it, whether she may stand there, and
- * whether a jump can land on it** — `hotel/place.ts`'s rule, carried over
- * with the one change the spec makes: **no rectangles**. A `CollisionWorld`
- * rectangle is four walls round a hollow middle a mover is never pushed out
- * of (CLAUDE.md); a wall is a *filled* capsule and a circle a filled disc, so
- * every solid here is one {@link ReptileProps.disc} or one
- * {@link ReptileProps.wall}, and nothing has an inside to be stuck in.
+ * whether a jump can land on it** — `hotel/place.ts`'s rule. Every solid here
+ * is one {@link ReptileProps.disc} or one {@link ReptileProps.wall}, filled,
+ * so nothing has an inside to be stuck in.
+ *
+ * **A solid's top is where a jump lands, and nothing else says so** (Jim,
+ * 17 Oct 2026: *"anything should be jumpable with no special 'floor' being
+ * marked to make it so"*). There used to be a walkable plate laid on every
+ * top a jump could reach and a `stand: false` to leave one off the foliage;
+ * both are gone, and `world/standing.ts` puts her feet on any solid's top her
+ * jump reaches. What keeps her out of an enclosure is how tall its glass is.
  *
  * ## The keep-outs are the other half
  *
@@ -70,13 +71,12 @@ export function reptileKeepOuts(): KeepOut[] {
   return out;
 }
 
-/** A solid's top: a world height feet below it meet and feet above it clear, or `'wall'` for always solid. */
-export type PropTop = number | 'wall';
-
-export interface PropOptions {
-  /** `false` for a top a jump can clear that is nonetheless not a floor (foliage). */
-  readonly stand?: false;
-}
+/**
+ * A solid's top: a world height feet below it meet and feet above it clear.
+ * Always a real height — the `'wall'` (always solid) option went with Jim's
+ * ruling of 17 Oct 2026 that nothing drawn has a flag for a top.
+ */
+export type PropTop = number;
 
 export class ReptileProps {
   readonly violations: string[] = [];
@@ -95,57 +95,40 @@ export class ReptileProps {
   }[] = [];
 
   private readonly collision: CollisionWorld;
-  private readonly surfaces: WalkSurfaces;
   private readonly originX: number;
   private readonly originZ: number;
   private readonly keepOuts: readonly KeepOut[];
 
-  constructor(collision: CollisionWorld, surfaces: WalkSurfaces, originX: number, originZ: number) {
+  constructor(collision: CollisionWorld, originX: number, originZ: number) {
     this.collision = collision;
-    this.surfaces = surfaces;
     this.originX = originX;
     this.originZ = originZ;
     this.keepOuts = reptileKeepOuts();
   }
 
-  /** A solid disc, hall-local. `top` absolute, or `'wall'`. */
-  disc(what: string, x: number, z: number, radius: number, top: PropTop, options: PropOptions = {}): void {
+  /** A solid disc, hall-local, to its absolute `top`. */
+  disc(what: string, x: number, z: number, radius: number, top: PropTop): void {
     this.checkKeepOuts(what, [{ x, z }], radius);
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
-    let handle: number;
-    if (top === 'wall') {
-      handle = this.collision.addCircle(worldX, worldZ, radius);
-    } else {
-      handle = this.collision.addCircle(worldX, worldZ, radius, top, false, true);
-      this.standable(top, worldX - radius * 0.75, worldX + radius * 0.75, worldZ - radius * 0.75, worldZ + radius * 0.75, options);
-    }
+    const handle = this.collision.kinded(what, () => this.collision.addCircle(worldX, worldZ, radius, top, false, true));
     this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
-  /** A filled capsule between two hall-local points. `half` is the half-thickness. */
-  wall(what: string, a: LocalPoint, b: LocalPoint, half: number, top: PropTop, options: PropOptions = {}): void {
+  /**
+   * A filled capsule between two hall-local points. `half` is the
+   * half-thickness; `topHalf`, when the thing is drawn thinner than its solid
+   * (a panel), is how much of its top is drawn — `CollisionWorld.toppedNarrow`.
+   */
+  wall(what: string, a: LocalPoint, b: LocalPoint, half: number, top: PropTop, topHalf = Number.NaN): void {
     this.checkKeepOuts(what, [a, b], half);
     const ax = this.originX + a.x;
     const az = this.originZ + a.z;
     const bx = this.originX + b.x;
     const bz = this.originZ + b.z;
-    let handle: WallCollider;
-    if (top === 'wall') {
-      handle = this.collision.addWall(ax, az, bx, bz, half);
-    } else {
-      handle = this.collision.addWall(ax, az, bx, bz, half, top, false, true);
-      // The plate is the capsule's axis-aligned box — right for the axis-aligned
-      // logs this building has, conservative otherwise.
-      this.standable(
-        top,
-        Math.min(ax, bx) - half,
-        Math.max(ax, bx) + half,
-        Math.min(az, bz) - half,
-        Math.max(az, bz) + half,
-        options,
-      );
-    }
+    const handle: WallCollider = this.collision.kinded(what, () =>
+      this.collision.toppedNarrow(topHalf, () => this.collision.addWall(ax, az, bx, bz, half, top, false, true)),
+    );
     this.solids.push({ what, shape: 'wall', top, points: [a, b], radius: half, handle });
   }
 
@@ -156,12 +139,6 @@ export class ReptileProps {
       `${this.violations.length} Reptile House solid(s) block a spot a child must be able to stand on:\n` +
         this.violations.map((line) => `  - ${line}`).join('\n'),
     );
-  }
-
-  private standable(top: number, minX: number, maxX: number, minZ: number, maxZ: number, options: PropOptions): void {
-    if (options.stand === false) return;
-    if (top > JUMP_APEX_HEIGHT) return;
-    this.surfaces.addPlatform(new Plate(top, minX, maxX, minZ, maxZ));
   }
 
   private checkKeepOuts(what: string, points: readonly LocalPoint[], radius: number): void {

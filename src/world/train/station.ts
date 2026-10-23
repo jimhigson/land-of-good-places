@@ -11,7 +11,8 @@ import { PALETTE } from '../../core/palette';
 import { woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
-import { standOnSphere, terrainHeight } from '../terrain';
+import { CHILD_FOOTPRINT } from '../../art/models/kid';
+import { solidInFrame, standOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
@@ -58,6 +59,54 @@ const PLATFORM_OFFSET = 2.15;
 
 const CANOPY_HEIGHT = 2.9;
 
+/** The awning: wider than the platform, set towards the track, tipped to shed rain. */
+const ROOF_WIDTH = PLATFORM_WIDTH + 0.5;
+const ROOF_THICKNESS = 0.16;
+const ROOF_OFFSET = 0.1;
+const ROOF_TILT = 0.06;
+/** Its underside at its low edge, and its top at its high one, over the platform's foot. */
+const ROOF_UNDERSIDE = PLATFORM_HEIGHT + CANOPY_HEIGHT - ROOF_THICKNESS / 2 - (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
+const ROOF_TOP = PLATFORM_HEIGHT + CANOPY_HEIGHT + ROOF_THICKNESS / 2 + (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
+
+/** The bench at the back of the sheltered end: its seat and its back, in from the platform's back edge. */
+/**
+ * The waiting spots ({@link Station.waits}): 0.45 m behind the platform's
+ * middle line, along it towards the open end — the canopy's posts stand at
+ * −2.6 and −0.2 along and the bench from −2.4 to −0.4, so the open end is the
+ * only clear stretch. With the crowd's arrival radius (0.6 m, `trainTrip.ts`)
+ * a child waits at least 2.0 m from the line's middle: her body a metre clear
+ * of the engine's eaves.
+ *
+ * Two of them, a child's width ({@link CHILD_FOOTPRINT}) apart, the far one
+ * first: 2.7 m along, the child's body (`CHILD_FOOTPRINT / 2`) ending at the
+ * platform's end (`PLATFORM_LENGTH / 2`), and 0.9 m along, her collision circle
+ * (`NPC_RADIUS`, 0.5 m) 0.49 m clear of the post's (0.22 m, at −0.2 along and
+ * 0.95 across). One child to a spot (`TrainService.claimWait`):
+ * two sent to one spot pushed each other, and the first there was shoved a
+ * metre across the platform and off its edge onto the track, where the train she
+ * was waiting for stood for her.
+ *
+ * The nearer spot is 1.0 m from where the player's chip stands her ({@link
+ * Station.standX}). She is not shoved while she stands still, so a child walking
+ * up to it is held 1.52 m from her (`NpcSystem.PLAYER_SEPARATION`) — 0.5 m
+ * short of the spot, inside the 0.6 m that counts as arrived: she waits there,
+ * and does not walk into the player's back for a minute.
+ */
+const WAIT_ACROSS = 0.45;
+const WAIT_ALONG = 2.7;
+const WAIT_ALONGS: readonly number[] = [WAIT_ALONG, WAIT_ALONG - CHILD_FOOTPRINT];
+
+const BENCH_LENGTH = 2.0;
+const BENCH_ALONG = -1.4;
+const BENCH_SEAT_DEPTH = 0.52;
+const BENCH_SEAT_THICKNESS = 0.1;
+const BENCH_SEAT_IN = 0.55;
+const BENCH_SEAT_Y = 0.42;
+const BENCH_BACK_DEPTH = 0.1;
+const BENCH_BACK_HEIGHT = 0.44;
+const BENCH_BACK_IN = 0.32;
+const BENCH_BACK_Y = 0.66;
+
 /** The sheltered end: how much of the platform it covers, and where. */
 const CANOPY_LENGTH = 3.4;
 const CANOPY_CENTRE = -1.4;
@@ -84,6 +133,23 @@ export class Station {
 
   /** Top of the platform, in world units. */
   readonly surfaceY: number;
+
+  /**
+   * **Where a child of the crowd waits for the train**: on the platform's open
+   * end and back half — {@link WAIT_ACROSS} behind its middle line and
+   * {@link WAIT_ALONG} along from its middle, clear of the canopy's posts and
+   * the bench — so a child waiting is never in the way of the train she is
+   * waiting for (it stops for anybody in its way: `ParkTrain.wayAhead`). The
+   * first of {@link waits}.
+   */
+  readonly waitX: number;
+  readonly waitZ: number;
+  /**
+   * **Every place to wait**, a child's width apart along the open end, the far
+   * one first (`TrainStop.waits`): one child to a place, so no two are sent to
+   * the same spot to push each other across the platform.
+   */
+  readonly waits: readonly { readonly x: number; readonly z: number }[];
 
   /** Lamp materials, brightened after dark. */
   readonly lamps: MeshBasicMaterial[] = [];
@@ -124,6 +190,10 @@ export class Station {
     const yaw = Math.atan2(tangent.x, tangent.z);
     this.cosYaw = Math.cos(yaw);
     this.sinYaw = Math.sin(yaw);
+    this.waits = WAIT_ALONGS.map((along) => this.local(-trackSide * WAIT_ACROSS, along));
+    const wait = this.waits[0]!;
+    this.waitX = wait.x;
+    this.waitZ = wait.z;
 
     this.group.name = `train-station-${options.index}`;
     this.group.position.set(this.standX, ground, this.standZ);
@@ -135,6 +205,14 @@ export class Station {
     standOnSphere(this.group);
 
     this.build(options, trackSide, collision);
+  }
+
+  /** A point in the station's own frame (`across`, `along`), at `stand + yawed local` — where its colliders are counted from. */
+  private local(across: number, along: number): { x: number; z: number } {
+    return {
+      x: this.standX + across * this.cosYaw + along * this.sinYaw,
+      z: this.standZ - across * this.sinYaw + along * this.cosYaw,
+    };
   }
 
   /** The platform deck, for `WalkSurfaces.addPlatform`. */
@@ -254,21 +332,41 @@ export class Station {
       post.receiveShadow = true;
       this.group.add(post);
 
-      // Solid, so nobody walks through the canopy support.
-      collision.addCircle(
-        this.standX + postX * this.cosYaw + along * this.sinYaw,
-        this.standZ - postX * this.sinYaw + along * this.cosYaw,
-        0.22,
-      );
+      // Solid, so nobody walks through the canopy support — up to the roof.
+      const footX = this.standX + postX * this.cosYaw + along * this.sinYaw;
+      const footZ = this.standZ - postX * this.sinYaw + along * this.cosYaw;
+      const standing = solidInFrame(this.standX, this.standZ, footX, footZ, PLATFORM_HEIGHT, ROOF_TOP);
+      collision.kinded('station canopy post', () => collision.addCircle(footX, footZ, 0.22, standing.top, false, true));
     }
 
     const roof = new Mesh(
-      new BoxGeometry(PLATFORM_WIDTH + 0.5, 0.16, CANOPY_LENGTH),
+      new BoxGeometry(ROOF_WIDTH, ROOF_THICKNESS, CANOPY_LENGTH),
       roofMaterial,
     );
-    roof.position.set(trackSide * 0.1, PLATFORM_HEIGHT + CANOPY_HEIGHT, CANOPY_CENTRE);
+    roof.position.set(trackSide * ROOF_OFFSET, PLATFORM_HEIGHT + CANOPY_HEIGHT, CANOPY_CENTRE);
     // Tipped down towards the track, the way a platform awning sheds rain.
-    roof.rotation.z = trackSide * 0.06;
+    roof.rotation.z = trackSide * ROOF_TILT;
+    // A solid her head meets: far over it on the platform, but a jump reaches
+    // it. From its underside to its top, tilt and all.
+    {
+      const centre = this.local(trackSide * ROOF_OFFSET, CANOPY_CENTRE);
+      const roofSolid = solidInFrame(this.standX, this.standZ, centre.x, centre.z, ROOF_UNDERSIDE, ROOF_TOP);
+      const roofBase = solidInFrame(this.standX, this.standZ, centre.x, centre.z, ROOF_UNDERSIDE, ROOF_UNDERSIDE);
+      collision.kinded('station canopy', () =>
+        collision.addBox(
+          roofSolid.x,
+          roofSolid.z,
+          ROOF_WIDTH / 2,
+          CANOPY_LENGTH / 2,
+          Math.atan2(-this.sinYaw, this.cosYaw),
+          0,
+          roofSolid.top,
+          false,
+          true,
+          roofBase.top,
+        ),
+      );
+    }
     roof.castShadow = true;
     roof.receiveShadow = true;
     this.group.add(roof);
@@ -288,16 +386,35 @@ export class Station {
     this.group.add(valance);
 
     // --- bench ---------------------------------------------------------------
-    const benchSeat = new Mesh(new BoxGeometry(0.52, 0.1, 2.0), boardMaterial);
-    benchSeat.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.55), PLATFORM_HEIGHT + 0.42, -1.4);
+    const benchSeat = new Mesh(new BoxGeometry(BENCH_SEAT_DEPTH, BENCH_SEAT_THICKNESS, BENCH_LENGTH), boardMaterial);
+    benchSeat.position.set(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_SEAT_IN), PLATFORM_HEIGHT + BENCH_SEAT_Y, BENCH_ALONG);
     benchSeat.castShadow = false;
     benchSeat.receiveShadow = true;
     this.group.add(benchSeat);
 
-    const benchBack = new Mesh(new BoxGeometry(0.1, 0.44, 2.0), boardMaterial);
-    benchBack.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.32), PLATFORM_HEIGHT + 0.66, -1.4);
+    const benchBack = new Mesh(new BoxGeometry(BENCH_BACK_DEPTH, BENCH_BACK_HEIGHT, BENCH_LENGTH), boardMaterial);
+    benchBack.position.set(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_BACK_IN), PLATFORM_HEIGHT + BENCH_BACK_Y, BENCH_ALONG);
     benchBack.castShadow = false;
     this.group.add(benchBack);
+
+    // The bench is solid: a seat she steps up onto from the platform, and a
+    // back behind it to its own top. (It had no collider at all.)
+    {
+      const yaw = Math.atan2(-this.sinYaw, this.cosYaw);
+      const seatAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_SEAT_IN), BENCH_ALONG);
+      const seat = solidInFrame(this.standX, this.standZ, seatAt.x, seatAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_SEAT_Y + BENCH_SEAT_THICKNESS / 2);
+      const backAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_BACK_IN), BENCH_ALONG);
+      const back = solidInFrame(this.standX, this.standZ, backAt.x, backAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_BACK_Y + BENCH_BACK_HEIGHT / 2);
+      collision.kinded('station bench', () => {
+        collision.addBox(seat.x, seat.z, BENCH_SEAT_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, seat.top, false, true);
+        // The backrest is a plank's edge, not a ledge: she bumps it and sits
+        // against it, and never stands on top of it (seed 15's census stood
+        // her there, 0.2 m inside the drawn canopy's frame).
+        collision.toppedNarrow(BENCH_BACK_DEPTH / 2, () =>
+          collision.addBox(back.x, back.z, BENCH_BACK_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, back.top, false, true),
+        );
+      });
+    }
 
     for (const along of [-2.3, -0.5] as const) {
       const leg = new Mesh(new BoxGeometry(0.44, 0.42, 0.12), postMaterial);

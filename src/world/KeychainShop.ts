@@ -16,6 +16,10 @@ import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacemen
 import {
   addBoothCollision,
   KEYCHAIN_BOOTH_BOX,
+  KEYCHAIN_CART_BOARD_Y,
+  KEYCHAIN_PARASOL_RADIUS,
+  KEYCHAIN_PARASOL_Y,
+  KEYCHAIN_PARASOL_Z,
   KEYCHAIN_STALL_DEPTH,
   KEYCHAIN_STALL_WIDTH,
 } from '../minigames/boothFootprint';
@@ -998,7 +1002,12 @@ export class KeychainShop implements GameSystem {
   }
 
   /** She stands at the rack held by this while it is zoomed — let go by closing it. */
-  private readonly viewHolder: RideHolder = { holding: 'the keychain rack', letGo: () => this.closeView() };
+  private readonly viewHolder: RideHolder = {
+    holding: 'the keychain rack',
+    letGo: () => this.closeView(),
+    // A look at the rack, not a ride: her line stays at her heels.
+    companion: 'not a ride',
+  };
 
   /**
    * Eases {@link viewFacing} towards {@link viewFacingTarget} and writes it
@@ -1287,7 +1296,7 @@ export class KeychainShop implements GameSystem {
     addOutline(body, 0.014);
 
     const top = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH - 0.08, 0.06, STALL_DEPTH - 0.06, 3, 0.03), topMaterial));
-    top.position.set(0, 0.855, 0);
+    top.position.set(0, KEYCHAIN_CART_BOARD_Y, 0);
     this.group.add(top);
 
     // A cheerful trim band round the counter's skirt.
@@ -1309,7 +1318,7 @@ export class KeychainShop implements GameSystem {
     // clearly from the fixed isometric camera among the garden's foliage.
     const poleMaterial = toonMaterial(ART.cream);
     const pole = solid(new Mesh(new CylinderGeometry(0.03, 0.03, 1.35, 8), poleMaterial));
-    pole.position.set(0, 1.55, -STALL_DEPTH / 2 + 0.15);
+    pole.position.set(0, 1.55, KEYCHAIN_PARASOL_Z);
     this.group.add(pole);
 
     const canopyColours = [PALETTE.markerPink, ART.miniLilac];
@@ -1318,16 +1327,16 @@ export class KeychainShop implements GameSystem {
       const angle0 = (i / wedges) * Math.PI * 2;
       const wedge = solid(
         new Mesh(
-          new CylinderGeometry(0.62, 0.62, 0.1, 1, 1, false, angle0, (Math.PI * 2) / wedges),
+          new CylinderGeometry(KEYCHAIN_PARASOL_RADIUS, KEYCHAIN_PARASOL_RADIUS, 0.1, 1, 1, false, angle0, (Math.PI * 2) / wedges),
           toonMaterial(canopyColours[i % 2] ?? PALETTE.markerPink),
         ),
       );
       wedge.scale.set(1, 0.35, 1);
-      wedge.position.set(0, 2.18, -STALL_DEPTH / 2 + 0.15);
+      wedge.position.set(0, KEYCHAIN_PARASOL_Y, KEYCHAIN_PARASOL_Z);
       this.group.add(wedge);
     }
     const canopyCap = solid(new Mesh(new SphereGeometry(0.06, 10, 8), poleMaterial));
-    canopyCap.position.set(0, 2.24, -STALL_DEPTH / 2 + 0.15);
+    canopyCap.position.set(0, 2.24, KEYCHAIN_PARASOL_Z);
     this.group.add(canopyCap);
 
     // The six keyrings themselves, stood on the counter as a display rack —

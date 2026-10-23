@@ -19,6 +19,19 @@ import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 // mesh. See `stallPlacement.ts`.
 export { STALL_STAND_DISTANCE } from './stallPlacement';
 import { STALL_STAND_DISTANCE } from './stallPlacement';
+import {
+  MINI_GAME_AWNING_CLOTH,
+  MINI_GAME_AWNING_DEPTH,
+  MINI_GAME_AWNING_TILT,
+  MINI_GAME_AWNING_Y,
+  MINI_GAME_AWNING_Z,
+  MINI_GAME_BACK_WALL_HEIGHT,
+  MINI_GAME_COUNTER_BOARD_Y,
+  MINI_GAME_PANEL_THICKNESS,
+  MINI_GAME_SIDE_PANEL_DEPTH,
+  MINI_GAME_SIDE_PANEL_HEIGHT,
+  MINI_GAME_SIDE_PANEL_Z,
+} from './boothFootprint';
 import type { StallDefinition } from './types';
 
 /**
@@ -84,16 +97,18 @@ export function createStallProp(definition: StallDefinition): StallProp {
   root.add(pad);
 
   // --- back wall and side panels -------------------------------------------
-  const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, 2.5, 0.18, 3, 0.07), creamMaterial));
-  back.position.set(0, 1.25, -1.1);
+  // Heights from the booth's one owner (`boothFootprint.ts`), so the wall a
+  // child bumps and the wall she sees are one number.
+  const back = solid(new Mesh(new RoundedBoxGeometry(STALL_WIDTH, MINI_GAME_BACK_WALL_HEIGHT, MINI_GAME_PANEL_THICKNESS, 3, 0.07), creamMaterial));
+  back.position.set(0, MINI_GAME_BACK_WALL_HEIGHT / 2, -1.1);
   root.add(back);
   addOutline(back, 0.02);
 
   for (const side of [-1, 1] as const) {
     const panel = solid(
-      new Mesh(new RoundedBoxGeometry(0.18, 2.3, 1.9, 3, 0.07), creamMaterial),
+      new Mesh(new RoundedBoxGeometry(MINI_GAME_PANEL_THICKNESS, MINI_GAME_SIDE_PANEL_HEIGHT, MINI_GAME_SIDE_PANEL_DEPTH, 3, 0.07), creamMaterial),
     );
-    panel.position.set(side * (halfWidth - 0.09), 1.15, -0.2);
+    panel.position.set(side * (halfWidth - 0.09), MINI_GAME_SIDE_PANEL_HEIGHT / 2, MINI_GAME_SIDE_PANEL_Z);
     root.add(panel);
   }
 
@@ -108,7 +123,7 @@ export function createStallProp(definition: StallDefinition): StallProp {
   const counterTop = solid(
     new Mesh(new RoundedBoxGeometry(STALL_WIDTH - 0.1, 0.14, 0.92, 3, 0.06), boardMaterial),
   );
-  counterTop.position.set(0, 1.08, 1.02);
+  counterTop.position.set(0, MINI_GAME_COUNTER_BOARD_Y, 1.02);
   root.add(counterTop);
 
   // A skirt of alternating colour under the counter lip, so the front of the
@@ -165,13 +180,13 @@ export function createStallProp(definition: StallDefinition): StallProp {
 
   // --- striped awning -------------------------------------------------------
   const awning = new Group();
-  awning.position.set(0, 2.72, 0.15);
-  awning.rotation.x = -0.22;
+  awning.position.set(0, MINI_GAME_AWNING_Y, MINI_GAME_AWNING_Z);
+  awning.rotation.x = -MINI_GAME_AWNING_TILT;
   root.add(awning);
 
   const stripes = 9;
   const stripeWidth = STALL_WIDTH / stripes;
-  const awningDepth = 1.85;
+  const awningDepth = MINI_GAME_AWNING_DEPTH;
   // One scallop shape for every stripe of this booth — see `scallopGeometry`.
   const scallopShape = scallopGeometry(stripeWidth * SCALLOP_LENGTH_OF_STRIPE);
   for (let i = 0; i < stripes; i += 1) {
@@ -260,7 +275,7 @@ export function createStallProp(definition: StallDefinition): StallProp {
 }
 
 /** Thickness of one awning stripe's cloth slab. */
-const AWNING_CLOTH_THICKNESS = 0.11;
+const AWNING_CLOTH_THICKNESS = MINI_GAME_AWNING_CLOTH;
 /** Radius of the half-cylinder scallop on the front edge of each stripe. */
 const SCALLOP_RADIUS = 0.22;
 /** How far the scallop's axis sits below the middle of its cloth. */

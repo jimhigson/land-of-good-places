@@ -67,6 +67,12 @@ export class TrainTrip implements Activity {
 
   /** Which stop is being walked to, waited at, or was boarded at. */
   private stop = 0;
+  /**
+   * Which of that stop's places to wait is this child's (`TrainStop.waits`),
+   * from the moment the trip is decided on until a seat is taken or the trip
+   * is given up — see `TrainService.claimWait`. `null` between trips.
+   */
+  private waitSpot: number | null = null;
 
   /** Seconds until this child next considers a trip. */
   private cooldown = 0;
@@ -105,6 +111,16 @@ export class TrainTrip implements Activity {
   }
 
   /**
+   * **Standing at a place to wait, on purpose** (`GroundHolder`): a child
+   * waiting on the platform is not shoved off her spot by the children walking
+   * up to theirs, or by the player — they go round her. Only while waiting:
+   * walking there, and riding, she is nobody's furniture.
+   */
+  get holdsGround(): boolean {
+    return this.mode === 'waiting';
+  }
+
+  /**
    * Returns true when the train has this child's attention, in which case the
    * intent has been filled in and the wander behaviour must not run.
    */
@@ -115,6 +131,7 @@ export class TrainTrip implements Activity {
     if (!service) {
       // No train in this world (or it has gone away mid-ride).
       this.seat = null;
+      this.waitSpot = null;
       // Every exit gives the slot back. Unreachable today — a world without a
       // train never lets a child claim one in the first place — but this is
       // precisely the shape `budget.ts` warns about in its header: "a slot
@@ -151,8 +168,14 @@ export class TrainTrip implements Activity {
 
         const stop = service.nearestStop(context.position.x, context.position.z);
         if (!stop) return false;
+        // A place to wait on that platform, hers for the trip: with every one
+        // taken there is no trip, and she wonders again after the next
+        // interval, as she does when the train is full.
+        const wait = service.claimWait(stop.index);
+        if (wait === null) return false;
 
         this.stop = stop.index;
+        this.waitSpot = wait;
         // Claimed at the moment of commitment — walking to a station is part of
         // the trip, and a child strolling to a platform is as much "at the
         // railway" as one sitting in a carriage.
@@ -164,9 +187,10 @@ export class TrainTrip implements Activity {
 
       case 'walking': {
         const stop = service.stops[this.stop];
-        if (!stop) return this.abandon(host);
+        const spot = stop?.waits[this.waitSpot ?? -1] ?? null;
+        if (!stop || !spot) return this.abandon(host);
 
-        const step = this.walk.step(host, context, intent, stop.x, stop.z);
+        const step = this.walk.step(host, context, intent, spot.x, spot.z);
         if (step === 'givenUp') return this.abandon(host);
         if (step === 'arrived') {
           this.mode = 'waiting';
@@ -187,6 +211,7 @@ export class TrainTrip implements Activity {
         const seat = service.claimSeat(this.stop);
         if (seat !== null) {
           this.seat = seat;
+          this.releaseWait(service);
           this.mode = 'riding';
           this.stopsRidden = 0;
           this.stopsWanted = host.rng.int(1, 2);
@@ -228,8 +253,18 @@ export class TrainTrip implements Activity {
     }
   }
 
+  /** Gives the place to wait back, if this child still holds one. Safe to call twice. */
+  private releaseWait(service: { releaseWait(stop: number, wait: number): void }): void {
+    if (this.waitSpot === null) return;
+    service.releaseWait(this.stop, this.waitSpot);
+    this.waitSpot = null;
+  }
+
   /** Gives up on the train and goes back to wandering. Always returns false. */
   private abandon(host: ActivityHost): boolean {
+    const service = trainService();
+    if (service) this.releaseWait(service);
+    else this.waitSpot = null;
     this.mode = 'none';
     this.slot.release();
     this.seat = null;
@@ -246,8 +281,13 @@ const TRAIN_INTERVAL_MAX = 70;
 /** …and the chance they actually go, when they do wonder. */
 const TRAIN_CHANCE = 0.55;
 
-/** Close enough to the middle of the platform to count as waiting on it. */
-const PLATFORM_ARRIVE = 1.6;
+/**
+ * Close enough to the waiting spot (`TrainStop.waitX/waitZ`) to count as
+ * waiting on the platform. It was 1.6 m round the platform's middle, a circle
+ * that reached over the edge onto the track — and a child waiting there is in
+ * the train's way, so the train it is waiting for stood and waited for it.
+ */
+const PLATFORM_ARRIVE = 0.6;
 
 /** Longest a child spends walking to a station, or standing on one. */
 const WALK_TIMEOUT = 60;

@@ -12720,11 +12720,15 @@ const castleTurretsAreSolid: Invariant = (facts) => {
     for (let i = 0; i < 8; i += 1) {
       const bearing = (i / 8) * Math.PI * 2;
       const from = turret.radiusBottom + 8;
+      // Her feet on the ground she walks over, step by step: a solid's real
+      // top is measured against them (`Collision.ts`'s `contactWith`).
+      const ground = (x: number, z: number, from: number): number => facts.world.building.surfaces.sample(x, z, from);
       const probe = new Vector3(
         turret.x + Math.sin(bearing) * from,
         0,
         turret.z + Math.cos(bearing) * from,
       );
+      probe.y = ground(probe.x, probe.z, 0);
       let closest = Infinity;
       for (let travelled = 0; travelled < from + 3; travelled += PLAYER_LONGEST_STEP) {
         collision.resolveMovement(
@@ -12735,6 +12739,7 @@ const castleTurretsAreSolid: Invariant = (facts) => {
           0,
           MAX_FRAME_DELTA,
         );
+        probe.y = ground(probe.x, probe.z, probe.y);
         closest = Math.min(closest, Math.hypot(probe.x - turret.x, probe.z - turret.z));
       }
       marched += 1;

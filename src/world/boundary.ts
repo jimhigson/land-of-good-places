@@ -83,6 +83,59 @@ export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBo
   };
 }
 
+/** An axis-aligned rectangle of a space's floor, world metres. */
+export interface FloorRect {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+/**
+ * **A space whose edge is the edge of its floor** — the union of `rects`, for a
+ * floor that does not stop at a wall: the castle's roof garden, whose battlement
+ * is a low rampart over a drop of three hundred metres (`Building.boundTo`).
+ *
+ * The park's own edge is the same idea (`GARDEN_PLAY_BOUNDARY`): a soft
+ * boundary that holds at every height, so the stone along it can be the height
+ * it was drawn and a jump onto it is never a jump off the world. Positive
+ * inside, by the deepest rectangle's own margin; outside, minus the distance to
+ * the nearest one.
+ */
+export function rectanglesBoundary(rects: readonly FloorRect[]): ParkBoundary {
+  const inside = (rect: FloorRect, x: number, z: number): number => {
+    const dx = Math.max(rect.minX - x, x - rect.maxX);
+    const dz = Math.max(rect.minZ - z, z - rect.maxZ);
+    if (dx <= 0 && dz <= 0) return -Math.max(dx, dz);
+    return -Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+  };
+  const distanceToEdge = (x: number, z: number): number => {
+    let best = -Infinity;
+    for (const rect of rects) best = Math.max(best, inside(rect, x, z));
+    return best;
+  };
+  const minX = Math.min(...rects.map((r) => r.minX));
+  const maxX = Math.max(...rects.map((r) => r.maxX));
+  const minZ = Math.min(...rects.map((r) => r.minZ));
+  const maxZ = Math.max(...rects.map((r) => r.maxZ));
+  const centreX = (minX + maxX) / 2;
+  const centreZ = (minZ + maxZ) / 2;
+  return {
+    contains: (x, z) => distanceToEdge(x, z) >= 0,
+    distanceToEdge,
+    area: rects.reduce((sum, r) => sum + (r.maxX - r.minX) * (r.maxZ - r.minZ), 0),
+    perimeter: rects.reduce((sum, r) => sum + 2 * (r.maxX - r.minX + r.maxZ - r.minZ), 0),
+    maxRadius: Math.max(...rects.flatMap((r) => [Math.hypot(r.minX - centreX, r.minZ - centreZ), Math.hypot(r.maxX - centreX, r.maxZ - centreZ)])),
+    extent: { minX, maxX, minZ, maxZ },
+    outline: () => rects.flatMap((r): [number, number][] => [
+      [r.minX, r.minZ],
+      [r.maxX, r.minZ],
+      [r.maxX, r.maxZ],
+      [r.minX, r.maxZ],
+    ]),
+  };
+}
+
 // --------------------------------------------------------------- the profile
 
 

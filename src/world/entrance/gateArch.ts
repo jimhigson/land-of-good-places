@@ -3,6 +3,7 @@ import {
   createGateArch,
   GATE_ARCH_CLEAR_HEIGHT,
   GATE_ARCH_PIER_KEEP_OUT,
+  GATE_ARCH_TOP,
 } from '../../art/models/gateArch';
 import {
   ENTRANCE_ANGLE,
@@ -135,6 +136,8 @@ export interface GateArch {
   ];
   /** Radius a foot's collider must cover — the pier, measured off the mesh. */
   readonly footRadius: number;
+  /** How tall a foot's collider stands: the arch's own top, measured off the mesh. */
+  readonly footTop: number;
   /**
    * The lowest the arch gets over the gateway, in world Y. Below this the
    * gateway is empty and must stay so.
@@ -287,6 +290,7 @@ export function buildGateArch(options: GateArchOptions): GateArch {
     group,
     feet: [feet[0]!, feet[1]!],
     footRadius: GATE_ARCH_PIER_KEEP_OUT,
+    footTop: GATE_ARCH_TOP,
     clearHeightY: ground + GATE_ARCH_CLEAR_HEIGHT,
     // `AssetHandle.dispose` is optional on the interface; `createGateArch`
     // always supplies one, and this stays correct either way.

@@ -4,11 +4,12 @@ import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { Plate } from '../hotel/place';
 import { segmentsMinusGaps, cornerClosedSpans } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
-import { placeOnSphere } from '../terrain';
+import { placeOnSphere, planetRadiusAt, yAtRadius } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { solid, toonMaterial } from '../../art/style/materials';
 import { LIBRARY_INTERIOR_LIFT } from './lighting';
 import { END_HALF } from './props';
+import { libraryTopOver } from '../../art/models/libraryKit';
 import {
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
@@ -99,6 +100,17 @@ export class LibraryFrame {
   foot(localX: number, localZ: number): { x: number; z: number } {
     const p = this.toWorld(localX, 0, localZ, this.scratch);
     return { x: p.x, z: p.z };
+  }
+
+  /**
+   * **A building-local height as a solid's real top, in world column
+   * `(x, z)`** — the drawn point's own radius from the planet's centre, read
+   * back in the collider's column, so a solid's top is where the leaning
+   * stone's is.
+   */
+  topY(x: number, z: number, localX: number, localZ: number, height: number): number {
+    const p = this.toWorld(localX, height, localZ, this.scratch);
+    return yAtRadius(x, z, planetRadiusAt(p.x, p.y, p.z));
   }
 
   /**
@@ -232,14 +244,29 @@ export interface LibraryShellSolids {
  *   from (and the waves rise and fall under), so a riser there can be more
  *   than she can step up — and the plate does not lift her past
  *   `BUILDING_STEP_UP`, so without a collider she walked on into the slab.
- *   A thin wall on each drawn edge, back corner to front step, keeps her to
- *   the full-width steps: the one way up, the way the paths arrive.
+ *   A thin wall on each drawn edge, back corner to front step, to the stone's
+ *   own top: a step where the riser is one, a side to bump or jump where it
+ *   is not. Nothing marks it otherwise (PR #722).
  */
 export function registerLibraryShellCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): LibraryShellSolids {
-  const add = (list: WallCollider[], x1: number, z1: number, x2: number, z2: number, half: number): void => {
+  // Every solid to its real top, in the building's own leaning frame
+  // (`LibraryFrame.topY`): the cella and its corners to the building's height,
+  // the plinth's edges to the plinth's top — a step where its riser is one,
+  // a side to bump where the ground falls away under it.
+  // A top at each end, so a long edge's top runs with the drawn stone rather
+  // than drifting off it along the sphere (`TopSlope`).
+  const add = (list: WallCollider[], x1: number, z1: number, x2: number, z2: number, half: number, height = plan.height): void => {
     const a = frame.foot(x1, z1);
     const b = frame.foot(x2, z2);
-    list.push(collision.addWall(a.x, a.z, b.x, b.z, half));
+    const topA = frame.topY(a.x, a.z, x1, z1, height);
+    const topB = frame.topY(b.x, b.z, x2, z2, height);
+    // An edge stands wholly on the stone (its outer face on the drawn edge)
+    // and to the stone's own top where it runs (`edgeRun`): a top to stand on
+    // like the plate beside it, and a riser to step up where it is a step
+    // high — nothing marks it otherwise (PR #722). Run at the plinth's height
+    // past the steps, it once stood her 0.18 m over the bottom tread.
+    const edge = height !== plan.height;
+    list.push(collision.kinded(edge ? 'library plinth edge' : 'library walls', () => collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, -Infinity, false, Number.NaN, topB)));
   };
   const H = SHELL_HALF;
   const t = EDGE_HALF;
@@ -280,15 +307,108 @@ export function registerLibraryShellCollision(collision: CollisionWorld, frame: 
 
   const edges: WallCollider[] = [];
   const px = plan.plinthHalfX - t;
-  add(edges, px, plan.stepFrontZ - t, px, plan.plinthBackZ + t, t);
-  add(edges, px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, t);
-  add(edges, -px, plan.plinthBackZ + t, -px, plan.stepFrontZ - t, t);
+  // In pieces no longer than `EDGE_PIECE`: a top runs straight between its
+  // two ends, and the drawn stone is flat in the building's frame, which on
+  // the sphere bows under that straight line — by L²/8R, 0.16 m along the
+  // 17 m back edge, where she stood over the drawn plinth (seeds 2, 3, 7, 9, 13
+  // and 14). Two metres is under 3 mm.
+  const addPieces = (x1: number, z1: number, x2: number, z2: number, height: number): void => {
+    const pieces = Math.max(1, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / EDGE_PIECE));
+    for (let i = 0; i < pieces; i += 1) {
+      const u0 = i / pieces;
+      const u1 = (i + 1) / pieces;
+      add(edges, x1 + (x2 - x1) * u0, z1 + (z2 - z1) * u0, x1 + (x2 - x1) * u1, z1 + (z2 - z1) * u1, t, height);
+    }
+  };
+  // Each side, back to front, in runs of one drawn height: the plinth, then
+  // each tread of the steps down to the path (`edgeRun`).
+  for (const x of [px, -px]) {
+    for (const run of edgeRuns(x, plan.plinthBackZ + t, plan.stepFrontZ - t)) addPieces(x, run.fromZ, x, run.toZ, run.top);
+  }
+  addPieces(px, plan.plinthBackZ + t, -px, plan.plinthBackZ + t, plan.plinthTop);
 
   const columns = plan.columns.map((column) => {
     const at = frame.foot(column.x, column.z);
-    return collision.addCircle(at.x, at.z, column.radius);
+    const top = frame.topY(at.x, at.z, column.x, column.z, plan.height);
+    return collision.kinded('library column', () => collision.addCircle(at.x, at.z, column.radius, top, false, true));
   });
   return { walls, corners, edges, columns };
+}
+
+/** How finely a plinth edge is walked to find where the drawn stone steps down. */
+const EDGE_RUN_STEP = 0.02;
+/** The longest piece a plinth edge is built of, so its straight top stays on the drawn stone (see `registerLibraryShellCollision`). */
+const EDGE_PIECE = 2;
+
+/**
+ * **A plinth edge in runs of one drawn height** — along `x` from `fromZ` to
+ * `toZ`, the stone's own top under it (`libraryTopOver`, a ray down the kit),
+ * split at each riser: the plinth's top, then each tread of the steps.
+ */
+function edgeRuns(x: number, fromZ: number, toZ: number): { readonly fromZ: number; readonly toZ: number; readonly top: number }[] {
+  const runs: { fromZ: number; toZ: number; top: number }[] = [];
+  const count = Math.max(1, Math.ceil((toZ - fromZ) / EDGE_RUN_STEP));
+  for (let i = 0; i <= count; i += 1) {
+    const z = fromZ + ((toZ - fromZ) * i) / count;
+    const top = libraryTopOver(['shell-plinth', 'shell-steps'], x, z);
+    if (top === null) continue;
+    const last = runs[runs.length - 1];
+    if (last && Math.abs(last.top - top) < 0.005) last.toZ = z;
+    else {
+      // A riser: split halfway between the two heights' samples.
+      if (last) last.toZ = (last.toZ + z) / 2;
+      runs.push({ fromZ: last ? last.toZ : z, toZ: z, top });
+    }
+  }
+  return runs.filter((run) => run.toZ - run.fromZ > 1e-3);
+}
+
+/** The library roof's strips: about this wide across the cella, and this long front to back, so each top lies on the roof's slope. */
+const ROOF_STRIP = 1;
+const ROOF_PIECE = 2;
+
+/**
+ * **The roof the park sees is somewhere to stand.**
+ *
+ * The cella's walls seal its inside, and once they stood to `Infinity`; with
+ * real tops (17 Oct 2026) the jet pack flies over them — 9.5 m against its
+ * 12 m — and the roof over the cella had no solid, so she fell through the
+ * slates into a room walled in on every side. Strips across the cella, inside
+ * its walls' inner faces, each banded from the walls' top to the roof drawn
+ * over it (`libraryTopOver`, a ray down the kit's own geometry), one height
+ * at each end of a piece: the attic between the walls and the roof is solid,
+ * so the room under it is sealed from above, and she stands on the slates.
+ * Banded, so no route lattice stamps them, and the door's recess keeps its
+ * air: the strips start at the walls' top, nine metres over its floor.
+ */
+export function registerLibraryRoofCollision(collision: CollisionWorld, frame: LibraryFrame, plan: LibraryExteriorPlan): void {
+  const H = SHELL_HALF;
+  const minX = -plan.cellaHalfX + 2 * H;
+  const maxX = plan.cellaHalfX - 2 * H;
+  const minZ = plan.cellaBackZ + 2 * H;
+  const maxZ = plan.cellaFrontZ - 2 * H;
+  const strips = Math.max(1, Math.round((maxX - minX) / ROOF_STRIP));
+  const half = (maxX - minX) / strips / 2;
+  // A capsule's round ends inside the walls' inner faces.
+  const z0 = minZ + half;
+  const z1 = maxZ - half;
+  const pieces = Math.max(1, Math.round((z1 - z0) / ROOF_PIECE));
+  const roofOver = (x: number, z: number): number => Math.max(plan.height, libraryTopOver(['shell-roof'], x, z) ?? plan.height);
+  collision.kinded('library roof', () => {
+    for (let i = 0; i < strips; i += 1) {
+      const x = minX + (2 * i + 1) * half;
+      for (let k = 0; k < pieces; k += 1) {
+        const za = z0 + ((z1 - z0) * k) / pieces;
+        const zb = z0 + ((z1 - z0) * (k + 1)) / pieces;
+        const a = frame.foot(x, za);
+        const b = frame.foot(x, zb);
+        const topA = frame.topY(a.x, a.z, x, za, roofOver(x, za));
+        const topB = frame.topY(b.x, b.z, x, zb, roofOver(x, zb));
+        const base = Math.min(frame.topY(a.x, a.z, x, za, plan.height), frame.topY(b.x, b.z, x, zb, plan.height));
+        collision.addWall(a.x, a.z, b.x, b.z, half, topA, false, true, base, false, Number.NaN, topB);
+      }
+    }
+  });
 }
 
 /**
@@ -401,12 +521,17 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
       if (hidden) box.visible = false;
       root.add(box);
       walls.push(
-        collision.addWall(
-          originX + (along === 'x' ? a : x1),
-          originZ + (along === 'x' ? z1 : a),
-          originX + (along === 'x' ? b : x1),
-          originZ + (along === 'x' ? z1 : b),
-          LIBRARY_WALL_HALF,
+        collision.kinded('library room wall', () =>
+          collision.addWall(
+            originX + (along === 'x' ? a : x1),
+            originZ + (along === 'x' ? z1 : a),
+            originX + (along === 'x' ? b : x1),
+            originZ + (along === 'x' ? z1 : b),
+            LIBRARY_WALL_HALF,
+            LIBRARY_WALL_HEIGHT,
+            false,
+            true,
+          ),
         ),
       );
     }

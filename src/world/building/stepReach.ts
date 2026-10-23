@@ -50,6 +50,18 @@ export function stepCeilingAt(x: number, z: number, y: number): number {
 }
 
 /**
+ * **How far under the step's own reach a top must be for her to start up it,
+ * metres** — and so where a top stops being a step and starts being a hop:
+ * the step-up (`standing.ts`'s `walkingOntoStep`) and the auto-hop
+ * (`CollisionWorld.hopsOver`) both draw the line here. The step she starts is
+ * finished by `resolve`, asked at her own column, and by her feet, asked from
+ * where she stands once over the top; a top at the very limit was a step to
+ * one and a wall to the other, and she stood at its face with neither (seed
+ * 2's stone wall at (19.4, 18.6), 0.620 m: QA on PR #722, round two).
+ */
+export const STEP_MARGIN = 0.03;
+
+/**
  * **How far `b` stands above `a` along the local up** — the one owner of "is
  * this rise within a step", for everything that decides steps without asking
  * `WalkSurfaces.sample` itself (`NavGrid`'s edges, its line walk and its
@@ -124,12 +136,25 @@ export function carryReference(
   toX: number,
   toZ: number,
 ): number {
+  return carryFrom(fromX, fromZ, y)(toX, toZ);
+}
+
+/**
+ * **{@link carryReference} from one column to many** — the reference's own
+ * radius asked once, then carried to each column asked of it, bit for bit
+ * what `carryReference` gives. For a caller asking a whole stretch at once
+ * (`walkingOntoStep`'s points along her front half, every frame she walks).
+ */
+export function carryFrom(fromX: number, fromZ: number, y: number): (toX: number, toZ: number) => number {
   const cy = y + GROUND_SPHERE_RADIUS;
-  if (!Number.isFinite(y) || cy <= 0) return y;
-  if (spaceAt(fromX, fromZ) !== SPACE_GARDEN || spaceAt(toX, toZ) !== SPACE_GARDEN) return y;
+  if (!Number.isFinite(y) || cy <= 0 || spaceAt(fromX, fromZ) !== SPACE_GARDEN) return () => y;
   const radius = Math.hypot(fromX, cy, fromZ);
-  const above = radius * radius - toX * toX - toZ * toZ;
-  if (above <= 0) return y;
-  return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
+  const radiusSquared = radius * radius;
+  return (toX, toZ) => {
+    if (spaceAt(toX, toZ) !== SPACE_GARDEN) return y;
+    const above = radiusSquared - toX * toX - toZ * toZ;
+    if (above <= 0) return y;
+    return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
+  };
 }
 

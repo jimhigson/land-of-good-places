@@ -9,6 +9,7 @@ import type { ShopItem } from '../../world/building/shops/catalogue';
 import type { PetBedSpot } from '../../world/hotel/Hotel';
 import { BED_POSE_X, BED_POSE_Y, posedBox, sleepingBox } from '../../world/hotel/petBedFit';
 import type { SlideSeat } from '../../world/slide/petRiders';
+import type { CompanionSeat } from '../Player';
 import { RIDE_RECLINE } from '../ridePose';
 import { faceOnGround } from '../../world/up';
 
@@ -241,7 +242,7 @@ export class ParadeMember {
    * doing, and nothing else in the game moves or poses a parade pet. The ride
    * says where the seat is; it never touches the animal.
    */
-  private sliding = false;
+  private riding: 'slide' | 'seat' | null = null;
   private readonly seat: SlideSeat = {
     x: 0,
     y: 0,
@@ -432,7 +433,58 @@ export class ParadeMember {
 
   /** True while this one is riding the ginormous slide behind her (#468). */
   get onSlide(): boolean {
-    return this.sliding;
+    return this.riding === 'slide';
+  }
+
+  /**
+   * True while this one rides **in the seat beside her** — her companion on a
+   * ride (`CompanionRide`'s `beside`), the one of her line that did not hop
+   * into her backpack when she boarded.
+   */
+  get onSeat(): boolean {
+    return this.riding === 'seat';
+  }
+
+  /**
+   * **Sit in the seat beside her, this frame** — her companion on a ride, by
+   * way of `Parade`, which asks the ride where its seat is every frame she
+   * rides (`CompanionRide`'s `beside`). Like {@link rideSlide}, the seat is
+   * written straight onto the body rather than followed by the spring: a train
+   * at 4 m/s or a cart on a hill is not something a spring keeps up with, and
+   * one lagging out of its seat would be a pet walking along the railway
+   * behind her. Upright, its feet on the seat — the way every one of them
+   * sits — and still one body: the ride never touches the animal.
+   *
+   * Idempotent, and boarding is simply the first frame a seat arrives.
+   */
+  rideSeat(seat: Readonly<CompanionSeat>): void {
+    if (this.riding !== 'seat') {
+      this.riding = 'seat';
+      this.velocity.set(0, 0, 0);
+      // Hopped up into it.
+      this.rejoice();
+    }
+    this.seat.x = seat.x;
+    this.seat.y = seat.y;
+    this.seat.z = seat.z;
+    this.seat.facing = seat.facing;
+    this.seat.turn.copy(seat.turn);
+    this.seat.recline = 0;
+  }
+
+  /**
+   * Out of the seat beside her, from wherever the ride had got to — she has
+   * got off. A no-op for a member that was not in one. Like
+   * {@link leaveSlide}, nothing is teleported here: `Parade` puts the body
+   * down behind her, where her line forms up again.
+   */
+  leaveSeat(): void {
+    if (this.riding !== 'seat') return;
+    this.riding = null;
+    this.root.quaternion.identity();
+    this.root.rotation.set(0, this.facing, 0);
+    this.velocity.set(0, 0, 0);
+    this.rejoice();
   }
 
   /**
@@ -451,8 +503,8 @@ export class ParadeMember {
    * Idempotent, and boarding is simply the first frame a seat arrives.
    */
   rideSlide(seat: SlideSeat): void {
-    if (!this.sliding) {
-      this.sliding = true;
+    if (this.riding !== 'slide') {
+      this.riding = 'slide';
       // Off the spring: whatever momentum it had walking is not what carries
       // it down the chute, and it must not be waiting to be spent when the
       // ride hands the body back at the bottom.
@@ -487,8 +539,8 @@ export class ParadeMember {
    * picks it up from the chute and carries it to her in the ball pit.
    */
   leaveSlide(): void {
-    if (!this.sliding) return;
-    this.sliding = false;
+    if (this.riding !== 'slide') return;
+    this.riding = null;
     this.root.rotation.set(0, this.facing, 0);
     this.velocity.set(0, 0, 0);
     this.rejoice();
@@ -600,7 +652,7 @@ export class ParadeMember {
     // climb below does: the seat is written straight on, and letting the spring
     // write `root` in the same frame is the two-owners bug this class is the
     // single owner against.
-    if (this.sliding) {
+    if (this.riding) {
       this.updateOnSlide(dt, elapsed);
       return;
     }
@@ -735,8 +787,10 @@ export class ParadeMember {
     // the trough — see {@link slideOffset}. The lift is measured in the
     // reclined body's own frame, so it is turned into the world by the seat's
     // yaw and pitch (and *not* by the recline, which the measurement already
-    // carries) before it is added.
-    this.slideLift.copy(this.slideOffset).applyQuaternion(this.seat.turn);
+    // carries) before it is added. Sat upright in a seat beside her, its own
+    // origin is already its feet, and nothing is lifted.
+    if (this.riding === 'seat') this.slideLift.set(0, 0, 0);
+    else this.slideLift.copy(this.slideOffset).applyQuaternion(this.seat.turn);
     this.position.set(
       this.seat.x + this.slideLift.x,
       this.seat.y + this.slideLift.y,

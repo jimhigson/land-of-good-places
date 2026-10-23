@@ -250,6 +250,8 @@ export class TreeClimbing implements GameSystem {
    */
   private readonly climbHolder: RideHolder = {
     holding: 'a tree',
+    // A climb, not a ride: her line waits for her at the foot of the trunk.
+    companion: 'not a ride',
     letGo: () => {
       const tree = this.playerTree;
       this.endPlayerWave();

@@ -1,4 +1,5 @@
-import { Mesh, MeshBasicMaterial, Raycaster, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
+import { Matrix4, Mesh, MeshBasicMaterial, Raycaster, Vector3, type BufferAttribute, type BufferGeometry } from 'three';
+import { geometryTriangles, measureTriangleSets, type MeasuredTop } from '../../world/measuredTop';
 import { LIBRARY_GLB_BASE64 } from '../assets/libraryGlb';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
 
@@ -60,6 +61,22 @@ function eachVertex(name: string, visit: (x: number, y: number, z: number) => vo
     p.fromBufferAttribute(position, i).multiply(part.scale).applyQuaternion(part.quaternion).add(part.position);
     visit(p.x, p.y, p.z);
   }
+}
+
+/**
+ * **The named nodes' top, and how much of it she could stand on**, within the
+ * part of the plan `keep` admits — `measureTop`'s slice of the kit's own
+ * triangles (`world/measuredTop.ts`): a rolled arm measures the crown of its
+ * tube, a cushion's top its board. In the asset's frame.
+ */
+export function kitTop(names: readonly string[], keep?: (x: number, z: number) => boolean): MeasuredTop {
+  return measureTriangleSets(
+    names.map((name) => {
+      const part = libraryPart(name);
+      return geometryTriangles(part.geometry, new Matrix4().compose(part.position, part.quaternion, part.scale));
+    }),
+    keep,
+  );
 }
 
 /** The extent of the named nodes' vertices — never a bounding box of a bounding box. */
@@ -141,6 +158,17 @@ function firstHit(names: readonly string[], origin: Vector3, direction: Vector3)
   }
   material.dispose();
   return best;
+}
+
+/**
+ * **The drawn top of the named nodes over a building-local `(x, z)`**, its
+ * local height, or `null` where none of them is over the point — a ray down
+ * the building's own up, which in its own metres is plain `−Y`.
+ */
+export function libraryTopOver(names: readonly string[], x: number, z: number): number | null {
+  const from = 100;
+  const distance = firstHit(names, new Vector3(x, from, z), new Vector3(0, -1, 0)); // flat-ok: building-local metres, where the kit's own up is +Y
+  return distance === null ? null : from - distance;
 }
 
 // ---------------------------------------------------------------------------

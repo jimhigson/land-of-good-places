@@ -112,6 +112,14 @@ export async function petSlide(
    * here, so what rides the slide is what a child who caught three animals has.
    */
   const PET_IDS = ['pet.kitten', 'pet.bunny', 'pet.mouse'] as const;
+  /**
+   * **How many of them ride the chute: one** — Jim, 19 Oct 2026: *"all the pets
+   * except one jump into her backpack on getting on any ride, then one rides on
+   * the seat alongside the player"*. The one is the front of her line (the
+   * newest, the mouse); the other two ride in her backpack, and all three are
+   * asked to come back out at the bottom.
+   */
+  const RIDING = 1;
 
   /** How long after boarding every companion must be on the chute, in seconds. */
   const BOARD_SECONDS = 2;
@@ -805,11 +813,13 @@ export async function petSlide(
       const bodies = PET_IDS.map((_, slot) => parade.companionAt(slot)).filter(
         (member): member is NonNullable<typeof member> => member !== null,
       );
-      if (bodies.length !== PET_IDS.length) {
+      // Her companion out, the front of her line; the rest in her backpack —
+      // asked once they have had their poof (the first stride or two).
+      if (ridingFrames > BOARD_SECONDS * 60 && bodies.length !== RIDING) {
         say(
           'line',
-          `only ${bodies.length} of ${PET_IDS.length} companions were in the line on ridden ` +
-            `frame ${ridingFrames} — one of them left it during the descent`,
+          `${bodies.length} of her ${PET_IDS.length} companions were out on ridden frame ` +
+            `${ridingFrames}, against ${RIDING} — the front of her line rides, the rest in her backpack`,
         );
       }
 
@@ -1285,10 +1295,14 @@ export async function petSlide(
       );
     }
 
-    // **And back to her at the bottom**, with nobody still riding.
+    // **And back to her at the bottom**, with nobody still riding — all of
+    // them, out of her backpack too.
     const settled = PET_IDS.map((_, slot) => parade.companionAt(slot)).filter(
       (member): member is NonNullable<typeof member> => member !== null,
     );
+    if (rideEnded && settled.length !== PET_IDS.length) {
+      say('regroup', `${settled.length} of her ${PET_IDS.length} companions were out ${REGROUP_SECONDS} s after the ride — the rest never came back out of her backpack`);
+    }
     for (const member of settled) {
       if (member.onSlide) {
         say('off at the bottom', `${member.displayName} was still on the chute after the ride`);
@@ -1523,7 +1537,10 @@ export async function petSlide(
     gameStore.catchWildPet(spec);
   }
 
-  log('  riding the ginormous slide with three companions:');
+  log('  riding the ginormous slide with three companions out — the front of her line rides, two in her backpack:');
+  // Said on every run: with one companion on the chute, the pair clauses have
+  // no pair to ask about.
+  if (all) write(`check:pet-slide: ${RIDING} companion rides the chute (Jim, 19 Oct 2026), so "in order" and "no closer to the one in front" assert nothing; the other ${PET_IDS.length - RIDING} are asked to come back out at the bottom\n`);
   const wired = await ride(true);
   // The control is the instrument's own proof, not a question about this park:
   // ridden only when every clause is asked.
@@ -1563,16 +1580,16 @@ export async function petSlide(
       // because **the misleading pass was the expensive half**: a red log at least
       // gets read, while five green runs quoting different frame counts were read
       // as one park behaving inconsistently for a whole evening.
-      `check:pet-slide ok on park seed ${PARK_SEED} (${parkSeedSource()}) — three companions rode ` +
-        `all ${wired.ridingFrames} frames of the descent ` +
-        `behind her and in order, never more than ${wired.worstOffChute.toFixed(2)} m off the chute, ` +
+      `check:pet-slide ok on park seed ${PARK_SEED} (${parkSeedSource()}) — her companion (the front ` +
+        `of her line of three; the other two in her backpack) rode all ${wired.ridingFrames} frames of the descent ` +
+        `behind her, never more than ${wired.worstOffChute.toFixed(2)} m off the chute, ` +
         `lying down throughout (most upright ${wired.worstLie.toFixed(3)}, against ` +
         `${LYING_DOWN_DOT} required), never closer to her own body than ` +
         `${wired.worstClearance.toFixed(2)} m, ` +
-        `never closer to the one in front of it than ${wired.worstNeighbour.toFixed(2)} m, never ` +
+        `(with one companion riding, "in order" and "closer to the one in front" ask nothing), never ` +
         `moving more than ` +
         `${wired.worstStep.toFixed(3)} m in a frame, in the chase camera's shot on ` +
-        `${(wired.framedFraction * 100).toFixed(0)}% of its rasters, and back within ` +
+        `${(wired.framedFraction * 100).toFixed(0)}% of its rasters, and all three back out within ` +
         `${wired.worstRegroup.toFixed(1)} m of her ${REGROUP_SECONDS} s later.\n` +
         `  The control (ride not wired to the parade) failed ` +
         `${control?.complaints.length ?? 0} of the same clauses — ` +

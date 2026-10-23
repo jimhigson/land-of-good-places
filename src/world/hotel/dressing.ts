@@ -24,6 +24,7 @@ import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { BED_MATTRESS_TOP } from '../../art/models/hotelAssets';
 
+
 /**
  * The furniture that stops a hotel room being a rectangle with a statue in it.
  *
@@ -263,14 +264,6 @@ export function rainbowRing(innerRadius: number, band: number): Group {
 }
 
 /**
- * A chunky sofa, seat at 0.44 m, facing **+Z**.
- *
- * Deliberately not a `MovingPlatform`: a child who can stand on the lobby sofa
- * can stand on its back and walk out over the wall, and nothing here is worth
- * that. It is scenery you walk round, which is also why it registers no
- * collision — the hotel's interiors only wall off the room itself.
- */
-/**
  * The height of a sofa's seat — the surface a child who jumps onto one stands
  * on (plinth 0.3 + cushion 0.2). Named because two other files need the same
  * number: `Hotel` registers it as every sofa's collider top and standing
@@ -278,28 +271,54 @@ export function rainbowRing(innerRadius: number, band: number): Group {
  */
 export const SOFA_SEAT_TOP = 0.5;
 
+/** A sofa's depth, front to back — its plinth's, and so its whole plan's. */
+const SOFA_DEPTH = 0.95;
+/** The seat cushion: its inset from the sofa's width, its depth, and how far it sits forward. */
+const SOFA_CUSHION_INSET = 0.3;
+const SOFA_CUSHION_DEPTH = 0.85;
+const SOFA_CUSHION_FORWARD = 0.03;
+/** The back: how thick, how tall, and where its middle stands (back of the plan on −Z). */
+const SOFA_BACK_DEPTH = 0.26;
+const SOFA_BACK_HEIGHT = 0.62;
+const SOFA_BACK_Y = 0.61;
+const SOFA_BACK_Z = -0.35;
+/** The arms: how wide, how tall, and where their middle stands. */
+const SOFA_ARM_WIDTH = 0.26;
+const SOFA_ARM_HEIGHT = 0.34;
+const SOFA_ARM_Y = 0.47;
+/** The pillows: a squashed sphere's radius and squash, how far in from each end, where. */
+const SOFA_PILLOW_RADIUS = 0.22;
+const SOFA_PILLOW_SQUASH = { x: 1.15, y: 0.72, z: 0.5 } as const;
+const SOFA_PILLOW_IN = 0.55;
+const SOFA_PILLOW_Y = 0.62;
+const SOFA_PILLOW_Z = -0.19;
+
+/**
+ * A chunky sofa, seat at {@link SOFA_SEAT_TOP}, facing **+Z**. `Hotel` stands
+ * it on {@link sofaPlan}: its drawn footprint, solid to the seat.
+ */
 export function sofa(width: number, colour: number, cushion: number): Group {
   const group = new Group();
   group.name = 'hotel.sofa';
   const body = toonMaterial(colour);
 
-  const plinth = solid(new Mesh(new BoxGeometry(width, 0.3, 0.95), body));
+  const plinth = solid(new Mesh(new BoxGeometry(width, 0.3, SOFA_DEPTH), body));
   plinth.position.y = 0.15;
   addOutline(plinth, 0.018);
   group.add(plinth);
 
-  const seat = solid(new Mesh(new BoxGeometry(width - 0.3, 0.2, 0.85), toonMaterial(cushion)));
-  seat.position.set(0, 0.4, 0.03);
+  const seat = solid(new Mesh(new BoxGeometry(width - SOFA_CUSHION_INSET, 0.2, SOFA_CUSHION_DEPTH), toonMaterial(cushion)));
+  seat.position.set(0, 0.4, SOFA_CUSHION_FORWARD);
   group.add(seat);
 
-  const back = solid(new Mesh(new BoxGeometry(width, 0.62, 0.26), body));
-  back.position.set(0, 0.61, -0.35);
+  const back = solid(new Mesh(new BoxGeometry(width, SOFA_BACK_HEIGHT, SOFA_BACK_DEPTH), body));
+  back.position.set(0, SOFA_BACK_Y, SOFA_BACK_Z);
   addOutline(back, 0.018);
   group.add(back);
 
   for (const side of [-1, 1]) {
-    const arm = solid(new Mesh(new BoxGeometry(0.26, 0.34, 0.95), body));
-    arm.position.set(side * (width / 2 - 0.13), 0.47, 0);
+    const arm = solid(new Mesh(new BoxGeometry(SOFA_ARM_WIDTH, SOFA_ARM_HEIGHT, SOFA_DEPTH), body));
+    arm.position.set(side * (width / 2 - SOFA_ARM_WIDTH / 2), SOFA_ARM_Y, 0);
     addOutline(arm, 0.018);
     group.add(arm);
   }
@@ -308,13 +327,36 @@ export function sofa(width: number, colour: number, cushion: number): Group {
   // bench and this is meant to look sat-in.
   for (const side of [-1, 1]) {
     const pillow = solid(
-      new Mesh(new SphereGeometry(0.22, 14, 10), toonMaterial(PALETTE.blossomWhite)),
+      new Mesh(new SphereGeometry(SOFA_PILLOW_RADIUS, 14, 10), toonMaterial(PALETTE.blossomWhite)),
     );
-    pillow.scale.set(1.15, 0.72, 0.5);
-    pillow.position.set(side * (width / 2 - 0.55), 0.62, -0.19);
+    pillow.scale.set(SOFA_PILLOW_SQUASH.x, SOFA_PILLOW_SQUASH.y, SOFA_PILLOW_SQUASH.z);
+    pillow.position.set(side * (width / 2 - SOFA_PILLOW_IN), SOFA_PILLOW_Y, SOFA_PILLOW_Z);
     group.add(pillow);
   }
   return group;
+}
+
+/**
+ * **Everything a sofa's placement needs to know about its shape** — the
+ * drawn sofa's own footprint, so every call site stands the sofa it draws
+ * (the suite's had a 2.2 × 2.6 m footprint under a 3.2 × 0.95 m sofa, swept
+ * to its axis-aligned box, and the census stood her on its air corners) —
+ * and its top, the seat's.
+ *
+ * **One solid, to the seat.** Not its parts: her body is `PLAYER_RADIUS`
+ * (0.62 m) round, and the seat in front of the back is 0.7 m deep, so with
+ * the back solid to its own 0.92 m there is nowhere on the seat her body
+ * fits — measured, the seat pushed every stand off it, and she stood on the
+ * back instead. So the back above the seat is open to her jump, as this
+ * file's own rule has always had it ("sailing over the backrest on the way is
+ * a visual graze a six-year-old reads as bouncing onto the cushions").
+ */
+export function sofaPlan(width: number): { readonly halfX: number; readonly halfZ: number; readonly top: number } {
+  return {
+    halfX: width / 2,
+    halfZ: Math.max(SOFA_DEPTH / 2, -(SOFA_BACK_Z - SOFA_BACK_DEPTH / 2)),
+    top: SOFA_SEAT_TOP,
+  };
 }
 
 /**

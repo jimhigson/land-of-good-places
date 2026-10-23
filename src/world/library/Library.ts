@@ -30,6 +30,7 @@ import {
   libraryEntryBand,
   libraryExitBand,
   LibraryFrame,
+  registerLibraryRoofCollision,
   registerLibraryShellCollision,
   registerLibrarySteps,
   type LibraryShellSolids,
@@ -193,7 +194,7 @@ export class Library implements GameSystem {
     this.roomRoot.position.set(LIBRARY_ORIGIN_X, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z);
     this.roomRoot.visible = false;
     this.roomWalls = buildReadingRoomShell(this.roomRoot, collision, surfaces);
-    this.props = new LibraryProps(collision, surfaces, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z);
+    this.props = new LibraryProps(collision, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z);
     const furnished = furnishReadingRoom(this.roomRoot, this.props);
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;
@@ -238,6 +239,7 @@ export class Library implements GameSystem {
     group.add(this.parkRoot);
     deps.anchorPlots.setPlaceholderVisible('library', false);
     this.shellSolids = registerLibraryShellCollision(collision, this.frame, this.plan);
+    registerLibraryRoofCollision(collision, this.frame, this.plan);
     registerLibrarySteps(surfaces, this.frame, this.plan);
 
     // "The Library", over the middle of the entablature, just proud of it.
@@ -280,7 +282,7 @@ export class Library implements GameSystem {
     return this.props.solids;
   }
 
-  /** Every top in the reading room she may stand on, with its drawn footprint — so a check can land a jump on each. */
+  /** Every solid top in the reading room, with its drawn footprint — so a check can land a jump on each. */
   get standables(): readonly LibraryStandable[] {
     return this.props.standables;
   }

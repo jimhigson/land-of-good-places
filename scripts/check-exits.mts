@@ -23,8 +23,9 @@
  * 1. **The rule's own clauses**, on small worlds built here: an open spot is
  *    left exactly where it is (the control); a spot in a sealed pocket is moved
  *    to one that reaches open floor; a spot inside a collider is moved out; a
- *    pocket holding a point of the space's open area is left alone; and the
- *    cost of one put-down is bounded.
+ *    pocket holding a point of the space's open area is left alone; a crate's
+ *    top she can walk off is left alone, and one in a sealed pit is not; and
+ *    the cost of one put-down is bounded.
  * 2. **The instrument, and its controls.** "She can walk out" is the router's
  *    own whole-space flood (`NavGrid.floodFrom` — what a tap can reach) from
  *    where she stands to the space's way out (`World.openAreaAt`'s first point:
@@ -58,6 +59,19 @@
  *    checked in, the key it gives her must do its one job: she walks out to
  *    the corridor and back into her suite. The `/hotel-cafe` link is driven
  *    too: sat at `lobby-a-1`, then left by its own "Leave breakfast".
+ * 4c. **Her companions on every ride** (Jim, 19 Oct 2026: *"all the pets except
+ *    one jump into her backpack on getting on any ride, then one rides on the
+ *    seat alongside the player"*). Three pets out; on every holder she is
+ *    boarded onto, anywhere in this check, her line is asked a moment in: the
+ *    front of it in the seat beside her (or carried down the chute, or in the
+ *    ferris car's own chair) and the rest in her backpack, or — for a chair, a
+ *    nap, a view, a climb — all of it still out, as each holder declares
+ *    (`RideHolder.companion`). After every exit, all of them back out, none
+ *    still riding, none inside anything, none on the railway.
+ * 4d. **Every ride, ridden to its end**: the Rail Race, the Sky Cruiser and the
+ *    ferris wheel to their own finish, the cat bus to the gate, and the train
+ *    a whole lap and off at a stop by its own chip — the blocker it was: with a
+ *    pet out, the train once never left the platform and she could not get off.
  * 6. **Coverage.** Every call site found in (3) must have been driven by (4) or
  *    (5), or be named in {@link NOT_DRIVEN} with the reason; one that is neither
  *    fails. Coverage notes go to stderr, so a passing run says what it covered.
@@ -65,20 +79,34 @@
  * Red on the old breakfast: with the rule bypassed (`putDownSpot` returning the
  * spot it was given) and `standUp` ending on the seat as it did, (4) fails on
  * `lobby-a-1` and `lobby-b-1` — see the PR for the transcript and geometry.
+ *
+ * And 4c/4d are proved red by `EXITS_PROVE=<name>`:
+ *
+ * - `pets-stay-out`: no backpack — every ride taken as no ride, so her line
+ *   walks behind her wherever a ride takes her, the train included (the
+ *   blocker as it was): 4c must find her line out on every ride, and 4d the
+ *   train never leaving the platform with her aboard.
+ * - `pets-stay-in`: her line never comes back out of her backpack when she
+ *   gets off — 4c's every exit must find it missing.
+ * - `pets-count-aboard`: her companion counted as standing on the line while
+ *   it rides beside her — 4d's train must never leave with her aboard.
  */
 import './headless-canvas.mjs';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { JUMP_APEX_HEIGHT, PLAYER_PUT_DOWN, Player } from '../src/entities/Player.ts';
+import { PLAYER_PUT_DOWN, Player } from '../src/entities/Player.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { BARE_SPACE, PUT_DOWN_WINDOW_CELLS, putDownSpot, SEARCH_REACH } from '../src/world/dismount.ts';
-import { NAV_CELL, NavGrid } from '../src/world/NavGrid.ts';
+import { NAV_CELL } from '../src/world/NavGrid.ts';
+import { playerNavGrid } from '../src/world/playerLattice.ts';
+import { feetSampler } from '../src/world/standing.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
-import { DAY_LENGTH_SECONDS, DAY_START_TIME, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { DAY_LENGTH_SECONDS, DAY_START_TIME, PARADE_MEMBER_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   BREAKFAST,
   CORRIDOR,
@@ -102,6 +130,8 @@ import { gameStore } from '../src/state/index.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
+import type { RideHolder } from '../src/entities/Player.ts';
+import { CLEAR_TOLERANCE } from '../src/world/dismount.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 
 const problems: string[] = [];
@@ -126,8 +156,20 @@ const say = (line: string): void => {
     collision.setPlayBounds(circleBoundary(30, 0, 0));
     return collision;
   };
+  /**
+   * Four walls round a hollow middle — a pocket of floor, built as one on
+   * purpose. Not `addRectangle`: that is one filled box (#722), so a spot in
+   * its middle is inside a solid, which clause 3 answers, and the pocket these
+   * clauses are about would never be asked of clause 4 at all.
+   */
+  const walledRing = (collision: CollisionWorld, x: number, z: number, half: number, halfThickness: number): void => {
+    collision.addWall(x - half, z - half, x + half, z - half, halfThickness);
+    collision.addWall(x + half, z - half, x + half, z + half, halfThickness);
+    collision.addWall(x + half, z + half, x - half, z + half, halfThickness);
+    collision.addWall(x - half, z + half, x - half, z - half, halfThickness);
+  };
   const sealedRing = (collision: CollisionWorld, x: number, z: number, half: number): void => {
-    collision.addRectangle(x, z, half, half, 0.2);
+    walledRing(collision, x, z, half, 0.2);
   };
 
   // (a) CONTROL: an open spot is handed back exactly as given.
@@ -208,7 +250,7 @@ const say = (line: string): void => {
   for (const innerHalf of [0.66, 0.72, 0.8]) {
     const collision = world();
     const wall = 0.1;
-    collision.addRectangle(0, 0, innerHalf + wall, innerHalf + wall, wall);
+    walledRing(collision, 0, 0, innerHalf + wall, wall);
     const spot = putDownSpot(collision, flat, { x: 0, y: 0, z: 0 }, PLAYER_PUT_DOWN);
     const outside = Math.max(Math.abs(spot.x), Math.abs(spot.z)) >= innerHalf + 2 * wall + PLAYER_RADIUS - 1e-6;
     if (!spot.found || !outside) {
@@ -233,7 +275,7 @@ const say = (line: string): void => {
     const wall = 0.05;
     const cx = 0.2;
     const cz = 0;
-    collision.addRectangle(cx, cz, innerHalf + wall, innerHalf + wall, wall);
+    walledRing(collision, cx, cz, innerHalf + wall, wall);
     const spot = putDownSpot(collision, flat, { x: cx, y: 0, z: cz }, PLAYER_PUT_DOWN);
     const outside = Math.max(Math.abs(spot.x - cx), Math.abs(spot.z - cz)) >= innerHalf + 2 * wall + PLAYER_RADIUS - 1e-6;
     if (!spot.found || !outside) {
@@ -245,6 +287,43 @@ const say = (line: string): void => {
     notes.push(
       `rule (g) thin-walled box ${(innerHalf * 2).toFixed(2)} m inside, walls 0.10 m: moved ${spot.moved.toFixed(2)} m to (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`,
     );
+  }
+
+  // (i) A spot on a solid's top is a place she may be put down (#722): a
+  // 0.9 m crate on open floor — more than a step up, so no level of her
+  // lattice — and the exit names its top. She gets down by walking off its
+  // edge, so it is left exactly where it is. Without the walk-off
+  // (`OpenFloor.getsDown`) nothing within reach at that height is open, and
+  // the rule finds nowhere.
+  const CRATE_TOP = 0.9;
+  {
+    const collision = world();
+    collision.addRectangle(0, 0, 0.6, 0.6, 0.05, CRATE_TOP, false, true);
+    const spot = putDownSpot(collision, flat, { x: 0, y: CRATE_TOP, z: 0 }, PLAYER_PUT_DOWN);
+    if (!spot.found || spot.moved !== 0 || Math.abs(spot.y - CRATE_TOP) > 1e-6) {
+      fail(
+        `rule (i) a crate's top: asked (0, ${CRATE_TOP}, 0) on a ${CRATE_TOP} m crate on open floor, got ` +
+          `(${spot.x.toFixed(2)}, ${spot.y.toFixed(2)}, ${spot.z.toFixed(2)}) moved ${spot.moved.toFixed(2)} found=${spot.found} — ` +
+          'she can walk off its edge, so it must be left alone',
+      );
+    }
+    notes.push(`rule (i) a crate's top: left at (0, ${spot.y.toFixed(2)}, 0), moved ${spot.moved}, ${spot.cells} cells`);
+  }
+
+  // (j) The same crate in a sealed pit — four walls round it, 3.6 m of floor
+  // inside — is not left as it is: every way off its top lands her in the pit.
+  {
+    const collision = world();
+    walledRing(collision, 0, 0, 2, 0.2);
+    collision.addRectangle(0, 0, 0.6, 0.6, 0.05, CRATE_TOP, false, true);
+    const warn = console.warn;
+    console.warn = (): void => {};
+    const spot = putDownSpot(collision, flat, { x: 0, y: CRATE_TOP, z: 0 }, PLAYER_PUT_DOWN);
+    console.warn = warn;
+    if (spot.found && spot.moved === 0) {
+      fail(`rule (j) a crate in a sealed pit: its top was left as given — every way off it lands in the pit, so it is not open`);
+    }
+    notes.push(`rule (j) a crate in a sealed pit: found=${spot.found}, moved ${spot.moved.toFixed(2)} m`);
   }
 
   // (f) The cost bound: one window of the router's lattice, however bad the
@@ -267,7 +346,7 @@ const say = (line: string): void => {
 // built — as it does for a child who already has them.
 gameStore.earn(1000);
 const PETS: { readonly uid: string; readonly who: string }[] = [];
-for (const [id, who] of [['pet.bunny', 'bunny'], ['pet.kitten', 'kitten']] as const) {
+for (const [id, who] of [['pet.bunny', 'bunny'], ['pet.kitten', 'kitten'], ['pet.mouse', 'mouse']] as const) {
   const spec = shopItem(id);
   const bought = spec ? gameStore.buy(spec) : null;
   if (!bought || bought.outcome !== 'kept') fail(`the ${who} could not be bought — Next day's pets cannot be checked`);
@@ -277,10 +356,17 @@ for (const [id, who] of [['pet.bunny', 'bunny'], ['pet.kitten', 'kitten']] as co
 gameStore.setCarried(null);
 /**
  * How near her a pet must be, three seconds after she gets up, to be at her
- * heels: her parade's line is two companions long, and a companion back in it
- * walks within a few metres of her.
+ * heels: a companion back in her line walks within a few metres of her.
  */
 const PET_HEEL_REACH = 4;
+/** How far past its own place in her line a companion may be and still be following her: a stride and its spring's lag. */
+const PET_LINE_SLACK = 1.5;
+/** How long a booth ride may run before it must have come to its own end, seconds: the ferris wheel's ninety and its card. */
+const RIDE_TO_END_SECONDS = 240;
+/** How long the train may take to go all the way round and offer "Get off" at a stop: a lap at cruise and two dwells, twice over. */
+const TRAIN_LAP_SECONDS = 240;
+/** How long a train standing at a platform may take to leave once nothing is in its way: its dwell, and a margin. */
+const TRAIN_LEAVES_SECONDS = 15;
 
 const { world, scene } = quietly(() => buildHeadlessPark());
 const { collision } = world;
@@ -337,12 +423,31 @@ for (const name of PLACEMENTS) {
 }
 
 world.attachPlayer(player as never);
-// Her pets' parade, built and wired as `Game` does: one parade, handed to the
-// hotel and the castle, routed by her own router (below, once it exists).
+// Her pets' parade, built and wired as `Game` does: one parade, introduced to
+// the park in `Game`'s one call (`World.attachParade`), routed by her own
+// router (below, once it exists).
 const parade = new Parade(player as never, collision, camera);
 scene.add(parade.group);
-world.hotel.petParade = parade;
-world.building.petParade = parade;
+world.attachParade(parade);
+/** The red proofs (see the header): each breaks one thing 4c or 4d is for. */
+const PROVE = process.env['EXITS_PROVE'] ?? '';
+const PROOFS = ['pets-stay-out', 'pets-stay-in', 'pets-count-aboard'];
+if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`EXITS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
+if (PROVE === 'pets-stay-out') {
+  (Parade.prototype as unknown as { embark: (holder: RideHolder) => void }).embark = function (this: { aboard: unknown }, holder: RideHolder) {
+    this.aboard = { holder, ride: 'not a ride', companion: null, stays: true };
+  };
+}
+if (PROVE === 'pets-stay-in') {
+  (Parade.prototype as unknown as { disembark: () => void }).disembark = function (this: { aboard: unknown }) {
+    this.aboard = null;
+  };
+}
+if (PROVE === 'pets-count-aboard') {
+  (Parade.prototype as unknown as { standing: () => Iterable<unknown> }).standing = function* (this: { members: { root: { visible: boolean; position: unknown } }[] }) {
+    for (const member of this.members) if (member.root.visible) yield member.root.position;
+  };
+}
 // The trees are `Game`'s system, not `World`'s; built here as `Game` builds them.
 const hudStub = { setPrompt(): void {} };
 const trees = new TreeClimbing(player, world.npcs, hudStub as never, world.scenery.climbableTrees);
@@ -351,6 +456,8 @@ world.stalls.onEnter = (stallId: string) => {
   world.boardStallRide(stallId);
 };
 const sample = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
+/** Her feet's sampler — the walk surface or a solid's top within a step — as `Player.groundAt` stands her: the levels of her lattice. */
+const feet = feetSampler(sample, collision);
 
 let elapsed = 1000;
 /** Nobody touching anything — with the input system's setters a ride may call on it. */
@@ -375,8 +482,88 @@ function tick(seconds: number, input = still): void {
     // `Game`'s systems, in `Game`'s order: the parade, then the trees.
     parade.update(context as never);
     trees.update(context as never);
+    watchCompanions(dt);
   }
 }
+
+// ------------------------------------------------------------------ 4c. her companions on every ride (the watch)
+
+/** How many of her line were out the last frame she stood on her own feet — what each ride must give back. */
+let lineOnFoot = 0;
+/** The holder that has her now, how long it has, and whether her line has been asked about it. */
+let boarding: { holder: RideHolder; riding: number; asked: boolean; lineBefore: number } | null = null;
+/** Every holder her line was asked about, once each by name, with the answer. */
+const companionsAsked = new Map<string, string>();
+/** How long into a ride her line is asked: past the poof into her backpack, and the companion's first frame in its seat. */
+const COMPANIONS_ASKED_AFTER = 0.3;
+/** Every frame: when a holder takes her, her line is asked once she has been on it {@link COMPANIONS_ASKED_AFTER}. */
+function watchCompanions(dt: number): void {
+  const holder = player.rideHolder;
+  if (!holder) {
+    boarding = null;
+    lineOnFoot = parade.lineNow().out;
+    return;
+  }
+  if (!boarding || boarding.holder !== holder) boarding = { holder, riding: 0, asked: false, lineBefore: lineOnFoot };
+  boarding.riding += dt;
+  if (!boarding.asked && boarding.riding >= COMPANIONS_ASKED_AFTER) {
+    boarding.asked = true;
+    companionsAboard(holder, boarding.lineBefore);
+  }
+}
+/**
+ * **Her line, a moment into a ride** — what the holder declares
+ * (`RideHolder.companion`), asked of the parade that owns the bodies.
+ */
+function companionsAboard(holder: RideHolder, before: number): void {
+  const ride = holder.companion ?? 'in her backpack';
+  const line = parade.lineNow();
+  let ok: boolean;
+  let wanted: string;
+  if (ride === 'not a ride') {
+    ok = line.out === before && line.seated === 0;
+    wanted = `all ${before} of her line still out — not a ride`;
+  } else if (typeof ride === 'object') {
+    ok = before === 0 ? line.out === 0 : line.out === 1 && line.seated === 1;
+    wanted = 'one out, in its seat beside her, the rest in her backpack';
+  } else if (ride === 'carried by the ride') {
+    ok = before === 0 ? line.out === 0 : line.out === 1;
+    wanted = 'one out, carried down the chute behind her, the rest in her backpack';
+  } else if (ride === 'drawn by the ride') {
+    ok = line.out === 0 && world.ferrisWheel.companionsAboard === (before === 0 ? 0 : 1);
+    wanted = `none of her line out, and ${before === 0 ? 'nobody' : 'her companion'} in the car's own chair (it seats ${world.ferrisWheel.companionsAboard})`;
+  } else {
+    ok = line.out === 0;
+    wanted = 'all of her line in her backpack — no room beside her';
+  }
+  const verdict = `${holder.holding}: ${line.out} of her ${before} out, ${line.seated} in a seat — ${ok ? 'as declared' : `WANTED ${wanted}`}`;
+  if (!companionsAsked.has(holder.holding) || !ok) companionsAsked.set(holder.holding, verdict);
+  if (!ok) fail(`her companions on ${holder.holding}: ${line.out} of her ${before} out, ${line.seated} in a seat beside her — wanted ${wanted}`);
+}
+/**
+ * **Off the ride, all of them back out with her** — none still riding, none
+ * inside anything (`deepestSolidOverlap` at a companion's own size, the
+ * put-down rule's tolerance), none on the railway (the train's own answer).
+ * A companion in a bed or at the pets' table is where its routine put it, and
+ * is not asked where it stands.
+ */
+function companionsBack(what: string, before: number): void {
+  const line = parade.lineNow();
+  if (line.seated > 0 || line.sliding > 0) fail(`${what}: ${line.seated + line.sliding} of her line still riding after she got off`);
+  if (line.out < before) fail(`${what}: only ${line.out} of the ${before} of her line out before the ride came back out of her backpack`);
+  for (let slot = 0; slot < line.out; slot += 1) {
+    const member = parade.companionAt(slot);
+    if (!member) continue;
+    const state = parade.petState(member.uid);
+    if (state && state.bedPhase !== null) continue;
+    const at = member.root.position;
+    const inside = collision.deepestSolidOverlap(at.clone(), PARADE_MEMBER_RADIUS, 0, undefined, COMPANION_HEIGHT);
+    if (inside > CLEAR_TOLERANCE) fail(`${what}: ${member.displayName} came back out ${inside.toFixed(2)} m inside something, at (${at.x.toFixed(2)}, ${at.y.toFixed(2)}, ${at.z.toFixed(2)})`);
+    if (world.train.onTheLine(at.x, at.y, at.z, PARADE_MEMBER_RADIUS)) fail(`${what}: ${member.displayName} came back out on the railway, at (${at.x.toFixed(2)}, ${at.z.toFixed(2)})`);
+  }
+}
+/** How tall a companion stands — the tallest walks 1.53 m (`PET_RENDER_HEIGHT`, the puff and the snakes). */
+const COMPANION_HEIGHT = 1.55;
 
 // ------------------------------------------------------------------ 1b. a wedge with nowhere to go backs off
 
@@ -419,8 +606,8 @@ function tick(seconds: number, input = still): void {
 
 // ------------------------------------------------------------------ 2. the instrument
 
-/** The router, exactly as `Game` builds it — following the play bounds of the space she is in. */
-const router = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers);
+/** The router, exactly as `Game` builds it, from its one owner — following the play bounds of the space she is in. */
+const router = playerNavGrid(world);
 parade.setNavGrid(router);
 /** The rule, asked for a spot exactly as `Player` asks it. */
 function putDownAt(x: number, y: number, z: number): ReturnType<typeof putDownSpot> {
@@ -601,6 +788,29 @@ function settle(): void {
   tick(0.1);
 }
 
+// ------------------------------------------------------------------ 4d. the cat bus, ridden to the gate
+// She arrives on it, as a new child does — `World.attachPlayer` put her aboard
+// (`ArrivalSequence.attachPlayer`) before her parade was built, and the parade
+// sent her line into her backpack as it was (no room beside her: every other
+// seat is a child's). Ridden to its own hand-over at the gate, then: all of
+// them back out with her.
+{
+  if (player.riding && player.rideHolder?.holding === 'the cat bus') {
+    const startedAt = player.putDowns;
+    let t = 0;
+    for (; t < 60 && player.riding; t += 0.5) tick(0.5);
+    if (player.riding) fail('the cat bus: still riding 60 s in — it never handed her over at the gate');
+    else if (player.putDowns === startedAt) fail('the cat bus: handed her over at the gate without the put-down rule');
+    else {
+      tick(1);
+      companionsBack(`the cat bus, ridden to the gate (${t.toFixed(0)} s)`, PETS.length);
+      notes.push(`the cat bus: ridden to the gate in ${t.toFixed(0)} s, her ${PETS.length} pets in her backpack the whole way and out again with her`);
+    }
+  } else {
+    notes.push('the cat bus: she was not aboard as the check began, so its ride to the gate asserts nothing');
+  }
+}
+
 // CONTROLS on the instrument, before anything below is read.
 {
   const park = SPACES[0]!;
@@ -636,11 +846,13 @@ function settle(): void {
  * walk out of here?", and this holds it to that across a sample of real points
  * in every space — every cell of every railway bridge's deck and ramps, every
  * point of every declared stair, and a stride of every space's cells at each
- * of their top surfaces (the lobby's gallery, the castle's decks). A point is
- * in the sample when the router could stand there (`canStandAt`), her body is
- * clear there by the resolver's own test, the soft boundary leaves her alone,
- * and the router's flood from the space's way out reaches it. Every one of
- * those must come back from the rule unmoved.
+ * of their top surfaces (the lobby's gallery, the castle's decks — and the top
+ * of whatever she stands on there, by her feet's own sampler: a bench, a bed, a
+ * sofa within a step is a level of her lattice). A point is in the sample when
+ * the router could stand there (`canStandAt`), her body is clear there by the
+ * resolver's own test, her whole height asked, the soft boundary leaves her
+ * alone, and the router's flood from the space's way out reaches it. Every one
+ * of those must come back from the rule unmoved.
  */
 const TOP = 500;
 const AGREE_STRIDE = 3;
@@ -667,7 +879,7 @@ for (const visit of SPACES) {
     const onBridge = world.routeBridgeCovers(x, z);
     const strided = Math.round(x / NAV_CELL) % AGREE_STRIDE === 0 && Math.round(z / NAV_CELL) % AGREE_STRIDE === 0;
     if (visit.space === SPACE_GARDEN ? !onBridge : !strided) return;
-    points.push({ x, y: sample(x, z, TOP), z, what: onBridge ? 'a bridge' : 'a top surface' });
+    points.push({ x, y: feet(x, z, TOP), z, what: onBridge ? 'a bridge' : 'a top surface' });
   });
   for (const connector of world.routeConnectors()) {
     for (const point of connector.points) {
@@ -679,7 +891,7 @@ for (const visit of SPACES) {
   for (const point of points) {
     if (!router.canStandAt(point.x, point.z, point.y, sample)) continue;
     if (!collision.clearOfBoundary(point.x, point.z, PLAYER_RADIUS)) continue;
-    if (collision.deepestSolidOverlap(new Vector3(point.x, point.y, point.z), PLAYER_RADIUS, 0) > 1e-3) continue;
+    if (collision.deepestSolidOverlap(new Vector3(point.x, point.y, point.z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT) > 1e-3) continue;
     if (!fromDoor.has(point.x, point.z, point.y)) continue;
     asked += 1;
     const spot = putDownAt(point.x, point.y, point.z);
@@ -956,9 +1168,13 @@ function petsFollowHer(): string | null {
   for (let t = 0; t < 3; t += 0.1) {
     tick(0.1, stickAlong(door.centreX - player.position.x, door.centreZ - player.position.z));
   }
+  // At her heels, or at its own place in her line: she catches wild pets in
+  // the roof garden on the way through (4), and her line is as long as she has
+  // companions out.
   const lagging = PETS.filter((pet) => {
     const state = parade.petState(pet.uid);
-    return !state || state.bedPhase !== null || Math.hypot(state.x - player.position.x, state.z - player.position.z) > PET_HEEL_REACH;
+    const reach = Math.max(PET_HEEL_REACH, (parade.followDistance(pet.uid) ?? 0) + PET_LINE_SLACK);
+    return !state || state.bedPhase !== null || Math.hypot(state.x - player.position.x, state.z - player.position.z) > reach;
   });
   return lagging.length === 0 ? null : `her pets did not get up and follow her (${petsNow()})`;
 }
@@ -1097,7 +1313,9 @@ function judge(what: string, before: number, holding: string, left: string, ms: 
   if (Math.hypot(placed.x - spot.x, placed.z - spot.z) > 1e-6 && !placed.airborne) {
     fail(`${what}: she was left at (${placed.x.toFixed(2)}, ${placed.z.toFixed(2)}), not where the rule put her (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
   }
+  const lineBefore = boarding?.lineBefore ?? lineOnFoot;
   tick(1); // let a fling land
+  companionsBack(what, lineBefore);
   judgeWalkAway(`${what}: left by ${left}`);
   const out = walksOut();
   if (!out.out) {
@@ -1417,6 +1635,94 @@ for (const [label, go] of [
   }
 }
 
+// ------------------------------------------------------------------ 4d. every ride, ridden to its end
+
+// The booths' world rides, boarded as the booths board them, and ridden to
+// their own finish with her pets out.
+for (const stallId of ['railRacer', 'skyCruiser', 'spaceFerrisWheel']) {
+  settle();
+  SPACES[0]!.enter();
+  tick(0.5);
+  const startedAt = player.putDowns;
+  if (!world.boardStallRide(stallId) || (tick(0.5), !player.riding)) {
+    fail(`booth ride ${stallId}: would not board, so its ride to the end asserts nothing`);
+    continue;
+  }
+  // The Rail Race waits on its level-select card, as `Game`'s race HUD
+  // answers it (`RaceHud.onChooseLevel`): the first level, pressed at once.
+  if (stallId === 'railRacer') world.railRace.chooseLevel(1);
+  const holding = player.rideHolder?.holding ?? '?';
+  let t = 0;
+  for (; t < RIDE_TO_END_SECONDS && player.riding; t += 0.5) tick(0.5);
+  if (player.riding) {
+    fail(`${holding}: still riding ${RIDE_TO_END_SECONDS} s in — it never came to its own end`);
+    player.letGo();
+    continue;
+  }
+  judge(`${holding}, ridden to its end (${t.toFixed(0)} s)`, startedAt, holding, 'its own end', 0);
+}
+
+// **The train, a whole lap, and off at a stop by its own chip** — the blocker
+// this replaced: with a pet out, the train never left the platform once she
+// was aboard, and she could not get off. Her line out; she gets on at a
+// platform; it must leave, go all the way round, stand at a stop and offer
+// "Get off"; she takes it; and the train must go on without her.
+{
+  settle();
+  SPACES[0]!.enter();
+  tick(0.5);
+  let boardedIn = -1;
+  for (let t = 0; t < 200 && !player.riding; t += 0.5) {
+    const station = world.train.interactZones().find((zone) => zone.actions?.().some((action) => action.label === 'Get on'));
+    if (station) {
+      player.teleportTo(station.standX, sample(station.standX, station.standZ, player.position.y + 2), station.standZ);
+      tick(0.5);
+      station.actions?.().find((action) => action.label === 'Get on')?.run();
+      if (player.riding) boardedIn = t;
+    }
+    if (!player.riding) tick(0.5);
+  }
+  if (boardedIn < 0) {
+    fail('the train: never stood at a platform she could board in 200 s, so its lap asserts nothing');
+  } else {
+    const route = world.train.route;
+    let last = world.train.noseDistance();
+    let travelled = 0;
+    let leftIn = -1;
+    let offered: InteractZone | null = null;
+    let t = 0;
+    for (; t < TRAIN_LAP_SECONDS; t += 0.25) {
+      tick(0.25);
+      const nose = world.train.noseDistance();
+      travelled += route.forwardGap(last, nose);
+      last = nose;
+      if (leftIn < 0 && travelled > 1) leftIn = t;
+      if (travelled < route.length - 1) continue;
+      offered = world.train.interactZones().find((zone) => zone.actions?.().some((action) => action.label === 'Get off')) ?? null;
+      if (offered) break;
+    }
+    if (leftIn < 0 || leftIn > TRAIN_LEAVES_SECONDS) fail(`the train: with her aboard and her line out, it ${leftIn < 0 ? 'never left the platform' : `took ${leftIn.toFixed(1)} s to leave it`} (${TRAIN_LEAVES_SECONDS} s allowed)`);
+    if (travelled < route.length - 1) fail(`the train: went ${travelled.toFixed(0)} m of its ${route.length.toFixed(0)} m lap in ${TRAIN_LAP_SECONDS} s with her aboard`);
+    else if (!offered) fail(`the train: after a whole lap with her aboard, no stop offered "Get off" in ${TRAIN_LAP_SECONDS} s`);
+    else {
+      const startedAt = player.putDowns;
+      offered.actions?.().find((action) => action.label === 'Get off')?.run();
+      if (player.riding) fail('the train: its "Get off" chip did not let her off');
+      else {
+        judge(`the train, a whole lap (${travelled.toFixed(0)} m in ${t.toFixed(0)} s) and off at a stop`, startedAt, 'the train', 'its own "Get off" chip', 0);
+        const off = world.train.noseDistance();
+        let goneIn = -1;
+        for (let u = 0; u < TRAIN_LEAVES_SECONDS + 10 && goneIn < 0; u += 0.5) {
+          tick(0.5);
+          if (route.forwardGap(off, world.train.noseDistance()) > 2) goneIn = u;
+        }
+        if (goneIn < 0) fail(`the train: did not go on without her within ${TRAIN_LEAVES_SECONDS + 10} s of her getting off`);
+        else notes.push(`the train: a whole lap with her aboard and her line out (one beside her, the rest in her backpack), off at a stop by its chip, and away again ${goneIn.toFixed(1)} s later`);
+      }
+    }
+  }
+}
+
 for (const visit of SPACES) nextDayFrom(visit.name, () => visit.enter());
 // Mid-ride: at breakfast, up a tree, on the train's platform ride, in the castle lift.
 nextDayFrom('a breakfast chair', () => {
@@ -1545,6 +1851,7 @@ say(
 );
 say(`check:exits — arrivals:\n  ${arrivals.join('\n  ')}`);
 say(`check:exits — Next day:\n  ${nextDays.join('\n  ')}`);
+say(`check:exits — her companions on every holder she was boarded onto (${companionsAsked.size}):\n  ${[...companionsAsked.values()].join('\n  ')}`);
 for (const note of notes.filter((note) => !note.startsWith('rule') && !note.startsWith('instrument') && !note.startsWith('router agreement') && !note.startsWith('off the lattice'))) say(`  note: ${note}`);
 if (problems.length > 0) {
   for (const problem of problems) console.error(`  ✗ ${problem}`);

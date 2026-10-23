@@ -37,8 +37,8 @@ import {
   type ReptileHandle,
   type TortoiseHandle,
 } from '../../art/models/reptiles';
-import { reptileCaseMesh, REPTILE_NURSERY_GLASS_RADIUS } from '../../art/models/reptileCasesAssets';
-import { instancedPlant, reptilePlantAnchor, reptilePlantBottom, reptilePlantMesh } from '../../art/models/reptilePlantsAssets';
+import { reptileCaseMesh, reptileCaseTop, REPTILE_NURSERY_GLASS_RADIUS } from '../../art/models/reptileCasesAssets';
+import { instancedPlant, reptilePlantAnchor, reptilePlantBottom, reptilePlantMesh, reptilePlantTop } from '../../art/models/reptilePlantsAssets';
 import { createNoodleRock, createNoodleTailMound, type NoodleRock } from '../../art/models/reptileNoodleAssets';
 import type { HallContext } from './context';
 import { asCrowd } from './exhibitCamera';
@@ -64,6 +64,7 @@ import {
   REPTILE_LOG_LENGTH,
   REPTILE_NURSERY_KERB_HEIGHT,
   REPTILE_NOODLE_HEAD_Y,
+  REPTILE_NURSERY_GLASS_TOP,
   REPTILE_NURSERY_RAIL_TOP,
   REPTILE_PIER_POST_RADIUS,
   PIER_POSTS,
@@ -373,8 +374,8 @@ export class Exhibits {
   }
 
   private registerShape(id: string, shape: ExhibitShape, top: number): void {
-    if (shape.kind === 'disc') this.ctx.props.disc(`${id}'s enclosure`, shape.centre.x, shape.centre.z, shape.radius, top, { stand: false });
-    else this.ctx.props.wall(`${id}'s enclosure`, shape.a, shape.b, shape.half, top, { stand: false });
+    if (shape.kind === 'disc') this.ctx.props.disc(`${id}'s enclosure`, shape.centre.x, shape.centre.z, shape.radius, top);
+    else this.ctx.props.wall(`${id}'s enclosure`, shape.a, shape.b, shape.half, top);
   }
 
   // ---------------------------------------------------------- glass cases
@@ -986,12 +987,13 @@ export class Exhibits {
     group.add(reptileCaseMesh('rc-nursery-kerb'), reptileCaseMesh('rc-nursery-rail'));
     const glassRadius = REPTILE_NURSERY_GLASS_RADIUS;
     // Inside the rail's posts and ring by a clear margin, so no pane face
-    // lies in a plane with the rail's.
+    // lies in a plane with the rail's. It rises past the rail to the guard's
+    // height (`REPTILE_NURSERY_GLASS_TOP`).
     const glass = new Mesh(
-      new CylinderGeometry(glassRadius - 0.2, glassRadius - 0.2, REPTILE_NURSERY_RAIL_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
+      new CylinderGeometry(glassRadius - 0.2, glassRadius - 0.2, REPTILE_NURSERY_GLASS_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
       GLASS,
     );
-    glass.position.y = (REPTILE_NURSERY_RAIL_TOP + REPTILE_NURSERY_KERB_HEIGHT) / 2;
+    glass.position.y = (REPTILE_NURSERY_GLASS_TOP + REPTILE_NURSERY_KERB_HEIGHT) / 2;
     glass.castShadow = false;
     group.add(glass);
     const bedding = decal(new Mesh(new CylinderGeometry(shape.radius - 0.3, shape.radius - 0.3, 0.12, 32), toonMaterial(ART.hothouseClay)));
@@ -1017,7 +1019,7 @@ export class Exhibits {
       [0.5, 0.07],
       [0.8, 0.09],
     ] as const;
-    this.registerShape(placement.id, shape, REPTILE_NURSERY_RAIL_TOP);
+    this.registerShape(placement.id, shape, REPTILE_NURSERY_GLASS_TOP);
     for (let i = 0; i < 12; i += 1) {
       const [length, radius] = sizes[i % 3]!;
       const angle = (i / 12) * Math.PI * 2 + 0.4;
@@ -1172,7 +1174,7 @@ export class Exhibits {
     const over = rock.snoutReach - REPTILE_ISLAND_COLLIDER_RADIUS;
     if (over > 0) {
       const at = (REPTILE_ISLAND_COLLIDER_RADIUS + rock.snoutReach) / 2;
-      this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.15, 1.3, { stand: false });
+      this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.15, 1.3);
     }
     const headAt: LocalPoint = { x: rock.head.position.x, z: rock.head.position.z };
     return {
@@ -1230,7 +1232,8 @@ export class Exhibits {
       group.rotation.y = index * 1.3;
       group.add(reptileCaseMesh('rc-pier-post'), reptileCaseMesh('rc-pier-vine'));
       this.ctx.root.add(group);
-      this.ctx.props.disc(`pier post ${index}`, post.x, post.z, REPTILE_PIER_POST_RADIUS, 'wall');
+      // To the top of the post and the vine round it, measured off the kit.
+      this.ctx.props.disc(`pier post ${index}`, post.x, post.z, REPTILE_PIER_POST_RADIUS, Math.max(reptileCaseTop('rc-pier-post'), reptileCaseTop('rc-pier-vine')));
     }
   }
 
@@ -1248,7 +1251,9 @@ export class Exhibits {
         { x: REPTILE_LOG_CENTRE_X - half, z: side * wallZ },
         { x: REPTILE_LOG_CENTRE_X + half, z: side * wallZ },
         0.3,
-        'wall',
+        // To the log's own crown, measured off the kit: she walks through it,
+        // not over it — the crown is out of reach.
+        reptilePlantTop('rp-log-hollow'),
       );
     }
     for (let i = 0; i < 20; i += 1) {
@@ -1302,7 +1307,7 @@ export class Exhibits {
     soil.position.y = 0.9;
     group.add(soil);
     group.add(...instancedPlant('rp-banana-leaf', [0, 1, 2].map((i) => ({ x: 0, y: 0.88, z: 0, yaw: i * 2.1 + 0.5, scale: 1.2 }))));
-    this.ctx.props.disc('the foyer pot', FOYER_POT.x, FOYER_POT.z, FOYER_POT_RADIUS, 2.4, { stand: false });
+    this.ctx.props.disc('the foyer pot', FOYER_POT.x, FOYER_POT.z, FOYER_POT_RADIUS, 2.4);
     const baby = createSnake({ length: 0.3, radius: 0.05, colourway: 'rainbow', seed: 1700, pool: this.ctx.babies });
     baby.root.position.set(0.1, 0.75, 0.25);
     baby.root.rotation.y = 0.3;

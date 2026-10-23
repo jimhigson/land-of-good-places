@@ -22,16 +22,16 @@ import { toonMaterial } from '../art/style/materials';
 import { SKULL_RADIUS } from '../art/models/kid';
 import { TRAIN_PLAN } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
-import { placeOnSphere, standOnSphere, terrainHeight } from './terrain';
+import { groundRadiusAt, placeOnSphere, standOnSphere, terrainHeight, upAt, yAtAltitude, yAtRadius } from './terrain';
 import { COASTER_PLANS } from './coaster/plan';
 import { hidesTheArrivingBus } from './entrance/arrivalSightline';
 import { distanceToEntranceCorridor } from './entrance/roadRoute';
 import { CART_ENVELOPE } from './coaster/cart';
-import type { CollisionWorld } from './Collision';
+import { roundTopHalf, type CollisionWorld } from './Collision';
 // **The trees are not this file's to define.** See `world/treeModel.ts`: the
 // lane the cat bus drives up plants the same trees from the same rolls, so
 // they live in a module neither scene owns and both ask.
-import { CANOPY_GREENS, FOLIAGE_GEOMETRY, fileTreeParts, foliageMaterial, makeInstanced, type InstanceItem, type RolledTree, type TreeKind, type TreePart } from './treeModel';
+import { CANOPY_GREENS, FOLIAGE_GEOMETRY, fileTreeParts, foliageMaterial, makeInstanced, partTopY, type InstanceItem, type RolledTree, type TreeKind, type TreePart } from './treeModel';
 import { type Claim } from '../boot/groundClaims';
 
 /**
@@ -510,6 +510,22 @@ export function rollBush(rng: Rng, x: number, z: number): InstanceItem[] {
   return items;
 }
 
+/**
+ * **A clump's crown over its own middle** — the highest blob surface above
+ * `(x, z)`, as a `y` in the frame {@link rollBush} rolled it in. Each blob is a
+ * unit ball scaled by its own `scale` (`Scenery`'s bush geometry), so its top
+ * `d` metres off its centre is `y + scale.y · √(1 − (d / scale.x)²)`.
+ */
+export function bushCrownY(blobs: readonly InstanceItem[], x: number, z: number): number {
+  let crown = -Infinity;
+  for (const blob of blobs) {
+    const off = Math.hypot(blob.position.x - x, blob.position.z - z) / blob.scale.x;
+    if (off >= 1) continue;
+    crown = Math.max(crown, blob.position.y + blob.scale.y * Math.sqrt(1 - off * off));
+  }
+  return crown;
+}
+
 /** One bush clump the world phase decided: its blobs, rolled once, drawn later. */
 export interface BushDecision {
   readonly x: number;
@@ -540,6 +556,12 @@ export interface SceneryDecisions {
 export const TREE_TRUNK_CLAIM = 0.6;
 /** Radius of the collider a clump registers, and so the ground it occupies. */
 export const BUSH_COLLIDER = 0.85;
+/**
+ * The highest a bush's solid stands: within her jump from flat ground (1.23 m
+ * apex, 0.15 m grace) wherever she is in the park, so every bush is
+ * somewhere she can climb onto — and out of a thicket by. Above it, leaves.
+ */
+export const BUSH_CORE_TOP = 1.2;
 
 /** The ground a tree claims — its trunk. One owner for the builder and a prebuilt park. */
 export function treeClaim(x: number, z: number): Claim {
@@ -601,7 +623,13 @@ function buildFoliage(
     });
     occluderRefs.push(refs);
     const trunkRadius = 0.55 * lean;
-    const colliderId = collision.addCircle(x, z, trunkRadius);
+    // Solid to the top of its canopy — the drawn top over the trunk — a real
+    // height, measured up from the foot it was rolled standing on.
+    let treeTop = -Infinity;
+    for (const part of parts) treeTop = Math.max(treeTop, partTopY(part));
+    const colliderId = collision.kinded('tree', () =>
+      collision.addCircle(x, z, trunkRadius, yAtAltitude(x, z, treeTop - terrainHeight(x, z)), false, true),
+    );
     treeColliders.push({ id: colliderId, radius: trunkRadius });
   }
 
@@ -610,7 +638,19 @@ function buildFoliage(
   for (const clump of decisions.bushes) {
     const instanceStart = bushes.length;
     for (const blob of clump.blobs) bushes.push(blob);
-    const bushColliderId = collision.addCircle(clump.x, clump.z, BUSH_COLLIDER);
+    // **Solid to its dense heart, never higher than she can climb** — its
+    // crown over the clump's middle, or `BUSH_CORE_TOP`, whichever is lower —
+    // and above that she stands *in* its leaves (the planters ruling: leaves
+    // are what she brushes through). A bush is 1.7 m across, too wide to
+    // jump clean over, and the park plants them in thickets: solid to a 2 m
+    // crown, the low bush she climbed in by was the only way out, and five
+    // thickets on seed 5 were pens she could not leave (check:solids, 17 Oct
+    // 2026). Every bush a step she can always get up onto, a thicket is a
+    // place she walks out of across its tops.
+    const crown = Math.min(BUSH_CORE_TOP, bushCrownY(clump.blobs, clump.x, clump.z) - terrainHeight(clump.x, clump.z));
+    const bushColliderId = collision.kinded('bush', () =>
+      collision.addCircle(clump.x, clump.z, BUSH_COLLIDER, yAtAltitude(clump.x, clump.z, crown), false, true),
+    );
     bushColliders.push({ id: bushColliderId, instanceStart, instanceCount: clump.blobs.length });
     bushClumps.push({ x: clump.x, z: clump.z, radius: BUSH_COLLIDER });
   }
@@ -977,6 +1017,15 @@ export function clearOfCruiser(x: number, z: number, reach: number, topY: number
  * around and hide behind", so these are laid out as a loose, open maze rather
  * than a fence line.
  */
+/**
+ * A wooden wall's corner post at its foot, and its ball cap — its radius, and
+ * how squashed it is drawn. The post's solid stands on the foot's radius,
+ * which is inside the run's own capsule end ({@link WOOD_WALL_COLLIDER_HALF}).
+ */
+const POST_FOOT_RADIUS = 0.21;
+const CAP_RADIUS = 0.24;
+const CAP_SQUASH = 0.8;
+
 function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], runs: readonly WallRun[]): Group {
   const group = new Group();
   group.name = 'wooden-walls';
@@ -991,8 +1040,8 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
   const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
   const postMaterial = toonMaterial(PALETTE.woodDark);
   const capMaterial = toonMaterial(PALETTE.woodLight);
-  const postGeometry = new CylinderGeometry(0.19, 0.21, 1, 8);
-  const capGeometry = new SphereGeometry(0.24, 10, 8);
+  const postGeometry = new CylinderGeometry(0.19, POST_FOOT_RADIUS, 1, 8);
+  const capGeometry = new SphereGeometry(CAP_RADIUS, 10, 8);
 
   /**
    * **One post per corner, however many runs end there.**
@@ -1016,6 +1065,8 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     z: number;
     base: number;
     top: number;
+    /** The lowest boards' top meeting here, as a radius from the planet's centre — where the post's own solid begins. */
+    boards: number;
   }
   const corners: Corner[] = [];
   /** Same corner, allowing for the endpoints being written twice over. */
@@ -1046,23 +1097,40 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     boards.receiveShadow = true;
     group.add(boards);
 
+    // The boards' top as the run's solid holds it: a radius, measured up from
+    // the midpoint the boards are leant at (`gardenWallTop`).
+    const boardsTop = groundRadiusAt(midX, midZ) + base + run.height - terrainHeight(midX, midZ);
     for (const [px, pz] of [run.from, run.to]) {
       const top = base + run.height + 0.32;
       const existing = cornerAt(px, pz);
       if (existing) {
         existing.base = Math.min(existing.base, base);
         existing.top = Math.max(existing.top, top);
+        existing.boards = Math.min(existing.boards, boardsTop);
       } else {
-        corners.push({ x: px, z: pz, base, top });
+        corners.push({ x: px, z: pz, base, top, boards: boardsTop });
       }
     }
 
-    // Real wall height, not the `Infinity` default — this is what lets a jump
-    // clear a low or mid wall while a tall one still stops you (Collision.ts).
-    // `autoHoppable: true` is what lets `Player` clear one on its own, with no
-    // button press, the moment walking (or tap-to-move) runs into one it
-    // could jump anyway (design feedback #30e).
-    collision.addWall(x1, z1, x2, z2, WOOD_WALL_COLLIDER_HALF, run.height, true);
+    // **Its real top, as drawn, as a place** — the boards' top edge, `base +
+    // run.height` in the flat frame the boards were authored in, re-measured
+    // along the local up exactly as `standOnSphere` leans them
+    // (`gardenWallTop`). A jump that clears it lands on it, and she can walk
+    // along it. The hop is still planned on the run's own height
+    // (`hopHeight`), which is what `autoHoppable` and `NavGrid`'s hop band have
+    // always asked: the route lattice cannot tell a wall it may hop from one it
+    // may not by where its top happens to be in the world.
+    //
+    // **And stood on where the boards' top is drawn** (`toppedShifted`): the
+    // boards stand at the midpoint and lean about their own middle
+    // (`standOnSphere`), so their top edge is drawn half their height out
+    // along the local up from the footprint she bumps.
+    const boardsUp = upAt(midX, base + run.height / 2, midZ, gardenWallUp);
+    collision.kinded('wooden garden wall', () =>
+      collision.toppedShifted(boardsUp.x * (run.height / 2), boardsUp.z * (run.height / 2), () =>
+        collision.addWall(x1, z1, x2, z2, WOOD_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, base + run.height), true, true, -Infinity, false, run.height),
+      ),
+    );
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
 
@@ -1079,9 +1147,41 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
     const cap = new Mesh(capGeometry, capMaterial);
     cap.position.set(corner.x, corner.top, corner.z);
     standOnSphere(cap);
-    cap.scale.set(1, 0.8, 1);
+    cap.scale.set(1, CAP_SQUASH, 1);
     cap.castShadow = true;
     group.add(cap);
+
+    // **The post is a solid of its own, to its cap's crown** — taller than the
+    // boards either side by a third of a metre and a cap, so a child walking
+    // along a wall's top meets the post (or steps up onto its cap) rather
+    // than standing inside it at the boards' height, which is where the run's
+    // own capsule end put her. The cap is a ball: she stands on its crown
+    // (`roundTopHalf`).
+    //
+    // **Banded, from the boards' top up** (a finite `baseHeight`). Below the
+    // boards the run's own capsule end is what anyone meets, and a banded
+    // solid is one the planner and the crowd's hop band never read, so the
+    // park is the one it was; only what stands over the boards is new.
+    // **Stamped into the route lattice** (`navStamped`), though: the crowd
+    // walks with her height now, and the post stands 0.1 m proud of the run's
+    // capsule, so a child routed along a wall's face was nudged at every post
+    // (PR #722's review, 22 posts on seed 5). Routed clear of it instead.
+    //
+    // Only where the post stands over its boards: a run up a steep bank is
+    // drawn from its lower end's ground, so at the upper end its boards and
+    // its post can be buried in the hill, and a band from the boards' top to
+    // a crown below it is no solid at all (seed 12: base 0.08 m, top -0.04 m
+    // over the ground — a ceiling over the wall's own top).
+    const crown = corner.top + CAP_RADIUS * CAP_SQUASH;
+    const postTop = yAtAltitude(corner.x, corner.z, crown - terrainHeight(corner.x, corner.z));
+    const postBase = yAtRadius(corner.x, corner.z, corner.boards);
+    if (postTop > postBase + CAP_RADIUS * CAP_SQUASH) {
+      collision.kinded('wooden wall post', () =>
+        collision.toppedNarrow(roundTopHalf(CAP_RADIUS), () =>
+          collision.addCircle(corner.x, corner.z, POST_FOOT_RADIUS, postTop, false, true, postBase, true),
+        ),
+      );
+    }
   }
 
   return group;
@@ -1129,6 +1229,20 @@ function withoutBoxTop(geometry: BoxGeometry): BoxGeometry {
   geometry.clearGroups();
   return geometry;
 }
+
+/**
+ * **How far a stone wall's coping runs past each end of the wall** — and so
+ * how far past each end its top is somewhere to stand
+ * (`CollisionWorld.toppedSquare`). The wall's solid is a capsule, round-ended
+ * so she slides round an end; its round end runs 0.34 m past the wall, and as
+ * a top it was a ledge over nothing drawn: the census stood her 0.3 m past a
+ * coping's end, 0.24 m over the flank of its finial (seed 5, 17 Oct 2026).
+ */
+const COPING_END_OVERHANG = 0.1;
+
+/** Scratch for a garden wall's up at its midpoint, and for a coping's end. */
+const gardenWallUp = new Vector3();
+const copingEnd = new Vector3();
 
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
@@ -1180,7 +1294,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     group.add(wall);
 
     // A rounded coping stone along the top — reads as "sit on me".
-    const coping = new Mesh(new BoxGeometry(length + 0.2, 0.16, 0.72), copingMaterial);
+    const coping = new Mesh(new BoxGeometry(length + 2 * COPING_END_OVERHANG, 0.16, 0.72), copingMaterial);
     placeOnSphere(new Vector3(midX, base + run.height + 0.08, midZ), -angle, coping.position, coping.quaternion);
     coping.castShadow = true;
     coping.receiveShadow = true;
@@ -1206,9 +1320,45 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
       });
     }
 
-    // Real wall height, not the `Infinity` default — see the wooden walls
-    // above, including why `autoHoppable` is `true` here too.
-    collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, run.height, true);
+    // Its real top, as drawn: the coping's top, `copingTop`, a place she can
+    // land on and walk along — see the wooden walls above, including why the
+    // hop is still planned on the run's own height.
+    //
+    // **And stood on where the coping is drawn** (`toppedShifted`): the wall
+    // and its coping lean from their foot at the midpoint (`placeOnSphere`),
+    // so the coping's top is drawn its height out along the local up from the
+    // footprint she bumps — a third of a metre at the park's edge, where the
+    // census stood her on the wall's footprint with nothing drawn under her
+    // feet (seeds 10, 11 and 15, 64-76 m out).
+    const midGround = terrainHeight(midX, midZ);
+    const copingUp = upAt(midX, midGround, midZ, gardenWallUp);
+    const copingLift = copingTop - midGround;
+    const shiftX = copingUp.x * copingLift;
+    const shiftZ = copingUp.z * copingLift;
+    // **And its ends where the coping's top is drawn to.** A straight stone
+    // leant at its middle lies on the planet's tangent there, so wherever the
+    // wall runs downhill round the curve its ends come in — 0.13 m each at the
+    // park's edge on a 6 m wall — and a top squared off at the flat ends plus
+    // the overhang stood her past the drawn stone (seed 10, 65 m out). The
+    // coping's own top-end centres, from its own transform, measured along
+    // the wall from its shifted ends.
+    const axisX = (x2 - x1) / length;
+    const axisZ = (z2 - z1) / length;
+    let beyond = Infinity;
+    for (const [sign, ex, ez] of [
+      [1, x2, z2],
+      [-1, x1, z1],
+    ] as const) {
+      const end = copingEnd.set(sign * (length / 2 + COPING_END_OVERHANG), 0.08, 0).applyQuaternion(coping.quaternion).add(coping.position);
+      beyond = Math.min(beyond, sign * ((end.x - (ex + shiftX)) * axisX + (end.z - (ez + shiftZ)) * axisZ));
+    }
+    collision.kinded('stone garden wall', () =>
+      collision.toppedShifted(shiftX, shiftZ, () =>
+        collision.toppedSquare(Math.max(0, beyond), () =>
+          collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, gardenWallTop(midX, midZ, copingTop), true, true, -Infinity, false, run.height),
+        ),
+      ),
+    );
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
 
@@ -1222,7 +1372,21 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
 
 // ----------------------------------------------------------------- helpers
 
-/** Multiplies a geometry's UVs so a tiling texture keeps a constant scale. */
+/**
+ * **A garden wall's drawn top, as a world `y` over its midpoint** — `flatTop`
+ * is the top as the wall was authored (its foot plus its height, plus the
+ * coping on a stone one), and the wall is stood on the sphere at its midpoint
+ * (`placeOnSphere`, `standOnSphere`), which keeps that height but measures it
+ * along the local up. So the top is that far above the ground at the midpoint,
+ * along the up — `yAtAltitude` — and `CollisionWorld` holds it as a radius from
+ * there, so it is the leaned top the wall is drawn with at every point along
+ * it rather than one number right only in its middle.
+ */
+function gardenWallTop(midX: number, midZ: number, flatTop: number): number {
+  return yAtAltitude(midX, midZ, flatTop - terrainHeight(midX, midZ));
+}
+
+/** Multiplies a geometry's UVs so a tiling texture keeps a constant scale. *//** Multiplies a geometry's UVs so a tiling texture keeps a constant scale. */
 function scaleUvs(geometry: BufferGeometry, sx: number, sy: number): void {
   const uv = geometry.getAttribute('uv');
   if (!uv) return;

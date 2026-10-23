@@ -32,7 +32,7 @@ import { BEAM_UNDERSIDE, BEAM_WIDTH, CASTLE_CEILING_CLEAR } from './castleFabric
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 import { DECK_ROUNDEL, deckIsFurnished, keepOutsFor, scatterKeepOutsFor } from './dressing';
 import { buildBurrows, buildRoofMeadow } from './roofMeadow';
-import { dressGreatHall, isTapestryBay } from './castleFurniture';
+import { dressGreatHall, isTapestryBay, type CastleDecorSolid } from './castleFurniture';
 import {
   HALL_DECK,
   insideInterior,
@@ -85,11 +85,9 @@ export function castleDecorGroupName(deck: number): string {
   return `castle-decor-${deck}`;
 }
 
-export function dressCastle(deck: number, floor: Group): void {
-  if (deck >= TOP_DECK) {
-    dressRoofGarden(deck, floor);
-    return;
-  }
+export function dressCastle(deck: number, floor: Group): CastleDecorSolid[] {
+  if (deck >= TOP_DECK) return dressRoofGarden(deck, floor);
+  const solids: CastleDecorSolid[] = [];
 
   const group = new Group();
   group.name = castleDecorGroupName(deck);
@@ -109,7 +107,7 @@ export function dressCastle(deck: number, floor: Group): void {
   if (rug) group.add(rug);
   group.add(paintings(deck, anchors, rng));
 
-  const clutter = cornerClutter(deck, rng);
+  const clutter = cornerClutter(deck, rng, solids);
   if (clutter) group.add(clutter);
 
   // **The hall's own fabric, on the hall's own floor.** This was `deck === 0`,
@@ -121,19 +119,20 @@ export function dressCastle(deck: number, floor: Group): void {
   if (deck === HALL_DECK) {
     group.add(coatOfArms());
     group.add(portcullis());
-    group.add(hearthside());
+    group.add(hearthside(solids));
   }
 
   // Batch 1's authored furniture — the throne, the feast, the tapestries, the
   // armour and the chest (#368). Inside this group on purpose: `check:castle`'s
   // prop assertions walk what `dressCastle` builds, so everything placed there
   // is measured for free and nothing has to remember to add it.
-  dressGreatHall(deck, group);
+  solids.push(...dressGreatHall(deck, group));
 
   const hole = mouseHole(deck, anchors);
   if (hole) group.add(hole);
 
   floor.add(group);
+  return solids;
 }
 
 // -------------------------------------------------------------- heraldry
@@ -601,7 +600,7 @@ function holeGeometry(height: number): BufferGeometry {
  * {@link CASTLE_HEARTH}, which is the fire's own constant, so it cannot end up
  * asleep in front of a hearth that has moved.
  */
-function hearthside(): Group {
+function hearthside(solids: CastleDecorSolid[]): Group {
   const group = new Group();
   group.name = 'castle-hearthside';
 
@@ -621,9 +620,9 @@ function hearthside(): Group {
 
   // The woodpile, stacked against the wall beside the fire.
   const logs = new InstancedMesh(
-    new CylinderGeometry(0.11, 0.1, 0.9, 7),
+    new CylinderGeometry(LOG_RADIUS, 0.1, LOG_LENGTH, 7),
     softMaterial(PALETTE.bark, 0.8),
-    18,
+    WOODPILE_ROWS * WOODPILE_PER_ROW,
   );
   logs.name = 'castle-woodpile';
   logs.castShadow = false;
@@ -635,8 +634,8 @@ function hearthside(): Group {
   const along = new Vector3(0, 0, 1);
   const rng = new Rng(0x1065);
   let index = 0;
-  for (let row = 0; row < 3; row += 1) {
-    for (let i = 0; i < 6; i += 1) {
+  for (let row = 0; row < WOODPILE_ROWS; row += 1) {
+    for (let i = 0; i < WOODPILE_PER_ROW; i += 1) {
       if (index >= logs.count) break;
       rotation.setFromAxisAngle(along, Math.PI / 2 + rng.range(-0.05, 0.05));
       position.set(
@@ -651,6 +650,22 @@ function hearthside(): Group {
   }
   logs.instanceMatrix.needsUpdate = true;
   group.add(logs);
+  // The stack is solid, to its top row: logs lie along X, so it is the run of
+  // their centres plus half a log either end, a log's girth deep, and the top
+  // row's crown high — a step up, which is what a woodpile is.
+  {
+    const firstX = CASTLE_HEARTH.x - 2.9 + (0 - 2.5) * 0.235;
+    const lastX = CASTLE_HEARTH.x - 2.9 + (WOODPILE_PER_ROW - 1 - 2.5) * 0.235 + (WOODPILE_ROWS - 1) * 0.11;
+    solids.push({
+      kind: 'woodpile',
+      x: (firstX + lastX) / 2,
+      z: CASTLE_HEARTH.z + 0.1,
+      halfX: (lastX - firstX) / 2 + LOG_LENGTH / 2,
+      halfZ: LOG_RADIUS,
+      yaw: 0,
+      top: 0.11 + (WOODPILE_ROWS - 1) * 0.2 + LOG_RADIUS,
+    });
+  }
 
   return group;
 }
@@ -666,7 +681,7 @@ function hearthside(): Group {
  * offers corners, because clutter in the middle of a hall is not clutter, it is
  * an obstacle course.
  */
-function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
+function cornerClutter(deck: number, rng: Rng, solids: CastleDecorSolid[]): InstancedMesh | null {
   // A scatter, so it asks what is already standing on the floor as well as
   // where a child has to be able to stand. See `scatterKeepOutsFor`.
   const blocked = scatterKeepOutsFor(deck);
@@ -709,6 +724,10 @@ function cornerClutter(deck: number, rng: Rng): InstancedMesh | null {
     scale.set(spot.size, spot.size, spot.size);
     matrix.compose(position, rotation, scale);
     crates.setMatrixAt(index, matrix);
+    // A unit crate scaled by its size: solid to its lid, a box she climbs onto
+    // (a small one is a step, a big one a jump). The battens stand 2 cm proud
+    // and are not counted — generous-light, never generous-heavy.
+    solids.push({ kind: 'crate', x: spot.x, z: spot.z, halfX: spot.size / 2, halfZ: spot.size / 2, yaw: spot.yaw, top: spot.size });
   });
   crates.instanceMatrix.needsUpdate = true;
   return crates;
@@ -799,7 +818,7 @@ function quietShadows(root: Group): void {
  * happens to be what a real roof terrace is — the planting goes where the view
  * is — and it keeps every trough within reach of a child leaning on the parapet.
  */
-function dressRoofGarden(deck: number, floor: Group): void {
+function dressRoofGarden(deck: number, floor: Group): CastleDecorSolid[] {
   const group = new Group();
   group.name = castleDecorGroupName(deck);
   const blocked = keepOutsFor(deck);
@@ -828,10 +847,21 @@ function dressRoofGarden(deck: number, floor: Group): void {
     consider(-INTERIOR_HALF_X + inset, z, Math.PI / 2);
     consider(INTERIOR_HALF_X - inset, z, Math.PI / 2);
   }
-  if (spots.length === 0) return;
+  if (spots.length === 0) return [];
 
   const TROUGH_LENGTH = 2.6;
   const TROUGH_HEIGHT = 0.5;
+  // Each trough is solid to its soil, a step up; the shrubs in it are foliage,
+  // soft by the planters' ruling (`dressing.ts`'s `planterRing`).
+  const solids: CastleDecorSolid[] = spots.map((spot) => ({
+    kind: 'roof trough',
+    x: spot.x,
+    z: spot.z,
+    halfX: TROUGH_LENGTH / 2,
+    halfZ: TROUGH_DEPTH / 2,
+    yaw: spot.yaw,
+    top: TROUGH_HEIGHT,
+  }));
   const troughs = new InstancedMesh(
     troughGeometry(TROUGH_LENGTH, TROUGH_HEIGHT),
     softMaterial(PALETTE.stonePinkLight, 0.8),
@@ -944,11 +974,21 @@ function dressRoofGarden(deck: number, floor: Group): void {
   if (burrows) group.add(burrows);
 
   floor.add(group);
+  return solids;
 }
+
+/** How deep a trough is, across its long axis. */
+const TROUGH_DEPTH = 0.8;
+
+/** The woodpile by the hearth: rows of logs, and each log's girth and length. */
+const WOODPILE_ROWS = 3;
+const WOODPILE_PER_ROW = 6;
+const LOG_RADIUS = 0.11;
+const LOG_LENGTH = 0.9;
 
 /** A planter trough: an open box, four low walls round a soil bed. */
 function troughGeometry(length: number, height: number): BufferGeometry {
-  const depth = 0.8;
+  const depth = TROUGH_DEPTH;
   const wall = 0.12;
   const parts: BufferGeometry[] = [];
   for (const [sx, sz, dx, dz] of [

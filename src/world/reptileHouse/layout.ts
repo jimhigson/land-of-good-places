@@ -225,6 +225,14 @@ export const REPTILE_TORTOISE_HALF = 2.9;
 export const REPTILE_NURSERY_RADIUS = 2.6;
 export const REPTILE_NURSERY_KERB_HEIGHT = 0.6;
 export const REPTILE_NURSERY_RAIL_TOP = 1.5;
+/**
+ * **The nursery's glass stands over its rail**, to the height of a guard: out
+ * of her reach from the foyer's hop-on log (its 0.59 m top, 4 m away), which a
+ * sprint-jump off it cleared at the rail's 1.5 m and stood her over the
+ * babies (`check:solids`, 17 Oct 2026). The log's 0.59 m plus her reach
+ * (1.28 m apex, 0.15 m grace) and a margin; the census proves it.
+ */
+export const REPTILE_NURSERY_GLASS_TOP = 2.1;
 
 /** Noodle's Rock: a solid disc; the kerb is drawn at `ISLAND_RADIUS`. */
 export const REPTILE_ISLAND_COLLIDER_RADIUS = 3.6;
@@ -509,13 +517,22 @@ export const REPTILE_DOORWAY_KEEP_OUT = 1.6;
 // ---------------------------------------------------------------------------
 
 /**
- * A bed's radius-1.2 discs and their absolute top. The top is above
- * `JUMP_APEX_HEIGHT` (≈ 1.28) so a jump never clears a bed; the discs are
- * what `planting.ts` registers, chained along the inset outline and tiled
- * across the inside so there is no hollow for a child to land in.
+ * A bed's radius-1.2 discs and their absolute top. The discs are what
+ * `planting.ts` registers, chained along the inset outline and tiled across
+ * the inside so there is no hollow for a child to land in.
+ *
+ * **The beds are the hall's walls**, the planting's solid mass between the
+ * paths, and a wall stops her by being taller than she can reach — from the
+ * floor *and from anything she can stand on beside one*. 2.4 cleared a jump
+ * from the floor; since every solid has a real top (17 Oct 2026) she stands
+ * on the foyer log, the stall's counter and its back panel too, and from the
+ * panel's 1.5 m a jump reaches 2.9 — `check:solids` found her walking the
+ * bed tops from there, over the plants and onto every exhibit. 3.1 is the
+ * highest pad in the house plus her reach (1.28 m apex, 0.15 m grace) and a
+ * margin; `check:solids`' census is what proves it out of reach.
  */
 export const REPTILE_BED_DISC_RADIUS = 1.2;
-export const REPTILE_BED_TOP = 2.4;
+export const REPTILE_BED_TOP = 3.1;
 
 export interface BedSpec {
   readonly id: string;

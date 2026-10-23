@@ -1,4 +1,4 @@
-import { Group, Mesh, MeshToonMaterial } from 'three';
+import { Group, Mesh, MeshBasicMaterial, MeshToonMaterial, Raycaster, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
 import { REPTILE_HOUSE_GLB_BASE64 } from '../assets/reptileHouseGlb';
@@ -144,6 +144,92 @@ export function reptileHouseLowDiscs(bore: number): { x: number; z: number; radi
     const x = centre.z > 0 && Math.abs(centre.x) < bore + radius ? Math.sign(centre.x) * (bore + radius) : centre.x;
     return { x, z: centre.z, radius };
   });
+}
+
+/**
+ * **How high the house is drawn over a capsule of its own ground** — the
+ * highest vertex of any of its parts within `half` of the segment `a`–`b`
+ * (building-local metres; a point is a zero-length segment). What a solid on
+ * the house's footprint stands to (`shell.ts`), measured off the shipped mesh
+ * as every other figure here is, so a coil that dips to the paving is a coil
+ * she can jump onto and a dome is a dome she cannot.
+ */
+export function reptileHouseTopOver(
+  a: { readonly x: number; readonly z: number },
+  b: { readonly x: number; readonly z: number },
+  half: number,
+): number {
+  const kit = houseKit();
+  const ax = b.x - a.x;
+  const az = b.z - a.z;
+  const lengthSquared = ax * ax + az * az;
+  let top = 0;
+  for (const name of kit.names) {
+    const part = kit.part(name);
+    const position = part.geometry.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i) + part.position.x;
+      const z = position.getZ(i) + part.position.z;
+      let t = lengthSquared < 1e-8 ? 0 : ((x - a.x) * ax + (z - a.z) * az) / lengthSquared;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      if (Math.hypot(x - (a.x + ax * t), z - (a.z + az * t)) > half) continue;
+      top = Math.max(top, position.getY(i) + part.position.y);
+    }
+  }
+  return top;
+}
+
+/**
+ * **How high the house stands in one sector of its plan** — the highest vertex
+ * of any part whose bearing from the house's centre falls between `from` and
+ * `to` (radians, the house's own plan, `atan2(x, z)`). What a chord of the
+ * shell's ring stands to: the ring is the *whole building's* footprint edge,
+ * sealing everything inside it, so its top is the building's own top in that
+ * sector — the coil, the wall, the dome behind it — and not just the plinth
+ * the chord happens to run along. Measured off the shipped mesh.
+ */
+/**
+ * **The drawn top of the house over a point of its own plan** (`x` across,
+ * `z` along), house-local metres, or 0 where nothing of it is over the point:
+ * a ray down every part of the shipped mesh. Where {@link reptileHouseTopOver}
+ * asks the vertices near a point, this asks the faces, so it is right over the
+ * middle of a big curved face with no vertex near it — the dome's.
+ */
+export function reptileHouseDrawnTopAt(x: number, z: number): number {
+  const kit = houseKit();
+  const from = 100;
+  const ray = new Raycaster(new Vector3(x, from, z), new Vector3(0, -1, 0)); // flat-ok: house-local metres, where the kit's own up is +Y
+  const material = new MeshBasicMaterial();
+  let top = 0;
+  for (const name of kit.names) {
+    const part = kit.part(name);
+    const mesh = new Mesh(part.geometry, material);
+    mesh.position.copy(part.position);
+    mesh.updateMatrixWorld(true);
+    const hit = ray.intersectObject(mesh, false)[0];
+    if (hit) top = Math.max(top, from - hit.distance);
+  }
+  material.dispose();
+  return top;
+}
+
+export function reptileHouseTopInSector(from: number, to: number): number {
+  const kit = houseKit();
+  const wrap = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
+  const middle = (from + to) / 2;
+  const half = Math.abs(to - from) / 2;
+  let top = 0;
+  for (const name of kit.names) {
+    const part = kit.part(name);
+    const position = part.geometry.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i) + part.position.x;
+      const z = position.getZ(i) + part.position.z;
+      if (Math.hypot(x, z) > 1e-6 && Math.abs(wrap(Math.atan2(x, z) - middle)) > half) continue;
+      top = Math.max(top, position.getY(i) + part.position.y);
+    }
+  }
+  return top;
 }
 
 /**

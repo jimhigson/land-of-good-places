@@ -1,6 +1,7 @@
 import { BoxGeometry, Group, Mesh, type Material } from 'three';
 import { interiorMaterial } from './parts';
 import {
+  BUILDING_BASE_Y,
   SHOP_RECESS_DEPTH,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
@@ -14,7 +15,7 @@ import {
   type ShopUnitDefinition,
 } from './layout';
 import type { CollisionWorld } from '../Collision';
-import { COUNTER_HALF_WIDTH } from './shops/stallShape';
+import { COUNTER_BOARD_THICKNESS, COUNTER_BOARD_Y, COUNTER_HALF_WIDTH } from './shops/stallShape';
 
 /**
  * The seven empty shop units.
@@ -220,7 +221,14 @@ function registerCounter(unit: ShopUnitDefinition, collision: CollisionWorld): v
   // generous-light rule. It no longer costs another storey its floor (the
   // floors are disjoint since #377/#380), but a counter fatter than the wood a
   // child can see is still a child brushing an invisible wall.
-  collision.addWall(worldX(ax), worldZ(az), worldX(bx), worldZ(bz), 0.35 * SHOP_SCALE_XZ);
+  //
+  // Its top is the counter's own: the plank across it, in the stage's scaled
+  // units, on the stage's own floor (sunk where the unit has a forecourt).
+  const stageY = shopHasForecourt(unit) ? -SHOP_RECESS_DEPTH : 0;
+  const top = BUILDING_BASE_Y + stageY + shopScaleY(unit) * (COUNTER_BOARD_Y + COUNTER_BOARD_THICKNESS / 2);
+  collision.kinded('shop counter', () =>
+    collision.addWall(worldX(ax), worldZ(az), worldX(bx), worldZ(bz), 0.35 * SHOP_SCALE_XZ, top, false, true),
+  );
 }
 
 /**

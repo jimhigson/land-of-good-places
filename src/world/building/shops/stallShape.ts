@@ -165,6 +165,13 @@ export const COUNTER_Z = 1.15;
 export const COUNTER_DEPTH = 0.7;
 /** Top of the counter: the good place to stand stock, in front of everything. */
 export const COUNTER_TOP_Y = 1.02;
+/**
+ * The pale plank across the counter: its middle's height and its thickness.
+ * Its top is the counter's real top (1.04 m, stall-local) — what the counter's
+ * solid stands to (`ShopUnits.registerCounter`).
+ */
+export const COUNTER_BOARD_Y = 0.98;
+export const COUNTER_BOARD_THICKNESS = 0.12;
 const COUNTER_FRONT_Z = COUNTER_Z + COUNTER_DEPTH / 2;
 
 /** Shelf boards sit just in front of the back panel; see `kiosk.ts`. */

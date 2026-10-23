@@ -1,3 +1,4 @@
+import { terrainHeight } from '../src/world/terrain.ts';
 /**
  * **Is the stranded ground reachable, or only unserved by waypoints?** — #427.
  *
@@ -45,7 +46,7 @@ const route = TRAIN_PLAN.route;
 
 const probe = new Vector3();
 const isClear = (x: number, z: number): boolean => {
-  probe.set(x, height(x, z) ?? 0, z);
+  probe.set(x, height(x, z) ?? terrainHeight(x, z), z); // the ground, not y = 0: real tops
   collision.resolve(probe, isOnPath(x, z, 0) ? PAVED_CLEARANCE : CLEARANCE);
   const dx = probe.x - x;
   const dz = probe.z - z;

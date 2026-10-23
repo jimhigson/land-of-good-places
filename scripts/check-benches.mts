@@ -57,18 +57,21 @@
  *   is only ever bounded by the plate, which is what an `isClearCircle` that
  *   was never actually consulted would look like.
  */
-import { Box3, Matrix4, Vector3, type Object3D } from 'three';
+import { Box3, Group, Matrix4, Vector3, type Object3D } from 'three';
 import './headless-canvas.mjs';
 import { BuildingShell } from '../src/world/building/Shell.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
+  registerDecorCollision,
   registerInteriorCollision,
   registerHallCollision,
   registerPavilionCollision,
   registerPlanterCollision,
   registerRoofTurretCollision,
 } from '../src/world/building/Building.ts';
+import { dressCastle } from '../src/world/building/castleDecor.ts';
+import type { CastleDecorSolid } from '../src/world/building/castleFurniture.ts';
 import {
   BENCH_DEPTH,
   BENCH_HEIGHT,
@@ -133,7 +136,22 @@ function worldFor(floor: CastleFloor): CollisionWorld {
   registerPlanterCollision(world, floor);
   registerPavilionCollision(world, floor);
   registerRoofTurretCollision(world, floor);
+  // The dressing's own solids (17 Oct 2026) — the crates, the woodpile, the
+  // troughs, the throne, the armour, the chest — asked of `dressCastle` the
+  // way `Building` asks it, so the fill walks the room as it really is.
+  registerDecorCollision(world, floor, decorSolidsFor(floor));
   return world;
+}
+
+/** What `dressCastle` stands on this floor and hands back, built once per floor. */
+const decorSolidsByFloor = new Map<number, readonly CastleDecorSolid[]>();
+function decorSolidsFor(floor: CastleFloor): readonly CastleDecorSolid[] {
+  let solids = decorSolidsByFloor.get(floor.index);
+  if (!solids) {
+    solids = dressCastle(floor.index, new Group());
+    decorSolidsByFloor.set(floor.index, solids);
+  }
+  return solids;
 }
 
 /** The same castle **without this branch's colliders** — the "before" the
@@ -312,13 +330,12 @@ for (const floor of CASTLE_FLOORS) {
 // ---------------------------------------------------------------------------
 
 /**
- * **`addRectangle` is four walls round a hollow middle, and a mover inside one
- * is never pushed out** — the soft-lock #453 nearly shipped on the banquet
- * tables. A bench is small enough that the four walls' stadiums overlap
- * through the centre and there is no interior at all, which is arithmetic
- * (`BENCH_DEPTH` under four half-thicknesses) rather than luck — so this
- * clause is what turns the arithmetic into something that fails out loud the
- * day somebody widens a bench.
+ * **A mover inside a solid must be pushed out** — the soft-lock #453 nearly
+ * shipped on the banquet tables, when `addRectangle` was four walls round a
+ * hollow middle that cancelled each other's pushes. It is one filled box now
+ * (`Collision.ts`'s `BoxCollider`), pushed out through the nearest face from
+ * anywhere inside, and this clause is what proves that rather than trusting
+ * it, whatever size a bench grows to.
  *
  * She gets there by jumping onto the bench and stepping off inside it, which
  * is exactly what a six-year-old does with a thing she has just discovered she
@@ -408,16 +425,12 @@ for (const floor of CASTLE_FLOORS) {
   }
 }
 
-// A bench cannot be so deep that `addRectangle`'s hollow middle reappears.
-// Clause 2 is the measurement; this is the reason, stated where a widening
-// edit will read it.
-if (BENCH_DEPTH >= 4 * 0.2) {
-  fail(
-    `a bench is ${BENCH_DEPTH} m deep, which is no less than four collision-wall ` +
-      `half-thicknesses — its four walls no longer overlap through the middle, so it has an ` +
-      `interior to get stuck in. See Building.ts's registerBenchCollision.`,
-  );
-}
+// (A clause stood here holding a bench under 0.8 m deep, because four walls
+// round a hollow middle only overlapped through it while the bench was that
+// narrow. A rectangle is one filled box now — `Collision.ts`'s `BoxCollider` —
+// so there is no interior to reappear, whatever the depth. Clause 2, which
+// drops a body in every bench's middle and watches it leave, is the
+// measurement either way.)
 
 // ---------------------------------------------------------------------------
 // 3b. The planters: the pot stops her, the bush does not
@@ -949,7 +962,8 @@ for (const floor of CASTLE_FLOORS) {
   process.stderr.write(
     `check:benches — ${floor.name}: ${benchFootprints(floor.index).length} benches, ` +
       `${planterRing(floor.index).length} planters` +
-      `${floor.index === TOP_DECK ? ', the pavilion and 4 corner turrets' : ''} cost ` +
+      `${floor.index === TOP_DECK ? ', the pavilion and 4 corner turrets' : ''}, ` +
+      `${decorSolidsFor(floor).length} dressing solids (${[...new Set(decorSolidsFor(floor).map((s) => s.kind))].join(', ') || 'none'}) cost ` +
       `${lost} of ${bare.size} walkable cells (${((lost / bare.size) * 100).toFixed(2)}%), and ` +
       `${clean ? 'nothing became unreachable' : 'SOMETHING BECAME UNREACHABLE — see below'}.\n`,
   );

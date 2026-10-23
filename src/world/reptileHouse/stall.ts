@@ -9,6 +9,8 @@ import {
   BACK_PANEL_HEIGHT,
   BACK_PANEL_THICKNESS,
   BACK_PANEL_Z,
+  COUNTER_BOARD_THICKNESS,
+  COUNTER_BOARD_Y,
   COUNTER_DEPTH,
   COUNTER_HALF_WIDTH,
   COUNTER_TOP_Y,
@@ -92,8 +94,8 @@ export class ReptileStall {
     const counter = solid(new Mesh(new BoxGeometry(COUNTER_HALF_WIDTH * 2, 0.95, COUNTER_DEPTH), accent));
     counter.position.set(0, 0.475, COUNTER_Z);
     group.add(counter);
-    const top = solid(new Mesh(new BoxGeometry(COUNTER_HALF_WIDTH * 2 + 0.24, 0.12, COUNTER_DEPTH + 0.16), cream));
-    top.position.set(0, 0.98, COUNTER_Z);
+    const top = solid(new Mesh(new BoxGeometry(COUNTER_HALF_WIDTH * 2 + 0.24, COUNTER_BOARD_THICKNESS, COUNTER_DEPTH + 0.16), cream));
+    top.position.set(0, COUNTER_BOARD_Y, COUNTER_Z);
     group.add(top);
     const back = solid(new Mesh(new BoxGeometry(COUNTER_HALF_WIDTH * 2, BACK_PANEL_HEIGHT, BACK_PANEL_THICKNESS), cream));
     back.position.set(0, BACK_PANEL_HEIGHT / 2, BACK_PANEL_Z);
@@ -132,8 +134,13 @@ export class ReptileStall {
       x: STALL_POSITION.x + Math.cos(stallYaw) * x + Math.sin(stallYaw) * z,
       z: STALL_POSITION.z - Math.sin(stallYaw) * x + Math.cos(stallYaw) * z,
     });
-    ctx.props.wall('the stall counter', local(-COUNTER_HALF_WIDTH, COUNTER_Z), local(COUNTER_HALF_WIDTH, COUNTER_Z), COUNTER_DEPTH / 2 + 0.05, 'wall');
-    ctx.props.wall('the stall back panel', local(-COUNTER_HALF_WIDTH, BACK_PANEL_Z), local(COUNTER_HALF_WIDTH, BACK_PANEL_Z), 0.3, 'wall');
+    // Each to its own drawn top: the counter to the plank across it, the back
+    // panel to its edge.
+    ctx.props.wall('the stall counter', local(-COUNTER_HALF_WIDTH, COUNTER_Z), local(COUNTER_HALF_WIDTH, COUNTER_Z), COUNTER_DEPTH / 2 + 0.05, COUNTER_BOARD_Y + COUNTER_BOARD_THICKNESS / 2);
+    // The panel's solid is fattened to be met square; its drawn edge is 10 cm,
+    // an edge and not a ledge — it was the stair from the counter onto the
+    // planting beds (`check:solids`, 17 Oct 2026).
+    ctx.props.wall('the stall back panel', local(-COUNTER_HALF_WIDTH, BACK_PANEL_Z), local(COUNTER_HALF_WIDTH, BACK_PANEL_Z), 0.3, BACK_PANEL_HEIGHT, BACK_PANEL_THICKNESS / 2);
 
     // The Noodle-o-meter.
     const meter = createNoodleMeter();
@@ -145,7 +152,7 @@ export class ReptileStall {
     ctx.root.add(meterGroup);
     this.meterGroup = meterGroup;
     ctx.atlas.applyTo(meter.board);
-    ctx.props.disc('the Noodle-o-meter', METER_POSITION.x, METER_POSITION.z, meter.baseRadius, 'wall');
+    ctx.props.disc('the Noodle-o-meter', METER_POSITION.x, METER_POSITION.z, meter.baseRadius, meter.height);
 
     const nursery = EXHIBIT_PLACEMENTS.find((exhibit) => exhibit.id === 'nursery');
     if (!nursery) throw new Error('Reptile House: no nursery placement for the adoption stand');

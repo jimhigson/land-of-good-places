@@ -33,7 +33,7 @@ import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
 import { addOutline } from '../../art/style/materials';
 import { PALETTE } from '../../core/palette';
-import { placeOnSphere, terrainHeight } from '../terrain';
+import { placeOnSphere, planetRadiusAt, terrainHeight, yAtRadius } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player, RideHolder } from '../../entities/Player';
@@ -280,7 +280,15 @@ export class Coaster implements GameSystem {
   }
 
   /** Whoever rides the coaster is held by this — and let go by arriving back now. */
-  private readonly holder: RideHolder = { holding: 'the coaster', letGo: () => this.arrive() };
+  private readonly holder: RideHolder = {
+    holding: 'the coaster',
+    letGo: () => this.arrive(),
+    // No room beside her: she fills the tub, which is no wider than she is
+    // (`CART_BODY_WIDTH`), and nothing may ride outside the swept envelope the
+    // track's clearances are proved against (`CART_ENVELOPE`). Her companion
+    // rides in her backpack with the rest.
+    companion: 'in her backpack',
+  };
 
   /** The stall's interact press lands here instead of opening the 2D game. */
   requestBoard(): boolean {
@@ -616,8 +624,12 @@ export class Coaster implements GameSystem {
       matrix.compose(position, rotation, stretch);
       pylons.setMatrixAt(index, matrix);
       // Registered here rather than inside the planner, so a pure function stays
-      // pure and the collision world gains a post exactly once.
-      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS);
+      // pure and the collision world gains a post exactly once. Solid up to
+      // where it meets the track: a real height, read in the foot's column.
+      const pylonTopY = yAtRadius(spot.x, spot.z, planetRadiusAt(pylonTop.x, pylonTop.y, pylonTop.z));
+      collision.kinded('sky cruiser pylon', () =>
+        collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS, pylonTopY, false, true),
+      );
     });
     pylons.instanceMatrix.needsUpdate = true;
     // The pylons cast too: they are what plants the track on the ground, and

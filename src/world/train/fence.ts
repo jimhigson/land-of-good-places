@@ -15,27 +15,47 @@ import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
-import { placeOnSphere, terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight, yAtAltitude } from '../terrain';
 
 /**
- * The exclusion fence — Decision 4 §6, "keeping feet off the track".
+ * The railway's fence — Decision 4 §6.
  *
- * Two picket runs offset either side of the solved loop: invisible walls for
- * the collision world (full height — the fence is a rule, not a hurdle), and
- * a visible pink post-and-rail fence so the rule reads as scenery rather
- * than as an invisible force. A gap along every platform, for boarding; no
- * gap anywhere else — not even at a crossing, since issue #116 (Decision 8)
- * a path crosses on a bridge, and the fence runs on underneath it. Where a
- * bridge's own deck stands directly over a run of posts, that run's wall
- * gets an absolute top pinned just under the deck instead of the usual
- * `Infinity`: solid at ground height (nobody reachable there clears it),
- * open at the deck's own height (see `bridges.ts`'s header for why that is
- * safe against the jump-the-fence hazard Decision 8 records). Continuous by
- * construction everywhere else — which is what closes `check:park`'s
+ * Two picket runs offset either side of the solved loop: a pink post-and-rail
+ * fence, knee-high, and **solid exactly as tall as it is drawn** (the engine
+ * rework, PR #722: Jim, 17 Oct 2026 — anything should be jumpable, and what
+ * stops her is what she can see). A child can hop it onto the line and hop
+ * back out (Jim, 19 Oct 2026: *"jumping onto the train tracks sounds ok so
+ * long as the train stops if there's someone on the tracks"*); the train
+ * stops for her (`ParkTrain`'s `wayAhead`). A gap along every platform, for
+ * boarding; no gap anywhere else — not even at a crossing, since issue #116
+ * (Decision 8) a path crosses on a bridge, and the fence runs on underneath
+ * it.
+ *
+ * What the fence still is to the router and the crowd: the closed stretches
+ * between platforms, sealed — their sides by the fence itself, which nobody
+ * but her climbs, and the track down their middle and across each end by
+ * closures (`CollisionWorld.asClosure`): `NavGrid` stamps them, so no tap is
+ * routed onto the line and nothing is placed on it, and no mover meets them,
+ * so she never meets an invisible wall. That is what closes `check:park`'s
  * rail.exclusion and rail.walkable ratchets.
  */
 
 const STEP = 2.4;
+/**
+ * A fence post: its foot radius, its length, and where its middle stands above
+ * the ground — so its top is `POST_TOP`. One owner for the mesh and the solid.
+ */
+const POST_RADIUS = 0.11;
+const POST_LENGTH = 0.95;
+const POST_MIDDLE = 0.48;
+const POST_TOP = POST_MIDDLE + POST_LENGTH / 2;
+/** The rail: its centre's height above the ground, and its own depth, so its top is `RAIL_TOP`. */
+const RAIL_CENTRE = 0.62;
+const RAIL_DEPTH = 0.1;
+const RAIL_TOP = RAIL_CENTRE + RAIL_DEPTH / 2;
+/** A rail's drawn width, and a post's drawn top radius: what of each she could put a foot on — not enough (`FOOT_HALF_WIDTH`). */
+const RAIL_WIDTH = 0.09;
+const POST_TOP_RADIUS = 0.09;
 // Re-exported so existing importers keep one obvious home for it; the value
 // itself lives in the leaf module (see clearance.ts's own note).
 export { STATION_GAP } from './clearance';
@@ -265,46 +285,84 @@ export function buildRailFence(
     const z = point.z - tangent.x * side * FENCE_OFFSET;
     return { x, z, y: terrainHeight(x, z) };
   };
-  /** Every wall segment this file adds goes through here, so a run that
-   * passes under a bridge deck always gets the seam instead of the ordinary
-   * always-solid wall — see `deckSpanAt` above. */
-  const addFenceWall = (a: Post, b: Post): void => {
-    const deckY = deckSpanForSegment(a, b, FENCE_HALF_THICKNESS);
-    if (deckY === null) {
-      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS);
-    } else {
-      collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, deckY - FENCE_SEAM_MARGIN, false, true);
-    }
+  /**
+   * Every bay of fence this file adds goes through here.
+   *
+   * **Its top is the rail she can see** (the engine rework): a bay is a solid
+   * up to its rail's top, `RAIL_TOP` over the ground at each post, running
+   * from one to the other (`TopSlope`) — not an infinitely tall rule. Fattened
+   * to be met square; stood on only where drawn — a 9 cm rail is an edge, not
+   * a ledge, so she hops a fence and never perches on it. A post stands at
+   * each end, taller (`POST_TOP`), its own solid.
+   *
+   * Under a bridge deck the bay used to need a "seam" — an absolute top just
+   * under the deck, so the deck's walkers were not stopped by a wall meant
+   * for the ground (`deckSpanAt` above). A real top is that already: the deck
+   * is metres above a fence rail, so nothing on it meets one.
+   */
+  const railTopAt = (p: { x: number; z: number; y: number }): number => yAtAltitude(p.x, p.z, p.y + RAIL_TOP - terrainHeight(p.x, p.z));
+  const addFenceWall = (a: { x: number; z: number; y: number }, b: { x: number; z: number; y: number }): void => {
+    collision.kinded('railway fence', () =>
+      collision.toppedNarrow(RAIL_WIDTH / 2, () =>
+        collision.addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS, railTopAt(a), false, true, -Infinity, false, Number.NaN, railTopAt(b)),
+      ),
+    );
+  };
+  /** A post at `p`, its own solid, as tall as it is drawn: a rail's ends stand on it. */
+  const addFencePost = (p: Post): void => {
+    posts.push(p);
+    collision.kinded('railway fence post', () =>
+      collision.toppedNarrow(POST_TOP_RADIUS, () => collision.addCircle(p.x, p.z, POST_RADIUS, yAtAltitude(p.x, p.z, POST_TOP), false, true)),
+    );
+  };
+  /**
+   * The closure that seals the line where nothing drawn does — down the track
+   * and across each box's end — for the router and the planner, never for
+   * her (`CollisionWorld.asClosure`). Under a deck, the same seam the old
+   * walls had, so the lattice under a bridge is stamped as it always was.
+   */
+  const linkClosure = (a: Post, b: Post, half: number): void => {
+    const deckY = deckSpanForSegment(a, b, half);
+    collision.kinded('railway corridor', () =>
+      collision.asClosure(() => {
+        if (deckY === null) {
+          collision.addWall(a.x, a.z, b.x, b.z, half);
+        } else {
+          collision.addWall(a.x, a.z, b.x, b.z, half, deckY - FENCE_SEAM_MARGIN, false, true);
+        }
+      }),
+    );
   };
   const link = (a: Post, b: Post) => {
     addFenceWall(a, b);
     rails.push({
       x: (a.x + b.x) / 2,
       z: (a.z + b.z) / 2,
-      y: (a.y + b.y) / 2 + 0.62,
+      y: (a.y + b.y) / 2 + RAIL_CENTRE,
       yaw: Math.atan2(b.x - a.x, b.z - a.z),
       length: Math.hypot(b.x - a.x, b.z - a.z),
     });
   };
   /**
    * A box end cap crosses the track, and the train drives through it four
-   * times a lap — so the *collision* wall keeps its full span (the seal is a
-   * rule, and rules are airtight), but the *visible* rail is two short stubs
-   * flanking the rails with the middle left open. What a child sees is the
-   * fence turning in to meet the crossing; what the train sees is nothing.
+   * times a lap — so the *visible* rail is two short stubs flanking the rails
+   * with the middle left open, and each stub is solid as it is drawn. The
+   * middle is open to her, as it looks (and so is a way off the line, along
+   * the track to the platform): only the router's closure spans it.
    */
   const cap = (a: Post, b: Post) => {
-    addFenceWall(a, b);
+    linkClosure(a, b, FENCE_HALF_THICKNESS);
     const span = Math.hypot(b.x - a.x, b.z - a.z);
     const stub = Math.max(0, span / 2 - 1.1) / span; // fraction of the way in
     for (const [from, to] of [
       [a, { x: a.x + (b.x - a.x) * stub, z: a.z + (b.z - a.z) * stub, y: a.y }],
       [b, { x: b.x + (a.x - b.x) * stub, z: b.z + (a.z - b.z) * stub, y: b.y }],
     ] as const) {
+      if (stub > 0) addFenceWall(from, to);
       rails.push({
         x: (from.x + to.x) / 2,
         z: (from.z + to.z) / 2,
-        y: (from.y + to.y) / 2 + 0.62,
+        y: (from.y + to.y) / 2 + RAIL_CENTRE,
         yaw: Math.atan2(to.x - from.x, to.z - from.z),
         length: Math.hypot(to.x - from.x, to.z - from.z),
       });
@@ -319,7 +377,8 @@ export function buildRailFence(
       const distance = box.from + ((box.to - box.from) * i) / steps;
       const left = sideAt(distance, 1);
       const right = sideAt(distance, -1);
-      posts.push(left, right);
+      addFencePost(left);
+      addFencePost(right);
       if (previousLeft && previousRight) {
         link(previousLeft, left);
         link(previousRight, right);
@@ -345,24 +404,20 @@ export function buildRailFence(
   // lattice let `NavGrid` route the *entire uncovered ring* as reachable,
   // not just the bridge's own cells. A third, invisible run straight down
   // the rail — half of `TRACK_CLEARANCE` wider than the flanks reach solo —
-  // closes it, and (see `addFenceWall`) gets exactly the same `topIsAbsolute`
-  // seam under a bridge deck that the flanks get, so nothing here narrows
-  // what a bridge already opened.
-  const linkCentre = (a: Post, b: Post): void => {
-    const deckY = deckSpanForSegment(a, b, TRACK_CLEARANCE);
-    if (deckY === null) {
-      collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE);
-    } else {
-      collision.addWall(a.x, a.z, b.x, b.z, TRACK_CLEARANCE, deckY - FENCE_SEAM_MARGIN, false, true);
-    }
-  };
+  // closes it, and gets the same `topIsAbsolute` seam under a bridge deck,
+  // so nothing here narrows what a bridge already opened.
+  //
+  // **A closure, not a body** (`linkClosure`, PR #722): it is invisible, so it
+  // is never what stops her — she may walk the line (Jim, 19 Oct 2026), and
+  // the train stops for her. It is here for the router and the planner: no
+  // tap is routed along the track and nothing is placed on it.
   for (const box of closed) {
     let previousCentre: Post | null = null;
     const steps = Math.max(2, Math.ceil((box.to - box.from) / STEP));
     for (let i = 0; i <= steps; i += 1) {
       const distance = box.from + ((box.to - box.from) * i) / steps;
       const centre = sideAt(distance, 0);
-      if (previousCentre) linkCentre(previousCentre, centre);
+      if (previousCentre) linkClosure(previousCentre, centre, TRACK_CLEARANCE);
       previousCentre = centre;
     }
   }
@@ -394,7 +449,7 @@ export function buildRailFence(
       const x = point.x + tangent.z * farSide * FENCE_OFFSET;
       const z = point.z - tangent.x * farSide * FENCE_OFFSET;
       const post: Post = { x, z, y: terrainHeight(x, z) };
-      posts.push(post);
+      addFencePost(post);
       if (previous) link(previous, post);
       previous = post;
     }
@@ -403,8 +458,8 @@ export function buildRailFence(
 
   const postMaterial = toonMaterial(PALETTE.stonePink);
   const railMaterial = toonMaterial(PALETTE.stonePinkLight);
-  const postMesh = new InstancedMesh(new CylinderGeometry(0.09, 0.11, 0.95, 6), postMaterial, posts.length);
-  const railMesh = new InstancedMesh(new BoxGeometry(0.09, 0.1, 1), railMaterial, rails.length);
+  const postMesh = new InstancedMesh(new CylinderGeometry(POST_TOP_RADIUS, POST_RADIUS, POST_LENGTH, 6), postMaterial, posts.length);
+  const railMesh = new InstancedMesh(new BoxGeometry(RAIL_WIDTH, RAIL_DEPTH, 1), railMaterial, rails.length);
   postMesh.castShadow = false;
   railMesh.castShadow = false;
 
@@ -414,7 +469,7 @@ export function buildRailFence(
   const position = new Vector3();
   const flat = new Vector3();
   posts.forEach((post, index) => {
-    flat.set(post.x, post.y + 0.48, post.z);
+    flat.set(post.x, post.y + POST_MIDDLE, post.z);
     placeOnSphere(flat, 0, position, rotation);
     matrix.compose(position, rotation, one);
     postMesh.setMatrixAt(index, matrix);

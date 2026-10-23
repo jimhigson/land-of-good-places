@@ -215,6 +215,7 @@ export class FerrisWheelRide implements GameSystem {
   /** True on a touch device — only changes which words the cues use. */
   touch = false;
 
+  private parade: { frontOfLine(): { readonly uid: string } | null } | null = null;
   private player: Player | null = null;
   private riding = false;
 
@@ -292,7 +293,7 @@ export class FerrisWheelRide implements GameSystem {
     this.clouds = createCloudBand(this.boardX, this.boardZ);
     this.group.add(this.clouds.root);
 
-    this.gondola = createGondola();
+    this.gondola = createGondola(this.parade?.frontOfLine()?.uid ?? null);
     liftFromGround(this.boardX, this.boardZ, FERRIS_CAR_LOW_Y, this.carPoint);
     this.gondola.root.position.copy(this.carPoint);
     tiltToSphere(
@@ -384,8 +385,28 @@ export class FerrisWheelRide implements GameSystem {
     this.player = player;
   }
 
+  /** How many of her companions sit in the car's chairs now — `check:exits` asks, of the car it built. */
+  get companionsAboard(): number {
+    return this.gondola?.passengerCount ?? 0;
+  }
+
+  /**
+   * Her line, for the car to seat her companion from — the front of it
+   * (`Parade.frontOfLine`), asked as the car is built. Given by
+   * `World.attachParade`.
+   */
+  attachParade(parade: { frontOfLine(): { readonly uid: string } | null }): void {
+    this.parade = parade;
+  }
+
   /** Whoever rides the wheel is held by this — and let go by the ride ending now. */
-  private readonly holder: RideHolder = { holding: 'the ferris wheel', letGo: () => this.leave() };
+  private readonly holder: RideHolder = {
+    holding: 'the ferris wheel',
+    letGo: () => this.leave(),
+    // The car seats her companion in its own middle chair, drawn in its own
+    // pass over the finished frame; the rest of her line rides in her backpack.
+    companion: 'drawn by the ride',
+  };
 
   requestBoard(): boolean {
     if (this.riding || !this.player) return false;

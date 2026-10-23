@@ -4,7 +4,10 @@ import {
   PLAYER_ACCELERATION,
   PLAYER_BOB_CYCLES_PER_METRE,
   PLAYER_BOB_HEIGHT,
+  BUILDING_STEP_UP,
   FALL_THRESHOLD,
+  GRAVITY,
+  JUMP_SPEED,
   PLAYER_DECELERATION,
   PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_MAX_SPEED,
@@ -19,11 +22,13 @@ import { applyRidePose, type RidePosture } from './ridePose';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
-import { terrainHeight } from '../world/terrain';
+import { altitudeAt, terrainHeight } from '../world/terrain';
 import { carryReference } from '../world/building/surfaces';
+import { STEP_DOWN_ASKED, WEDGE_DEPTH, crackFloor, dropWedges, liftOutOfSqueeze, nearestFit, riseUnder, solidStepCeiling, standingHeight, teleportHeight, walkingOntoStep, wedgeDepth } from '../world/standing';
 import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
+import { KID_HEIGHT } from '../art/models/kidHeight';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { poseRailRaceRider, type RiderPose } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
@@ -88,8 +93,6 @@ const DUST_STANCE = 0.14;
  * (1.00 m, against a measured limit of 1.07–1.10 m) and the reasons. Buildings
  * and tree trunks stay `Infinity` (unjumpable) — see `Collision.ts`.
  */
-const JUMP_SPEED = 6.6;
-const GRAVITY = 17;
 
 /**
  * The height a jump actually reaches, in metres — the ≈1.28 m the doc above
@@ -108,11 +111,20 @@ export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 
 /**
  * **Her body, as the put-down rule measures it** — `world/dismount.ts`'s
- * `putDownSpot`: her radius, and the hop she makes without being asked. One
- * object, so `endRide`, `teleportTo`, `check:exits` and the procgen invariants
- * all ask the rule about the same child.
+ * `putDownSpot`: her radius, the hop she makes without being asked, how tall
+ * she is (a solid is in her way from its base to its top, as `resolve` asks
+ * with `KID_HEIGHT`), and that she stands on solids — her lattice, and so the
+ * rule's windows of it, takes a solid within a step for floor
+ * (`playerLattice.ts`, which builds from these same numbers). One object, so
+ * `endRide`, `teleportTo`, `check:exits` and the procgen invariants all ask the
+ * rule about the same child.
  */
-export const PLAYER_PUT_DOWN = { radius: PLAYER_RADIUS, hopApex: JUMP_APEX_HEIGHT } as const;
+export const PLAYER_PUT_DOWN = {
+  radius: PLAYER_RADIUS,
+  hopApex: JUMP_APEX_HEIGHT,
+  height: KID_HEIGHT,
+  standsOnSolids: true,
+} as const;
 
 /**
  * The ride pose now lives in `./ridePose.ts`, and everything it used to export
@@ -163,8 +175,24 @@ const AUTO_HOP_LOOKAHEAD = 0.5;
  * the depth she starts at. Then the rescue cuts the escort short and puts her
  * down clear at once, which is where the escort was taking her anyway.
  */
-const WEDGE_DEPTH = 0.05;
 const WEDGE_SECONDS = 0.5;
+
+/**
+ * **A hover is a wedge too** — airborne this long in all, never further than
+ * {@link HOVER_SPAN} from where it began, and she is put down through the one
+ * rule, as a wedge is. Dropped into the gap between two of the train's cars
+ * (0.42 m, against her 1.24 m), the squeeze lift set her on one car's top and
+ * the resolver pushed her back off it into the gap, for ever: 0.13 m up and
+ * down and 0.45 m to and fro, airborne on eight frames in nine — so the wedge
+ * rescue, which waits for her feet, never asked. A jump is airborne 0.78 s and
+ * rises 1.28 m; a fall leaves the span at once; flying under the jet pack is
+ * left alone.
+ */
+const HOVER_SECONDS = 1;
+/** How far, metres, up, down or across, a hover may wander and still be one. */
+const HOVER_SPAN = 0.5;
+/** On her feet this long at a stretch, she has landed: the hover is over. */
+const HOVER_LANDED_SECONDS = 0.25;
 /**
  * **The longest a wedge waits before it tries again, seconds.** When the rule
  * finds nowhere within reach to put her, it says so and leaves her where she
@@ -378,7 +406,81 @@ export interface RideHolder {
    * her not riding; {@link Player.letGo} says so loudly if it does not.
    */
   letGo(): void;
+  /**
+   * **How her companion rides with her** — see {@link CompanionRide}. Omitted,
+   * it is `'in her backpack'`: a ride that has not said where its seat beside
+   * her is has none.
+   */
+  readonly companion?: CompanionRide;
 }
+
+/**
+ * **One of her line rides with her, and the rest hop into her backpack** — Jim,
+ * 19 Oct 2026: *"all the pets except one jump into her backpack on getting on
+ * any ride, then one rides on the seat alongside the player"*.
+ *
+ * The rule has one owner: the boarding choke point. {@link Player.beginRide}
+ * tells whoever watches her rides ({@link Player.watchRides}) — the parade —
+ * and the parade does the rest: the one at the front of her line is her
+ * companion, everyone else goes into her backpack the way a stowed toy does,
+ * and when {@link Player.endRide} puts her down they all come back out behind
+ * her. A ride says only where its seat beside her is:
+ *
+ * - **`beside`** — the parade puts her companion in this seat every frame she
+ *   rides. Answering `false` for a frame hands the companion back to the line
+ *   for that frame (the cat bus's walk in through the gate, say).
+ * - **`'carried by the ride'`** — the ride moves her companion itself: the
+ *   ginormous slide's chute, behind her (`Parade.ridePetsDownSlide`, #468).
+ * - **`'drawn by the ride'`** — the ride draws her companion in a seat of its
+ *   own, in its own pass: the ferris gondola's pet chair, whose car is painted
+ *   over the finished frame. Her whole line goes into the backpack.
+ * - **`'in her backpack'`** — no room beside her: she fills the tub, or every
+ *   seat is somebody's. Her companion rides in her backpack with the rest.
+ * - **`'not a ride'`** — a chair, a nap, a view, a climb: nothing carries her
+ *   anywhere, and each of those places already looks after her companions
+ *   (their beds, their table). Her line stays out exactly as before.
+ *
+ * Nothing aboard ever blocks the ride: a companion in a seat, or in her
+ * backpack, is not standing anywhere ({@link Parade.standing}).
+ */
+export type CompanionRide =
+  | { readonly beside: (seat: CompanionSeat) => boolean }
+  | 'carried by the ride'
+  | 'drawn by the ride'
+  | 'in her backpack'
+  | 'not a ride';
+
+/**
+ * Where her companion sits beside her **this frame** — written in place by
+ * the ride's {@link CompanionRide} `beside`, every frame, world metres. Its
+ * feet go on `(x, y, z)`; `turn` is the seat's whole frame (the vehicle's own,
+ * as {@link Player.setRideFrame} takes hers), its forward the way it faces.
+ */
+export interface CompanionSeat {
+  x: number;
+  y: number;
+  z: number;
+  /** Yaw, radians, as `Player.facing` — the rest of the game's word for its heading. */
+  facing: number;
+  readonly turn: Quaternion;
+}
+
+/**
+ * **A companion's place `back` metres behind her, standing as she stands** —
+ * for a ride whose room is behind her rather than beside her (a lift car she
+ * stands in the mouth of, facing out): her own feet, moved back along her own
+ * frame, facing the way she faces. Fills `seat` and answers `true`.
+ */
+export function companionBehind(player: Player, back: number, seat: CompanionSeat): boolean {
+  _behind.set(0, 0, -back).applyQuaternion(player.group.quaternion);
+  seat.x = player.position.x + _behind.x;
+  seat.y = player.position.y + _behind.y;
+  seat.z = player.position.z + _behind.z;
+  seat.facing = player.facing;
+  seat.turn.copy(player.group.quaternion);
+  return true;
+}
+const _behind = /* @__PURE__ */ new Vector3();
 
 export type { RideExit } from '../world/dismount';
 
@@ -509,6 +611,15 @@ export class Player implements GameSystem {
   readonly previousPosition = new Vector3();
   /** Scratch point for the auto-hop lookahead — see `wouldAutoHopClear` below. */
   private readonly hopProbe = new Vector3();
+  /** Her feet, where the auto-hop judges a wall's height from. */
+  private readonly hopFeet = new Vector3();
+  /** Her feet at a plan point, reached on foot from {@link hopFeet}: where the auto-hop judges a face from. */
+  private readonly feetFromHop = (x: number, z: number): number =>
+    this.groundAt(x, z, carryReference(this.hopFeet.x, this.hopFeet.z, this.hopFeet.y, x, z));
+  /** Her feet where the step-up asks, and at a plan point reached on foot from them: where it judges a face from. */
+  private readonly stepFeet = new Vector3();
+  private readonly feetFromStep = (x: number, z: number): number =>
+    this.groundAt(x, z, carryReference(this.stepFeet.x, this.stepFeet.z, this.stepFeet.y, x, z));
 
   /** Start facing the camera, so the first thing you see is her face. */
   private facingAngle = CAMERA_YAW_DEGREES * DEG;
@@ -583,8 +694,14 @@ export class Player implements GameSystem {
    * for ordinary contact and banked as speed.
    */
   private escorting = false;
+  /** The highest her feet have been since she last stood on something — what a squeeze in the air may lift her back to (`liftOutOfSqueeze`). */
+  private flightHighest = -Infinity;
   /** How long she has been wedged inside something solid, seconds — see {@link WEDGE_SECONDS}. */
   private wedgedFor = 0;
+  /** A hover's time in the air so far, where it began, and how long she has stood since — see {@link HOVER_SECONDS}. */
+  private hoverFor = 0;
+  private readonly hoverAt = new Vector3();
+  private landedFor = 0;
   /**
    * How long the current wedge must last before it lets go of her, seconds:
    * {@link WEDGE_SECONDS}, doubled after each time the rule found nowhere to
@@ -622,6 +739,8 @@ export class Player implements GameSystem {
   private ridingFlag = false;
   /** Who has her while {@link ridingFlag} is up — see {@link RideHolder}. */
   private holder: RideHolder | null = null;
+  /** Whoever watches her rides — see {@link watchRides}. */
+  private readonly rideWatchers: ((holder: RideHolder | null) => void)[] = [];
   /**
    * Where the last put-down left her — `endRide`, or a `teleportTo` that left
    * her on her own feet — and how far the rule moved her from the spot asked
@@ -823,9 +942,15 @@ export class Player implements GameSystem {
    * that way" stays one operation with one owner of the ground question —
    * {@link groundAt} is private, so a caller that wanted both had no way to
    * ask for the height without a second teleport landing on top of the first.
+   *
+   * **Where a child standing there would be** (PR #722's QA): the floor at
+   * `(x, z)` — the walk surface, a deck or a bridge included — or the top of
+   * something she would step up onto from it, a bench or a bed. Never the
+   * highest top over the spot: asked from `Infinity`, her feet's rule found
+   * the station's awning over its bench, and the reptile house's roof 7 m up.
    */
   teleport(x: number, z: number, facing?: number): void {
-    this.teleportTo(x, this.groundAt(x, z, Infinity), z, facing);
+    this.teleportTo(x, teleportHeight((px, pz, py) => this.walkSurfaceAt(px, pz, py), this.collision, x, z), z, facing);
   }
 
   /**
@@ -943,6 +1068,23 @@ export class Player implements GameSystem {
   }
 
   /**
+   * **Standing still, on her own feet**: nothing asks her to move — no stick,
+   * no tap route, no script walking her — and she has come to rest. Not
+   * riding (a ride is placing her) and not in the air.
+   *
+   * Asked by the crowd (`NpcSystem.separateFromPlayer`): a child walking past
+   * a child who is standing still goes round her, and does not shove her.
+   * Waiting on a platform for the train, children walking up to their own
+   * waiting spots used to push her, a centimetre a frame, a metre across the
+   * platform into the train's way — and the train, which stops for anybody in
+   * its way, stood short of the station for her (22 Oct 2026, check:solids).
+   * One owner, so "standing still" means one thing wherever it is asked.
+   */
+  get isStandingStill(): boolean {
+    return !this.ridingFlag && !this.airborne && this.scriptedWalkSpeed === 0 && this.desiredVelocity.lengthSq() === 0 && this.velocity.lengthSq() < 1e-6;
+  }
+
+  /**
    * True where she may actually take off: a jet pack is on her back **and**
    * there is room here to use it.
    *
@@ -1001,7 +1143,7 @@ export class Player implements GameSystem {
     // though an escalator's per-frame shove is far too small to reach even one
     // extra sub-step: a moving walkway that ever carried her a wall's width in
     // a frame should not be able to carry her through one.
-    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance);
+    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance, Infinity, undefined, undefined, KID_HEIGHT);
     this.group.position.copy(this.position);
   }
 
@@ -1012,6 +1154,7 @@ export class Player implements GameSystem {
    * able to give her back on request.
    */
   beginRide(holder: RideHolder): void {
+    const was = this.ridingFlag ? this.holder : null;
     this.ridingFlag = true;
     this.holder = holder;
     // Every ride is sat in until it says otherwise, so a ride that has never
@@ -1029,6 +1172,26 @@ export class Player implements GameSystem {
     // So a jump button still held from before boarding can't be mistaken for
     // a fresh hold-past-the-threshold the moment she's handed back.
     this.jumpHeldFor = 0;
+    // Told last, with her already held: whoever watches her rides (her
+    // parade) asks the holder how her companion rides with her.
+    if (was !== holder) for (const watcher of this.rideWatchers) watcher(holder);
+  }
+
+  /**
+   * **Tell `watcher` every time she boards something or is given back** —
+   * with the holder that now has her, or `null` once she is on her own feet.
+   * Called from inside {@link beginRide} and {@link endRide} themselves, the
+   * two choke points every ride, seat and set piece goes through, so nothing
+   * can take her anywhere without the watcher hearing of it; and **after**
+   * each has done its work — on boarding she is already held, and on getting
+   * off she already stands where the put-down rule put her.
+   *
+   * Her parade is the watcher (`Parade`'s constructor): it is what puts all
+   * but one of her line into her backpack while she rides, and brings them out
+   * again when she gets off — see {@link CompanionRide}.
+   */
+  watchRides(watcher: (holder: RideHolder | null) => void): void {
+    this.rideWatchers.push(watcher);
   }
 
   /**
@@ -1228,6 +1391,8 @@ export class Player implements GameSystem {
     // A ride hands back a fresh velocity of its own choosing; nothing about
     // the overlap she was in before it took over still applies.
     this.escorting = false;
+    // Told last, standing where she was put down — see {@link watchRides}.
+    for (const watcher of this.rideWatchers) watcher(null);
   }
 
   update(context: FrameContext): void {
@@ -1343,8 +1508,8 @@ export class Player implements GameSystem {
     // rejected exactly as before, which is what keeps her from climbing things
     // she should not.
     //
-    // Airborne she is not following any surface, so the reference stays her
-    // own height and the last sub-step's answer is the one used — identical to
+    // Airborne she is not following any surface, so the reference is her own
+    // height and the last sub-step's answer is the one used — identical to
     // the single end-of-frame sample this replaced.
     //
     // **The reference travels with her at her own distance from the planet's
@@ -1353,11 +1518,52 @@ export class Player implements GameSystem {
     // by the sub-step times the sine of the lean, and the step-up reach would
     // spend that on the planet instead of the ramp. `carryReference` is the
     // identity indoors, so the castle and the hotel are untouched.
+    //
+    // **And in the air her own height travels with her the same way — a jump
+    // is a jump everywhere.** Gravity pulls along world `y`, and a flight that
+    // kept its world `y` while she moved in plan rose off a ground falling
+    // away under her by the sine of the lean. Measured with `playerSim.mts` on
+    // the bare planet, a sprint-jump outwards reached 2.37 m over the ground
+    // at 44 m from the middle of the park, 2.84 m at 60 m and 3.1 m beyond
+    // 70 m, against 1.23 m in the middle, and inwards less every metre out.
+    // On screen the rig is turned to the local up (`eyeForFocus`), so that
+    // read as a jump that floats one way and not the other — and no guard can
+    // be taller than she can reach while her reach depends on where she
+    // stands. Carried, a sprint-jump reaches 1.10–1.41 m everywhere, in every
+    // direction; what spread is left is the damped height's lag over the
+    // ground on a run downhill (see the take-off below), inside every guard's
+    // margin.
     const following = !this.airborne;
     let reference = following ? this.groundHeight : this.position.y;
     let groundY = reference;
     let fromX = this.position.x;
     let fromZ = this.position.z;
+    // --- stepping up onto a solid --------------------------------------------
+    // A solid's top within one step of the surface she stands on is climbed
+    // exactly as a deck of that height is — walking into a 0.44 m bench puts
+    // her on it, as walking into the castle's porch always did. Only while she
+    // is walking *into* one (`walkingOntoStep` looks just past her front edge),
+    // so walking past a bench she brushes its side instead of sinking into it.
+    // The reach is the sampler's own, asked from the same carried reference
+    // the sampler below is asked from, so every top the lateral rule lets her
+    // climb onto is a top she is then stood on.
+    // Judged from where her body meets the face, on the level she walks
+    // (`walkingOntoStep`'s `feetAt`): the point the auto-hop judges it from.
+    this.stepFeet.set(this.position.x, reference, this.position.z);
+    const stepping =
+      following &&
+      inputLength > 1e-4 &&
+      walkingOntoStep(
+        this.collision,
+        this.position.x,
+        this.position.z,
+        this.moveDirection.x / inputLength,
+        this.moveDirection.z / inputLength,
+        reference,
+        undefined,
+        undefined,
+        this.feetFromStep,
+      );
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -1367,11 +1573,26 @@ export class Player implements GameSystem {
       dt,
       (at) => {
         if (following) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
+        else {
+          // In the air her own height travels with her: see "a jump is a
+          // jump everywhere" above.
+          at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
+          reference = at.y;
+        }
         fromX = at.x;
         fromZ = at.z;
         groundY = this.groundAt(at.x, at.z, reference);
         if (following) reference = groundY;
       },
+      stepping ? (x, z) => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
+      // Her whole body, feet to the top of her head: a solid that begins above
+      // her (a canopy, the underside of a rail's deck) meets her only once her
+      // head is up there with it.
+      KID_HEIGHT,
+      // Standing, her feet are on the surface she stands on — not her drawn
+      // height, damping up to it behind them (see `CollisionWorld.resolve`'s
+      // `feetY`: the foyer log's shuttle).
+      following ? Math.max(this.position.y, this.groundHeight) : undefined,
     );
 
     // An escort runs until the pushing stops, not until it goes quiet.
@@ -1416,6 +1637,32 @@ export class Player implements GameSystem {
       }
     }
 
+    // A step down off anything — a wall's top, a bush, the edge of a deck —
+    // into a crack she does not fit is not taken (`dropWedges`): the edge
+    // holds her on what she was standing on, as a ledge over a gap too narrow
+    // to step into would.
+    // And on the level: a walk that ends wedged — pressed into a slot between
+    // a wall's end and a lamp post — is not taken either, unless she was
+    // wedged already (then any way out is hers).
+    //
+    // Held where the frame began — unless she was wedged there already: a
+    // hold that puts her back into a wedge is no hold, and the push out of it
+    // `resolve` gave her is hers, at the height she stands (seed 6: come down
+    // on a bush's edge against a sky cruiser pylon, the hold put her back
+    // into the pylon every frame the push took her out of it).
+    if (
+      !this.airborne &&
+      ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
+        this.walksIntoWedge(groundY))
+    ) {
+      if (wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH) {
+        this.position.x = this.previousPosition.x;
+        this.position.z = this.previousPosition.z;
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+      }
+      groundY = this.groundHeight;
+    }
     // Walk off the edge of a deck — or over one of the shafts inside the big
     // building — and the surface under your feet drops away. Start falling.
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
@@ -1439,7 +1686,12 @@ export class Player implements GameSystem {
       this.hopProbe
         .copy(this.position)
         .addScaledVector(this.moveDirection, AUTO_HOP_LOOKAHEAD * inverse);
-      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+      // Judged from her feet: a top within a step of them is a step, and the
+      // wall she stands on is no height at all (`CollisionWorld.hopsOver`).
+      this.hopFeet.set(this.position.x, groundY, this.position.z);
+      // …and from where she will meet the face, on the level she walks:
+      // the decision a face gets must not move with the frame clock.
+      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT, this.hopFeet, this.feetFromHop);
     }
 
     // --- hop, and — held past a beat — the jet pack --------------------------
@@ -1449,6 +1701,15 @@ export class Player implements GameSystem {
     // has passed decides whether that hop turns into a take-off.
     const canFly = this.canFlyHere;
     if ((input.justPressed('jump') || autoHopWanted) && !this.airborne) {
+      // She leaves the ground from the ground. Her drawn height is damped and
+      // lags *below* the surface on a climb, and a jump started from there was
+      // still under it after its first frame and landed at once: sprinting up
+      // the planet's lean, a jump did nothing anywhere past about 38 m from
+      // the middle of the park (walking, past about 55 m). Running downhill
+      // the lag is *above* the surface, and that is left alone: snapping her
+      // down would dip her at the start of every such jump, for at most
+      // 0.18 m of reach (a sprint at the park's outer edge).
+      if (this.position.y < groundY) this.position.y = groundY;
       this.verticalVelocity = JUMP_SPEED;
       this.airborne = true;
       this.jumpHeldFor = 0;
@@ -1483,7 +1744,9 @@ export class Player implements GameSystem {
       } else {
         this.verticalVelocity -= GRAVITY * dt;
       }
-      this.position.y += this.verticalVelocity * dt;
+      const before = this.position.y;
+      this.rise(dt);
+      groundY = this.comeDownOn(before, groundY);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1497,7 +1760,9 @@ export class Player implements GameSystem {
     } else if (this.airborne) {
       this.wornJetpack?.setThrust(0);
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
+      const before = this.position.y;
+      this.rise(dt);
+      groundY = this.comeDownOn(before, groundY);
       if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
@@ -1506,6 +1771,7 @@ export class Player implements GameSystem {
       hopHeight = this.position.y - groundY;
     } else {
       this.wornJetpack?.setThrust(0);
+      this.flightHighest = this.position.y;
       // Damp onto the ground so walking over the gentle hills isn't jittery.
       // The half-life is a shared constant, not a literal: it sets how far
       // behind the ground this height lags on a climb, and so how steep a
@@ -1513,6 +1779,11 @@ export class Player implements GameSystem {
       // sprint-climb budget in `everyBridgeIsWalkableAndReachable`.
       this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
+    // Squeezed after all of that — between two lamp posts and a wall's end —
+    // she is at the nearest place she fits (`nearestFit`): on her feet, on
+    // her own floor's level, never over a drop or up onto a top.
+    if (this.airborne) nearestFit(this.collision, this.position, this.position.y);
+    else if (nearestFit(this.collision, this.position, groundY, (x, z) => this.levelWith(x, z, groundY))) groundY = this.groundAt(this.position.x, this.position.z, groundY);
     this.hopClearance = hopHeight;
     // Next frame's sampling reference: the surface she is on, not the damped
     // height she is drawn at. See `groundHeight`.
@@ -1537,8 +1808,15 @@ export class Player implements GameSystem {
       this.sinceLanding = this.airborneFor > 0.1 ? 0 : this.sinceLanding + dt;
       this.airborneFor = 0;
     }
-    const wedgeDepth = this.airborne ? 0 : this.collision.deepestSolidOverlap(this.position, PLAYER_RADIUS, 0);
-    if (wedgeDepth > WEDGE_DEPTH) {
+    // Inside a body below its top — and above its base, her whole height asked,
+    // as `resolve` asks it: standing on a solid's top is standing, not a wedge.
+    // Nor is leaning on one within a step of where she stands: that is a step
+    // she walks up onto (`resolve`'s 'stepped'), not a gap she is caught in —
+    // pressed into the corner between the suite's wall and a pet bed (0.41 m),
+    // the two pushes leave her 0.11 m into the bed, and she walks out of it.
+    // (`standing.ts`'s `wedgeDepth`: the one owner, which the census asks too.)
+    const wedged = this.airborne ? 0 : wedgeDepth(this.collision, this.position, groundY);
+    if (wedged > WEDGE_DEPTH) {
       if (this.wedgedFor === 0) this.wedgeTookHold = this.sinceLanding;
       this.wedgedFor += dt;
       if (this.wedgedFor >= this.wedgeWait) {
@@ -1548,7 +1826,7 @@ export class Player implements GameSystem {
           x: this.position.x,
           y: this.position.y,
           z: this.position.z,
-          depth: wedgeDepth,
+          depth: wedged,
           afterLanding: this.wedgeTookHold,
         };
         this.teleportTo(this.position.x, groundY, this.position.z);
@@ -1559,6 +1837,28 @@ export class Player implements GameSystem {
     } else {
       this.wedgedFor = 0;
       this.wedgeWait = WEDGE_SECONDS;
+    }
+    // --- a hover lets go of her too ({@link HOVER_SECONDS}) ------------------
+    if (this.airborne && !this.flying) {
+      this.landedFor = 0;
+      const p = this.position;
+      // Her height is her altitude over the ground in her own column, never a
+      // world-y difference between two columns (mostly planet, not height).
+      if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(altitudeAt(p.x, p.y, p.z) - altitudeAt(this.hoverAt.x, this.hoverAt.y, this.hoverAt.z)) > HOVER_SPAN) {
+        this.hoverAt.copy(p);
+        this.hoverFor = dt;
+      } else {
+        this.hoverFor += dt;
+      }
+      if (this.hoverFor >= HOVER_SECONDS) {
+        this.hoverFor = 0;
+        this.wedgeRescues += 1;
+        this.lastWedge = { x: p.x, y: p.y, z: p.z, depth: 0, afterLanding: this.sinceLanding };
+        this.teleportTo(p.x, groundY, p.z);
+      }
+    } else {
+      this.landedFor += dt;
+      if (this.landedFor >= HOVER_LANDED_SECONDS || this.flying) this.hoverFor = 0;
     }
 
     // A little sparkle the moment the jump actually carries her over a wall's
@@ -1697,15 +1997,22 @@ export class Player implements GameSystem {
     this.hopRings.burst(this.position.x, this.position.y - 0.05, this.position.z, 0.4);
   }
 
+  /** One frame of vertical motion in the air; her head stops at an underside — `riseUnder`, its one owner. */
+  private rise(dt: number): void {
+    this.verticalVelocity = riseUnder(this.collision, this.position, this.verticalVelocity, dt, KID_HEIGHT);
+  }
+
   /**
    * **The one put-down** — `world/dismount.ts`'s rule, asked with her own
-   * collision world, her own ground sampler, her own body and the space's own
-   * {@link putDownSpace}. `endRide` and `teleportTo` are its only callers.
+   * collision world, her own walk surface, her own body and the space's own
+   * {@link putDownSpace}. `endRide` and `teleportTo` are its only callers. The
+   * rule stands her on solids by her feet's own rule (`PLAYER_PUT_DOWN` says
+   * she stands on them), exactly as {@link groundAt} does.
    */
   private putDown(spot: RideExit): PutDown {
     const result = putDownSpot(
       this.collision,
-      (x, z, y) => this.groundAt(x, z, y),
+      (x, z, y) => this.walkSurfaceAt(x, z, y),
       spot,
       PLAYER_PUT_DOWN,
       this.putDownSpace,
@@ -1715,8 +2022,60 @@ export class Player implements GameSystem {
     return result;
   }
 
+  /**
+   * Where her feet come to rest at `(x, z)`, reached from `y`: the ground
+   * there, or the top of a solid she is over, whichever is higher and within
+   * a step — {@link standingHeight}, the one owner of that rule. A bench, a
+   * crate or a garden wall is somewhere to land because it is solid; nothing
+   * marks a floor on top of it.
+   */
+  /** Is the floor at `(x, z)` the one she stands on at `groundY` — no drop off it, nothing more than a step up? */
+  private levelWith(x: number, z: number, groundY: number): boolean {
+    const there = this.groundAt(x, z, groundY);
+    return there >= groundY - STEP_DOWN_ASKED && there <= groundY + BUILDING_STEP_UP;
+  }
+
+  /** Has this frame's walk left her wedged, where the frame began she was not? */
+  private walksIntoWedge(groundY: number): boolean {
+    if (this.position.x === this.previousPosition.x && this.position.z === this.previousPosition.z) return false;
+    if (wedgeDepth(this.collision, this.position, groundY) <= WEDGE_DEPTH) return false;
+    return wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH;
+  }
+
+  /**
+   * Coming down from `before` to where she is now: over a crack she does not
+   * fit, she comes down on what stands either side of it (`crackFloor`) —
+   * the ground she lands on, as far as this frame is concerned.
+   */
+  private comeDownOn(before: number, groundY: number): number {
+    this.flightHighest = Math.max(this.flightHighest, before);
+    if (this.verticalVelocity >= 0) return groundY;
+    const floor = crackFloor(this.collision, this.position.x, this.position.z, before, this.position.y, groundY);
+    if (floor !== null && floor > groundY) return floor;
+    // …and if a crack holds her anyway, out onto what holds her.
+    const lifted = liftOutOfSqueeze(this.collision, this.position, this.flightHighest);
+    return lifted !== null && lifted > groundY ? lifted : groundY;
+  }
+
   private groundAt(x: number, z: number, y: number): number {
+    return standingHeight(this.walkSurfaceAt(x, z, y), this.collision, x, z, y);
+  }
+
+  /** The walk surface at `(x, z)` from `y` — the sampler's ground, no solid's top: what her lattice is built over. */
+  private walkSurfaceAt(x: number, z: number, y: number): number {
     return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+  }
+
+  /**
+   * **Where feet come to rest at `(x, z)`, reached from `y`, by her rule** —
+   * the ground there or the top of a solid, whichever is higher within a step
+   * ({@link groundAt}). Public for the one thing that walks where she walks
+   * and must stand where she stood: her parade, which retraces her steps
+   * (`Parade.groundAt`), so a companion following her up onto a bed is on the
+   * bed rather than inside it.
+   */
+  standingAt(x: number, z: number, y: number): number {
+    return this.groundAt(x, z, y);
   }
 
   /**

@@ -8,11 +8,12 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
-import { Rng } from '../../core/mathUtils';
+import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
 import { groundInPlot, type AnchorPlots } from '../../world/AnchorPlots';
-import type { CollisionWorld } from '../../world/Collision';
+import { solidInFrame } from '../../world/terrain';
+import { roundTopHalf, type CollisionWorld } from '../../world/Collision';
 
 /**
  * Dresses the `waterFight` anchor plot — the doorway into the garden.
@@ -49,6 +50,19 @@ const RACK_INSET = 2.8;
 const RACK_ASIDE = 1.6;
 const RACK_HALF_X = 1.1;
 const RACK_HALF_Z = 0.8;
+/** The rack's legs, the tallest of it. */
+const RACK_LEG_HEIGHT = 1.5;
+/** A paddling pool's inflatable rim: its tube's radius (it lies on the lawn), and the solid ring's segment length. */
+const POOL_RIM_TUBE = 0.2;
+/** The gun rack's cross bar, as drawn: all of the rack's top there is. */
+const RACK_BAR_RADIUS = 0.07;
+const POOL_RIM_SEGMENT = 0.9;
+/** The light puffs along a hedge's crown: their height, radius and squash — their tops are the hedge's. */
+const HEDGE_PUFF_Y = 1.22;
+const HEDGE_PUFF_RADIUS = 0.55;
+const HEDGE_PUFF_SQUASH = 0.6;
+/** The sprinkler's solid: its stem, and a little for the head. */
+const SPRINKLER_SOLID_RADIUS = 0.15;
 
 /** How thick the mown-lawn slab is, and how far its middle sits off the plot's
  * own origin — so its top surface is at {@link LAWN_TOP}. One definition, read
@@ -155,9 +169,9 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
     if (!clearOfDoor(x, z, radius)) continue;
     const y = poolGround(x, z);
 
-    const rim = solid(new Mesh(new TorusGeometry(radius, 0.2, 9, 30), toonMaterial(rimColour)));
+    const rim = solid(new Mesh(new TorusGeometry(radius, POOL_RIM_TUBE, 9, 30), toonMaterial(rimColour)));
     rim.rotation.x = Math.PI / 2;
-    rim.position.set(x, y + 0.2, z);
+    rim.position.set(x, y + POOL_RIM_TUBE, z);
     root.add(rim);
     addOutline(rim, 0.016);
 
@@ -167,9 +181,25 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
     surface.receiveShadow = true;
     root.add(surface);
 
-    // A small circle at the middle, not the whole pool: children should be able
-    // to paddle in these, not be walled out of them.
-    collision.addCircle(centreX + x, centreZ + z, radius * 0.3);
+    // The inflatable rim is the solid, a ring of short walls to its own top —
+    // no higher than a step, so she walks up over it and paddles in the
+    // middle, and climbs back out the same way. (It used to be an invisible
+    // post in the middle of the water, with the rim she could see walked
+    // straight through.)
+    const rimTop = y + POOL_RIM_TUBE * 2;
+    const segments = Math.max(10, Math.ceil((TAU * radius) / POOL_RIM_SEGMENT));
+    for (let i = 0; i < segments; i += 1) {
+      const from = (i / segments) * TAU;
+      const to = ((i + 1) / segments) * TAU;
+      const at = (angle: number) =>
+        solidInFrame(centreX, centreZ, centreX + x + Math.cos(angle) * radius, centreZ + z + Math.sin(angle) * radius, y, rimTop);
+      const a = at(from);
+      const b = at(to);
+      const middle = at((from + to) / 2);
+      collision.kinded('paddling pool rim', () =>
+        collision.toppedNarrow(roundTopHalf(POOL_RIM_TUBE), () => collision.addWall(a.x, a.z, b.x, b.z, POOL_RIM_TUBE, middle.top, false, true)),
+      );
+    }
   }
 
   // --- hedges to duck behind ------------------------------------------------------
@@ -184,15 +214,19 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
     body.position.set(x, y + 0.6, z);
     root.add(body);
     addOutline(body, 0.02);
-    collision.addRectangle(centreX + x, centreZ + z, extent, 0.55);
+    // Solid to the tops of the puffs along its crown.
+    const hedge = solidInFrame(centreX, centreZ, centreX + x, centreZ + z, y, y + HEDGE_PUFF_Y + HEDGE_PUFF_RADIUS * HEDGE_PUFF_SQUASH);
+    collision.kinded('water fight hedge', () =>
+      collision.addRectangle(hedge.x, hedge.z, extent, 0.55, 0.35, hedge.top, false, true),
+    );
 
     const puffs = Math.round(extent * 2);
     for (let i = 0; i < puffs; i += 1) {
-      const puff = decal(new Mesh(new SphereGeometry(0.55, 12, 9), materials.hedgeLight));
-      puff.scale.set(1.1, 0.6, 1);
+      const puff = decal(new Mesh(new SphereGeometry(HEDGE_PUFF_RADIUS, 12, 9), materials.hedgeLight));
+      puff.scale.set(1.1, HEDGE_PUFF_SQUASH, 1);
       puff.position.set(
         x + ((i + 0.5) / puffs - 0.5) * extent * 1.8,
-        y + 1.22,
+        y + HEDGE_PUFF_Y,
         z + rng.range(-0.08, 0.08),
       );
       root.add(puff);
@@ -210,6 +244,13 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   sprinklerHead.scale.set(1, 0.7, 1);
   sprinklerHead.position.set(sprinklerX, sprinklerY + 0.85, sprinklerZ);
   root.add(sprinklerHead);
+  // Solid, to the top of its head — a post she can see is one she bumps into.
+  {
+    const sprinkler = solidInFrame(centreX, centreZ, centreX + sprinklerX, centreZ + sprinklerZ, sprinklerY, sprinklerY + 0.85 + 0.2 * 0.7);
+    collision.kinded('water fight sprinkler', () =>
+      collision.addCircle(sprinkler.x, sprinkler.z, SPRINKLER_SOLID_RADIUS, sprinkler.top, false, true),
+    );
+  }
 
   // NO SIGN. There was a "Water Fight! / come and get soaked" board on two
   // posts standing exactly where the path spur arrives, and it was here for two
@@ -257,15 +298,19 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   const rackY = localGround(rackX, rackZ);
 
   for (const offset of [-0.85, 0.85]) {
-    const leg = solid(new Mesh(new CylinderGeometry(0.09, 0.11, 1.5, 8), materials.post));
-    leg.position.set(rackX + offset, rackY + 0.75, rackZ);
+    const leg = solid(new Mesh(new CylinderGeometry(0.09, 0.11, RACK_LEG_HEIGHT, 8), materials.post));
+    leg.position.set(rackX + offset, rackY + RACK_LEG_HEIGHT / 2, rackZ);
     root.add(leg);
   }
-  const bar = solid(new Mesh(new CylinderGeometry(0.07, 0.07, 2, 8), materials.post));
+  const bar = solid(new Mesh(new CylinderGeometry(RACK_BAR_RADIUS, RACK_BAR_RADIUS, 2, 8), materials.post));
   bar.rotation.z = Math.PI / 2;
   bar.position.set(rackX, rackY + 1.42, rackZ);
   root.add(bar);
-  collision.addCircle(centreX + rackX, centreZ + rackZ, 0.9);
+  {
+    const rack = solidInFrame(centreX, centreZ, centreX + rackX, centreZ + rackZ, rackY, rackY + RACK_LEG_HEIGHT);
+    // A frame of legs and a 7 cm bar: met square, never stood on.
+    collision.kinded('water gun rack', () => collision.toppedNarrow(RACK_BAR_RADIUS, () => collision.addCircle(rack.x, rack.z, 0.9, rack.top, false, true)));
+  }
 
   for (let i = 0; i < 3; i += 1) {
     const gun = new Group();

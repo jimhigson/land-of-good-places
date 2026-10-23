@@ -32,16 +32,22 @@ import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
 import type { LiftPanelSource } from '../building/liftRide';
 import { interiorMaterial, softMaterial } from '../building/parts';
 import {
+  basinParts,
   buildBasin,
   buildPan,
   buildPrivacyRoof,
+  panParts,
+  panReachBehind,
+  privacyRoofSpan,
   TOILET_APPROACH,
   ToiletRoutine,
 } from '../building/Toilets';
 import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
+import { yAtAltitude } from '../terrain';
 import { toonMaterial, solid, decal, inkTint } from '../../art/style/materials';
 import {
   BED_MATTRESS_TOP,
+  BRIDGE_RAIL_HEIGHT,
   BRIDGE_RAIL_TILE,
   createBreakfastBowl,
   createBreakfastChair,
@@ -68,6 +74,8 @@ import {
   LOBBY_MIN_WALL_HEIGHT,
   STAIR_INNER_RADIUS,
   STAIR_OUTER_RADIUS,
+  STAIR_RAIL_HEIGHT,
+  HANDRAIL_HALF_WIDTH,
   STAIR_RAIL_RADIUS,
   STAIR_RISE,
   STAIR_SWEEP,
@@ -94,7 +102,7 @@ import {
   buffetCounter,
   BUFFET_TOP,
   DECAL_STEP,
-  SOFA_SEAT_TOP,
+  sofaPlan,
   cloud,
   crystalCluster,
   crystalColumn,
@@ -123,6 +131,7 @@ import {
   trellisArch,
 } from './dressing';
 import { hotelResidents } from './HotelGuests';
+import { measureTop } from '../measuredTop';
 import { HotelProps, Plate, type RoomKeepOut } from './place';
 import { HotelLighting, pendantLight } from './lighting';
 import type { ResidentSpec } from '../../entities/npc';
@@ -649,18 +658,6 @@ const LOBBY_FRONT_LANDING = { x: 0, z: LOBBY.halfZ - 2.2, facing: Math.PI } as c
  * "Leave breakfast" used to strand her behind (Jim, 17 Oct 2026).
  */
 const CAFE_LINK_CHAIR = 'lobby-a-1';
-
-/**
- * Honest tops for the scatter dressing, metres above the floor they stand on.
- *
- * Approximate on purpose — a seeded crystal cluster varies a little — but
- * approximately *true*, where the old `Infinity` default made every one an
- * unjumpable pillar (probe 11). All well above `JUMP_APEX_HEIGHT`'s reach or
- * flagged `stand: false`, so none of them is a landing surface either way.
- */
-const CLUSTER_TOP = 1.4;
-const PLANTER_TOP = 1.5;
-const SEAWEED_TOP = 1.5;
 
 /** What a child sat at breakfast is wearing. The park's own marker set. */
 const DINER_OUTFITS: readonly number[] = [
@@ -1345,7 +1342,7 @@ export class Hotel implements GameSystem {
     // Collision: an octagon of walls around the crystal cluster, with the
     // doorway left open and a short lobby wall behind it — the same "a metre
     // of hallway, then somewhere else entirely" trick as the castle facade.
-    registerTowerCollision(collision, plot.x, plot.z, this.facadeYaw);
+    registerTowerCollision(collision, plot.x, plot.z, this.facadeYaw, tower.height);
 
     // ------------------------------------------------------------ the rooms
     this.hotelRoot.name = 'the-land-hotel-inside';
@@ -1359,15 +1356,22 @@ export class Hotel implements GameSystem {
     this.lighting = new HotelLighting();
     this.hotelRoot.add(this.lighting.group);
 
-    this.props = new HotelProps(collision, surfaces);
+    this.props = new HotelProps(collision);
     for (const room of ROOMS) this.buildRoomShell(room);
     if (!saveFlags.hasHotelKey()) {
-      this.suiteLock = collision.addWall(
-        CORRIDOR.originX + CORRIDOR.halfX,
-        CORRIDOR.originZ - (DOOR_HALF + 0.4),
-        CORRIDOR.originX + CORRIDOR.halfX,
-        CORRIDOR.originZ + (DOOR_HALF + 0.4),
-        0.3,
+      // The shut door, to the corridor's own height: a real top, and nothing
+      // she can reach.
+      this.suiteLock = collision.kinded('suite door (locked)', () =>
+        collision.addWall(
+          CORRIDOR.originX + CORRIDOR.halfX,
+          CORRIDOR.originZ - (DOOR_HALF + 0.4),
+          CORRIDOR.originX + CORRIDOR.halfX,
+          CORRIDOR.originZ + (DOOR_HALF + 0.4),
+          0.3,
+          CORRIDOR.wallHeight,
+          false,
+          true,
+        ),
       );
     }
     this.statue = this.dressLobby();
@@ -2934,10 +2938,15 @@ export class Hotel implements GameSystem {
       if (this.moment === 'food') this.cine.cancel();
       this.standUp();
     },
+    // A chair, not a ride: her line stays out, as at every meal.
+    companion: 'not a ride',
   };
 
-  /** A nap is let go by waking up — the same wake a tap or a hop gives. */
-  private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap() };
+  /**
+   * A nap is let go by waking up — the same wake a tap or a hop gives. Not a
+   * ride: her pets go to their own beds (`sendPetsToBed`).
+   */
+  private readonly bedHolder: RideHolder = { holding: 'a hotel bed', letGo: () => this.wakeNap(), companion: 'not a ride' };
 
   private standUp(): void {
     const player = this.player;
@@ -3402,7 +3411,11 @@ export class Hotel implements GameSystem {
         const wz1 = room.originZ + (along === 'x' ? z1 : a);
         const wx2 = room.originX + (along === 'x' ? b : x1);
         const wz2 = room.originZ + (along === 'x' ? z1 : b);
-        this.collision.addWall(wx1, wz1, wx2, wz2, 0.3);
+        // To the wall's own top — a real height, like every solid since
+        // 17 Oct 2026 (the rooms stand on y = 0, their own floor).
+        this.collision.kinded('hotel wall', () =>
+          this.collision.addWall(wx1, wz1, wx2, wz2, 0.3, height, false, true),
+        );
       }
     }
 
@@ -3420,12 +3433,17 @@ export class Hotel implements GameSystem {
         [ax - depth, room.liftZ + 1.7, ax, room.liftZ + 1.7],
         [ax - depth, room.liftZ - 1.9, ax - depth, room.liftZ + 1.9],
       ] as const) {
-        this.collision.addWall(
-          room.originX + x1,
-          room.originZ + z1,
-          room.originX + x2,
-          room.originZ + z2,
-          0.25,
+        this.collision.kinded('hotel wall', () =>
+          this.collision.addWall(
+            room.originX + x1,
+            room.originZ + z1,
+            room.originX + x2,
+            room.originZ + z2,
+            0.25,
+            room.wallHeight,
+            false,
+            true,
+          ),
         );
         const wall = solid(
           new Mesh(
@@ -3505,12 +3523,17 @@ export class Hotel implements GameSystem {
         panel.name = 'hotel.wall';
         panel.position.set(alongX ? mid : wall.at, height / 2, alongX ? wall.at : mid);
         shell.add(panel);
-        this.collision.addWall(
-          room.originX + (alongX ? a : wall.at),
-          room.originZ + (alongX ? wall.at : a),
-          room.originX + (alongX ? b : wall.at),
-          room.originZ + (alongX ? wall.at : b),
-          0.25,
+        this.collision.kinded('hotel partition', () =>
+          this.collision.addWall(
+            room.originX + (alongX ? a : wall.at),
+            room.originZ + (alongX ? wall.at : a),
+            room.originX + (alongX ? b : wall.at),
+            room.originZ + (alongX ? wall.at : b),
+            0.25,
+            height,
+            false,
+            true,
+          ),
         );
         // Guests never come in here (the suite is yours — `HotelGuests`' roster
         // says so), but the keep-out is registered anyway: it costs one entry
@@ -3731,12 +3754,13 @@ export class Hotel implements GameSystem {
     // over it. Symmetric pairs, clear of the straight flight's mouth and of
     // the connector's own exit stride (which `NavGrid` routes through).
     for (const columnX of [-8.6, -4.4, 4.4, 8.6]) {
-      this.props.place(shell, room, crystalColumn(height - 0.4, room.theme.trim), {
+      const column = crystalColumn(height - 0.4, room.theme.trim);
+      this.props.place(shell, room, column, {
         x: columnX,
         z: (minZ + maxZ) / 2 + 1.6,
         radius: 0.62,
-        top: height - 0.4,
-        stand: false,
+        // Measured: its capital is a flat hexagon, under the landing's deck.
+        ...measureTop(column),
       });
     }
 
@@ -3838,20 +3862,29 @@ export class Hotel implements GameSystem {
 
       // The flanks: chains of short walls along each radius. The asset's
       // closed strings are solid from the floor to the tread at every point
-      // (its own doc says so, and why), so height-agnostic is honest here —
-      // and it is the only collision a curved flight has.
+      // (its own doc says so, and why), and the balustrade stands on them, so
+      // each link stands to the handrail over the highest tread it runs
+      // beside — a real height, rising with the flight. It is the only
+      // collision a curved flight has.
       for (const radius of [flight.innerRadius, flight.outerRadius]) {
         const segments = Math.max(4, Math.ceil((Math.abs(sweep) * radius) / 0.8));
         for (let i = 0; i < segments; i += 1) {
           const a = stair.fromAngle + (sweep * i) / segments;
           const b = stair.fromAngle + (sweep * (i + 1)) / segments;
-          this.collision.addWall(
-            room.originX + stair.centreX - Math.sin(a) * radius,
-            room.originZ + stair.centreZ + Math.cos(a) * radius,
-            room.originX + stair.centreX - Math.sin(b) * radius,
-            room.originZ + stair.centreZ + Math.cos(b) * radius,
-            0.22,
-          );
+          const highestTread = Math.min(flight.treads - 1, Math.floor(((i + 1) / segments) * flight.treads - 1e-9));
+          const railTop = flight.treadTop(highestTread) + STAIR_RAIL_HEIGHT;
+          this.collision.kinded('hotel stair flank', () => this.collision.toppedNarrow(HANDRAIL_HALF_WIDTH, () =>
+            this.collision.addWall(
+              room.originX + stair.centreX - Math.sin(a) * radius,
+              room.originZ + stair.centreZ + Math.cos(a) * radius,
+              room.originX + stair.centreX - Math.sin(b) * radius,
+              room.originZ + stair.centreZ + Math.cos(b) * radius,
+              0.22,
+              railTop,
+              false,
+              true,
+            ),
+          ));
         }
       }
     }
@@ -3891,19 +3924,28 @@ export class Hotel implements GameSystem {
     // landing to the flight *sideways* and the walk wedged against a rail it
     // could not see (found live, 9 Aug 2026; check:nav-routes walks the legs
     // now). The axis keeps its channel — the flanks stand 4 m apart.
+    //
+    // One link per tread, each to the handrail over that tread — a real
+    // height rising with the flight, where one wall to `Infinity` stood.
     for (const flankSign of [-1, 1]) {
-      this.collision.addWall(
-        room.originX + straight.centreX + flankSign * straight.flankX,
-        room.originZ + straight.frontZ,
-        room.originX + straight.centreX + flankSign * straight.flankX,
-        room.originZ + maxZ,
-        0.18,
-        Infinity,
-        false,
-        false,
-        landing.height - RAIL_BASE_DROP,
-        true,
-      );
+      const flankX = room.originX + straight.centreX + flankSign * straight.flankX;
+      const going = (straight.frontZ - maxZ) / grand.treads;
+      for (let i = 0; i < grand.treads; i += 1) {
+        this.collision.kinded('hotel stair flank', () => this.collision.toppedNarrow(HANDRAIL_HALF_WIDTH, () =>
+          this.collision.addWall(
+            flankX,
+            room.originZ + straight.frontZ - going * i,
+            flankX,
+            room.originZ + straight.frontZ - going * (i + 1),
+            0.18,
+            landing.height + grand.treadTop(i) + STAIR_RAIL_HEIGHT,
+            false,
+            true,
+            landing.height - RAIL_BASE_DROP,
+            true,
+          ),
+        ));
+      }
     }
 
     // --- the banded balustrade colliders -------------------------------------
@@ -3919,18 +3961,21 @@ export class Hotel implements GameSystem {
     // them: the gallery's balustrade is drawn along that line but banded to
     // its own 4.94 m, so a child on the landing at 3.84 m walked through the
     // rail she could see and fell to the lobby floor.
+    // To the handrail's own height over the deck it guards.
     for (const edge of mezzanineGuardedEdges(plan, STAIR_RAIL_RADIUS)) {
-      this.collision.addWall(
-        room.originX + edge.x1,
-        room.originZ + edge.z1,
-        room.originX + edge.x2,
-        room.originZ + edge.z2,
-        0.15,
-        Infinity,
-        false,
-        false,
-        edge.base,
-      );
+      this.collision.kinded('hotel balustrade', () => this.collision.toppedNarrow(HANDRAIL_HALF_WIDTH, () =>
+        this.collision.addWall(
+          room.originX + edge.x1,
+          room.originZ + edge.z1,
+          room.originX + edge.x2,
+          room.originZ + edge.z2,
+          0.15,
+          edge.deckHeight + BRIDGE_RAIL_HEIGHT,
+          false,
+          true,
+          edge.base,
+        ),
+      ));
     }
 
     // --- the ways between the levels, declared for the router ---------------
@@ -4075,7 +4120,6 @@ export class Hotel implements GameSystem {
       // The statue's real height — far above any jump, so no plate; honest
       // rather than Infinity so probe 11's pillar sweep stays meaningful.
       top: statue.height,
-      stand: false,
     });
     // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
     // radius 1.4 clears the 1.15 m footing; six 0.15 m bands (0.22 until
@@ -4176,7 +4220,6 @@ export class Hotel implements GameSystem {
       // The asset's own measured height (counter plus key board). No plate:
       // the counter is not the top of the asset, so there is no honest floor.
       top: desk.height,
-      stand: false,
     });
     const reception = createKeeper({ colour: PALETTE.flowerRed, hair: PALETTE.markerPink });
     // The receptionist is a person, and people in this park are scenery-soft
@@ -4245,15 +4288,11 @@ export class Hotel implements GameSystem {
         [side * 5.9, PALETTE.markerSky],
         [side * 9.2, PALETTE.markerMint],
       ] as const) {
+        // The drawn sofa's own footprint, solid to the seat (`sofaPlan`).
         this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
           x,
           z: 4.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
-          halfX: 1.3,
-          halfZ: 0.48,
-          // The seat: what a jump lands on. Sailing over the backrest on the
-          // way is a visual graze a six-year-old reads as bouncing onto the
-          // cushions, which is the whole point.
-          top: SOFA_SEAT_TOP,
+          ...sofaPlan(2.6),
         });
       }
       this.props.place(shell, LOBBY, bedsideTable(), {
@@ -4261,7 +4300,6 @@ export class Hotel implements GameSystem {
         z: 6.4 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
         radius: 0.36,
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -4294,26 +4332,24 @@ export class Hotel implements GameSystem {
         x: -11.9,
         z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
         radius: 0.62,
-        top: 8.3,
       },
       {
         prop: () => crystalColumn(8.3, LOBBY.theme.floor),
         x: -11.9,
         z: 6.6 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
         radius: 0.62,
-        top: 8.3,
       },
-      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT },
+      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT },
       // Back at its natural, mirrored x (3.4, matching the planter at −3.4),
       // 18 August 2026: it moved to 7.2 only to dodge the reception check-in
       // stand spot, which shared this room with it at the time. Issue #280's
       // room split moved the desk (and its stand spot) into its own room
       // entirely — see {@link RECEPTION_X} — so nothing here needs dodging
       // any more.
-      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT },
+      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8 + LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT },
+      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT },
     ]);
 
     // The one keep-out in the lobby that is not a prop: the patch of floor a
@@ -4528,10 +4564,10 @@ export class Hotel implements GameSystem {
     shell.add(sun);
 
     this.placeProps(shell, BREAKFAST, [
-      { prop: () => crystalCluster(0x20b1), x: -10.6, z: -7.4, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x20b2), x: 11, z: -7.4, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x20b3), x: -10.8, z: 6.4, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x20b4), x: 10.6, z: 1, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x20b1), x: -10.6, z: -7.4 },
+      { prop: () => crystalCluster(0x20b2), x: 11, z: -7.4 },
+      { prop: () => crystalPlanter(0x20b3), x: -10.8, z: 6.4 },
+      { prop: () => crystalPlanter(0x20b4), x: 10.6, z: 1 },
     ]);
     this.hangOnWalls(shell, BREAKFAST, {
       // No sconces on the north wall here: the glowing window band already
@@ -4670,10 +4706,10 @@ export class Hotel implements GameSystem {
       // `/hotel-suite` furniture fix) caught this cluster 0.22 m inside the
       // west lift doorway's now-deeper zone. It is still the same corner
       // scatter, just a stride further from the door it stands beside.
-      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 3.0, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 3.0 },
+      { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6 },
+      { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9 },
+      { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9 },
     ]);
     this.hangOnWalls(shell, CORRIDOR, { north: [], west: [-2.9, 2.9], pictures: [] });
 
@@ -4751,7 +4787,7 @@ export class Hotel implements GameSystem {
       arch.position.set(x, 0, -2.6);
       shell.add(arch);
       for (const side of [-1, 1]) {
-        this.props.footprint(room, { x: x + side * 1.6, z: -2.6, radius: 0.22, top: 2.5, stand: false });
+        this.props.footprint(room, { x: x + side * 1.6, z: -2.6, radius: 0.22, top: 2.5 });
       }
     }
 
@@ -4770,7 +4806,6 @@ export class Hotel implements GameSystem {
         halfZ: 0.31,
         // Bobbles top out around a metre; a hedge's top is foliage, not floor.
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -4796,9 +4831,9 @@ export class Hotel implements GameSystem {
       // the `/hotel-suite` furniture fix) caught this planter 0.04 m inside
       // the west lift doorway's now-deeper zone. Still the same corner spot,
       // just clear of it.
-      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.0, z: 0.4, top: PLANTER_TOP },
-      { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6, top: PLANTER_TOP },
-      { prop: () => flowerTuft(0x50f3, 1.6), x: -2.4, z: 5.4, radius: 0.4, top: 1.2 },
+      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.0, z: 0.4 },
+      { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6 },
+      { prop: () => flowerTuft(0x50f3, 1.6), x: -2.4, z: 5.4, radius: 0.4 },
     ]);
 
     // A bench to sit and look at the pond from. It is a sofa in the room's own
@@ -4806,9 +4841,7 @@ export class Hotel implements GameSystem {
     this.props.place(shell, room, sofa(2.4, room.theme.accent, PALETTE.blossomWhite), {
       x: 2.2,
       z: 5.2,
-      halfX: 1.2,
-      halfZ: 0.48,
-      top: SOFA_SEAT_TOP,
+      ...sofaPlan(2.4),
     });
 
     this.hangOnWalls(shell, room, {
@@ -4924,8 +4957,8 @@ export class Hotel implements GameSystem {
     // Seaweed in the corners and along the walls — this floor's crystal
     // cluster, and placed the same way.
     this.placeProps(shell, room, [
-      { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4 },
+      { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4 },
       // Moved from (-8.6, 6.4) to (-6.0, 7.2) (issue #281) — the bathroom's
       // own room now occupies exactly that corner, growing a real south wall
       // out to z = 6.8; the old spot first sat inside the doorway's
@@ -4933,10 +4966,10 @@ export class Hotel implements GameSystem {
       // inside the wall's own collider instead (the wall physically stands
       // there now — this decoration cannot). East of the bathroom's own east
       // wall (x = -7.6) instead, still low in the room's south end.
-      { prop: () => seaweed(0x60c3, 1), x: -6.0, z: 7.2, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6, top: SEAWEED_TOP },
-      { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c3, 1), x: -6.0, z: 7.2 },
+      { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2 },
+      { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6 },
+      { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6 },
       {
         // x nudged from -6.4 to -5.4 (issue #281) — sat squarely inside the
         // new bathroom doorway's clearance zone, which reaches from the
@@ -4945,13 +4978,11 @@ export class Hotel implements GameSystem {
         prop: () => crystalPlanter(0x60c7, PALETTE.waterFoam, [PALETTE.markerMint, PALETTE.bubbleSkin, PALETTE.waterTop]),
         x: -5.4,
         z: 3.6,
-        top: PLANTER_TOP,
       },
       {
         prop: () => crystalPlanter(0x60c8, PALETTE.waterFoam, [PALETTE.bubbleSkin, PALETTE.markerSky, PALETTE.waterTop]),
         x: 6.4,
         z: 3.6,
-        top: PLANTER_TOP,
       },
     ]);
 
@@ -4959,9 +4990,7 @@ export class Hotel implements GameSystem {
     this.props.place(shell, room, sofa(2.8, room.theme.accent, PALETTE.blossomWhite), {
       x: 0,
       z: 5.4,
-      halfX: 1.4,
-      halfZ: 0.48,
-      top: SOFA_SEAT_TOP,
+      ...sofaPlan(2.8),
     });
     // Tier 1: the mat lies on the sandy sea bed, not beside it.
     const mat = roundRug(2.2, PALETTE.markerSky, PALETTE.bubbleSkin, 1);
@@ -5070,19 +5099,20 @@ export class Hotel implements GameSystem {
     spots.forEach(([x, z], index) => {
       const bed = createHotelBed();
       repaintPart(bed.root, 'bed-blanket', ART.rainbow[index * 2] ?? PALETTE.markerMint);
-      // **Soft on purpose.** A bed is a `WalkSurfaces` platform — Eleri's
-      // "sleep, or go jumpy jumpy!" — and `Collision`'s height rule is fed
-      // the player's height above *the sampler's* ground, which is 0 when she
-      // is stood on the mattress. A wall round its edge would therefore shove
-      // her straight back off the thing she climbed onto. See `place.ts`'s
-      // header: anything you can stand on is placed soft.
+      // **Solid, like everything she can see** — and so somewhere to land:
+      // Eleri's "sleep, or go jumpy jumpy!" is a hop onto the mattress now.
+      // A bed used to be the one piece of furniture placed soft, a walkable
+      // plate with no body, because a wall round a hollow box would have
+      // caught her at its rim; a box is filled now and its top is where her
+      // feet come to rest (`world/standing.ts`), so the bed is one solid like
+      // the sofa beside it. Its keep-out and the nap's stand spot in front of
+      // it (`interactZones`) are unchanged.
       this.props.place(shell, SUITE, bed.root, {
         x,
         z,
         halfX: SUITE_BED_HALF_X,
         halfZ: SUITE_BED_HALF_Z,
         top: BED_MATTRESS_TOP,
-        solid: false,
       });
       const id = `bed-${index}`;
       // The tucked blanket she naps under, in the bed's own rainbow, hidden
@@ -5093,26 +5123,16 @@ export class Hotel implements GameSystem {
       blanket.visible = false;
       shell.add(blanket);
       this.beds.push({ x: SUITE.originX + x, z: SUITE.originZ + z, id, blanket, bedIndex: index });
-      this.surfaces.addPlatform(
-        new Plate(
-          BED_MATTRESS_TOP,
-          SUITE.originX + x - SUITE_BED_HALF_X,
-          SUITE.originX + x + SUITE_BED_HALF_X,
-          SUITE.originZ + z - SUITE_BED_HALF_Z,
-          SUITE.originZ + z + SUITE_BED_HALF_Z,
-        ),
-      );
     });
 
     // A bedside table and its little crystal lamp beside each bed. The lamp
-    // is the top, and a lamp is not a floor.
+    // is the top.
     for (const x of SUITE_BEDSIDE_X) {
       this.props.place(shell, SUITE, bedsideTable(), {
         x,
         z: SUITE_BEDSIDE_Z,
         radius: SUITE_BEDSIDE_RADIUS,
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -5153,9 +5173,9 @@ export class Hotel implements GameSystem {
     // bedroom3 (east, 9.8 → 13.6) when `SUITE.halfX` grew for issue #274 —
     // both still hug the same wall at the same margin, just further out.
     this.placeProps(shell, SUITE, [
-      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -13.4, z: -7, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 13.6, z: -7, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -13.4, z: 6.6, top: PLANTER_TOP },
+      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -13.4, z: -7 },
+      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 13.6, z: -7 },
+      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -13.4, z: 6.6 },
     ]);
     this.hangOnWalls(shell, SUITE, {
       // Threaded between the three north windows, one per bedroom.
@@ -5755,12 +5775,18 @@ export class Hotel implements GameSystem {
     // turn, and from `PLAYER_RADIUS`. Nothing here is nudged past whatever last
     // complained, which is what the previous four positions all were.
     const sofaSpin = -0.9;
-    const sofaHalfX = 1.1;
-    const sofaHalfZ = 1.3;
+    // **The sofa that is drawn**, 3.2 × 0.96 m (`sofaPlan`). The footprint here
+    // used to be a hand-typed 2.2 × 2.6 m that matched no sofa, swept to its
+    // axis-aligned box; with real tops she stood on that box's air corners,
+    // 0.5 m over the rug (check:solids, PR #722). The true sofa sweeps 3.10 m
+    // here, not 3.34, so it stands 0.12 m further north than it did with the
+    // walkway on its north side exactly as wide as it was.
+    const SUITE_SOFA_WIDTH = 3.2;
+    const sofaShape = sofaPlan(SUITE_SOFA_WIDTH);
     // The turned box the sofa really sweeps — the same rotation `place.ts`'s
     // `effectiveHalfExtents` measures it by.
     const sofaSweptHalfZ =
-      sofaHalfX * Math.abs(Math.sin(sofaSpin)) + sofaHalfZ * Math.abs(Math.cos(sofaSpin));
+      sofaShape.halfX * Math.abs(Math.sin(sofaSpin)) + sofaShape.halfZ * Math.abs(Math.cos(sofaSpin));
     const SOFA_X = 5.6;
     const loungeFloor = clearFloorAround(SUITE, SOFA_X, FLOOR_Z);
     /**
@@ -5772,13 +5798,11 @@ export class Hotel implements GameSystem {
      * `DOORWAY_THROUGH_DEPTH` is written down with.
      */
     const SOFA_NORTH_WALKWAY = PLAYER_RADIUS * 3;
-    this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
+    this.props.place(shell, SUITE, sofa(SUITE_SOFA_WIDTH, PALETTE.markerSky, PALETTE.blossomWhite), {
       x: SOFA_X,
       z: loungeFloor.minZ + SOFA_NORTH_WALKWAY + sofaSweptHalfZ,
       spin: sofaSpin,
-      halfX: sofaHalfX,
-      halfZ: sofaHalfZ,
-      top: SOFA_SEAT_TOP,
+      ...sofaShape,
     });
 
     // The telly, at the west end. See this method's header for the angle.
@@ -5827,7 +5851,6 @@ export class Hotel implements GameSystem {
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,
       top: tv.height,
-      stand: false,
     });
 
     // The low table between them, with the Game Boy on it.
@@ -5848,20 +5871,10 @@ export class Hotel implements GameSystem {
     // hugging the (also moved) bathroom wall the way the telly now does —
     // otherwise the whole west end of the room, past the telly, was bare
     // floor with nothing standing in it.
-    this.props.place(shell, SUITE, crystalPlanter(0x41a2, PALETTE.markerPink), {
-      x: -7.1,
-      z: 7.2,
-      radius: 0.6,
-      top: PLANTER_TOP,
-      stand: false,
-    });
-    this.props.place(shell, SUITE, crystalPlanter(0x41a1, PALETTE.markerPink), {
-      x: 13.6,
-      z: 7.2,
-      radius: 0.6,
-      top: PLANTER_TOP,
-      stand: false,
-    });
+    const westPlanter = crystalPlanter(0x41a2, PALETTE.markerPink);
+    this.props.place(shell, SUITE, westPlanter, { x: -7.1, z: 7.2, radius: 0.6, ...measureTop(westPlanter) });
+    const eastPlanter = crystalPlanter(0x41a1, PALETTE.markerPink);
+    this.props.place(shell, SUITE, eastPlanter, { x: 13.6, z: 7.2, radius: 0.6, ...measureTop(eastPlanter) });
   }
 
   /**
@@ -5875,11 +5888,14 @@ export class Hotel implements GameSystem {
    * over you (on before you are out of sight); use it and the flush plays,
    * then the tap while you wash (*"good manners are part of the game"*); the
    * wash beat lifts the roof, and stepping out always clears everything, so
-   * it can never trap her. The one thing the castle's room could not have is
-   * the one thing every room here adds: **real solidity** — the castle's
-   * collision is height-blind across decks so its toilet room is open
-   * geometry, while the hotel's fixtures go through `place.ts` like every
-   * other prop, solid and (the pan) mountable.
+   * it can never trap her. What every room here adds is **real solidity**:
+   * the hotel's fixtures go through `place.ts` like every other prop, as the
+   * solids they are drawn as (`panParts`, `basinParts`), under a lid her head
+   * meets (`privacyRoofSpan`). The castle's toilet room still has none — its
+   * screens, pan and basin are drawn with no solid. That was once because
+   * the castle's collision was height-blind across decks; it is not any more
+   * (its decks are disjoint spaces, CLAUDE.md), so it is simply a gap, written
+   * down on PR #722 for its own change.
    *
    * Every caller hands this the room, the rectangle its own walls (real
    * ones, or `layout.ts` partition data) already enclose, and where the two
@@ -5936,16 +5952,21 @@ export class Hotel implements GameSystem {
     const bathMat = rug(matWidth, matDepth, PALETTE.markerMint, PALETTE.blossomWhite, 1);
     bathMat.position.set(panX, 0, panZ);
     shell.add(bathMat);
+    // The pan and the basin as the solids they are drawn as (`panParts`,
+    // `basinParts`): the pan's lid a flat top, its cistern another, the
+    // basin's rim an edge with nothing to stand on.
     const pan = buildPan(0, 0);
-    this.props.place(shell, room, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7 });
+    const panSolids = panParts();
+    this.props.place(shell, room, pan.group, { x: panX, z: panZ, radius: 0.45, parts: panSolids, top: Math.max(...panSolids.map((part) => part.top)) });
     const basin = buildBasin(0, 0);
+    const basinSolids = basinParts();
     this.props.place(shell, room, basin.group, {
       x: basinX,
       z: basinZ,
       spin: basinYaw,
       radius: 0.4,
-      top: 1.0,
-      stand: false,
+      parts: basinSolids,
+      top: Math.max(...basinSolids.map((part) => part.top)),
     });
 
     const roof = buildPrivacyRoof(
@@ -5955,6 +5976,29 @@ export class Hotel implements GameSystem {
       rect.maxZ - rect.minZ,
     );
     shell.add(roof.group);
+    // **The lid she sees slide over her is a lid her head meets** — the
+    // nook's ceiling, a solid band at the roof's own height. She is
+    // `KID_HEIGHT` (2.12 m) tall under a 2.42 m lid, so it is what keeps her
+    // off the pan's lid and cistern (on the lid her head would be through it)
+    // and out of the slot beside them that stepping down off either used to
+    // wedge her in (17 Oct 2026): by her height and its, where a
+    // `ledge: false` on the pan and basin used to (PR #722). Held off the
+    // floor, so the route lattice and the guests walk under it.
+    const span = privacyRoofSpan();
+    this.collision.kinded('toilet privacy roof', () =>
+      this.collision.addBox(
+        room.originX + centreX,
+        room.originZ + centreZ,
+        (rect.maxX - rect.minX) / 2,
+        (rect.maxZ - rect.minZ) / 2,
+        0,
+        0,
+        span.top,
+        false,
+        true,
+        span.base,
+      ),
+    );
 
     this.bathrooms.set(room, {
       routine: new ToiletRoutine(pan, basin, roof),
@@ -5996,6 +6040,10 @@ export class Hotel implements GameSystem {
     // the doorway, its mirror against the hall wall.
     // panX/standX shifted 3.8 m west with the bathroom wall (see the method
     // header); panZ/basin offsets are untouched since #274 only moved x.
+    // Her stand spot is behind the pan, clear of its cistern: 1.1 m behind
+    // its middle stood her body 0.14 m into the cistern once the cistern was
+    // solid as drawn (`panParts`, PR #722) — `check:hotel`'s "asks her to
+    // stand inside something solid".
     this.buildBathroomFixtures(
       shell,
       SUITE,
@@ -6003,7 +6051,7 @@ export class Hotel implements GameSystem {
       -11.6,
       4.6,
       -11.6,
-      4.6 - 1.1,
+      4.6 - (panReachBehind() + PLAYER_RADIUS + 0.05),
       rect.minX + 1.1,
       rect.minZ + 0.55,
     );
@@ -6155,10 +6203,8 @@ export class Hotel implements GameSystem {
           x,
           y: height,
           z: -10.9 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT,
-          halfX: 1.15,
-          halfZ: 0.48,
           base: height,
-          top: SOFA_SEAT_TOP,
+          ...sofaPlan(2.3),
         });
       }
       this.props.place(overhang, LOBBY, bedsideTable(), {
@@ -6168,7 +6214,6 @@ export class Hotel implements GameSystem {
         radius: 0.36,
         base: height,
         top: 1.0,
-        stand: false,
       });
     }
 
@@ -6183,14 +6228,14 @@ export class Hotel implements GameSystem {
       [-4.1, -7.0 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, landing.height, 0x11a3],
       [4.1, -7.0 - LOBBY_FOYER_GROWTH - RECEPTION_ORIGIN_SHIFT, landing.height, 0x11a4],
     ] as const) {
-      this.props.place(overhang, LOBBY, crystalPlanter(seed), {
+      const planter = crystalPlanter(seed);
+      this.props.place(overhang, LOBBY, planter, {
         x,
         y: base,
         z,
         radius: 0.6,
         base,
-        top: PLANTER_TOP,
-        stand: false,
+        ...measureTop(planter),
       });
     }
 
@@ -6270,18 +6315,15 @@ export class Hotel implements GameSystem {
   private placeProps(
     shell: Group,
     room: HotelRoom,
-    items: readonly { prop: () => Group; x: number; z: number; radius?: number; top: number }[],
+    items: readonly { prop: () => Group; x: number; z: number; radius?: number }[],
   ): void {
     for (const item of items) {
-      this.props.place(shell, room, item.prop(), {
-        x: item.x,
-        z: item.z,
-        radius: item.radius ?? 0.6,
-        top: item.top,
-        // The scatter props are crystals, seaweed and tufts: real heights,
-        // never floors, so none of them offers a landing plate.
-        stand: false,
-      });
+      const model = item.prop();
+      // Its top, and how much of it she could stand on, measured off what is
+      // drawn (`measureTop`): a crystal or a frond comes to a point a few
+      // millimetres across, so the width rule finds nothing to stand on —
+      // where a guessed 1.4–1.5 m top under a `ledge: false` used to.
+      this.props.place(shell, room, model, { x: item.x, z: item.z, radius: item.radius ?? 0.6, ...measureTop(model) });
     }
   }
 
@@ -6374,7 +6416,7 @@ export class Hotel implements GameSystem {
     this.controls.cancelWalk();
     // A picture is let go by cutting the shot short: `cancel` runs the undo
     // below, which is where she gets off.
-    player.beginRide({ holding: 'a painting', letGo: () => this.cine.cancel() });
+    player.beginRide({ holding: 'a painting', letGo: () => this.cine.cancel(), companion: 'not a ride' });
     const stand: RideExit = {
       x: art.x + art.normalX * 1.9,
       y: 0,
@@ -6438,6 +6480,8 @@ export class Hotel implements GameSystem {
     };
     const holder: RideHolder = {
       holding: 'a window view',
+      // A look out of the window, not a ride.
+      companion: 'not a ride',
       letGo: () => {
         // Mid-shot, `cancel` runs the undo below. Before the iris has reached
         // its middle there is no shot yet: get her off now, and the midpoint
@@ -7060,7 +7104,14 @@ function registerTowerCollision(
   x: number,
   z: number,
   yaw: number,
+  towerHeight: number,
 ): void {
+  // Every wall of the shell stands to the tower's own measured height — a real
+  // top, far over anything she can jump to.
+  const add = (x1: number, z1: number, x2: number, z2: number, halfThickness: number): void => {
+    const top = yAtAltitude((x1 + x2) / 2, (z1 + z2) / 2, towerHeight);
+    collision.kinded('hotel tower', () => collision.addWall(x1, z1, x2, z2, halfThickness, top, false, true));
+  };
   const R = TOWER_SHELL_RADIUS;
   const SIDES = 8;
   const sector = (Math.PI * 2) / SIDES;
@@ -7077,7 +7128,7 @@ function registerTowerCollision(
     across2: number,
     halfThickness: number,
   ): void => {
-    collision.addWall(
+    add(
       x + alongX * along1 + acrossX * across1,
       z + alongZ * along1 + acrossZ * across1,
       x + alongX * along2 + acrossX * across2,
@@ -7097,7 +7148,7 @@ function registerTowerCollision(
   for (let face = 1; face < SIDES; face += 1) {
     const a1 = yaw + (face - 0.5) * sector;
     const a2 = yaw + (face + 0.5) * sector;
-    collision.addWall(
+    add(
       x + Math.sin(a1) * R,
       z + Math.cos(a1) * R,
       x + Math.sin(a2) * R,

@@ -26,8 +26,8 @@
  * (CLAUDE.md: two agents got clean, decisive, entirely wrong answers from flood
  * fills that were measuring the wrong thing):
  *
- *  1. CONTROL — the fill instrument sees a sealed pocket (a hollow rectangle in
- *     an empty room of its own) and floods an empty room.
+ *  1. CONTROL — the fill instrument sees a sealed pocket (a pen of four walls
+ *     in an empty room of its own) and floods an empty room.
  *  2. CONTROL on the real room — a disc dropped on the desk's front stand makes
  *     the fill call that keep-out unreachable; taken back out, reachable again.
  *  3. REACHABILITY — from the arrival, at her radius: every keep-out
@@ -40,9 +40,11 @@
  *     at the room's four walls: the body's edge never gets into a drawn box
  *     past the corner rounding its capsules leave. Every box is the **model's**
  *     drawn footprint (`libraryAssets.ts`), never the collider's own.
- *  6. LANDING — a jump landed on every top she may stand on (the chairs, the
- *     desk, the bins, the cushions) finds it under her feet everywhere across
- *     its drawn footprint; the control: just outside the footprint, the floor.
+ *  6. LANDING — her feet, asked the way `Player` asks them
+ *     (`world/standing.ts`), find every solid's top under them everywhere
+ *     across its drawn footprint (the chairs, the desk, the bins, the
+ *     cushions, the lamps); the control: just outside the footprint, the
+ *     floor.
  *  7. FACADE — the building marched at from forty-eight bearings at both
  *     strides: nothing gets inside the cella but through the doorway, nothing
  *     into a column, the deepest reading reported per outside corner; marches
@@ -94,8 +96,9 @@ import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
-import { CollisionWorld } from '../src/world/Collision.ts';
+import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
+import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
@@ -252,7 +255,9 @@ function fill(collision: CollisionWorld, fromX: number, fromZ: number, radius = 
       const x = OX + cx * CELL;
       const z = OZ + cz * CELL;
       if (!onPlate(x - OX, z - OZ)) continue;
-      if (collision.isClearCircle(x, z, radius)) clear.add(key(cx, cz));
+      // Somewhere she can stand: clear of every solid she could not step up
+      // onto from the floor. A cushion on the rug is a step, not a wall.
+      if (walkableAt(collision, x, z, radius, 0)) clear.add(key(cx, cz));
     }
   }
   const [sx, sz] = cellOf(fromX, fromZ);
@@ -298,6 +303,8 @@ function march(collision: CollisionWorld, from: Vector3, to: Vector3, step: numb
 /** A drawn box, room-local. */
 interface DrawnBox extends BoxFootprint {
   readonly what: string;
+  /** Its drawn top above the room's floor — where her feet come to rest on it. */
+  readonly top: number;
 }
 
 /** How far outside a drawn box (x, z) stands — negative inside. */
@@ -328,17 +335,17 @@ function drawnBoxes(): DrawnBox[] {
   for (const spec of LIBRARY_BOOKCASES) {
     const size = libraryBookcaseSize(spec.kind);
     const centre = bookcaseCentre(spec);
-    boxes.push({ what: `bookcase ${spec.id}`, x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2 });
+    boxes.push({ what: `bookcase ${spec.id}`, x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2, top: size.height });
   }
   const desk = libraryDeskSize();
   const chair = libraryArmchairSize();
   for (const piece of LIBRARY_FURNITURE) {
     if (piece.kind === 'desk') {
       const centre = turned(piece, desk.centreX, desk.centreZ);
-      boxes.push({ what: 'the desk', x: centre.x, z: centre.z, facing: piece.facing, halfLength: desk.width / 2, halfDepth: desk.depth / 2 });
+      boxes.push({ what: 'the desk', x: centre.x, z: centre.z, facing: piece.facing, halfLength: desk.width / 2, halfDepth: desk.depth / 2, top: desk.top });
     } else if (piece.kind === 'armchair' || piece.kind === 'storyChair') {
       const centre = turned(piece, chair.centreX, chair.centreZ);
-      boxes.push({ what: piece.id, x: centre.x, z: centre.z, facing: piece.facing, halfLength: chair.width / 2, halfDepth: chair.depth / 2 });
+      boxes.push({ what: piece.id, x: centre.x, z: centre.z, facing: piece.facing, halfLength: chair.width / 2, halfDepth: chair.depth / 2, top: chair.seat });
     }
   }
   return boxes;
@@ -351,11 +358,20 @@ console.log('CONTROL — the fill instrument:');
 {
   const control = new CollisionWorld();
   buildReadingRoomShell(new Group(), control, new WalkSurfaces());
-  control.addRectangle(OX - 6, OZ, 2.5, 2.5, 0.3);
+  // A pen: four walls round an empty square, the one kind of sealed pocket
+  // there can be now a rectangle is a filled box.
+  for (const [ax, az, bx, bz] of [
+    [-2.5, -2.5, 2.5, -2.5],
+    [2.5, -2.5, 2.5, 2.5],
+    [2.5, 2.5, -2.5, 2.5],
+    [-2.5, 2.5, -2.5, -2.5],
+  ] as const) {
+    control.addWall(OX - 6 + ax, OZ + az, OX - 6 + bx, OZ + bz, 0.3);
+  }
   const seen = fill(control, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
   say(seen.reached.size > 10000, `the fill floods the empty room: ${seen.reached.size} cells reached`);
-  say(pockets.length > 30 && !reachedAt(seen, OX - 6, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a hollow rectangle are unreachable`);
+  say(pockets.length > 30 && !reachedAt(seen, OX - 6, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a pen of four walls are unreachable`);
   say(!seen.clear.has(key(...cellOf(OX, OZ + LIBRARY_HALF_Z + 4))), 'nothing off the plate counts as floor');
 }
 
@@ -374,6 +390,15 @@ const { world, scene, camera } = quietly(() => buildHeadlessPark());
 const library = world.library;
 const collision = world.collision;
 const surfaces = world.building.surfaces;
+/**
+ * **A body standing on the garden's ground at `(x, z)`** — the walk sampler's
+ * surface there (the plinth, the step, the terrain). Every solid has its real
+ * top now, measured against the body's feet, so a march out here starts on
+ * the ground and follows it (`p.y = surfaces.sample(...)` after each step)
+ * rather than floating at y = 0 metres above the sphere and clearing the
+ * building it was sent at.
+ */
+const onGround = (x: number, z: number): Vector3 => new Vector3(x, surfaces.sample(x, z, terrainHeight(x, z) + 3), z);
 const remove = process.env['LIBRARY_CHECK_REMOVE'];
 if (remove) {
   const victims = library.solids.filter((solid) => solid.what.includes(remove));
@@ -402,7 +427,7 @@ if (openEdge) {
   const edge = library.shellSolids.edges[index - 1];
   if (!Number.isInteger(index) || !edge) throw new Error(`LIBRARY_CHECK_OPEN_EDGE=${openEdge}: edges are 1..${library.shellSolids.edges.length}`);
   collision.removeWall(edge);
-  note(`OPENED the plinth's edge ${index} (east, back, west) on purpose — this run must go red`);
+  note(`OPENED the plinth's edge piece ${index} of ${library.shellSolids.edges.length} (each side's runs, tread by tread, then the back; each in pieces of up to 2 m) on purpose — this run must go red`);
 }
 const bounds = collision.playBounds;
 collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 } as never);
@@ -431,10 +456,23 @@ console.log(`\nREACHABILITY — ${library.solids.length} solids registered by th
   }
   say(unreachable === 0, `every keep-out is reachable: ${keepOuts.length - unreachable} of ${keepOuts.length}`);
   say(reachedAt(seen, OX + LIBRARY_DOOR_X, OZ + LIBRARY_HALF_Z), "the exit band's centre is reachable");
+  // Every drawn box is solid. One taller than a step must not be reached at
+  // all; one she steps up onto (a chair's seat) is reached — she stands on it —
+  // so for that one the clause asks the floor-level question directly: a body
+  // with her feet on the floor in its middle is pushed out.
+  const floorProbe = new Vector3();
+  let steppedOnto = 0;
   for (const box of drawnBoxes()) {
     if (box.halfDepth * 2 < 0.5) continue;
-    if (reachedAt(seen, OX + box.x, OZ + box.z)) say(false, `${box.what}'s middle IS reachable — it is not solid`);
+    if (box.top <= BUILDING_STEP_UP) {
+      steppedOnto += 1;
+      floorProbe.set(OX + box.x, 0, OZ + box.z);
+      if (collision.deepestSolidOverlap(floorProbe, PLAYER_RADIUS) <= 0) say(false, `${box.what}'s middle does not push a body standing on the floor — it is not solid`);
+    } else if (reachedAt(seen, OX + box.x, OZ + box.z)) {
+      say(false, `${box.what}'s middle IS reachable — it is not solid`);
+    }
   }
+  note(`${steppedOnto} drawn box(es) within one ${BUILDING_STEP_UP} m step of the floor (their middles are stood on, so asked as solid at the floor instead)`);
   // Drawn implies solid: every readable book (#718) stands where she cannot
   // walk — inside its case's solid, never a mesh in the open a child strolls through.
   let walkable = 0;
@@ -474,7 +512,7 @@ console.log('\nAISLES — a player disc swept along every aisle:');
         const x = OX + a.x + (b.x - a.x) * t;
         const z = OZ + a.z + (b.z - a.z) * t;
         stations += 1;
-        if (!collision.isClearCircle(x, z, PLAYER_RADIUS)) {
+        if (!walkableAt(collision, x, z, PLAYER_RADIUS, 0)) {
           blocked += 1;
           if (blocked <= 5) say(false, `aisle '${aisle.id}' is blocked at (${(x - OX).toFixed(2)}, ${(z - OZ).toFixed(2)})`);
         }
@@ -531,21 +569,28 @@ console.log('\nMARCHED at every case, the desk and every chair — 16 bearings, 
   say(escaped === 0, `the walls hold: ${escaped} of 48 marches left the room other than through the door`);
 }
 
-console.log('\nLANDING — a jump landed on every top she may stand on:');
+console.log('\nLANDING — her feet find every solid top across its drawn footprint:');
 {
   let points = 0;
   let missed = 0;
   let controls = 0;
   let controlWrong = 0;
+  let shared = 0;
   const firstMiss: string[] = [];
   const standables = library.standables;
-  /** Does any standable's drawn footprint (other than `except`) cover room-local (x, z)? */
+  /** Does any other solid's drawn footprint cover room-local (x, z)? Where two overlap (a lamp on a desk), her feet rest on whichever is higher. */
   const coveredByAnother = (x: number, z: number, except: (typeof standables)[number]): boolean =>
     standables.some((other) => other !== except && footprintCovers(other.footprint, x, z));
+  /** Where her feet come to rest at room-local (x, z), asked from just over `top` — `Player.groundAt`'s rule. */
+  const feetAt = (x: number, z: number, top: number): number => standingAt(collision, surfaces.sample.bind(surfaces), OX + x, OZ + z, top + 0.1);
   for (const standable of standables) {
     for (const [u, v] of grid(standable.footprint, 0)) {
+      if (coveredByAnother(u, v, standable)) {
+        shared += 1;
+        continue;
+      }
       points += 1;
-      const y = surfaces.sample(OX + u, OZ + v, standable.top + 0.1);
+      const y = feetAt(u, v, standable.top);
       if (Math.abs(y - standable.top) > FEET_TOLERANCE) {
         missed += 1;
         if (firstMiss.length < 4) firstMiss.push(`${standable.what} at (${u.toFixed(2)}, ${v.toFixed(2)}): landed at ${y.toFixed(3)}, its top is ${standable.top.toFixed(3)}`);
@@ -555,23 +600,23 @@ console.log('\nLANDING — a jump landed on every top she may stand on:');
     for (const [u, v] of grid(standable.footprint, 0.1)) {
       if (coveredByAnother(u, v, standable)) continue;
       controls += 1;
-      const y = surfaces.sample(OX + u, OZ + v, standable.top + 0.1);
+      const y = feetAt(u, v, standable.top);
       if (Math.abs(y) > FEET_TOLERANCE) controlWrong += 1;
     }
   }
   for (const line of firstMiss) say(false, line);
   say(standables.length >= 10 && missed === 0, `${standables.length} tops, ${points} landings across their drawn footprints: ${missed} fell through`);
   say(controls > 0 && controlWrong === 0, `CONTROL: ${controls} landings 0.1 m outside a footprint found the floor (${controlWrong} found a top in the air)`);
-  note(`the tops: ${standables.map((s) => `${s.what} ${s.top.toFixed(2)}`).join(', ')}`);
+  note(`${shared} point(s) shared by two solids (a lamp on a desk or a table) left to the higher one; the tops: ${standables.map((s) => `${s.what} ${s.top.toFixed(2)}`).join(', ')}`);
 }
 
-/** Does a standable footprint cover room-local (x, z)? */
+/** Does a solid's drawn footprint cover room-local (x, z)? */
 function footprintCovers(footprint: (typeof library.standables)[number]['footprint'], x: number, z: number): boolean {
-  if ('radius' in footprint) return Math.abs(x - footprint.x) <= footprint.radius && Math.abs(z - footprint.z) <= footprint.radius;
+  if ('radius' in footprint) return Math.hypot(x - footprint.x, z - footprint.z) <= footprint.radius;
   return outsideBox(footprint, x, z) <= 0;
 }
 
-/** A grid of room-local points across a footprint grown by `grow` (on its edge when growing). */
+/** A grid of room-local points across a footprint, or a ring `grow` outside it. */
 function grid(footprint: (typeof library.standables)[number]['footprint'], grow: number): [number, number][] {
   const out: [number, number][] = [];
   if ('radius' in footprint) {
@@ -579,12 +624,18 @@ function grid(footprint: (typeof library.standables)[number]['footprint'], grow:
     if (grow > 0) {
       for (let k = 0; k < 16; k += 1) {
         const a = (k / 16) * Math.PI * 2;
-        // The square plate's corners reach r·√2; a ring outside that is clear of it.
-        out.push([footprint.x + Math.cos(a) * (r * Math.SQRT2 + grow), footprint.z + Math.sin(a) * (r * Math.SQRT2 + grow)]);
+        out.push([footprint.x + Math.cos(a) * (r + grow), footprint.z + Math.sin(a) * (r + grow)]);
       }
       return out;
     }
-    for (let i = -4; i <= 4; i += 1) for (let j = -4; j <= 4; j += 1) out.push([footprint.x + (i / 4) * r * 0.98, footprint.z + (j / 4) * r * 0.98]);
+    // Rings across the disc, its rim (at 98%) included.
+    out.push([footprint.x, footprint.z]);
+    for (const fraction of [0.33, 0.66, 0.98]) {
+      for (let k = 0; k < 12; k += 1) {
+        const a = (k / 12) * Math.PI * 2;
+        out.push([footprint.x + Math.cos(a) * r * fraction, footprint.z + Math.sin(a) * r * fraction]);
+      }
+    }
     return out;
   }
   const yaw = (footprint.facing * Math.PI) / 180;
@@ -656,10 +707,11 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     const bearing = frame.yaw + (i / 48) * Math.PI * 2;
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       marches += 1;
-      const p = new Vector3(frame.x + Math.sin(bearing) * 16, 0, frame.z + Math.cos(bearing) * 16);
+      const p = onGround(frame.x + Math.sin(bearing) * 16, frame.z + Math.cos(bearing) * 16);
       let closest = Infinity;
       for (let travelled = 0; travelled < 20; travelled += step) {
         collision.resolveMovement(p, -Math.sin(bearing) * step, -Math.cos(bearing) * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        p.y = surfaces.sample(p.x, p.z, p.y);
         const into = intoSolid(p.x, p.z);
         if (into.depth > deepest.depth) deepest = { depth: into.depth, what: into.what, bearing: (i / 48) * 360 };
         if (into.what === 'the cella') {
@@ -676,8 +728,15 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
   say(reachedShell >= marches * 0.75, `${reachedShell} of ${marches} marches reached the building (the rest met a neighbour or the doorway)`);
   note(`deepest per outside corner: ${corners.map((corner) => `${corner.name} ${Number.isFinite(atCorner.get(corner.name)!) ? atCorner.get(corner.name)!.toFixed(3) : 'not reached'}`).join(', ')}`);
 
-  // Square at the plinth's sides and back, from the lawn: she stops at its drawn edge.
+  // Square at the plinth's sides and back, from the lawn: she stops at its drawn
+  // edge — **wherever it stands proud of the ground she walks up on.** Every
+  // solid has its real top now (17 Oct 2026): where the hillside rises to the
+  // plinth's own top, there is no edge to stop her and she walks onto the stone
+  // as onto a step, which is the physics, not a hole. So a body counts as *in*
+  // the stone only with the stone's top more than the clearance grace over her
+  // feet — sinking into it, the fault this clause is for.
   let edgeMarches = 0;
+  let steppedOnto = 0;
   let worstEdge = { depth: -Infinity, at: '' };
   const intoPlinth = (x: number, z: number): number => {
     toPlan(x, z);
@@ -708,16 +767,23 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     const to = frame.foot(approach.to.x, approach.to.z);
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       edgeMarches += 1;
-      const p = new Vector3(from.x, 0, from.z);
+      const p = onGround(from.x, from.z);
       const dir = new Vector3(to.x - from.x, 0, to.z - from.z).normalize();
       for (let travelled = 0; travelled < 5; travelled += step) {
         collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        p.y = surfaces.sample(p.x, p.z, p.y);
         const depth = intoPlinth(p.x, p.z);
+        const stoneTop = frame.topY(p.x, p.z, local.x, local.z, plan.plinthTop);
+        if (depth > CORNER_ALLOWANCE && stoneTop - p.y <= JUMP_CLEARANCE_GRACE) {
+          steppedOnto += 1;
+          continue;
+        }
         if (depth > worstEdge.depth) worstEdge = { depth, at: approach.at };
       }
     }
   }
-  say(worstEdge.depth <= CORNER_ALLOWANCE, `${edgeMarches} marches square at the plinth's sides and back: deepest a body's edge got over its stone ${worstEdge.depth.toFixed(3)} m (${worstEdge.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+  say(worstEdge.depth <= CORNER_ALLOWANCE, `${edgeMarches} marches square at the plinth's sides and back: deepest a body's edge got into its stone below its top ${worstEdge.depth.toFixed(3)} m (${worstEdge.at}), allowance ${CORNER_ALLOWANCE.toFixed(3)}`);
+  note(`${steppedOnto} march step(s) went onto the plinth where the ground rises level with its top — a step, not a hole`);
 
   // From the portico — the central bay between the middle columns — at the
   // front wall either side of the door, head on at the doorway's two outside
@@ -757,10 +823,11 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
       const start = frame.foot(aim.from.x, aim.from.z);
       const target = frame.foot(aim.to.x, aim.to.z);
-      const p = new Vector3(start.x, 0, start.z);
+      const p = onGround(start.x, start.z);
       const dir = new Vector3(target.x - start.x, 0, target.z - start.z).normalize();
       for (let travelled = 0; travelled < 10; travelled += step) {
         collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        p.y = surfaces.sample(p.x, p.z, p.y);
         const into = intoSolid(p.x, p.z);
         if (into.what === 'the cella' && into.depth > porticoWorst.depth) porticoWorst = { depth: into.depth, at: aim.at };
       }
@@ -773,12 +840,13 @@ console.log('\nFACADE — the building marched at from 48 bearings, at 5 cm and 
 
   // A sprinter through the door stops on the door leaves, inside the band.
   const start = frame.foot(0, plan.stepFrontZ + 3);
-  const p = new Vector3(start.x, 0, start.z);
+  const p = onGround(start.x, start.z);
   let crossed = false;
   for (let t = 0; t < 14; t += PLAYER_LONGEST_STEP) {
     const fx = p.x;
     const fz = p.z;
     collision.resolveMovement(p, -Math.sin(frame.yaw) * PLAYER_LONGEST_STEP, -Math.cos(frame.yaw) * PLAYER_LONGEST_STEP, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+    p.y = surfaces.sample(p.x, p.z, p.y);
     if (bandCrossed(band, fx, fz, p.x, p.z)) crossed = true;
   }
   toPlan(p.x, p.z);

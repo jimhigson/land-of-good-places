@@ -45,6 +45,7 @@ import {
   buildHallShell,
   facadeToWorld,
   registerPlinthStep,
+  registerReptileRoofCollision,
   registerReptileShellCollision,
   reptileEntryBand,
   reptileExitBand,
@@ -190,7 +191,7 @@ export class ReptileHouse implements GameSystem {
     this.hallRoot.visible = false;
     this.hallRoot.add(new ReptileLighting(0, 0).group);
     buildHallShell(this.hallRoot, collision, surfaces);
-    this.props = new ReptileProps(collision, surfaces, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
+    this.props = new ReptileProps(collision, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
     const atlas = new SignAtlas();
     this.hearts = new SpritePuffs(this.hallRoot, 12);
     this.hallRoot.add(this.bubble.sprite);
@@ -265,6 +266,7 @@ export class ReptileHouse implements GameSystem {
       throw new Error(`ReptileHouse: the mouth reaches ${mouthReach.toFixed(2)} m, past REPTILE_LIPS_REACH ${REPTILE_LIPS_REACH} — raise it in layout.ts`);
     }
     this.shellSolids = registerReptileShellCollision(collision, this.frame, lowDiscs, lipsReach);
+    registerReptileRoofCollision(collision, this.frame);
     registerPlinthStep(surfaces, this.frame, reptileHousePlinthTop());
     atlas.applyTo(this.exterior.sign);
   }

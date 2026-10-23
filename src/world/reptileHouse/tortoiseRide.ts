@@ -1,7 +1,7 @@
-import { Box3, CatmullRomCurve3, Group, Vector3 } from 'three';
+import { Box3, CatmullRomCurve3, Group, Raycaster, Vector3 } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
-import type { Player, RideHolder } from '../../entities/Player';
+import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
 import { pressZone, type InteractZone } from '../interact';
 import { highlightObject } from '../highlight';
 import { createTortoise, type TortoiseHandle } from '../../art/models/reptiles';
@@ -59,6 +59,25 @@ import {
  * bypasses collision, so a bed's kerb could not stop it anyway, which is why
  * the loop is proved against the layout's own path widths rather than trusted.
  */
+/**
+ * How far from the parked capsule's line her shell's top is a place to stand:
+ * the crown of the dome, within 0.15 m of its crest (`check:solids`).
+ */
+const TORTOISE_DOME_HALF = 0.35;
+/**
+ * …and how far along it from the crest: the dome falls away faster along her
+ * length than across her back (0.12 m down 0.2 m along, 0.21 m down 0.4 m),
+ * so her shell's top stops this far either side of its middle. Stood on out to
+ * the parked capsule's ends, she stood 0.27 m over the drawn shell near its
+ * tail (`check:solids`' drawn tops, the reptile house).
+ */
+const TORTOISE_CROWN_ALONG = 0.25;
+
+/** How far past each end of the parked capsule's line its top runs — negative: short of them, to the crown alone. */
+function crownBeyond(front: LocalPoint, back: LocalPoint): number {
+  return TORTOISE_CROWN_ALONG - Math.hypot(back.x - front.x, back.z - front.z) / 2;
+}
+
 /** The parked capsule's two ends, hall-local: along the parking spot's facing, head end first. */
 function parkedCapsule(): [LocalPoint, LocalPoint] {
   const yaw = (TORTOISE_RIDE_PARK.facing * Math.PI) / 180;
@@ -81,6 +100,14 @@ const HOP_OFF_SIDE = 1.2;
 const HOP_OFF_UP = 3;
 /** Where she lands, beside the tortoise's flank, before the put-down rule has its say. */
 const DISMOUNT_BESIDE = 1.7;
+/**
+ * **How far behind her seat her companion sits on the shell**, metres: past her
+ * back (she reaches 0.44 m behind her seat, measured on the seated rig) and on
+ * the dome's back slope, where its feet are put on the drawn shell itself
+ * (`companionSpot`, ray-cast once). There is no room beside her: the shell is
+ * 2.06 m across and she is 1.75 m, holding on.
+ */
+const COMPANION_BACK = 0.75;
 
 export class TortoiseRide {
   readonly tortoise: TortoiseHandle;
@@ -91,6 +118,8 @@ export class TortoiseRide {
   private readonly loop: CatmullRomCurve3;
   private readonly length: number;
   private readonly seat = new Group();
+  /** Her companion's place on the shell behind her — see {@link COMPANION_BACK}. */
+  private readonly companionSpot = new Group();
   private readonly at = new Vector3();
   private readonly ahead = new Vector3();
   private readonly seatWorld = new Vector3();
@@ -105,6 +134,8 @@ export class TortoiseRide {
   /** The parked capsule's handle in the collision world, or `null` while it is out walking. */
   private bay: WallCollider | null = null;
   private readonly parkedSolid: ReptileProps['solids'][number];
+  /** The top of her shell, world `y` in the flat hall: the parked solid's top, every time it is added. */
+  private readonly shellTop: number;
 
   constructor(root: Group, props: ReptileProps, collision: CollisionWorld, controls: InteriorControls) {
     this.root = root;
@@ -119,6 +150,14 @@ export class TortoiseRide {
     const shell = new Box3().setFromObject(this.tortoise.shell);
     this.seat.position.set(0, shell.max.y - 0.08, -0.15); // flat-ok: the tortoise's box taken under its root before any lean; the hall is flat (floor y 0, off the sphere)
     this.tortoise.root.add(this.seat);
+    // Her companion's feet on the drawn shell behind her: straight down onto
+    // the shell's own mesh, in the same unposed frame the seat was set in.
+    const behind = this.seat.position.z - COMPANION_BACK;
+    this.tortoise.root.updateMatrixWorld(true);
+    const ray = new Raycaster(new Vector3(0, shell.max.y + 1, behind), new Vector3(0, -1, 0)); // flat-ok: down the tortoise's own up, before any lean, in the flat hall
+    const onShell = ray.intersectObject(this.tortoise.shell, true)[0]?.point.y ?? this.seat.position.y;
+    this.companionSpot.position.set(0, onShell, behind);
+    this.tortoise.root.add(this.companionSpot);
 
     this.loop = new CatmullRomCurve3(
       TORTOISE_RIDE_LOOP.map((point) => new Vector3(point.x, 0, point.z)),
@@ -128,7 +167,12 @@ export class TortoiseRide {
     this.length = this.loop.getLength();
 
     const [front, back] = parkedCapsule();
-    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, 'wall');
+    // To the top of her shell — the drawn tortoise, a real height — and stood
+    // on only on the crown of its dome (`TORTOISE_DOME_HALF`), not out over her head and tail.
+    this.shellTop = shell.max.y; // flat-ok: the same box the seat above is set from; the hall is flat (floor y 0, off the sphere)
+    collision.toppedSquare(crownBeyond(front, back), () =>
+      this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, this.shellTop, TORTOISE_DOME_HALF),
+    );
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
     this.bay = this.parkedSolid.handle as WallCollider;
     this.park();
@@ -165,7 +209,25 @@ export class TortoiseRide {
   }
 
   /** Whoever rides the shell is held by this — and let go by hopping off it. */
-  private readonly holder: RideHolder = { holding: 'the tortoise', letGo: () => this.dismount() };
+  private readonly holder: RideHolder = {
+    holding: 'the tortoise',
+    letGo: () => this.dismount(),
+    // Her companion rides on the shell behind her ({@link COMPANION_BACK}).
+    companion: { beside: (seat) => this.companionSeat(seat) },
+  };
+
+  /** Her companion's place on the shell this frame, turned as the tortoise is. */
+  private companionSeat(seat: CompanionSeat): boolean {
+    if (!this.riding) return false;
+    this.root.updateMatrixWorld();
+    this.companionSpot.getWorldPosition(this.seatWorld);
+    seat.x = this.seatWorld.x;
+    seat.y = this.seatWorld.y;
+    seat.z = this.seatWorld.z;
+    seat.facing = this.yaw;
+    this.tortoise.root.getWorldQuaternion(seat.turn);
+    return true;
+  }
 
   zones(): InteractZone[] {
     if (this.riding) return [];
@@ -259,12 +321,22 @@ export class TortoiseRide {
     this.along = 0;
     this.park();
     const [front, back] = parkedCapsule();
-    this.bay = this.collision.addWall(
-      REPTILE_HOUSE_ORIGIN_X + front.x,
-      REPTILE_HOUSE_ORIGIN_Z + front.z,
-      REPTILE_HOUSE_ORIGIN_X + back.x,
-      REPTILE_HOUSE_ORIGIN_Z + back.z,
-      TORTOISE_RIDE_PARK_HALF_WIDTH,
+    // Back as she was parked: to the top of her shell, stood on only on its
+    // dome. (Re-added with no top at all, she came back from her first lap
+    // an infinitely tall pillar.)
+    this.bay = this.collision.kinded('the tortoise ride, parked', () =>
+      this.collision.toppedSquare(crownBeyond(front, back), () => this.collision.toppedNarrow(TORTOISE_DOME_HALF, () =>
+        this.collision.addWall(
+          REPTILE_HOUSE_ORIGIN_X + front.x,
+          REPTILE_HOUSE_ORIGIN_Z + front.z,
+          REPTILE_HOUSE_ORIGIN_X + back.x,
+          REPTILE_HOUSE_ORIGIN_Z + back.z,
+          TORTOISE_RIDE_PARK_HALF_WIDTH,
+          this.shellTop,
+          false,
+          true,
+        ),
+      )),
     );
     this.parkedSolid.handle = this.bay;
     const player = this.player;

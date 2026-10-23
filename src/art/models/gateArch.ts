@@ -167,6 +167,13 @@ export const GATE_ARCH_CLEAR_WIDTH = 2 * (ENTRANCE_GATE_HALF_WIDTH - GATE_ARCH_P
 export const GATE_ARCH_CLEAR_HEIGHT = SIGN.min.y;
 
 /**
+ * **The top of the whole arch**, measured off every shipped node — what each
+ * pier's solid stands to, since the arch springs from the piers and its band,
+ * sign and roundel are what is drawn over them.
+ */
+export const GATE_ARCH_TOP = Math.max(...[...parts.keys()].map((name) => extentOf(name).max.y)); // flat-ok: the model's own frame, measured before it is stood on the sphere (as GATE_ARCH_CLEAR_HEIGHT is)
+
+/**
  * The arch is one rigid model of a gateway the park sizes for itself, so the
  * two can disagree. They cannot disagree *quietly*.
  *

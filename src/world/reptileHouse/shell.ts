@@ -6,6 +6,9 @@ import { Plate } from '../hotel/place';
 import { DOOR_HALF, WALL_HALF_DEPTH } from '../hotel/layout';
 import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import type { PortalBand } from '../tapSpacing';
+import { groundRadiusAt, solidInFrame, yAtRadius } from '../terrain';
+import { SPACE_GARDEN, spaceAt } from '../spaces';
+import { reptileHouseDrawnTopAt, reptileHouseTopInSector, reptileHouseTopOver } from '../../art/models/reptileHouseAssets';
 import { PALETTE } from '../../core/palette';
 import { solid, decal, softMaterial, toonMaterial } from '../../art/style/materials';
 import {
@@ -81,6 +84,16 @@ export function facadeToWorld(frame: FacadeFrame, along: number, across: number)
   };
 }
 
+/** The inverse of {@link facadeToWorld}: a world plan point in the facade's own `along`/`across`. */
+export function worldToFacade(frame: FacadeFrame, x: number, z: number): { along: number; across: number } {
+  const dx = x - frame.x;
+  const dz = z - frame.z;
+  return {
+    along: Math.sin(frame.yaw) * dx + Math.cos(frame.yaw) * dz,
+    across: Math.sin(frame.yaw + Math.PI / 2) * dx + Math.cos(frame.yaw + Math.PI / 2) * dz,
+  };
+}
+
 /** The front door's walk-through band, from the back wall out to the doormat. */
 export function reptileEntryBand(frame: FacadeFrame): PortalBand {
   const centreAlong = (REPTILE_BACK_WALL_ALONG + REPTILE_DOOR_BAND_OUTER) / 2;
@@ -147,24 +160,38 @@ export function registerReptileShellCollision(
   // clause go red without anyone editing this file to prove it.
   const walls: WallCollider[] = [];
 
+  // **Every solid to the house as it is drawn** — measured off the shipped
+  // mesh in the house's own metres (x across, z along), and read as a real top
+  // in the collider's column (`solidInFrame`: the house leans on the sphere at
+  // its own foot, as a plot does). The ring's chords and the doorway's walls
+  // are the whole building's edge, sealing what is inside, so each stands to
+  // the building's own top in its sector (`reptileHouseTopInSector`) — the
+  // wall and the dome behind the coil, not the plinth the chord runs along.
+  // The discs round the outside (the head's cheeks, the tail, the sign) stand
+  // to what is drawn over each (`reptileHouseTopOver`).
+  const realTop = (alongA: number, acrossA: number, alongB: number, acrossB: number, half: number, worldX: number, worldZ: number): number =>
+    solidInFrame(frame.x, frame.z, worldX, worldZ, 0, reptileHouseTopOver({ x: acrossA, z: alongA }, { x: acrossB, z: alongB }, half)).top;
+  const sectorTop = (alongA: number, acrossA: number, alongB: number, acrossB: number, worldX: number, worldZ: number): number =>
+    solidInFrame(frame.x, frame.z, worldX, worldZ, 0, reptileHouseTopInSector(Math.atan2(acrossA, alongA), Math.atan2(acrossB, alongB))).top;
+
   const wall = (along1: number, across1: number, along2: number, across2: number, half: number): void => {
     const a = facadeToWorld(frame, along1, across1);
     const b = facadeToWorld(frame, along2, across2);
-    walls.push(collision.addWall(a.x, a.z, b.x, b.z, half));
+    const top = sectorTop(along1, across1, along2, across2, (a.x + b.x) / 2, (a.z + b.z) / 2);
+    walls.push(collision.kinded('reptile house', () => collision.addWall(a.x, a.z, b.x, b.z, half, top, false, true)));
   };
 
   for (let face = 1; face < SHELL_SIDES; face += 1) {
-    const a1 = frame.yaw + (face - 0.5) * sector;
-    const a2 = frame.yaw + (face + 0.5) * sector;
-    walls.push(
-      collision.addWall(
-        frame.x + Math.sin(a1) * R,
-        frame.z + Math.cos(a1) * R,
-        frame.x + Math.sin(a2) * R,
-        frame.z + Math.cos(a2) * R,
-        SHELL_HALF_THICKNESS,
-      ),
-    );
+    const t1 = (face - 0.5) * sector;
+    const t2 = (face + 0.5) * sector;
+    const a1 = frame.yaw + t1;
+    const a2 = frame.yaw + t2;
+    const x1 = frame.x + Math.sin(a1) * R;
+    const z1 = frame.z + Math.cos(a1) * R;
+    const x2 = frame.x + Math.sin(a2) * R;
+    const z2 = frame.z + Math.cos(a2) * R;
+    const top = sectorTop(R * Math.cos(t1), R * Math.sin(t1), R * Math.cos(t2), R * Math.sin(t2), (x1 + x2) / 2, (z1 + z2) / 2);
+    walls.push(collision.kinded('reptile house', () => collision.addWall(x1, z1, x2, z2, SHELL_HALF_THICKNESS, top, false, true)));
   }
   for (const side of [-1, 1]) {
     wall(facadeAlong, side * JAMB_ACROSS, facadeAlong, side * (vertexAcross + 0.3), SHELL_HALF_THICKNESS);
@@ -173,12 +200,70 @@ export function registerReptileShellCollision(
   wall(REPTILE_BACK_WALL_ALONG, JAMB_ACROSS, REPTILE_BACK_WALL_ALONG, -JAMB_ACROSS, 0.35);
 
   const tail = reptileTailBase(frame);
-  collision.addCircle(tail.x, tail.z, REPTILE_TAIL_BASE_RADIUS);
+  const tailLocal = worldToFacade(frame, tail.x, tail.z);
+  const tailTop = realTop(tailLocal.along, tailLocal.across, tailLocal.along, tailLocal.across, REPTILE_TAIL_BASE_RADIUS, tail.x, tail.z);
+  collision.kinded('reptile house', () => collision.addCircle(tail.x, tail.z, REPTILE_TAIL_BASE_RADIUS, tailTop, false, true));
   for (const disc of lowDiscs) {
     const at = facadeToWorld(frame, disc.z, disc.x);
-    collision.addCircle(at.x, at.z, disc.radius);
+    const top = realTop(disc.z, disc.x, disc.z, disc.x, disc.radius, at.x, at.z);
+    collision.kinded('reptile house', () => collision.addCircle(at.x, at.z, disc.radius, top, false, true));
   }
   return walls;
+}
+
+/** The reptile house's roof strips: about this wide, and pieces this long, so each top lies on the coil drawn over it. */
+const ROOF_STRIP = 1;
+const ROOF_PIECE = 2;
+/** How far down from the drawn roof the roof's solid reaches: a crust, its edge below every chord's top. */
+const ROOF_CRUST = 1.5;
+
+/**
+ * **The coil the park sees is somewhere to stand.**
+ *
+ * The ring's chords seal the hall's footprint, and once they stood to
+ * `Infinity`; with real tops (17 Oct 2026) a jet pack clears the lower sectors
+ * and the dome and coil over the middle had no solid, so she fell through the
+ * roof she could see into a ring walled in on every side. Strips across the
+ * inside of the chords, each a crust banded from `ROOF_CRUST` under the drawn
+ * roof to the drawn roof (`reptileHouseDrawnTopAt`, a ray down the shipped
+ * mesh in the house's own metres), one height at each end of a piece: the hall's
+ * footprint is sealed from above, and she stands on the coil. Banded, so no
+ * route lattice stamps them, and the mouth's bore keeps its air.
+ */
+export function registerReptileRoofCollision(collision: CollisionWorld, frame: FacadeFrame): void {
+  // The 16-gon's inner faces: its apothem, less a chord's thickness.
+  const inner = REPTILE_SHELL_RADIUS * Math.cos(Math.PI / SHELL_SIDES) - 2 * SHELL_HALF_THICKNESS;
+  const strips = Math.max(1, Math.round((2 * inner) / ROOF_STRIP));
+  const half = inner / strips;
+  const drawnOver = (along: number, across: number): number => reptileHouseDrawnTopAt(across, along);
+  collision.kinded('reptile house roof', () => {
+    for (let i = 0; i < strips; i += 1) {
+      const across = -inner + (2 * i + 1) * half;
+      // The strip's run inside the ring, its round ends inside it too.
+      const reach = Math.sqrt(Math.max(0, inner * inner - (Math.abs(across) + half) * (Math.abs(across) + half))) - half;
+      if (reach <= 0) continue;
+      const pieces = Math.max(1, Math.round((2 * reach) / ROOF_PIECE));
+      for (let k = 0; k < pieces; k += 1) {
+        const alongA = -reach + (2 * reach * k) / pieces;
+        const alongB = -reach + (2 * reach * (k + 1)) / pieces;
+        // Not over the mouth's bore: she walks in under it, and it is open to
+        // the front, so nobody is ever shut in there.
+        if (Math.abs(across) - half < REPTILE_JAMB_STRIP && alongB > REPTILE_BACK_WALL_ALONG - half) continue;
+        const drawnA = drawnOver(alongA, across);
+        const drawnB = drawnOver(alongB, across);
+        if (drawnA <= 0 || drawnB <= 0) continue;
+        const atA = facadeToWorld(frame, alongA, across);
+        const atB = facadeToWorld(frame, alongB, across);
+        const a = solidInFrame(frame.x, frame.z, atA.x, atA.z, drawnA - ROOF_CRUST, drawnA);
+        const b = solidInFrame(frame.x, frame.z, atB.x, atB.z, drawnB - ROOF_CRUST, drawnB);
+        const base = Math.min(
+          solidInFrame(frame.x, frame.z, atA.x, atA.z, 0, drawnA - ROOF_CRUST).top,
+          solidInFrame(frame.x, frame.z, atB.x, atB.z, 0, drawnB - ROOF_CRUST).top,
+        );
+        collision.addWall(a.x, a.z, b.x, b.z, half, a.top, false, true, base, false, Number.NaN, b.top);
+      }
+    }
+  });
 }
 
 /**
@@ -192,13 +277,34 @@ class FacadePlate implements MovingPlatform {
   private readonly alongFrom: number;
   private readonly alongTo: number;
   private readonly halfAcross: number;
+  /** In a park plot: the plate's height as a radius over the planet's centre, at the frame. Else NaN, and the plate is flat at `surfaceY`. */
+  private readonly radius: number;
 
-  constructor(frame: FacadeFrame, surfaceY: number, alongFrom: number, alongTo: number, halfAcross: number) {
+  /**
+   * `top` is the plate's height in the building's own metres. **In a park plot
+   * the building stands on the sphere**, its origin the ground under it, leant
+   * to the local up (`standInPlot`), so the plate is that far over the ground
+   * there, as a radius — and its world `y` at any column is that radius, the
+   * way `solidInFrame` reads a rigid group's tops.
+   *
+   * It was `top` as a world `y`. Out in the park the ground under a plot is
+   * metres below world 0 — the sphere alone drops 9 m by 64 m out — so the
+   * plinth's walkable step hung in the air over the snake's mouth: 9.65 m up
+   * on seed 13, where a census run stood her on it and jumped her onto the
+   * roof (17 Oct 2026).
+   */
+  constructor(frame: FacadeFrame, top: number, alongFrom: number, alongTo: number, halfAcross: number) {
     this.frame = frame;
-    this.surfaceY = surfaceY;
     this.alongFrom = alongFrom;
     this.alongTo = alongTo;
     this.halfAcross = halfAcross;
+    this.radius = spaceAt(frame.x, frame.z) === SPACE_GARDEN ? groundRadiusAt(frame.x, frame.z) + top : Number.NaN;
+    this.surfaceY = Number.isNaN(this.radius) ? top : yAtRadius(frame.x, frame.z, this.radius);
+  }
+
+  surfaceYAt(x: number, z: number): number {
+    if (Number.isNaN(this.radius)) return this.surfaceY;
+    return yAtRadius(x, z, Math.hypot(this.radius, x - this.frame.x, z - this.frame.z));
   }
 
   covers(x: number, z: number): boolean {
@@ -316,12 +422,17 @@ export function buildHallShell(root: Group, collision: CollisionWorld, surfaces:
       // Hidden, not shortened: the collider below is the same either way.
       if (hidden) wall.visible = false;
       root.add(wall);
-      collision.addWall(
-        originX + (along === 'x' ? a : x1),
-        originZ + (along === 'x' ? z1 : a),
-        originX + (along === 'x' ? b : x1),
-        originZ + (along === 'x' ? z1 : b),
-        0.3,
+      collision.kinded('reptile hall wall', () =>
+        collision.addWall(
+          originX + (along === 'x' ? a : x1),
+          originZ + (along === 'x' ? z1 : a),
+          originX + (along === 'x' ? b : x1),
+          originZ + (along === 'x' ? z1 : b),
+          0.3,
+          height,
+          false,
+          true,
+        ),
       );
     }
   }

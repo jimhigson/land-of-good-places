@@ -1,4 +1,5 @@
 import type { Object3D, Scene } from 'three';
+import type { Parade } from '../entities/parade/Parade';
 import { LabelManager } from '../ui/LabelManager';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
@@ -466,6 +467,9 @@ export class World implements GameSystem {
     // this cannot be a constructor argument in either direction — it is the
     // same late-binding `attachPlayer` has always used.
     this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
+    // The train stops for anyone on the line ahead of it (Jim, 19 Oct 2026),
+    // the crowd as much as her — `Game` tells it of her and her parade.
+    this.train.keepClearOf(() => this.npcs.onTheLine());
 
     // Every world label, into the one manager. A label that is not here is
     // never drawn, so a new owner that forgets this line is found on sight.
@@ -872,6 +876,28 @@ export class World implements GameSystem {
     this.fountain.attachPlayer(player);
     // Puts her aboard the cat bus, if one is bringing her in.
     this.entrance.attachPlayer(player);
+  }
+
+  /**
+   * **Her parade, introduced to the park** — the one call, from `Game` once it
+   * has built her line (and from the checks, which build it the same way):
+   *
+   * - the hotel's seam for a nap, to send each pet to its own bed
+   *   (`Hotel.PetParadeLink`), and the castle's for the banquet's pets' table
+   *   and the ginormous slide (#449, #468) — one-way, both: the place says
+   *   where, the parade walks the animals there and owns their bodies;
+   * - the train, which stops for any of them on the line as it does for her
+   *   (Jim, 19 Oct 2026) — and whose line her companions, coming back out of
+   *   her backpack after a ride, never form up on;
+   * - the ferris wheel, whose gondola seats her companion — the front of her
+   *   line — in a chair of its own (`CompanionRide`'s `'drawn by the ride'`).
+   */
+  attachParade(parade: Parade): void {
+    this.hotel.petParade = parade;
+    this.building.petParade = parade;
+    this.train.attachParade(parade);
+    this.ferrisWheel.attachParade(parade);
+    parade.keepOff((x, y, z, radius) => this.train.onTheLine(x, y, z, radius));
   }
 
   dispose(): void {

@@ -6,12 +6,14 @@ import {
   PLAYER_TURN_SPEED,
 } from '../../core/constants';
 import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
-import type { CollisionWorld } from '../../world/Collision';
+import { separatedByHeight, type CollisionWorld } from '../../world/Collision';
+import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { terrainHeight } from '../../world/terrain';
 import { faceOnGround } from '../../world/up';
+import { carryReference } from '../../world/building/stepReach';
 import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
-import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
+import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent, type GroundHolder } from './driver';
 import type { NpcAvatar } from './npcAvatar';
 import { applyRidePose, type RidePosture } from '../ridePose';
 
@@ -95,6 +97,12 @@ export class NpcCharacter {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * Where her feet left the ground for the hop (or the drop) she is in — the
+   * height a solid's top is cleared from (`CollisionWorld.resolve`'s `feetY`):
+   * the crowd never stands on a top, so a hop must never carry it over one.
+   */
+  private takeoffY = 0;
   private expression: Expression = 'neutral';
 
   // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
@@ -240,6 +248,22 @@ export class NpcCharacter {
     faceOnGround(this.avatar.rig.root, facing);
   }
 
+  /**
+   * **Set down somewhere else by the park** — off the railway, where the train
+   * says is clear (`NpcSystem.offTheLine`). A jump, not a move, exactly as
+   * {@link stepThroughDoor} is, and told to everything that remembers
+   * continuity the same way; she keeps facing the way she faced. A declared
+   * write, so `check:jitter` can tell it from a child moved by two owners.
+   */
+  setDown(x: number, y: number, z: number): void {
+    this.stepThroughDoor(x, y, z, this.facing);
+  }
+
+  /** Standing somewhere on purpose — see the structural `GroundHolder` in `driver.ts`. */
+  get holdsGround(): boolean {
+    return (this.driver as Partial<GroundHolder>).holdsGround === true;
+  }
+
   /** Gives the character back to the wander driver, standing wherever it now is. */
   endClimb(): void {
     this.climbingFlag = false;
@@ -312,7 +336,7 @@ export class NpcCharacter {
     // the same way it caps an ordinary frame's — `this.previousPosition`
     // still holds where the script left her, from `setScriptedPose`'s own
     // copy, so it is the right "before" to measure the escape against.
-    this.collision.resolve(this.position, NPC_RADIUS);
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
     this.previousPosition.copy(this.position);
     this.avatar.rig.root.position.copy(this.position);
@@ -411,6 +435,18 @@ export class NpcCharacter {
   /** Nudges the walk cycle at spawn so children are not in lockstep. */
   setWalkPhase(phase: number): void {
     this.walkPhase = phase;
+  }
+
+  /** The height her feet count from when clearing a top — see {@link takeoffY}. */
+  /** Her height and her take-off's, carried from column `(fromX, fromZ)` to where she now is — `carryReference`, the one owner. */
+  private carryFlight(fromX: number, fromZ: number): void {
+    const { x, z } = this.position;
+    this.position.y = carryReference(fromX, fromZ, this.position.y, x, z);
+    this.takeoffY = carryReference(fromX, fromZ, this.takeoffY, x, z);
+  }
+
+  private clearsFrom(): number {
+    return this.airborne ? Math.min(this.position.y, this.takeoffY) : this.position.y;
   }
 
   /**
@@ -521,6 +557,9 @@ export class NpcCharacter {
     // standing — shoving it "apart" from a passer-by at ground level would
     // knock it out of setClimbPose's next call for nothing visible in return.
     if (this.climbingFlag || other.climbingFlag) return;
+    // One above the other — a guest on the hotel landing and one walking
+    // under it — are not in each other's way. See `separatedByHeight`.
+    if (separatedByHeight(this.position.x, this.position.y, this.position.z, other.position.x, other.position.y, other.position.z)) return;
 
     // **A scripted child cannot be pushed, but must still push.**
     //
@@ -541,8 +580,15 @@ export class NpcCharacter {
     // **A seated child is treated exactly the same way** (`beginSeated`): she
     // is sitting on a cushion and cannot step aside, so two sitters are left
     // where they sat and a walker who brushes one is the one who moves.
-    const thisFixed = this.scriptedFlag || this.seatedFlag;
-    const otherFixed = other.scriptedFlag || other.seatedFlag;
+    //
+    // **And a child standing at her place to wait for the train**
+    // ({@link holdsGround}): the children walking up to their own places go
+    // round her. Sent to one spot, they used to push the first there half the
+    // overlap a frame — a metre across the platform in a second, and off its
+    // edge onto the track within a minute, where the train she was waiting
+    // for stood for her (22 Oct 2026, check:jitter: Theo at Sunny Side).
+    const thisFixed = this.scriptedFlag || this.seatedFlag || this.holdsGround;
+    const otherFixed = other.scriptedFlag || other.seatedFlag || other.holdsGround;
     if (thisFixed && otherFixed) return;
     // A scripted child cannot react at all, so the free one takes the *whole*
     // correction (`pushAway`, never the halved one below) at a faster rate
@@ -688,8 +734,15 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
-    this.collision.resolve(this.position, NPC_RADIUS);
+    // A hop keeps its distance from the planet's centre, as hers does
+    // (`Player.update`: a jump is a jump everywhere) — before the resolve, so
+    // the height it clears from is the one in the column it is asked in.
+    if (this.airborne) this.carryFlight(this.previousPosition.x, this.previousPosition.z);
+    const movedX = this.position.x;
+    const movedZ = this.position.z;
+    this.collision.resolve(this.position, NPC_RADIUS, 0, Infinity, undefined, KID_HEIGHT, this.clearsFrom());
     this.boundEscape(this.previousPosition);
+    if (this.airborne) this.carryFlight(movedX, movedZ);
 
     // Trust the resolved position over the intended one, so walking into a wall
     // kills the momentum instead of grinding against it.
@@ -727,12 +780,17 @@ export class NpcCharacter {
 
     if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
       this.airborne = true;
+      this.takeoffY = this.position.y;
       this.verticalVelocity = 0;
     }
 
     if (this.intent.hop && !this.airborne) {
+      // From the ground, as hers is (`Player.update`): the damped height lags
+      // under it on a climb, and a hop from there landed on its first frame.
+      if (this.position.y < groundY) this.position.y = groundY;
       this.verticalVelocity = NPC_JUMP_SPEED;
       this.airborne = true;
+      this.takeoffY = this.position.y;
     }
 
     if (this.airborne) {
