@@ -356,7 +356,8 @@ export class Library implements GameSystem {
     // hands it {@link residents}), and met again in {@link attachNpcs}.
     this.kidsRoot.name = 'the-library-children';
     this.kidsRoot.visible = false;
-    this.kids = libraryResidents(this.kidsRoot);
+    // Each child plans her way round a player standing still in her way against the real world.
+    this.kids = libraryResidents(this.kidsRoot, (x, z, radius) => collision.isClearCircle(x, z, radius));
 
     // ------------------------------------------------------- the building
     const plot = deps.plot;

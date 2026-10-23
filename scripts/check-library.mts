@@ -201,6 +201,8 @@ import {
   LIBRARY_WALL_HALF,
   libraryCushion,
   libraryFacingStoryChair,
+  aisleNode,
+  libraryKidAisle,
   libraryKidCircuit,
   libraryKidRugRoute,
   type FurnitureSpec,
@@ -2999,6 +3001,256 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     say(
       kids.every((kid, i) => backOnAisle[i]! <= OFF_AISLE && feetOf(kid) <= 0.02),
       `ten seconds on, each is back on her own aisle: ${kids.map((kid, i) => `${kid.plan.name} ${backOnAisle[i]!.toFixed(2)} m off her circuit`).join(', ')} (${OFF_AISLE.toFixed(2)} allowed), feet on the floor`,
+    );
+  }
+
+  // Every way a child walks, world metres — her circuit (the wrap included), her aisle and her
+  // rug route, both ways — and how far off them she is: what a straight line nobody swept would show.
+  const waysWorld = kids.map((kid) => {
+    const segments: [LocalPoint, LocalPoint][] = [];
+    const circuit = libraryKidCircuit(kid.plan).map(toWorld);
+    for (let i = 0; i < circuit.length; i += 1) segments.push([circuit[i]!, circuit[(i + 1) % circuit.length]!]);
+    const aisle = libraryKidAisle(kid.plan).map(toWorld);
+    for (let i = 0; i + 1 < aisle.length; i += 1) segments.push([aisle[i]!, aisle[i + 1]!]);
+    const rug = libraryKidRugRoute(kid.plan).map(toWorld);
+    for (let i = 0; i + 1 < rug.length; i += 1) segments.push([rug[i]!, rug[i + 1]!]);
+    return segments;
+  });
+  const offWays = (index: number): number => {
+    const at = kids[index]!.body.position;
+    let nearest = Infinity;
+    for (const [a, b] of waysWorld[index]!) nearest = Math.min(nearest, segmentDistance(a, b, at));
+    return nearest;
+  };
+  /** Up against a solid — away from her own cushion, whose side her walk ends at and which she stands up out of. */
+  const pressed = (kid: (typeof kids)[number]): boolean =>
+    !kid.body.seated &&
+    Math.hypot(kid.body.position.x - kid.driver.seat.x, kid.body.position.z - kid.driver.seat.z) > seatArrive + 0.2 &&
+    !collision.isClearCircle(kid.body.position.x, kid.body.position.z, NPC_RADIUS + 0.01);
+  /**
+   * One run of the crowd, measured: each child's frames up against a solid, the
+   * longest run of them (a **lean**: pushing at something, where a brush past a
+   * corner is a few frames), her furthest off her ways, and the longest step.
+   */
+  interface Watch {
+    readonly pressedFrames: number[];
+    readonly lean: number[];
+    readonly run: number[];
+    readonly off: number[];
+    step: number;
+  }
+  /** The longest a child may stay up against a solid: a second — a brush at a corner, never a lean. */
+  const LEAN_FRAMES = Math.round(1 / CHILD_DT);
+  const watch = (): Watch => ({ pressedFrames: kids.map(() => 0), lean: kids.map(() => 0), run: kids.map(() => 0), off: kids.map(() => 0), step: 0 });
+  const stepWatched = (w: Watch, last: { x: number; z: number }[]): void => {
+    child.step();
+    kids.forEach((kid, i) => {
+      if (pressed(kid)) {
+        w.pressedFrames[i] = w.pressedFrames[i]! + 1;
+        w.run[i] = w.run[i]! + 1;
+        w.lean[i] = Math.max(w.lean[i]!, w.run[i]!);
+      } else {
+        w.run[i] = 0;
+      }
+      w.off[i] = Math.max(w.off[i]!, offWays(i));
+      w.step = Math.max(w.step, stepOf(kid, last[i]!));
+      last[i] = { x: kid.body.position.x, z: kid.body.position.z };
+    });
+  };
+  const lastOf = (): { x: number; z: number }[] => kids.map((kid) => ({ x: kid.body.position.x, z: kid.body.position.z }));
+  const eachKid = (values: readonly number[], fmt: (value: number) => string): string => kids.map((kid, i) => `${kid.plan.name} ${fmt(values[i]!)}`).join(', ');
+  const allStrolling = (): boolean => kids.every((kid) => kid.driver.mode === 'stroll');
+  /** Steps until every child strolls again, at most `seconds`; measured into `w`. */
+  const untilStrolling = (w: Watch, seconds: number): number => {
+    const last = lastOf();
+    let t = 0;
+    while (t < seconds && !allStrolling()) {
+      stepWatched(w, last);
+      t += CHILD_DT;
+    }
+    return t;
+  };
+
+  // 8. The gathering with her standing still where a child at story time is most likely to stand
+  //    (the review of Step 8): the central aisle's end, the door to the story rug (central[5]), and
+  //    the junction both Juno's and Lark's ways pass (central[4]); the desk's front is the CONTROL.
+  //    A player standing still is furniture to the crowd (PR #722, `Player.isStandingStill`): a
+  //    child goes round her or waits, and never shoves her. A point of a child's way the player
+  //    stands on is passed as near as she lets her come (`heldByStillPlayer`).
+  {
+    const stillSpots = [
+      { what: "the desk's front (CONTROL)", at: { x: desk.x, z: desk.z } },
+      { what: "the central aisle's end, the door to the story rug (central[5])", at: aisleNode('central', 5) },
+      { what: "the junction Juno's and Lark's ways both pass (central[4])", at: aisleNode('central', 4) },
+    ];
+    const results: { what: string; stood: LocalPoint; times: number[]; gaveUp: string[]; playerMoved: number; w: Watch; back: boolean }[] = [];
+    for (const spot of stillSpots) {
+      child.stand(spot.at.x, spot.at.z, 180);
+      child.run(0.5);
+      const where = child.player.position.clone();
+      const stood = child.room();
+      for (const kid of kids) kid.driver.summon();
+      const times = kids.map(() => Number.NaN);
+      const w = watch();
+      const last = lastOf();
+      let elapsed = 0;
+      while (elapsed < GATHER_SECONDS && !kids.every((kid) => kid.driver.arrived || kid.driver.gaveUp)) {
+        stepWatched(w, last);
+        elapsed += CHILD_DT;
+        kids.forEach((kid, i) => {
+          if (Number.isNaN(times[i]) && kid.driver.arrived) times[i] = elapsed;
+        });
+      }
+      const gaveUp = kids.filter((kid) => !kid.driver.arrived).map((kid) => `${kid.plan.name} (${kid.driver.mode} at ${label({ x: kid.body.position.x - OX, z: kid.body.position.z - OZ })})`);
+      const playerMoved = Math.hypot(child.player.position.x - where.x, child.player.position.z - where.z);
+      for (const kid of kids) kid.driver.dismiss();
+      untilStrolling(watch(), DISMISS_SECONDS);
+      results.push({ what: spot.what, stood, times, gaveUp, playerMoved, w, back: allStrolling() });
+    }
+    child.stand(desk.x, desk.z, desk.facing);
+    const control = results[0]!;
+    const bound = Math.max(...control.times) + 6;
+    for (const result of results) {
+      const isControl = result === control;
+      say(
+        result.gaveUp.length === 0 && result.times.every((time) => time <= (isControl ? GATHER_SECONDS : bound)) && result.playerMoved <= 0.01 && result.back,
+        `summoned with her standing still at ${result.what}, stood at ${label(result.stood)}: every child reaches her cushion's edge — ` +
+          `${eachKid(result.times, (time) => (Number.isNaN(time) ? 'NEVER' : `${time.toFixed(1)} s`))} ` +
+          `(${isControl ? `${GATHER_SECONDS} s allowed` : `${bound.toFixed(1)} s allowed: the control's slowest and 6 s to go round her`}); gave up: ${result.gaveUp.join(', ') || 'none'}; ` +
+          `she was never shoved (${result.playerMoved.toFixed(3)} m); back strolling after: ${result.back}`,
+      );
+      say(
+        result.w.lean.every((frames) => frames <= LEAN_FRAMES) && result.w.step <= NPC_RADIUS * 2,
+        `  and on the way nobody leant on the furniture: the longest any stayed up against a solid ${eachKid(result.w.lean, (frames) => `${frames}`)} frame(s) ` +
+          `(${LEAN_FRAMES} allowed: a brush, never a lean; in all ${eachKid(result.w.pressedFrames, (frames) => `${frames}`)}); ` +
+          `furthest off her ways ${eachKid(result.w.off, (off) => `${off.toFixed(2)} m`)}${isControl ? '' : ' (a way round her)'}; longest step ${result.w.step.toFixed(3)} m`,
+      );
+    }
+  }
+
+  // 9. Story time abandoned (`storyTime.abort`, she leaves the library): every child is dismissed,
+  //    whatever she is doing — mid-walk to the rug, or waiting at her cushion; and dismissed again
+  //    while already on her way back (the review of Step 8: a second dismissal turned the way back
+  //    round, into the west story armchair and the stacks). CONTROL: dismissed once.
+  {
+    const runs: { what: string; w: Watch; strolling: boolean; secondModes: string }[] = [];
+    // (a) Mid-walk: 2.5 s into the summons, dismissed once.
+    for (const kid of kids) kid.driver.summon();
+    child.run(2.5);
+    const midModes = kids.map((kid) => kid.driver.mode).join('/');
+    for (const kid of kids) kid.driver.dismiss();
+    const wMid = watch();
+    untilStrolling(wMid, 30);
+    runs.push({ what: `dismissed mid-walk (modes ${midModes})`, w: wMid, strolling: allStrolling(), secondModes: '' });
+    // (b) CONTROL: at her cushion's edge, dismissed once.
+    // (c) At her cushion's edge, dismissed, and dismissed again 2 s into the way back.
+    for (const twice of [false, true]) {
+      for (const kid of kids) kid.driver.summon();
+      let t = 0;
+      while (t < GATHER_SECONDS && !kids.every((kid) => kid.driver.arrived || kid.driver.gaveUp)) {
+        child.step();
+        t += CHILD_DT;
+      }
+      for (const kid of kids) kid.driver.dismiss();
+      const w = watch();
+      let secondModes = '';
+      if (twice) {
+        const last = lastOf();
+        for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) stepWatched(w, last);
+        secondModes = kids.map((kid) => kid.driver.mode).join('/');
+        for (const kid of kids) kid.driver.dismiss();
+      }
+      untilStrolling(w, 30);
+      runs.push({ what: twice ? 'dismissed at her cushion, and again 2 s into the way back' : 'CONTROL: dismissed once at her cushion', w, strolling: allStrolling(), secondModes });
+    }
+    // (d) Summoned again while on the way back (a story called as the last one's children walk off):
+    //     she turns round along her declared way and comes back to her cushion.
+    {
+      for (const kid of kids) kid.driver.summon();
+      let t = 0;
+      while (t < GATHER_SECONDS && !kids.every((kid) => kid.driver.arrived || kid.driver.gaveUp)) {
+        child.step();
+        t += CHILD_DT;
+      }
+      for (const kid of kids) kid.driver.dismiss();
+      child.run(2);
+      const modes = kids.map((kid) => kid.driver.mode).join('/');
+      for (const kid of kids) kid.driver.summon();
+      const w = watch();
+      const last = lastOf();
+      let back = 0;
+      while (back < GATHER_SECONDS && !kids.every((kid) => kid.driver.arrived || kid.driver.gaveUp)) {
+        stepWatched(w, last);
+        back += CHILD_DT;
+      }
+      const arrived = kids.filter((kid) => kid.driver.arrived).length;
+      say(
+        modes === kids.map(() => 'returning').join('/') && arrived === kids.length && w.lean.every((frames) => frames <= LEAN_FRAMES) && w.off.every((off) => off <= OFF_AISLE),
+        `summoned again 2 s into the way back (found ${modes}), every child turns round along her way and is back at her cushion's edge in ${back.toFixed(1)} s ` +
+          `(${arrived} of ${kids.length}); the longest any stayed up against a solid ${eachKid(w.lean, (frames) => `${frames}`)} frame(s); ` +
+          `furthest off her ways ${eachKid(w.off, (off) => `${off.toFixed(2)} m`)} (${OFF_AISLE.toFixed(2)} allowed)`,
+      );
+      for (const kid of kids) kid.driver.dismiss();
+      untilStrolling(watch(), 30);
+    }
+    for (const run of runs) {
+      say(
+        run.strolling && run.w.lean.every((frames) => frames <= LEAN_FRAMES) && run.w.off.every((off) => off <= OFF_AISLE) && run.w.step <= NPC_RADIUS * 2,
+        `${run.what}${run.secondModes ? ` (the second dismissal found them ${run.secondModes})` : ''}: every child back to her stroll (${run.strolling}); ` +
+          `the longest any stayed up against a solid ${eachKid(run.w.lean, (frames) => `${frames}`)} frame(s) (${LEAN_FRAMES} allowed; in all ${eachKid(run.w.pressedFrames, (frames) => `${frames}`)}); ` +
+          `furthest off her ways ${eachKid(run.w.off, (off) => `${off.toFixed(2)} m`)} (${OFF_AISLE.toFixed(2)} allowed); longest step ${run.w.step.toFixed(3)} m`,
+      );
+    }
+  }
+
+  // 10. A way back held up past the leg's timeout: a disc on a point of Juno's way back for longer than
+  //     KID_LEG_TIMEOUT, then taken away. She waits her turn on her declared way and goes on when it
+  //     clears — never a straight line from wherever she gave up (the review of Step 8: from 9 of 11
+  //     declared points, that line ran into furniture).
+  {
+    const juno = kids.findIndex((kid) => kid.plan.name === 'Juno');
+    const kid = kids[juno]!;
+    const held = kid.plan.toSeat[1]!;
+    for (const each of kids) each.driver.summon();
+    let t = 0;
+    while (t < GATHER_SECONDS && !kids.every((each) => each.driver.arrived || each.driver.gaveUp)) {
+      child.step();
+      t += CHILD_DT;
+    }
+    const HOLD = 0.5;
+    const disc = collision.addCircle(OX + held.x, OZ + held.z, HOLD);
+    note(`KIDS: a ${HOLD} m disc dropped on Juno's way back at ${label(held)} for ${(KID_LEG_TIMEOUT + 5).toFixed(0)} s, then taken away`);
+    for (const each of kids) each.driver.dismiss();
+    /** Up against a solid other than the disc dropped in her way. */
+    const leaning = (): boolean => pressed(kid) && Math.hypot(kid.body.position.x - (OX + held.x), kid.body.position.z - (OZ + held.z)) > HOLD + NPC_RADIUS + 0.02;
+    let lean = 0;
+    let run = 0;
+    let offWhileHeld = 0;
+    let modeAtTimeout = '';
+    for (let i = 0; i < Math.round((KID_LEG_TIMEOUT + 5) / CHILD_DT); i += 1) {
+      child.step();
+      run = leaning() ? run + 1 : 0;
+      lean = Math.max(lean, run);
+      offWhileHeld = Math.max(offWhileHeld, offWays(juno));
+      if (i === Math.round((KID_LEG_TIMEOUT + 1) / CHILD_DT)) modeAtTimeout = kid.driver.mode;
+    }
+    collision.removeCircle(disc);
+    const offAtRemoval = offWays(juno);
+    const after = watch();
+    untilStrolling(after, 30);
+    child.run(5);
+    const backOn = offCircuit(juno, kid.body.position.x, kid.body.position.z);
+    say(
+      modeAtTimeout === 'returning' && offWhileHeld <= HOLD + NPC_RADIUS + OFF_AISLE && lean <= LEAN_FRAMES,
+      `held up on her way back past the leg's ${KID_LEG_TIMEOUT} s, Juno waits on her way: a second past the timeout she is still '${modeAtTimeout}' (never a stroll from where she gave up), ` +
+        `at most ${offWhileHeld.toFixed(2)} m off her ways (the disc's ${HOLD}, her ${NPC_RADIUS} and ${OFF_AISLE.toFixed(2)} allowed), ` +
+        `up against anything but the disc for ${lean} frame(s) at most (${LEAN_FRAMES} allowed)`,
+    );
+    say(
+      after.lean[juno]! <= LEAN_FRAMES && after.off[juno]! <= HOLD + NPC_RADIUS + OFF_AISLE && allStrolling() && backOn <= OFF_AISLE,
+      `  the disc taken away, she walks on along her way: at most ${after.off[juno]!.toFixed(2)} m off it (${offAtRemoval.toFixed(2)} where the disc held her; ` +
+        `${(HOLD + NPC_RADIUS + OFF_AISLE).toFixed(2)} allowed — the sidestep she was using to get past it carries her a little way on before it lets go), ` +
+        `up against a solid ${after.lean[juno]} frame(s) at most, strolling again (${allStrolling()}), ${backOn.toFixed(2)} m off her circuit five seconds on`,
     );
   }
 

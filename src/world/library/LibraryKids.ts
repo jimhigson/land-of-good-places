@@ -4,7 +4,7 @@ import { CharacterModel } from '../../entities/CharacterModel';
 import { characterModelAvatar, type ResidentSpec } from '../../entities/npc';
 import { PLAYER_SEPARATION, SEPARATION } from '../../entities/npc/NpcSystem';
 import { GUEST_PACE, residentLook } from '../../entities/npc/residentLooks';
-import { LibraryKidDriver } from './libraryKidDriver';
+import { LibraryKidDriver, type ClearAt } from './libraryKidDriver';
 import {
   LIBRARY_FLOOR_Y,
   LIBRARY_KID_PLANS,
@@ -70,8 +70,11 @@ export interface LibraryResident {
  *   which must have an **identity transform**: an `NpcCharacter` writes world
  *   positions straight onto its model's root (the hotel's rule, for the same
  *   reason), and the reading room's own root stands at (−600, −600).
+ * @param clearAt  the real world's clearance (`CollisionWorld.isClearCircle`),
+ *   which each child's driver asks of every line it plans round a player
+ *   standing in her way (`LibraryKidDriver.wayRoundHer`).
  */
-export function libraryResidents(parent: Object3D): LibraryResident[] {
+export function libraryResidents(parent: Object3D, clearAt: ClearAt): LibraryResident[] {
   return LIBRARY_KID_PLANS.map((plan, i): LibraryResident => {
     const seed = LIBRARY_KID_SEED + i * LIBRARY_KID_SEED_STRIDE;
     const rng = new Rng(seed);
@@ -95,7 +98,7 @@ export function libraryResidents(parent: Object3D): LibraryResident[] {
         // The crowd hands in the stream the default driver would have had, at
         // the same point in it; her facing and walk phase are drawn after.
         driver: (stream) => {
-          const driver = new LibraryKidDriver(stream, plan);
+          const driver = new LibraryKidDriver(stream, plan, clearAt);
           resident.driver = driver;
           return driver;
         },
