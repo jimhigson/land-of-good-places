@@ -213,8 +213,8 @@ export function owlPerch(): Readonly<RoomPoint> & { readonly facing: number } {
 /** Breathing: `body.scale` sways by this share, at this rate (radians a second). */
 export const BREATH_DEPTH = 0.02;
 const BREATH_RATE = 1.7;
-/** Her bubble's tail points this far over the top of her head. */
-const BUBBLE_OVER_HEAD = 0.42;
+/** Her bubble's tail points this far over the top of her head, wherever she is — `check:library`'s STORY measures it there on every frame she speaks. */
+export const OWL_BUBBLE_OVER_HEAD = 0.42;
 /**
  * The hand-over: sparkles over her, and two quick flaps of the wing that holds
  * her book — **forward**, over her desk (`wingR.rotation.x`, the shush wing's
@@ -771,6 +771,6 @@ export class LibraryOwl {
   /** The bubble's tail over the top of her head, wherever she is. */
   private anchorBubble(): void {
     const at = this.handle.root.position;
-    this.bubble.anchorAt(at.x, at.y + this.handle.height + BUBBLE_OVER_HEAD, at.z);
+    this.bubble.anchorAt(at.x, at.y + this.handle.height + OWL_BUBBLE_OVER_HEAD, at.z);
   }
 }

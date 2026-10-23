@@ -144,6 +144,7 @@ import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.t
 import {
   BREATH_DEPTH,
   HEAD_TURN_LIMIT,
+  OWL_BUBBLE_OVER_HEAD,
   OWL_CRUISE_OVER_STACKS,
   OWL_FLIGHT_SECONDS,
   OWL_LOOK_RANGE,
@@ -3370,6 +3371,13 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  *   she is away, and **as drawn on the chair, no point a child standing on
  *   clear floor can touch beyond the chair's solids** (the reason she sits
  *   `OWL_PERCH_BACK` into it);
+ * - **her bubble** (plan Step 9: "the bubble follows her"): on every frame she
+ *   speaks — the call on the wing, the story on the chair — its tail is over
+ *   her head, read off the bubble (`worldAnchor`) against the live owl; the
+ *   label manager (`world.labels.resolve`, every frame here, as `Game` runs
+ *   it) draws it on every frame she reads aloud, so the child on her cushion
+ *   can read the story; and, seen from that cushion, the room's furniture
+ *   cannot cut it (it is drawn over the scenery);
  * - **the words**: the title line, every page of the book, both ending lines;
  * - **her pets** (Jim, 19 Oct 2026): a cushion is a seat, not a ride — all
  *   three out at her heels the whole story, none in a seat beside her
@@ -3387,10 +3395,27 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  * Proved red by `LIBRARY_CHECK_MUTATE=no-story` (the vacuity guard),
  * `block-cushion` (a 0.9 m disc on cushion 4: "every child seated" goes red
  * while the story still reads), and by hand (the handoff): the cruise under
- * the stacks (FLIGHT), the perch on the seat centre (the owl as drawn).
+ * the stacks (FLIGHT), the perch on the seat centre (the owl as drawn), the
+ * bubble left where she was (`LibraryOwl.update` without `anchorBubble`: the
+ * bubble clauses), the bubble depth-tested (no `overScenery`).
  */
 /** What the live owl's flights measured against `owlFlightPose` — STORY flies them, FLIGHT reports them. */
 const liveFlight = { frames: 0, worst: 0, flights: 0 };
+
+/**
+ * **How far the owl's bubble's tail is from over her head, now** — read off the
+ * bubble (`SpeechBubble.worldAnchor`: where its tail points, in the world)
+ * against the live owl: her root (room-local), `OWL_BUBBLE_OVER_HEAD` over her
+ * measured height, taken into the world through the room. Zero while the
+ * bubble follows her; a bubble left anchored where she was reads the distance
+ * she has flown since.
+ */
+function owlBubbleOffHerHead(): number {
+  const owl = library.owl;
+  const over = new Vector3(owl.feet.x, owl.feet.y + owl.handle.height + OWL_BUBBLE_OVER_HEAD, owl.feet.z);
+  library.roomRoot.updateWorldMatrix(true, false);
+  return owl.bubble.worldAnchor().distanceTo(library.roomRoot.localToWorld(over));
+}
 
 /**
  * **How much of the owl's bubble the room stands in front of, from the game's camera** — a grid of 9 × 5
@@ -3401,7 +3426,7 @@ const liveFlight = { frames: 0, worst: 0, flights: 0 };
  * the scenery (`depthTest` off) is not. Measured, not assumed: the story chair is backed onto the bookcase
  * wall, and headless Chrome showed a depth-tested bubble there losing its right side ("A day in the pa…").
  */
-function owlBubbleBehindTheRoom(): { points: number; behind: number; first: string; depthTested: boolean } {
+function owlBubbleBehindTheRoom(): { points: number; behind: number; first: string; depthTested: boolean; offHerHead: number; drawn: boolean } {
   const sprite = library.owl.bubble.sprite;
   const box = library.owl.bubble.contentBox;
   sprite.updateWorldMatrix(true, false);
@@ -3456,7 +3481,8 @@ function owlBubbleBehindTheRoom(): { points: number; behind: number; first: stri
       }
     }
   }
-  return { points, behind, first, depthTested: sprite.material.depthTest };
+  // Which bubble was measured: hers, over her head and drawn — never a stale sprite left somewhere else.
+  return { points, behind, first, depthTested: sprite.material.depthTest, offHerHead: owlBubbleOffHerHead(), drawn: sprite.visible };
 }
 console.log('\nSTORY — the owl calls, flies to the big chair, the children sit, she reads a whole book, and everyone wanders off:');
 {
@@ -3538,6 +3564,11 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   let petsSeatedMost = 0;
   /** The owl's bubble against the room, a second into the reading, from her cushion's camera. */
   let bubbleCut: ReturnType<typeof owlBubbleBehindTheRoom> | null = null;
+  /** Her bubble's tail against over her head, on every frame she spoke: frames by where she was, and the worst. */
+  const trail = { wing: 0, chair: 0, desk: 0, worst: 0, worstAt: '' };
+  /** Frames she read the story aloud from the chair, and how many of them the label manager drew her bubble on. */
+  let readAloud = 0;
+  let readDrawn = 0;
   const offCushionAt = kids.map(() => Number.NaN);
   let homeAt = Number.NaN;
   let prevFeet = new Vector3().copy(owl.feet);
@@ -3547,10 +3578,26 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   const LIMIT = 150;
   while (t < LIMIT) {
     child.step();
+    // The label manager decides, once a frame after every system, which labels are drawn (`Game.tick`'s order).
+    world.labels.resolve(view, CHILD_DT);
     t += CHILD_DT;
     const phase = library.storyPhase;
     if (phaseAt[phase] === undefined) phaseAt[phase] = t;
     if (owl.lastSaid !== null) said.add(owl.lastSaid);
+    // Her bubble follows her: on every frame she speaks, wherever she is.
+    if (owl.speaking) {
+      const off = owlBubbleOffHerHead();
+      const where = owl.flying ? 'wing' : owl.perched ? 'chair' : 'desk';
+      trail[where] += 1;
+      if (off > trail.worst) {
+        trail.worst = off;
+        trail.worstAt = `on the ${where} ${t.toFixed(1)} s in, the owl's feet at room (${owl.feet.x.toFixed(2)}, ${owl.feet.z.toFixed(2)})`;
+      }
+    }
+    if (phase === 'reading' && owl.speaking) {
+      readAloud += 1;
+      if (owl.bubble.sprite.visible) readDrawn += 1;
+    }
     // The live owl on her path.
     if (owl.flying) {
       if (!flight) {
@@ -3684,12 +3731,26 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     `the owl as drawn on the chair: ${perchedTouch?.touchable ?? '?'} of her ${perchedTouch?.points ?? 0} visible points are beyond the chair's solids (by more than ${RESOLVER_SLACK} m) ` +
       `where a child standing on clear floor could touch them${perchedTouch?.first ? ` — e.g. ${perchedTouch.first}` : ''}`,
   );
+  /** How far a bubble's tail may be from over her head: the anchor is written the frame she moves, so this is rounding. */
+  const TAIL_OFF = 0.02;
   say(
-    !!bubbleCut && (bubbleCut.behind === 0 || !bubbleCut.depthTested),
-    `her bubble as she reads from the chair, seen from her cushion: ${bubbleCut?.behind ?? '?'} of ${bubbleCut?.points ?? 0} points of it stand behind the room's own furniture from the camera` +
+    trail.wing > 0 && trail.chair > 0 && trail.worst <= TAIL_OFF,
+    `her bubble follows her: on every frame she spoke through the story (${trail.wing} on the wing, the call; ${trail.chair} on the story chair, the reading; ${trail.desk} at her desk) ` +
+      `its tail was at most ${trail.worst.toFixed(3)} m from ${OWL_BUBBLE_OVER_HEAD} m over her head (${TAIL_OFF} allowed)${trail.worstAt ? `, the worst ${trail.worstAt}` : ''}` +
+      `${trail.wing === 0 ? ' — SHE NEVER SPOKE ON THE WING: nothing measured there' : ''}${trail.chair === 0 ? ' — SHE NEVER SPOKE ON THE CHAIR: nothing measured there' : ''}`,
+  );
+  say(
+    readAloud > 0 && readDrawn === readAloud,
+    `the child on her cushion can read the story: the label manager drew the owl's bubble on ${readDrawn} of the ${readAloud} frames she read aloud (every one wanted; the screen ${SCREEN.width}×${SCREEN.height})`,
+  );
+  const bubbleHers = !!bubbleCut && bubbleCut.offHerHead <= TAIL_OFF && bubbleCut.drawn;
+  say(
+    !!bubbleCut && bubbleHers && (bubbleCut.behind === 0 || !bubbleCut.depthTested),
+    `her bubble as she reads from the chair, seen from her cushion — hers, its tail ${bubbleCut?.offHerHead.toFixed(3) ?? '?'} m off over her head (${TAIL_OFF} allowed), drawn ${bubbleCut?.drawn ?? false}: ` +
+      `${bubbleCut?.behind ?? '?'} of ${bubbleCut?.points ?? 0} points of it stand behind the room's own furniture from the camera` +
       `${bubbleCut?.first ? ` (e.g. ${bubbleCut.first})` : ''}; it is drawn ${bubbleCut?.depthTested === false ? 'over the scenery (depthTest off), so none of it is cut' : 'DEPTH-TESTED, so it is cut there'}`,
   );
-  if (bubbleCut && bubbleCut.behind === 0) note("STORY: the owl's bubble cleared the room's furniture from this camera — the bubble clause asserted nothing about its depth on this run");
+  if (bubbleCut && bubbleHers && bubbleCut.behind === 0) note("STORY: the owl's bubble cleared the room's furniture from this camera — the bubble clause asserted nothing about its depth on this run");
   const pages = book?.pages.map((page) => page.text) ?? [];
   const missing = [
     ...(book ? [LIBRARY_LINES.owl.storyBegin(book.title)] : ['the title line']),
