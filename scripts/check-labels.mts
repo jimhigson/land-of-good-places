@@ -21,8 +21,9 @@
  *
  * The real `World` (`park-harness.mts`), a real `Player` attached to it, the
  * real `Selection` and the real `ActionChips`, stepped at 1/60 in `Game.tick`'s
- * own order — player, camera, world, selection, chips, then
- * `world.labels.resolve` — through four scenes:
+ * own order — player, the reading room's camera claim (the owl's glance at the
+ * book she recommends, `bookGlance.ts`, applied as `Game` applies it), camera,
+ * world, selection, chips, then `world.labels.resolve` — through four scenes:
  *
  *  1. **A busy plaza.** From the gate into the middle of the garden and back,
  *     through the crowd, chips coming and going as she passes things.
@@ -124,6 +125,7 @@ import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layo
 import { terrainHeight } from '../src/world/terrain.ts';
 import { spaceAt, SPACE_GARDEN, SPACE_REPTILE_HOUSE, SPACE_HOTEL_LOBBY, SPACE_LIBRARY } from '../src/world/spaces.ts';
 import { OWL_ZONE_ID } from '../src/world/library/LibraryOwl.ts';
+import { BookGlance } from '../src/world/library/bookGlance.ts';
 import { hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import { gameStore } from '../src/state/index.ts';
 import { LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
@@ -194,6 +196,14 @@ const selection = new Selection(player, camera, canvas, {
   walking: () => false,
   flash: () => {},
 });
+/**
+ * The owl's glance at the book she recommends (`bookGlance.ts`): `Game.tick` applies it after the player
+ * and before the camera, its claim the camera's focus override — so here, so the labels of the library
+ * scene are laid out on the camera the game draws while the owl names her book and it draws back to show
+ * it. The frames it held are counted ({@link glanceFrames}).
+ */
+const bookGlance = new BookGlance(world.library);
+let glanceFrames = 0;
 const uiRoot = document.createElement('div') as unknown as HTMLElement;
 const chips = new ActionChips(uiRoot, selection, () => camera.camera, () => player.riding);
 world.labels.add(chips);
@@ -526,6 +536,10 @@ function step(): void {
   };
   quietly(() => {
     player.update(context);
+    const glanceClaim = bookGlance.apply(camera, player);
+    if (glanceClaim) camera.setFocusOverride(glanceClaim);
+    else camera.clearFocusOverride();
+    if (bookGlance.active) glanceFrames += 1;
     camera.update(context, player.position, velocity);
     world.update(context);
     selection.update(context);
@@ -664,7 +678,11 @@ let wingSpeakingFrames = 0;
     const cardScript = LIBRARY_LINES.owl.card.reduce((sum, line) => sum + lineSeconds(line), 0);
     if (visit(owl, true, cardScript + 0.5)) owlSelected += 1; // her card
     cardGiven = hasLibraryCard(gameStore.get());
-    if (visit(owl, true, 8)) owlSelected += 1; // a book recommended
+    // The recommendation, to its last line and the camera home after it: while the owl names her book and
+    // says it is glowing, the camera draws back to show it (`bookGlance.ts`), so the whole glance is laid out.
+    if (visit(owl, true, 0.5)) owlSelected += 1; // a book recommended
+    for (let i = 0; i < Math.round(20 / DT) && world.library.owl.speaking; i += 1) step();
+    run(2);
     recommended = world.library.owl.recommendedBookId !== null;
   }
   if (firstRead) libraryRead = visit(firstRead, false, 3);
@@ -720,7 +738,8 @@ process.stderr.write(
     `library: the owl selected ${owlSelected} of 2 visits (her card ${cardGiven ? 'handed over' : 'NOT handed over'}, a book ${recommended ? 'recommended' : 'NOT recommended'}), ` +
     `a shelf book's chip ${libraryRead ? 'up' : 'NOT up'}, story time on ${storyFrames} frames (${readingFrames} reading) with her ${seatedForStory ? 'sat on her cushion' : 'NOT seated'}: ` +
     `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
-    `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing. ` +
+    `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
+    `the owl's glance at her book held the camera on ${glanceFrames} frames. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -737,6 +756,7 @@ if (!receptionTalked) coverageGaps.push('the hotel reception was never reached')
 if (owlSelected < 2) coverageGaps.push(`the library owl was selected on only ${owlSelected} of her 2 visits`);
 if (!cardGiven) coverageGaps.push('the library owl never handed over her card');
 if (!recommended) coverageGaps.push('the library owl never recommended a book');
+if (glanceFrames === 0) coverageGaps.push("the owl's glance at the book she recommended never took the camera, so no label was laid out under it");
 if (!libraryRead) coverageGaps.push("no library shelf book's chip was ever up");
 if (!seatedForStory) coverageGaps.push('she never sat on a story cushion for story time');
 if (storyFrames === 0) coverageGaps.push('library story time never ran');
