@@ -3096,12 +3096,28 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
   //    child goes round her or waits, and never shoves her. A point of a child's way the player
   //    stands on is passed as near as she lets her come (`heldByStillPlayer`).
   {
+    // `wayRound`: a way round her exists, so every child must arrive; where none does (she stands in the
+    // one gap a child's way has, between the west story armchair and the cushions, or between the
+    // stacks and the rug), the child held off settles and listens from there within seconds.
     const stillSpots = [
-      { what: "the desk's front (CONTROL)", at: { x: desk.x, z: desk.z } },
-      { what: "the central aisle's end, the door to the story rug (central[5])", at: aisleNode('central', 5) },
-      { what: "the junction Juno's and Lark's ways both pass (central[4])", at: aisleNode('central', 4) },
+      { what: "the desk's front (CONTROL)", at: { x: desk.x, z: desk.z }, wayRound: true },
+      { what: "the central aisle's end, the door to the story rug (central[5])", at: aisleNode('central', 5), wayRound: true },
+      { what: "the junction Juno's and Lark's ways both pass (central[4])", at: aisleNode('central', 4), wayRound: true },
+      { what: 'the gap between the west story armchair and cushion 4, on Juno\'s way', at: { x: 1.4, z: -9.5 }, wayRound: false },
+      { what: 'the gap between the stacks and cushion 2, on Lark\'s way', at: { x: 3.0, z: -6.4 }, wayRound: false },
     ];
-    const results: { what: string; stood: LocalPoint; times: number[]; gaveUp: string[]; playerMoved: number; w: Watch; back: boolean; wBack: Watch }[] = [];
+    const results: {
+      what: string;
+      wayRound: boolean;
+      stood: LocalPoint;
+      times: number[];
+      settled: number[];
+      gaveUp: string[];
+      playerMoved: number;
+      w: Watch;
+      back: boolean;
+      wBack: Watch;
+    }[] = [];
     for (const spot of stillSpots) {
       child.stand(spot.at.x, spot.at.z, 180);
       child.run(0.5);
@@ -3109,6 +3125,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       const stood = child.room();
       for (const kid of kids) kid.driver.summon();
       const times = kids.map(() => Number.NaN);
+      const settled = kids.map(() => Number.NaN);
       const w = watch();
       const last = lastOf();
       let elapsed = 0;
@@ -3117,6 +3134,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         elapsed += CHILD_DT;
         kids.forEach((kid, i) => {
           if (Number.isNaN(times[i]) && kid.driver.arrived) times[i] = elapsed;
+          if (Number.isNaN(settled[i]) && (kid.driver.arrived || kid.driver.gaveUp)) settled[i] = elapsed;
         });
       }
       const gaveUp = kids.filter((kid) => !kid.driver.arrived).map((kid) => `${kid.plan.name} (${kid.driver.mode} at ${label({ x: kid.body.position.x - OX, z: kid.body.position.z - OZ })})`);
@@ -3125,25 +3143,36 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       for (const kid of kids) kid.driver.dismiss();
       const wBack = watch();
       untilStrolling(wBack, DISMISS_SECONDS, STROLL_WATCH);
-      results.push({ what: spot.what, stood, times, gaveUp, playerMoved, w, back: allStrolling(), wBack });
+      results.push({ what: spot.what, wayRound: spot.wayRound, stood, times, settled, gaveUp, playerMoved, w, back: allStrolling(), wBack });
     }
     child.stand(desk.x, desk.z, desk.facing);
     const control = results[0]!;
     const bound = Math.max(...control.times) + 6;
     for (const result of results) {
       const isControl = result === control;
-      say(
-        result.gaveUp.length === 0 && result.times.every((time) => time <= (isControl ? GATHER_SECONDS : bound)) && result.playerMoved <= 0.01 && result.back,
-        `summoned with her standing still at ${result.what}, stood at ${label(result.stood)}: every child reaches her cushion's edge — ` +
-          `${eachKid(result.times, (time) => (Number.isNaN(time) ? 'NEVER' : `${time.toFixed(1)} s`))} ` +
-          `(${isControl ? `${GATHER_SECONDS} s allowed` : `${bound.toFixed(1)} s allowed: the control's slowest and 6 s to go round her`}); gave up: ${result.gaveUp.join(', ') || 'none'}; ` +
-          `she was never shoved (${result.playerMoved.toFixed(3)} m); back strolling after: ${result.back}`,
-      );
+      if (result.wayRound) {
+        say(
+          result.gaveUp.length === 0 && result.times.every((time) => time <= (isControl ? GATHER_SECONDS : bound)) && result.playerMoved <= 0.01 && result.back,
+          `summoned with her standing still at ${result.what}, stood at ${label(result.stood)}: every child reaches her cushion's edge — ` +
+            `${eachKid(result.times, (time) => (Number.isNaN(time) ? 'NEVER' : `${time.toFixed(1)} s`))} ` +
+            `(${isControl ? `${GATHER_SECONDS} s allowed` : `${bound.toFixed(1)} s allowed: the control's slowest and 6 s to go round her`}); gave up: ${result.gaveUp.join(', ') || 'none'}; ` +
+            `she was never shoved (${result.playerMoved.toFixed(3)} m); back strolling after: ${result.back}`,
+        );
+      } else {
+        // No way round her: the child held off settles, listening from where she is, and story time is not held up.
+        say(
+          result.gaveUp.length >= 1 && result.settled.every((time) => time <= bound) && result.playerMoved <= 0.01 && result.back,
+          `summoned with her standing still in ${result.what}, stood at ${label(result.stood)}, where no way round her exists: ` +
+            `every child is at her cushion or listening from where she was held, within ${Math.max(...result.settled).toFixed(1)} s ` +
+            `(${eachKid(result.settled, (time) => (Number.isNaN(time) ? 'NEVER' : `${time.toFixed(1)} s`))}; ${bound.toFixed(1)} s allowed — the leg's own ${KID_LEG_TIMEOUT} s would hold the story up); ` +
+            `listening where she was held: ${result.gaveUp.join(', ') || 'nobody — so this spot asserts nothing about a child with no way round'}; she was never shoved (${result.playerMoved.toFixed(3)} m)`,
+        );
+      }
       say(
         result.w.lean.every((frames) => frames <= LEAN_FRAMES) && result.w.step <= NPC_RADIUS * 2,
         `  and on the way nobody leant on the furniture: the longest any stayed up against a solid ${eachKid(result.w.lean, (frames) => `${frames}`)} frame(s) ` +
           `(${LEAN_FRAMES} allowed: a brush, never a lean; in all ${eachKid(result.w.pressedFrames, (frames) => `${frames}`)}); ` +
-          `furthest off her ways ${eachKid(result.w.off, (off) => `${off.toFixed(2)} m`)}${isControl ? '' : ' (a way round her)'}; longest step ${result.w.step.toFixed(3)} m`,
+          `furthest off her ways ${eachKid(result.w.off, (off) => `${off.toFixed(2)} m`)}${isControl || !result.wayRound ? '' : ' (a way round her)'}; longest step ${result.w.step.toFixed(3)} m`,
       );
       say(
         result.back && result.wBack.lean.every((frames) => frames <= LEAN_FRAMES) && result.wBack.step <= NPC_RADIUS * 2,

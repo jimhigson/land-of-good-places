@@ -148,6 +148,14 @@ const LINE_BRUSH = 0.1;
 const REPLAN_SECONDS = 1;
 
 /**
+ * How long a child on her way to the rug waits, held off her way by a player
+ * standing still with no clear way round her, before she settles where she is
+ * and listens from there (`gaveUp`) — seconds, where the leg's own timeout
+ * would hold story time up for thirty. On the way back she waits on.
+ */
+export const KID_NO_WAY_SECONDS = 5;
+
+/**
  * Asks the real world whether a body of `radius` at world `(x, z)` meets no
  * solid: `CollisionWorld.isClearCircle`, handed in by whoever builds the
  * children (`Library`), so every line a child plans for herself is checked
@@ -204,6 +212,8 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
   private roundLength = 0;
   private roundIndex = 0;
   private replanIn = 0;
+  /** How long she has been held off her way with no way round (seconds). */
+  private noWayFor = 0;
   /** The planner's scratch, allocated once: the ring round her, and Dijkstra's tables over it and two ends. */
   private readonly ringX = new Float64Array(ROUND_BEARINGS);
   private readonly ringZ = new Float64Array(ROUND_BEARINGS);
@@ -380,10 +390,19 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
       this.legBegun = true;
       this.roundLength = 0;
       this.replanIn = 0;
+      this.noWayFor = 0;
     }
     if (this.roundLength === 0) {
       this.replanIn -= context.dt;
-      if (this.replanIn <= 0 && this.heldOff(context, target, toTheSeat ? this.seatArrive : KID_ROUTE_ARRIVE)) {
+      const held = this.heldOff(context, target, toTheSeat ? this.seatArrive : KID_ROUTE_ARRIVE);
+      this.noWayFor = held ? this.noWayFor + context.dt : 0;
+      if (this.modeValue === 'walking' && this.noWayFor >= KID_NO_WAY_SECONDS) {
+        // No way round her, and the story is waiting: she listens from here.
+        this.modeValue = 'gaveUp';
+        this.watchTheChair(context, intent);
+        return;
+      }
+      if (this.replanIn <= 0 && held) {
         this.replanIn = REPLAN_SECONDS;
         // Her own cushion with the player stood on it: she listens from here.
         if (toTheSeat) {
@@ -398,6 +417,12 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
           this.watchTheChair(context, intent);
           return;
         }
+      }
+      if (held && this.roundLength === 0) {
+        // No way round her yet: she waits, looking at whoever is in her way,
+        // rather than pushing at her — and at the furniture beside her.
+        this.waitFor(context, intent);
+        return;
       }
     }
     const rounding = this.roundLength > 0;
@@ -585,6 +610,18 @@ export class LibraryKidDriver implements CharacterDriver, ActivityHost {
     this.walk.clearSidestep();
     this.toSeat.clearSidestep();
     this.modeValue = 'walking';
+  }
+
+  /** Stood still, waiting for the player standing in her way, looking at her. */
+  private waitFor(context: DriverContext, intent: CharacterIntent): void {
+    intent.moveX = 0;
+    intent.moveZ = 0;
+    intent.hop = false;
+    intent.interact = false;
+    intent.wave = 0;
+    intent.lookAt = Math.atan2(context.playerPosition.x - context.position.x, context.playerPosition.z - context.position.z);
+    intent.expression = this.blink.expressionFor(context.dt, 'neutral');
+    this.blinkingNow = intent.expression === 'blink';
   }
 
   /** Stood still, looking at the storyteller's chair, happy. */
