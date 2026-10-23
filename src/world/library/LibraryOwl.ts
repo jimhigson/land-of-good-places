@@ -144,9 +144,10 @@ export const OWL_WING_BEAT_RATE = 9;
  * chair's own −Z, into it): measured, so that her face and glasses stay over
  * the chair's seat, inside its solids, where a child standing at the chair's
  * front cannot touch them — on the seat centre itself they reach 8 cm past
- * its front edge. `check:library`'s STORY measures her perched.
+ * its front edge, at 0.12 m back still 4 cm — and her back stays inside the
+ * chair's back (6.6 cm to spare). `check:library`'s STORY measures her perched.
  */
-export const OWL_PERCH_BACK = 0.12;
+export const OWL_PERCH_BACK = 0.15;
 
 /** Her cruise height over the room's floor: the stacks' measured top and {@link OWL_CRUISE_OVER_STACKS} — never typed. */
 export function owlCruiseHeight(): number {
@@ -185,6 +186,16 @@ export function owlFlightPose(
   const bump = smoothstep(0, OWL_CLIMBED_BY, u) * (1 - smoothstep(OWL_DESCEND_AT, 1, u));
   out.y = base + (cruise - base) * bump;
   return out;
+}
+
+/**
+ * **How far open her wings' beat is at `t` of a flight**, 0..1: opening as she
+ * lifts off, folded again as she lands — the share of {@link OWL_WING_BEAT}
+ * she beats at. One owner, so `check:library`'s FLIGHT measures her reach at
+ * the opening she really has.
+ */
+export function owlWingOpening(t: number): number {
+  return smoothstep(0, 0.1, t) * (1 - smoothstep(0.92, 1, t));
 }
 
 /**
@@ -723,8 +734,7 @@ export class LibraryOwl {
         : flight.startYaw + angleDelta(flight.startYaw, flight.travelYaw) * climb;
     root.rotation.y = yaw;
     head.rotation.y = damp(head.rotation.y, 0, HEAD_TURN_HALF_LIFE, dt);
-    const open = smoothstep(0, 0.1, flight.t) * (1 - smoothstep(0.92, 1, flight.t));
-    const beat = Math.sin(elapsed * OWL_WING_BEAT_RATE) * OWL_WING_BEAT * open;
+    const beat = Math.sin(elapsed * OWL_WING_BEAT_RATE) * OWL_WING_BEAT * owlWingOpening(flight.t);
     wingL.rotation.z = beat;
     wingR.rotation.z = -beat;
     if (flight.t < 1) return;
