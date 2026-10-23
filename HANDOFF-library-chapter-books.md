@@ -48,9 +48,24 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
       first CI run 39964056493 (+ Update adoption 39964056536) on d063e876
 - [x] part 4 moved again (2c9c1fca, its handoff only: CI round 1 green on 66549d88): merged with rerere
       off, park hash unchanged 53dde20f…, step-set proof PROOF OK (`merge-scripts-proof-final.log`)
-- [ ] the PR head fast-forwarded to this branch once run 39964056493's Parks job has saved the parks
-      cache for 53dde20f… (so the final run's Parks is a cache hit), then that run green on every job
-- [ ] preview deep links checked on the newest "Deploy PR preview" host and put in the PR body
+- [x] the PR head fast-forwarded d063e876..**83b72db8** once run 39964056493's Parks job had saved the
+      parks cache for 53dde20f… (CI's `merge-parks`: restarts `0:3 1:1 2:3 3:7 4:1 5:1 6:1 7:5 8:1 9:0
+      10:9 11:4 12:0 13:6 14:8 15:4`, exactly the local solve's). **CI 39972640138 on 83b72db8: completed
+      success** — 31 jobs, 25 success, 6 skipped (five Parks jobs on the cache hit, Deploy as on every
+      PR); required **Checks: SUCCESS**, **Procgen invariants: SUCCESS**; **Update adoption
+      39972639958: success**. (The superseded run 39964056493 on d063e876 was cancelled by the push —
+      the concurrency group — not red.)
+- [x] preview: the newest "Deploy PR preview" comment names **83b72db** —
+      `https://pr-734-83b72db-land-of-good-places.blockstack.workers.dev`; its `/version.txt` is
+      a830e4ab = `refs/pull/734/merge` (parents 66549d88 and 83b72db8), whose tree is byte-identical to
+      83b72db8's. `look/preview.mjs` on it: `/book?id=sirHopsalot` and `/library?at=-16.1,5.5&facing=270`
+      both HTTP 200, the reader opened (the shelf by its real "Read it!" chip), no page error, at 1280x800
+      and 390x844; all 10 frames opened (`look/preview-83b72db/`). Both links, each with its "you will
+      see" sentence, are in the PR body's "What to look at".
+- Overseer, 23 Oct ~16:15: **keep #734's head at 83b72db8** (a reviewer and QA work against it; Jim
+  merges once CI is green) — only a red check's fix moves it; no fast-forward for docs-only commits
+  (this handoff's later commits stay on `feat/library-chapter-books`), and docs-only commits on
+  `feat/library-v2` are not chased. Part 4 at the report: 2c9c1fca, inside 83b72db8; #733 still open.
 
 ## The merge (4333fc84)
 
