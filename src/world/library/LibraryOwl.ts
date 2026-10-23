@@ -46,11 +46,11 @@ import { LIBRARY_FLOOR_Y, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIG
  * never typed), registered through `props.wall(spot, spot, …)` as a
  * zero-length capsule: the one round solid `CollisionWorld` can take out and
  * put back as the same object. **On the story chair** she has one of her own
- * too ({@link perchCapsule}: her reach over every pose she holds perched, the
- * shush wing included, which swings forward over the rug there, not over a
- * desk). Each top is her measured head, like every solid's since PR #722: a
- * top is where a jump lands, and a jump that reaches the top of her head lands
- * on it — physics, not a flag. `LIBRARY_LIBRARIAN_SPOT` therefore left
+ * too ({@link perchCapsule}: her reach over every pose she holds perched —
+ * where her wings stay down, a shush there being her face alone). Each top is
+ * her measured head, like every solid's since PR #722: a top is where a jump
+ * lands, and a jump that reaches the top of her head lands on it — physics,
+ * not a flag. `LIBRARY_LIBRARIAN_SPOT` therefore left
  * `libraryStandSpots()`: it is a place a child bumps into now, not one she
  * must be able to stand on.
  *
@@ -86,12 +86,15 @@ import { LIBRARY_FLOOR_Y, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIG
  * `Player.isRunning` held {@link SHUSH_RUN_SECONDS}, or a real take-off (the
  * rising edge of `isAirborne` with `verticalSpeed > 0`, so standing up off a
  * cushion — airborne at speed 0 — never counts). Not while riding, not while
- * a change of space is running. She says "Shhh!" and raises her **left** wing
- * (the right holds her book), the face goes wide for a moment, and then she
- * waits {@link SHUSH_COOLDOWN_SECONDS} before the next one. **No penalty of
- * any kind** — Jim's rule, and a six-year-old's delight is in making her say
- * it. She shushes from her desk and from the story chair, never on the wing;
- * mid-story only her wing and face answer (a story is a script). Not while the
+ * a change of space is running. She says "Shhh!" and, at her desk, raises her
+ * **left** wing over it (the right holds her book), the face goes wide for a
+ * moment, and then she waits {@link SHUSH_COOLDOWN_SECONDS} before the next
+ * one. **No penalty of any kind** — Jim's rule, and a six-year-old's delight is
+ * in making her say it. She shushes from her desk and from the story chair,
+ * never on the wing; mid-story only her face answers (a story is a script),
+ * and on the chair her wings stay down: there the shush wing would swing out
+ * over the rug, past her chair's front, into a listener ({@link perchReach}).
+ * Not while the
  * child is in the secret den: that condition is the den track's (#719), which
  * owns `libraryDenContains`.
  *
@@ -277,22 +280,19 @@ export function standingReach(handle: OwlHandle): number {
 /**
  * **Her plan reach across every pose she holds perched on the story chair** —
  * the radius of her solid there: her head straight (she watches the child
- * only from her desk), her breath at rest or at either extreme, and her free
- * wing down or up in the shush ({@link SHUSH_WING_X}), the largest of them.
- * At the desk the shush wing swings forward over the desk, where no child can
- * stand; on the chair it swings forward over the rug, so it is hers to cover
- * (0.740 m against her standing 0.668, measured). The handle is left at rest.
+ * only from her desk) and her breath at rest or at either extreme, the
+ * largest of them. Her wings stay down on the chair: a shush there is her face
+ * alone ({@link noticeShush}), because the shush wing swings forward over the
+ * rug — 0.740 m from her middle, 0.16 m past the chair's front — where at her
+ * desk it swings over the desk, which nobody can stand in. The handle is left
+ * at rest.
  */
 export function perchReach(handle: OwlHandle): number {
   let reach = 0;
-  for (const wing of [0, SHUSH_WING_X]) {
-    handle.wingL.rotation.x = wing;
-    for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
-      handle.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
-      reach = Math.max(reach, visibleReachXZ(handle.root));
-    }
+  for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
+    handle.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
+    reach = Math.max(reach, visibleReachXZ(handle.root));
   }
-  handle.wingL.rotation.x = 0;
   handle.body.scale.set(1, 1, 1);
   return reach;
 }
@@ -816,7 +816,8 @@ export class LibraryOwl {
     }
     head.rotation.y = damp(head.rotation.y, target, HEAD_TURN_HALF_LIFE, dt);
 
-    wingL.rotation.x = damp(wingL.rotation.x, this.shushFor > 0 ? SHUSH_WING_X : 0, WING_HALF_LIFE, dt);
+    // The shush wing goes up only at her desk, over the desk; on the story chair a shush is her face alone (`perchReach`).
+    wingL.rotation.x = damp(wingL.rotation.x, this.shushFor > 0 && this.atDeskFlag ? SHUSH_WING_X : 0, WING_HALF_LIFE, dt);
     // On the wing they beat (`updateFlight` writes them); landed, they fold back.
     if (!this.flight) {
       wingL.rotation.z = damp(wingL.rotation.z, 0, WING_HALF_LIFE, dt);
