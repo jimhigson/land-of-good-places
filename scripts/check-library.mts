@@ -2054,6 +2054,47 @@ const wingsWide = pastHerSolid();
 const wingsOut = (): boolean =>
   Math.abs(owl.handle.wingL.rotation.x) + Math.abs(owl.handle.wingL.rotation.z) + Math.abs(owl.handle.wingR.rotation.x) + Math.abs(owl.handle.wingR.rotation.z) > 0.05;
 
+/** A world point on the check's screen, through the game's own camera (CSS pixels, y down). */
+const screenPoint = (world: Readonly<Vector3>): { x: number; y: number; ahead: boolean } => {
+  camera.camera.updateMatrixWorld();
+  const v = world.clone().project(camera.camera);
+  return { x: ((v.x + 1) / 2) * SCREEN.width, y: ((1 - v.y) / 2) * SCREEN.height, ahead: v.z < 1 };
+};
+/**
+ * **Where the owl's bubble is drawn on the screen, now**: its painted pill and tail (`contentBox`), the
+ * sprite's corners laid out on the camera's own axes exactly as `LabelManager.measureSprite` lays them out
+ * (and `owlBubbleBehindTheRoom` below), projected onto the check's screen — the rectangle anything behind it
+ * is hidden by, since it is drawn over the scenery.
+ */
+const owlBubbleOnScreen = (): { x0: number; y0: number; x1: number; y1: number } => {
+  const sprite = owl.bubble.sprite;
+  const box = owl.bubble.contentBox;
+  sprite.updateWorldMatrix(true, false);
+  const e = sprite.matrixWorld.elements;
+  const scaleX = Math.hypot(e[0]!, e[1]!, e[2]!);
+  const scaleY = Math.hypot(e[4]!, e[5]!, e[6]!);
+  const centre = new Vector3().setFromMatrixPosition(sprite.matrixWorld);
+  camera.camera.updateMatrixWorld();
+  const c = camera.camera.matrixWorld.elements;
+  const right = new Vector3(c[0]!, c[1]!, c[2]!).normalize();
+  const up = new Vector3(c[4]!, c[5]!, c[6]!).normalize();
+  const rect = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const fx of [box.x0, box.x1]) {
+    for (const fy of [box.y0, box.y1]) {
+      const corner = centre
+        .clone()
+        .addScaledVector(right, (fx - sprite.center.x) * scaleX)
+        .addScaledVector(up, (1 - fy - sprite.center.y) * scaleY);
+      const at = screenPoint(corner);
+      rect.x0 = Math.min(rect.x0, at.x);
+      rect.y0 = Math.min(rect.y0, at.y);
+      rect.x1 = Math.max(rect.x1, at.x);
+      rect.y1 = Math.max(rect.y1, at.y);
+    }
+  }
+  return rect;
+};
+
 console.log('\nOWL — the librarian at her desk: solid, and alive:');
 {
   const player = child.player;
@@ -2234,11 +2275,28 @@ console.log('\nCARD — her library card, on the first press at the desk:');
   child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
   const said = new Set<string>(owl.lastSaid === null ? [] : [owl.lastSaid]);
   let flapLow = 0;
+  /** The card's sparkles on the hand-over line, frame by frame: how many were drawn on the screen, and how many of those behind her bubble. */
+  const sparkles = { frames: 0, seen: 0, underBubble: 0, first: '' };
+  const handOver = LIBRARY_LINES.owl.card[LIBRARY_LINES.owl.cardCheerAt];
   for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
     child.step();
     if (owl.lastSaid !== null) said.add(owl.lastSaid);
     flapLow = Math.min(flapLow, owl.handle.wingR.rotation.x);
     if (wingsOut()) measurePastHerSolid(owlSolidRadius, wingsWide);
+    if (owl.lastSaid !== handOver) continue;
+    const live = owl.cardSparkles.sprites.filter((sprite) => sprite.visible);
+    if (live.length === 0) continue;
+    sparkles.frames += 1;
+    const bubble = owlBubbleOnScreen();
+    for (const sprite of live) {
+      const at = screenPoint(sprite.getWorldPosition(new Vector3()));
+      if (!at.ahead || at.x < 0 || at.x > SCREEN.width || at.y < 0 || at.y > SCREEN.height) continue;
+      sparkles.seen += 1;
+      if (at.x >= bubble.x0 && at.x <= bubble.x1 && at.y >= bubble.y0 && at.y <= bubble.y1) {
+        sparkles.underBubble += 1;
+        if (!sparkles.first) sparkles.first = `a sparkle at (${at.x.toFixed(0)}, ${at.y.toFixed(0)}) px inside her bubble's (${bubble.x0.toFixed(0)}, ${bubble.y0.toFixed(0)})–(${bubble.x1.toFixed(0)}, ${bubble.y1.toFixed(0)})`;
+      }
+    }
   }
   const lines = LIBRARY_LINES.owl.card;
   say(
@@ -2246,6 +2304,12 @@ console.log('\nCARD — her library card, on the first press at the desk:');
     `her ${lines.length} card lines were said in turn and the bubble went away: ${[...said].map((line) => `"${line}"`).join(', ')}`,
   );
   say(flapLow <= -0.3, `on the hand-over line (#${LIBRARY_LINES.owl.cardCheerAt + 1}) she flapped the wing that holds her book forward, over her desk: rotation.x down to ${flapLow.toFixed(2)}`);
+  say(
+    sparkles.frames > 0 && sparkles.seen > 0 && sparkles.underBubble === 0,
+    `the card's sparkles can be seen (browser QA round 1: "the card sparkles hardly show"): on ${sparkles.frames} frames of the hand-over line, ${sparkles.seen} sparkle-frames drawn on the ` +
+      `${SCREEN.width}×${SCREEN.height} screen from the desk's front, ${sparkles.underBubble} of them behind her bubble, which is drawn over the scenery${sparkles.first ? ` — e.g. ${sparkles.first}` : ''}` +
+      `${sparkles.frames === 0 ? ' — NO SPARKLE WAS EVER LIVE: this asserts nothing' : ''}`,
+  );
   const again = owlOffer();
   say(
     again.length === 1 && again[0]?.label === LIBRARY_CHIPS.hello && cardsHeld() === 1,
