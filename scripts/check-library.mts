@@ -2850,6 +2850,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         `none marked elsewhere (${markedFrames} child-frames), none left the room (${leftTheRoom})`,
     );
     say(
+      // flat-ok: `feetOf` is her height above the reading room's own flat floor (its own space at (-600, -600), off the sphere)
       kids.length > 0 && maxFeet.every((feet) => feet <= 0.02) && maxStep.every((step) => step <= NPC_RADIUS * 2),
       `their feet stayed within ${Math.max(...maxFeet, 0).toFixed(3)} m of the floor (0.02 allowed) and no step in any frame was over ${Math.max(...maxStep, 0).toFixed(3)} m ` +
         `(${(NPC_RADIUS * 2).toFixed(2)} allowed, check:jitter's own bound)`,
@@ -3490,6 +3491,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
       }
       flight.k += 1;
       owlFlightPose(flight.from, flight.to, (flight.k * CHILD_DT) / OWL_FLIGHT_SECONDS, expected);
+      // flat-ok: two room-local points (her root in the room's group, the pure path's pose) in the reading room's own flat space
       liveFlight.worst = Math.max(liveFlight.worst, Math.hypot(owl.feet.x - expected.x, owl.feet.y - expected.y, owl.feet.z - expected.z));
       liveFlight.frames += 1;
     } else {
@@ -3501,6 +3503,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
       deskClearAway &&= collision.isClearCircle(OX + desk.x, OZ + desk.z, PLAYER_RADIUS);
     }
     if (owl.perched) {
+      // flat-ok: two room-local points (her root in the room's group, owlPerch()) in the reading room's own flat space
       perchedOff = Math.min(perchedOff, Math.hypot(owl.feet.x - perch.x, owl.feet.y - perch.y, owl.feet.z - perch.z));
       if (!perchedTouch) {
         // The owl as drawn on the chair: every visible point more than the resolver's slack outside every
