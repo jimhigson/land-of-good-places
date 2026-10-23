@@ -21,7 +21,7 @@ import { LIBRARY_LINES } from './libraryLines';
 import { giveLibraryCard, hasLibraryCard } from './libraryCard';
 import { recommendFor } from './recommendation';
 import { isBookRead } from './readBooks';
-import { LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, pieceToRoom, type StandSpot } from './layout';
+import { LIBRARY_BOOKCASES, LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, pieceToRoom, type StandSpot } from './layout';
 
 /**
  * **The owl librarian at her desk** (#718, plan Step 6) — Jim, 13 October
@@ -145,6 +145,21 @@ export const GLOW_SWING = 0.35;
 export const GLOW_RATE = 2.4;
 /** A pair of warm twinkles rises off the glowing book this often (seconds). */
 export const TWINKLE_EVERY = 1.4;
+/**
+ * **A beacon over the glowing book's case** — one sky-blue sparkle this often
+ * (seconds), rising off the top of its bookcase right over the book, into the
+ * open air above the stacks where it can be seen across the room. The book's
+ * own glow is a sliver among hundreds of spines from the desk, 5 px wide at a
+ * laptop's size (browser QA round 1); a sparkle rising over a case's top is
+ * the thing a child can spot from the desk and walk to.
+ */
+export const BEACON_EVERY = 0.25;
+/** The beacon's sparkles' size (metres) — bigger than the card's, to read across the room. */
+export const BEACON_SCALE = 0.7;
+/** They rise from this far over the case's measured top. */
+const BEACON_OVER = 0.1;
+/** Enough for the beacon's sparkles in flight at once (each lives 1.2 s): a little rising column of them. */
+const BEACON_POOL = 6;
 
 /** How long one flight takes, desk to story chair or back (seconds) — the plan's 3.2. */
 export const OWL_FLIGHT_SECONDS = 3.2;
@@ -167,6 +182,17 @@ export const OWL_WING_BEAT_RATE = 9;
  * chair's back (6.6 cm to spare). `check:library`'s STORY measures her perched.
  */
 export const OWL_PERCH_BACK = 0.15;
+
+/**
+ * **Where the glowing book's beacon rises from** ({@link BEACON_EVERY}): the
+ * measured top of the book's own bookcase (`libraryBookcaseSize` of its kind),
+ * {@link BEACON_OVER} over it — room-local height, over the floor.
+ */
+export function glowBeaconBase(placed: Readonly<FurnishedShelfBook>): number {
+  const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === placed.slot.bookcase);
+  if (!spec) throw new Error(`LibraryOwl: '${placed.book.id}' stands on '${placed.slot.bookcase}', which is not in LIBRARY_BOOKCASES`);
+  return libraryBookcaseSize(spec.kind).height + BEACON_OVER;
+}
 
 /**
  * **Where her card passes to the child**: over the middle of her desk's top,
@@ -493,6 +519,8 @@ export class LibraryOwl {
   private readonly puffs: SpritePuffs;
   /** The card's sparkles — their own pool, bigger than the twinkles ({@link CARD_SPARKLE_SCALE}). */
   readonly cardSparkles: SpritePuffs;
+  /** The beacon over the glowing book's case ({@link BEACON_EVERY}). */
+  readonly beacon: SpritePuffs;
   private readonly fx = new Rng(LIBRARY_FX_SEED);
   private readonly breathPhase: number;
   private readonly scratch = new Vector3();
@@ -504,6 +532,7 @@ export class LibraryOwl {
   /** The book whose emissive is lit right now, so the one that stops glowing is written dark exactly once. */
   private glowingId: string | null = null;
   private twinkleIn = 0;
+  private beaconIn = 0;
   private shushFor = 0;
   private cooldown = 0;
   private runningFor = 0;
@@ -578,6 +607,7 @@ export class LibraryOwl {
 
     this.puffs = new SpritePuffs(roomRoot, PUFF_POOL, PALETTE.fairyWarm, 0.3);
     this.cardSparkles = new SpritePuffs(roomRoot, CARD_SPARKLES, CARD_SPARKLE_COLOUR, CARD_SPARKLE_SCALE);
+    this.beacon = new SpritePuffs(roomRoot, BEACON_POOL, CARD_SPARKLE_COLOUR, BEACON_SCALE);
     this.breathPhase = new Rng(LIBRARY_OWL_SEED).range(0, Math.PI * 2);
     this.face = createFaceLife((expression) => this.handle.setExpression(expression));
   }
@@ -647,6 +677,11 @@ export class LibraryOwl {
   /** The book she is recommending — the one that glows — or null. */
   get recommendedBookId(): string | null {
     return this.recommendedId;
+  }
+
+  /** The warm twinkles' pool — the glowing book's own twinkles, and the Story listener's sparkles — for a check to measure. */
+  get twinkles(): SpritePuffs {
+    return this.puffs;
   }
 
   // --------------------------------------------------------------- doors
@@ -811,6 +846,7 @@ export class LibraryOwl {
     this.glow(dt, elapsed);
     this.puffs.update(dt);
     this.cardSparkles.update(dt);
+    this.beacon.update(dt);
     if (this.speech) {
       this.anchorBubble();
       this.bubble.updateScreenSize(camera);
@@ -930,8 +966,10 @@ export class LibraryOwl {
    * **The recommended book glows until it is read.** Its own cover material's
    * emissive (`createShelfBook` sets the emissive to the cover's colour at
    * intensity 0) breathes between {@link GLOW_BASE} and `GLOW_BASE +
-   * GLOW_SWING`, and a pair of warm twinkles rises off it every
-   * {@link TWINKLE_EVERY} seconds. Every other book reads 0 — written only on
+   * GLOW_SWING`, a pair of warm twinkles rises off it every
+   * {@link TWINKLE_EVERY} seconds, and a sky-blue sparkle rises off the top of
+   * its case right over it every {@link BEACON_EVERY}, where it can be seen
+   * across the room. Every other book reads 0 — written only on
    * the frame a book stops glowing, never every frame. The recommendation
    * clears on the frame `isBookRead` turns true. **Never the rainbow**, which
    * means "selected" and nothing else.
@@ -944,18 +982,25 @@ export class LibraryOwl {
       if (was) was.material.emissiveIntensity = 0;
       this.glowingId = wanted;
       this.twinkleIn = 0;
+      this.beaconIn = 0;
     }
     if (wanted === null) return;
     const placed = this.shelfBooks.find((candidate) => candidate.book.id === wanted);
     if (!placed) return;
     placed.material.emissiveIntensity = GLOW_BASE + GLOW_SWING * (0.5 + 0.5 * Math.sin(elapsed * GLOW_RATE));
-    this.twinkleIn -= dt;
-    if (this.twinkleIn > 0) return;
-    this.twinkleIn = TWINKLE_EVERY;
     // The book's spot in the room's frame: a stack's book rides its stack's group, a wall case's the room.
     const at = placed.mesh.getWorldPosition(this.scratch);
     this.roomRoot.worldToLocal(at);
-    this.puffs.puff(at.x, at.y + TWINKLE_RISE, at.z, this.fx, 2);
+    this.twinkleIn -= dt;
+    if (this.twinkleIn <= 0) {
+      this.twinkleIn = TWINKLE_EVERY;
+      this.puffs.puff(at.x, at.y + TWINKLE_RISE, at.z, this.fx, 2);
+    }
+    this.beaconIn -= dt;
+    if (this.beaconIn <= 0) {
+      this.beaconIn = BEACON_EVERY;
+      this.beacon.puff(at.x, glowBeaconBase(placed), at.z, this.fx, 1);
+    }
   }
 
   /**

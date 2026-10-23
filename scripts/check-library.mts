@@ -2357,6 +2357,71 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
     said.has(LIBRARY_LINES.owl.recommend(first.title)) && said.has(LIBRARY_LINES.owl.recommendGlow) && !owl.speaking,
     `she said "${LIBRARY_LINES.owl.recommend(first.title)}" — the first unread title in RECOMMENDATION_ORDER — and "${LIBRARY_LINES.owl.recommendGlow}" (${said.size} lines, then quiet)`,
   );
+  // Found from the desk (browser QA round 1: from here the glowing book was a pale sliver 5 px wide among
+  // the spines): 3 s at the desk's front, the camera where the game puts it, and every frame the glow's
+  // sparkles asked whether one stands in the open over the top of the book's own case, on the screen and
+  // in clear view of the camera — a ray from it reaching the sparkle past every opaque mesh of the room.
+  {
+    const placed = library.shelfBooks.find((candidate) => candidate.book.id === first.id);
+    const spec = placed ? LIBRARY_BOOKCASES.find((candidate) => candidate.id === placed.slot.bookcase) : undefined;
+    const caseTop = spec ? libraryBookcaseSize(spec.kind).height : Number.NaN;
+    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+    child.run(0.3);
+    const opaque = (material: Material): boolean => material.visible && material.depthWrite && (!material.transparent || material.opacity >= 0.999);
+    const drawnNode = (node: Object3D): boolean => {
+      for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return false;
+      return true;
+    };
+    const meshes: Mesh[] = [];
+    for (const root of [library.roomRoot, library.kidsRoot]) {
+      root.traverse((node) => {
+        if (!(node instanceof Mesh) || !drawnNode(node)) return;
+        for (let at: Object3D | null = node; at; at = at.parent) if (at === owl.handle.root) return;
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
+        if (materials.some(opaque)) meshes.push(node);
+      });
+    }
+    const ray = new Raycaster();
+    const eye = new Vector3();
+    let frames = 0;
+    let framesSeen = 0;
+    let seenSprites = 0;
+    let hidden = 0;
+    let lowest = Infinity;
+    for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+      child.step();
+      frames += 1;
+      camera.camera.updateMatrixWorld();
+      eye.setFromMatrixPosition(camera.camera.matrixWorld);
+      let seenNow = false;
+      for (const sprite of [...owl.beacon.sprites, ...owl.twinkles.sprites]) {
+        if (!sprite.visible) continue;
+        const at = sprite.getWorldPosition(new Vector3());
+        const up = at.y - LIBRARY_FLOOR_Y; // flat-ok: a height over the reading room's own flat floor
+        const screen = screenPoint(at);
+        if (!screen.ahead || screen.x < 0 || screen.x > SCREEN.width || screen.y < 0 || screen.y > SCREEN.height) continue;
+        if (up < caseTop) continue;
+        lowest = Math.min(lowest, up);
+        const towards = at.clone().sub(eye);
+        const distance = towards.length();
+        ray.set(eye, towards.normalize());
+        ray.far = distance - 0.05;
+        if (ray.intersectObjects(meshes, false).length > 0) {
+          hidden += 1;
+          continue;
+        }
+        seenSprites += 1;
+        seenNow = true;
+      }
+      if (seenNow) framesSeen += 1;
+    }
+    say(
+      framesSeen >= frames * 0.8,
+      `found from the desk (browser QA round 1: from here the glowing book was a sliver among the spines): over ${frames} frames at the desk's front, a sparkle of its glow stood in the open ` +
+        `over the top of '${placed?.slot.bookcase ?? '?'}' (${caseTop.toFixed(2)} m), on the ${SCREEN.width}×${SCREEN.height} screen and in clear view of the camera, on ${framesSeen} ` +
+        `(${seenSprites} sparkle-frames; ${hidden} hidden by the room; the lowest at ${Number.isFinite(lowest) ? lowest.toFixed(2) : '—'} m) — 80% wanted`,
+    );
+  }
   // Read to the end: the glow goes on the next frames, the recommendation clears, the chip is plain again.
   markBookRead(first);
   child.step();
