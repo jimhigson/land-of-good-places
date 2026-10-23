@@ -18,6 +18,11 @@
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
  * LIBRARY_CHECK_MUTATE=seal-den pnpm run check:library        # a wall across the doorway once the leaf has landed: SECRET SHELF's open fills must go red
  * LIBRARY_CHECK_MUTATE=open-leaf-hollow pnpm run check:library  # the open leaf's collider out once it has landed: its middle is reachable, must go red
+ * LIBRARY_CHECK_REMOVE='dragon' pnpm run check:library        # the baby dragon and its nest not solid: CREATURES must go red
+ * LIBRARY_CHECK_REMOVE='cat' pnpm run check:library           # the library cat and her pile not solid: CREATURES must go red
+ * LIBRARY_CHECK_REMOVE='the baby dragon' pnpm run check:library  # the dragon alone not solid, its nest still there: CREATURES must go red
+ * LIBRARY_CHECK_REMOVE='the library cat' pnpm run check:library  # the cat alone not solid, her pile still there: CREATURES must go red
+ * LIBRARY_CHECK_MUTATE=wide-creature-tops pnpm run check:library  # the dragon's and the cat's tops made whole: a jump lands her on one, must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -107,6 +112,20 @@
  *     leaf shut, the guard opens it in one frame; a link into the den opens it
  *     in the same call; and out through the door and back in from the park,
  *     the leaf is shut and the den sealed again.
+ * 16. CREATURES (#719, plan Step 13) — the baby dragon on its nest of books
+ *     and the library cat on her pile: four bodies, each in its own shape,
+ *     every drawn point of each inside its body at rest and on every frame of
+ *     its life; the dragon's and the cat's tops too narrow for her feet; their
+ *     middles unreached and each marched at from sixteen bearings (the nest
+ *     and the pile from the floor, the dragon and the cat from up on them);
+ *     and the real child's jumps at both, standing by and from a sprint,
+ *     never stand her on either, never wedge her and never leave her in the
+ *     air. The Dragon friend card on meeting it, with a control; its hello,
+ *     then "Hello again" on a visit after; Say hi's answers and one discovery;
+ *     the idle puff (with a vacuity guard), the belly's glow up and back, the
+ *     warm sprites, and the head turning to her side. The cat: Pet the cat!
+ *     twitches her ears, lifts her face, makes her happy and then asleep,
+ *     purrs, and a second press inside the guard changes nothing.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -119,16 +138,34 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
+import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Sprite, Vector3, type BufferAttribute, type Light, type Object3D, type SpriteMaterial, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
-import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
+import { CollisionWorld, JUMP_CLEARANCE_GRACE, type BoxCollider } from '../src/world/Collision.ts';
+import { FOOT_HALF_WIDTH } from '../src/world/measuredTop.ts';
+import { WEDGE_DEPTH, wedgeDepth } from '../src/world/standing.ts';
+import { visiblePoints } from '../src/art/style/measure.ts';
+import { gameStore } from '../src/state/store.ts';
+import { DRAGON_BELLY_REST_GLOW } from '../src/art/models/libraryCreatures.ts';
+import {
+  DRAGON_FRIEND_SECRET,
+  DRAGON_HEAD_TURN_LIMIT,
+  DRAGON_LOOK_RADIUS,
+  DRAGON_MEET_RADIUS,
+  DRAGON_NEST_SOLID,
+  DRAGON_PUFF_GLOW,
+  DRAGON_PUFF_SECONDS,
+  DRAGON_SOLID,
+  DRAGON_ZONE_ID,
+} from '../src/world/library/LibraryDen.ts';
+import { CAT_PILE_SOLID, CAT_SOLID, CAT_ZONE_ID, PET_GUARD_SECONDS, PET_SECONDS } from '../src/world/library/LibraryCat.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
+import { glowTexture } from '../src/core/textures.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS } from '../src/world/library/books.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
@@ -164,12 +201,15 @@ import {
   LIBRARY_AISLES,
   LIBRARY_ARRIVAL,
   LIBRARY_BOOKCASES,
+  LIBRARY_CAT_PILE,
+  LIBRARY_CAT_STAND,
   LIBRARY_DEN_DOOR_HALF,
   LIBRARY_DEN_DOORWAY_STAND,
   LIBRARY_DEN_INNER,
   LIBRARY_DESK_STAND,
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
+  LIBRARY_DRAGON_NEST,
   LIBRARY_DRAGON_STAND,
   LIBRARY_FLOOR_Y,
   LIBRARY_FURNITURE,
@@ -191,7 +231,7 @@ import {
   type LocalPoint,
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
-import { LIBRARY_CHIPS } from '../src/world/library/libraryLines.ts';
+import { LIBRARY_CHIPS, LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
 import { PRIMARY_ACTION, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
 import { FLOOR_TOLERANCE, SEAT_TOLERANCE, seatedErrors } from './lib/seatedPose.mts';
 
@@ -230,7 +270,11 @@ const note = (line: string): void => {
  * A clause arms its mutation by asking {@link mutating}.
  *
  * `block-walk` is the real child's own (the WITH A REAL CHILD harness clause,
- * added with the harness); the rest are the plan's (Steps 3-14).
+ * added with the harness); `wide-creature-tops` is CREATURES' (#719, plan
+ * Step 13 on the engine: the dragon's and the cat's measured narrow tops made
+ * whole, so the real child's jumps must land her on them — the control that
+ * the jump sweep can see a child standing on a creature at all); the rest are
+ * the plan's (Steps 3-14).
  */
 const MUTATIONS = [
   '',
@@ -245,6 +289,7 @@ const MUTATIONS = [
   'open-leaf-hollow',
   'resident-in-den',
   'block-walk',
+  'wide-creature-tops',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -707,7 +752,17 @@ console.log("\nDEN WALLS — bodies in the secret den, marched at its three wall
   let marches = 0;
   let escaped = 0;
   const deepest = headings.map(() => -Infinity);
+  // The baby dragon on its nest (#719, plan Step 13) fills the den's far
+  // corner: a grid spot whose body would stand in one of those two solids is
+  // set apart by name, never by a rectangle of this clause's own — and only
+  // those; a body that cannot stand anywhere else still fails.
+  const creatureSolids = library.solids.filter((solid) => solid.what === DRAGON_SOLID || solid.what === DRAGON_NEST_SOLID);
+  const underCreatures: string[] = [];
   for (const body of bodies) {
+    if (libraryDenContains(body.x, body.z) && creatureSolids.some((solid) => depthInSolid(solid, body) > -PLAYER_RADIUS)) {
+      underCreatures.push(`(${body.x.toFixed(2)}, ${body.z.toFixed(2)})`);
+      continue;
+    }
     if (!libraryDenContains(body.x, body.z) || !collision.isClearCircle(OX + body.x, OZ + body.z, PLAYER_RADIUS)) {
       say(false, `a body could not be stood in the den at (${body.x.toFixed(2)}, ${body.z.toFixed(2)}) — nothing is measured from there`);
       continue;
@@ -729,8 +784,9 @@ console.log("\nDEN WALLS — bodies in the secret den, marched at its three wall
     }
   }
   say(
-    placed === bodies.length && escaped === 0,
-    `${placed} of ${bodies.length} bodies stood in the den, ${marches} marches (${headings.length} headings, 5 cm and the sprint stride): ${escaped} ended outside the den and the room`,
+    placed === bodies.length - underCreatures.length && underCreatures.length <= 2 && creatureSolids.length === 2 && escaped === 0,
+    `${placed} of ${bodies.length} bodies stood in the den (${underCreatures.length} spot(s) under the baby dragon and its nest set apart, at most 2: ${underCreatures.join(' ') || 'none'}), ` +
+      `${marches} marches (${headings.length} headings, 5 cm and the sprint stride): ${escaped} ended outside the den and the room`,
   );
   // Against each wall's drawn inner face: no deeper than the resolver's slack,
   // and some body got within 5 cm of it — so each heading measured its wall,
@@ -2538,6 +2594,9 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
  * the same call. Proved red by hand: the guard's lines deleted from
  * `Library.updateSecretLeaf`.
  */
+/** Where GUARD stands her in the den with the leaf shut — CREATURES asks whether that visit met the dragon too. */
+const GUARD_DEN_SPOT: LocalPoint = { x: -21, z: -5 };
+
 console.log('\nGUARD — found in the den with the leaf shut, it opens at once; a link into the den opens it in the same call:');
 {
   const leaf = library.secretShelf;
@@ -2547,7 +2606,7 @@ console.log('\nGUARD — found in the den with the leaf shut, it opens at once; 
   const middleBare = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, POINT_PROBE);
   child.enter();
   say(!leaf.open && leaf.angle === 0 && !library.denRoot.visible, `in at the arrival the leaf is shut (angle ${leaf.angle}) and the den hidden (drawn: ${library.denRoot.visible})`);
-  const inDen = { x: -21, z: -5 };
+  const inDen = GUARD_DEN_SPOT;
   child.stand(inDen.x, inDen.z, 270);
   const before = leaf.open;
   child.step();
@@ -2606,6 +2665,497 @@ console.log('\nFRESH VISIT — out through the door and back in from the park, t
   const sealed = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   const leaked = denSpots.filter((spot) => reachedAt(sealed, OX + spot.x, OZ + spot.z)).length;
   say(denSpots.length > 0 && leaked === 0, `and the den is sealed again: ${denSpots.length - leaked} of ${denSpots.length} den spots unreached from the arrival`);
+}
+
+/**
+ * **CREATURES** (#719, plan Step 13) — the baby dragon on its nest of books in
+ * the secret den, and the library cat asleep on her pile by the desk.
+ *
+ * - **Solid in their own shapes** (PR #722: one body per solid, its real top —
+ *   the plan's "nobody jumps onto a dragon" disc to the ceiling went with the
+ *   ceiling flag). Four bodies, registered by name: the nest a disc a step
+ *   high; the dragon, the pile and the cat boxes. Every drawn point of each —
+ *   the model's own vertices, outlines included, never the collider's own
+ *   description — lies inside its body now and on every sampled frame of its
+ *   life (the dragon's head turning to her, its tail, its breath, its puffs;
+ *   the cat's ears and head as she is petted). The dragon's and the cat's tops
+ *   measure under `FOOT_HALF_WIDTH`: they hold nobody.
+ * - **Unreached and marched**: the open-state fill reaches neither creature's
+ *   middle nor the nest's nor the pile's; a body marched at each drawn plan
+ *   from sixteen bearings, at 5 cm and the sprint stride — the nest and the
+ *   pile from the floor, the dragon from up on the nest's top, the cat from up
+ *   on the pile's — never gets into it past the corner allowance.
+ * - **Nobody stands on a dragon or a cat** — the real child jumps at each from
+ *   sixteen bearings, from beside it and from a sprint run-up: never standing
+ *   on its top, never wedged, never left in the air, never inside it.
+ *   `wide-creature-tops` makes both tops whole: the same jumps must then land
+ *   her on them (the control that this can see a child on a creature).
+ * - **DEX**: GUARD's walk into the den already met it, when GUARD's spot is
+ *   inside the meeting radius; taken back out of the collection, the CONTROL
+ *   — 60 frames at the arrival, the leaf shut — leaves it unmet and its zone
+ *   unoffered, and one frame at the dragon's stand meets it: Dragon friend,
+ *   "Oh, a visitor for me!", a puff, the leaf open. Say hi twice: two of its
+ *   answers in order and still one discovery. A visit later, "Hello again,
+ *   friend!".
+ * - **PUFF**: the belly glows past 1.0 within 0.7 s of a puff and is back at
+ *   rest within 3 s; warm sprites rise; an idle puff comes by itself inside
+ *   20 s (the vacuity guard); the head turns to her side within its look
+ *   radius, and straight ahead beyond it.
+ * - **CAT**: Pet the cat! twitches her ears and lifts her face within half a
+ *   second, she is happy at 1 s and asleep by 3 s, hearts rise, she purrs, and
+ *   a second press inside the guard changes nothing.
+ *
+ * Reds: `LIBRARY_CHECK_REMOVE='dragon'` / `'cat'` (both bodies of one),
+ * `'the baby dragon'` / `'the library cat'` (the creature alone, its seat
+ * still there), `LIBRARY_CHECK_MUTATE=wide-creature-tops`; by hand,
+ * `DRAGON_MEET_RADIUS = 0.5` (DEX) and `PET_SECONDS = 0` (CAT).
+ */
+console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile: solid in their own shapes, nobody stands on them, met, puffing and petted:');
+{
+  const den = library.den;
+  const cat = library.cat;
+  const player = child.player;
+  const nest = LIBRARY_DRAGON_NEST;
+  const lines = LIBRARY_LINES;
+  /** How far outside its body a drawn point may stand: the posed bodies are measured off these same vertices, so this is float noise. */
+  const DRAWN_INSIDE = 0.002;
+  const zoneById = (id: string): InteractZone | undefined => library.interactZones().find((candidate) => candidate.id === id);
+  const chipOf = (id: string): ZoneAction | undefined => zoneById(id)?.actions?.().find((action) => action.id === PRIMARY_ACTION);
+  const dex = (): { readonly discovered: boolean; readonly count: number } => {
+    const entry = gameStore.get().collection[DRAGON_FRIEND_SECRET];
+    return { discovered: entry?.discovered === true, count: entry?.count ?? 0 };
+  };
+  /** Every drawn point of a model this frame, room-local, outlines included. */
+  const drawn = (root: Object3D, visit: (point: Vector3) => void): void => visiblePoints(root, visit, library.roomRoot);
+  /** How far the furthest drawn point of `root` stands outside `box` — negative: every one is inside, by that much. */
+  const furthestOut = (root: Object3D, box: BoxFootprint): number => {
+    let worst = -Infinity;
+    drawn(root, (point) => {
+      worst = Math.max(worst, outsideBox(box, point.x, point.z));
+    });
+    return worst;
+  };
+  /** The furthest a drawn point of `root` reaches from `at` in plan. */
+  const reachFrom = (root: Object3D, at: LocalPoint): number => {
+    let reach = 0;
+    drawn(root, (point) => {
+      reach = Math.max(reach, Math.hypot(point.x - at.x, point.z - at.z));
+    });
+    return reach;
+  };
+  /** A model's drawn plan this frame, as a box turned to `facing` about `at` — measured off its vertices, never its collider. */
+  const drawnBox = (root: Object3D, at: LocalPoint, facing: number): BoxFootprint => {
+    const yaw = (facing * Math.PI) / 180;
+    let minA = Infinity;
+    let maxA = -Infinity;
+    let minO = Infinity;
+    let maxO = -Infinity;
+    drawn(root, (point) => {
+      const dx = point.x - at.x;
+      const dz = point.z - at.z;
+      const along = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+      const out = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+      minA = Math.min(minA, along);
+      maxA = Math.max(maxA, along);
+      minO = Math.min(minO, out);
+      maxO = Math.max(maxO, out);
+    });
+    const ca = (minA + maxA) / 2;
+    const co = (minO + maxO) / 2;
+    return { x: at.x + ca * Math.cos(yaw) + co * Math.sin(yaw), z: at.z - ca * Math.sin(yaw) + co * Math.cos(yaw), facing, halfLength: (maxA - minA) / 2, halfDepth: (maxO - minO) / 2 };
+  };
+  /** Glowing sprites showing under `parent` in `colour` — the dragon's warm puffs, the cat's pink hearts. */
+  const spritesUp = (parent: Object3D, colour: number): number =>
+    parent.children.filter((object) => object instanceof Sprite && object.visible && (object.material as SpriteMaterial).map === glowTexture(colour)).length;
+  let worstDragonDrawn = -Infinity;
+  let dragonSamples = 0;
+  const sampleDragon = (): void => {
+    dragonSamples += 1;
+    worstDragonDrawn = Math.max(worstDragonDrawn, furthestOut(den.dragon.root, den.dragonFootprint));
+  };
+
+  // ------------------------------------------------------------- DEX first: a child who has never met it.
+  const guardDistance = Math.hypot(GUARD_DEN_SPOT.x - nest.x, GUARD_DEN_SPOT.z - nest.z);
+  if (guardDistance <= DRAGON_MEET_RADIUS) {
+    say(
+      dex().discovered,
+      `GUARD's walk into the den at (${GUARD_DEN_SPOT.x}, ${GUARD_DEN_SPOT.z}), ${guardDistance.toFixed(2)} m from the nest (the meeting's ${DRAGON_MEET_RADIUS}), already met the baby dragon: Dragon friend is in the collection (${dex().discovered})`,
+    );
+  } else {
+    note(`GUARD's den spot is ${guardDistance.toFixed(2)} m from the nest, outside the meeting's ${DRAGON_MEET_RADIUS}: nothing asked of that visit`);
+  }
+  // Taken back out of the collection — check-side, the store's own entry — so
+  // the CONTROL and the meeting below start from a child who never met it.
+  delete (gameStore.get().collection as Record<string, unknown>)[DRAGON_FRIEND_SECRET];
+  child.enter();
+  const lineBefore = library.lastCreatureLine;
+  for (let i = 0; i < 60; i += 1) child.step();
+  const unoffered = zoneById(DRAGON_ZONE_ID) === undefined;
+  say(
+    !dex().discovered && !library.denOpen && unoffered && library.lastCreatureLine === lineBefore && !den.metThisVisit,
+    `CONTROL: 60 frames at the arrival with the leaf shut, the baby dragon is not met (Dragon friend: ${dex().discovered}), says nothing new, and its Say hi zone is ${unoffered ? 'not offered' : 'OFFERED'}`,
+  );
+  child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+  const puffsBefore = den.puffsSoFar;
+  child.step();
+  const standDistance = Math.hypot(LIBRARY_DRAGON_STAND.x - nest.x, LIBRARY_DRAGON_STAND.z - nest.z);
+  say(
+    dex().discovered && dex().count === 1 && library.lastCreatureLine === lines.dragon.firstHello && den.puffsSoFar === puffsBefore + 1 && library.denOpen,
+    `stood ${LIBRARY_DRAGON_STAND.what} (${standDistance.toFixed(2)} m from the nest, inside ${DRAGON_MEET_RADIUS}), one frame later it is met: Dragon friend discovered (count ${dex().count}), ` +
+      `it says '${library.lastCreatureLine}' (wanted '${lines.dragon.firstHello}') and puffs (${den.puffsSoFar - puffsBefore}); the guard opened the leaf the same frame (${library.denOpen})`,
+  );
+  const dragonZone = zoneById(DRAGON_ZONE_ID);
+  const sayHi = chipOf(DRAGON_ZONE_ID);
+  const dragonStandOff = dragonZone ? Math.hypot(dragonZone.standX - (OX + LIBRARY_DRAGON_STAND.x), dragonZone.standZ - (OZ + LIBRARY_DRAGON_STAND.z)) : Infinity;
+  const dragonReach = dragonZone ? Math.hypot(player.position.x - dragonZone.standX, player.position.z - dragonZone.standZ) : Infinity;
+  say(
+    !!dragonZone && sayHi?.label === LIBRARY_CHIPS.sayHi && dragonZone.verb === 'Say hi' && dragonZone.highlight?.object === den.dragon.root && dragonStandOff < 1e-9 && dragonReach <= standRadiusOf(dragonZone),
+    `with the leaf open '${DRAGON_ZONE_ID}' offers '${sayHi?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.sayHi}'), verb '${dragonZone?.verb ?? '?'}', its stand ${dragonStandOff.toFixed(3)} m off the layout's, ` +
+      `she ${dragonReach.toFixed(2)} m from it (reach ${dragonZone ? standRadiusOf(dragonZone) : '?'}), the rainbow ${dragonZone?.highlight?.object === den.dragon.root ? 'rings' : 'does NOT ring'} the dragon`,
+  );
+
+  // ------------------------------------------------------------- Say hi, and the puff it brings.
+  sayHi?.run();
+  const firstHi = library.lastCreatureLine;
+  const pressedAt = child.frames;
+  let peakEarly = 0;
+  let warmUp = 0;
+  for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+    child.step();
+    if ((child.frames - pressedAt) * CHILD_DT <= 0.7) peakEarly = Math.max(peakEarly, den.bellyGlow);
+    warmUp = Math.max(warmUp, spritesUp(library.denRoot, PALETTE.fairyWarm));
+    if (i % 6 === 0) sampleDragon();
+  }
+  const settled = den.bellyGlow;
+  chipOf(DRAGON_ZONE_ID)?.run();
+  const secondHi = library.lastCreatureLine;
+  say(
+    firstHi === lines.dragon.hi[0] && secondHi === lines.dragon.hi[1] && dex().discovered && dex().count === 1,
+    `Say hi twice: '${firstHi}', then '${secondHi}' (its answers, in order), and still one discovery (count ${dex().count})`,
+  );
+  say(
+    peakEarly > 1.0 && Math.abs(settled - DRAGON_BELLY_REST_GLOW) <= 0.01,
+    `the puff: the belly's warm glow reaches ${peakEarly.toFixed(3)} within 0.7 s (over 1.0: ${DRAGON_BELLY_REST_GLOW} + ${DRAGON_PUFF_GLOW} at the height of its ${DRAGON_PUFF_SECONDS} s) ` +
+      `and is back to ${settled.toFixed(3)} 3 s on (${DRAGON_BELLY_REST_GLOW} ± 0.01)`,
+  );
+  say(warmUp >= 1, `warm sprites rise from its mouth: up to ${warmUp} showing at once during the puff`);
+  const beforeIdle = den.puffsSoFar;
+  let idleAfter = Number.NaN;
+  for (let i = 0; i < Math.round(20 / CHILD_DT); i += 1) {
+    child.step();
+    if (Number.isNaN(idleAfter) && den.puffsSoFar > beforeIdle) idleAfter = (i + 1) * CHILD_DT;
+    if (i % 6 === 0) sampleDragon();
+  }
+  say(
+    den.puffsSoFar > beforeIdle,
+    `left alone, it puffs by itself: the first idle puff ${Number.isNaN(idleAfter) ? 'NEVER came' : `${idleAfter.toFixed(1)} s after the last`}, ${den.puffsSoFar - beforeIdle} in 20 s (its stream draws 9–14 s)`,
+  );
+
+  // ------------------------------------------------------------- The head turns to her side, within its look radius.
+  const yaw = (nest.facing * Math.PI) / 180;
+  const sideSpot = (side: number): LocalPoint => ({ x: nest.x + Math.sin(yaw + side * 0.5) * 2, z: nest.z + Math.cos(yaw + side * 0.5) * 2 });
+  const turnAt = (spot: LocalPoint): number => {
+    child.stand(spot.x, spot.z, ((yaw + Math.PI) * 180) / Math.PI);
+    for (let i = 0; i < Math.round(1.5 / CHILD_DT); i += 1) {
+      child.step();
+      if (i % 6 === 0) sampleDragon();
+    }
+    return den.headTurn;
+  };
+  const toLeft = sideSpot(1);
+  const toRight = sideSpot(-1);
+  const spotsFit = [toLeft, toRight].every((spot) => libraryDenContains(spot.x, spot.z) && walkableAt(collision, OX + spot.x, OZ + spot.z, PLAYER_RADIUS, LIBRARY_FLOOR_Y));
+  const turnLeft = turnAt(toLeft);
+  const turnRight = turnAt(toRight);
+  const farDistance = Math.hypot(LIBRARY_DEN_DOORWAY_STAND.x - nest.x, LIBRARY_DEN_DOORWAY_STAND.z - nest.z);
+  const turnFar = turnAt(LIBRARY_DEN_DOORWAY_STAND);
+  say(
+    spotsFit && 0.5 <= DRAGON_HEAD_TURN_LIMIT && 2 <= DRAGON_LOOK_RADIUS && Math.abs(turnLeft - 0.5) < 0.05 && Math.abs(turnRight + 0.5) < 0.05 && farDistance > DRAGON_LOOK_RADIUS && Math.abs(turnFar) < 0.05,
+    `its head follows her: 2 m off its nose 0.5 rad to one side it turns ${turnLeft.toFixed(3)} rad, to the other ${turnRight.toFixed(3)} (±0.5 wanted, its limit ${DRAGON_HEAD_TURN_LIMIT}); ` +
+      `${farDistance.toFixed(2)} m away (${LIBRARY_DEN_DOORWAY_STAND.what}, past its ${DRAGON_LOOK_RADIUS} m) it looks straight ahead (${turnFar.toFixed(3)})`,
+  );
+
+  // ------------------------------------------------------------- SOLID: four bodies, each its own shape.
+  const solidNamed = (what: string): LibrarySolid | undefined => library.solids.find((solid) => solid.what === what);
+  const nestSolid = solidNamed(DRAGON_NEST_SOLID);
+  const dragonSolid = solidNamed(DRAGON_SOLID);
+  const pileSolid = solidNamed(CAT_PILE_SOLID);
+  const catSolid = solidNamed(CAT_SOLID);
+  /** A box solid's top width (`topHalf`): how much of its top a foot could stand on — NaN for none, or for a disc. */
+  const topHalfOf = (solid: LibrarySolid | undefined): number =>
+    solid && typeof solid.handle !== 'number' && 'halfX' in solid.handle ? (solid.handle as BoxCollider).topHalf : Number.NaN;
+  say(
+    nestSolid?.shape === 'disc' && dragonSolid?.shape === 'box' && pileSolid?.shape === 'box' && catSolid?.shape === 'box',
+    `four bodies, each its own shape: '${DRAGON_NEST_SOLID}' ${nestSolid?.shape ?? 'MISSING'}, '${DRAGON_SOLID}' ${dragonSolid?.shape ?? 'MISSING'}, ` +
+      `'${CAT_PILE_SOLID}' ${pileSolid?.shape ?? 'MISSING'}, '${CAT_SOLID}' ${catSolid?.shape ?? 'MISSING'}`,
+  );
+  say(
+    den.nestTop <= BUILDING_STEP_UP &&
+      Math.abs((nestSolid?.top ?? Number.NaN) - den.nestTop) < 1e-9 &&
+      (dragonSolid?.top ?? 0) > BUILDING_STEP_UP &&
+      topHalfOf(dragonSolid) < FOOT_HALF_WIDTH &&
+      cat.pileTop > BUILDING_STEP_UP &&
+      topHalfOf(pileSolid) >= FOOT_HALF_WIDTH &&
+      topHalfOf(catSolid) < FOOT_HALF_WIDTH &&
+      Math.abs((catSolid?.top ?? Number.NaN) - cat.catTop) < 1e-9,
+    `their tops, measured off the models: the nest's books ${den.nestTop.toFixed(3)} m (a step: ${BUILDING_STEP_UP}); the dragon ${(dragonSolid?.top ?? Number.NaN).toFixed(3)} m to its horns, ` +
+      `its crest ${topHalfOf(dragonSolid).toFixed(3)} m either side; the pile ${cat.pileTop.toFixed(3)} m, ${topHalfOf(pileSolid).toFixed(3)} either side; the cat ${cat.catTop.toFixed(3)} m to her ears, ` +
+      `${topHalfOf(catSolid).toFixed(3)} either side — the dragon's and the cat's under the ${FOOT_HALF_WIDTH} her feet need, so neither holds anybody`,
+  );
+  sampleDragon();
+  const nestReach = reachFrom(den.nest.root, nest);
+  const pileOut = furthestOut(cat.pile.root, cat.pileFootprint);
+  const catOut = furthestOut(cat.cat.root, cat.catFootprint);
+  say(
+    worstDragonDrawn <= DRAWN_INSIDE && nestReach <= den.nestRadius + DRAWN_INSIDE && pileOut <= DRAWN_INSIDE && catOut <= DRAWN_INSIDE,
+    `drawn is solid: the dragon's furthest drawn point over ${dragonSamples} sampled frames of its life (turning, flicking, breathing, puffing) is ${worstDragonDrawn.toFixed(4)} m outside its body; ` +
+      `the nest reaches ${nestReach.toFixed(3)} m (its disc ${den.nestRadius.toFixed(3)}); the pile ${pileOut.toFixed(4)} and the cat ${catOut.toFixed(4)} m outside theirs (at most ${DRAWN_INSIDE})`,
+  );
+  const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  const middles: { readonly what: string; readonly at: LocalPoint }[] = [
+    { what: 'the baby dragon', at: den.dragonFootprint },
+    { what: "the dragon's nest", at: nest },
+    { what: "the cat's pile", at: cat.pileFootprint },
+    { what: 'the library cat', at: cat.catFootprint },
+  ];
+  const reachedMiddles = middles.filter((middle) => reachedAt(seen, OX + middle.at.x, OZ + middle.at.z));
+  say(
+    reachedMiddles.length === 0,
+    `with the leaf open the fill from the arrival reaches none of their middles: ${reachedMiddles.map((middle) => `${middle.what} IS reached`).join(', ') || `${middles.length} of ${middles.length} unreached`}`,
+  );
+  /** Bodies marched at a drawn plan from sixteen bearings at both strides, with her feet at `feet`: the deepest a body's edge got into it, by `depth`. */
+  const marchedAt = (centre: LocalPoint, reach: number, feet: number, depth: (end: LocalPoint) => number): { marches: number; skipped: number; deepest: number } => {
+    let marches = 0;
+    let skipped = 0;
+    let deepest = -Infinity;
+    const out = reach + 2.2;
+    for (let b = 0; b < 16; b += 1) {
+      const angle = (b / 16) * Math.PI * 2;
+      const sx = centre.x + Math.cos(angle) * out;
+      const sz = centre.z + Math.sin(angle) * out;
+      if (!onFloor(sx, sz) || !walkableAt(collision, OX + sx, OZ + sz, PLAYER_RADIUS, LIBRARY_FLOOR_Y + feet)) {
+        skipped += 1;
+        continue;
+      }
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        const end = march(collision, new Vector3(OX + sx, LIBRARY_FLOOR_Y + feet, OZ + sz), new Vector3(OX + centre.x, LIBRARY_FLOOR_Y + feet, OZ + centre.z), step, out + 1);
+        deepest = Math.max(deepest, depth({ x: end.x - OX, z: end.z - OZ }));
+      }
+    }
+    return { marches, skipped, deepest };
+  };
+  const dragonDrawn = drawnBox(den.dragon.root, nest, nest.facing);
+  const pileDrawn = drawnBox(cat.pile.root, LIBRARY_CAT_PILE, LIBRARY_CAT_PILE.facing);
+  const catDrawn = drawnBox(cat.cat.root, LIBRARY_CAT_PILE, LIBRARY_CAT_PILE.facing);
+  const atNest = marchedAt(nest, nestReach, 0, (end) => PLAYER_RADIUS - (Math.hypot(end.x - nest.x, end.z - nest.z) - nestReach));
+  const atDragon = marchedAt(dragonDrawn, Math.hypot(dragonDrawn.halfLength, dragonDrawn.halfDepth), den.nestTop, (end) => PLAYER_RADIUS - outsideBox(dragonDrawn, end.x, end.z));
+  const atPile = marchedAt(pileDrawn, Math.hypot(pileDrawn.halfLength, pileDrawn.halfDepth), 0, (end) => PLAYER_RADIUS - outsideBox(pileDrawn, end.x, end.z));
+  const atCat = marchedAt(catDrawn, Math.hypot(catDrawn.halfLength, catDrawn.halfDepth), cat.pileTop, (end) => PLAYER_RADIUS - outsideBox(catDrawn, end.x, end.z));
+  const marched = [
+    { what: "the dragon's nest, from the floor", run: atNest, least: 4 },
+    { what: `the dragon, up on its nest's top (${den.nestTop.toFixed(2)} m)`, run: atDragon, least: 4 },
+    { what: "the cat's pile, from the floor", run: atPile, least: 16 },
+    { what: `the cat, up on her pile's top (${cat.pileTop.toFixed(2)} m)`, run: atCat, least: 16 },
+  ];
+  for (const { what, run, least } of marched) {
+    say(
+      run.marches >= least && run.deepest <= CORNER_ALLOWANCE,
+      `${run.marches} marches at ${what} from 16 bearings at 5 cm and the sprint stride (${run.skipped} starts skipped: off the floor or in a solid; at least ${least} wanted): ` +
+        `deepest a body's edge got into its drawn plan ${run.deepest.toFixed(3)} m, allowance ${CORNER_ALLOWANCE.toFixed(3)}`,
+    );
+  }
+
+  // ------------------------------------------------------------- Nobody stands on a dragon or a cat: the real child jumps at both.
+  const narrowTops = [den.dragonCollider[0], cat.catCollider[0]];
+  const kept = narrowTops.map((box) => box.topHalf);
+  const wide = mutating('wide-creature-tops');
+  if (wide) {
+    for (const box of narrowTops) box.topHalf = Number.NaN;
+    note("MADE the dragon's and the cat's tops whole (topHalf NaN) on purpose — the jumps must land her on them, and this run must go red");
+  }
+  interface Jumps {
+    tried: number;
+    skipped: number;
+    onTop: number;
+    wedged: number;
+    aloft: number;
+    inside: number;
+    leftRoom: number;
+    seatTrials: number;
+    seatFrames: number;
+    first: string;
+  }
+  const jumpAt = (centre: LocalPoint, seatReach: number, seatTop: number, onSeat: (at: LocalPoint) => boolean, body: BoxFootprint, top: number): Jumps => {
+    const jumps: Jumps = { tried: 0, skipped: 0, onTop: 0, wedged: 0, aloft: 0, inside: 0, leftRoom: 0, seatTrials: 0, seatFrames: 0, first: '' };
+    const inDen = libraryDenContains(centre.x, centre.z);
+    const touch = seatReach + PLAYER_RADIUS + 0.05;
+    for (const sprint of [false, true]) {
+      for (let b = 0; b < 16; b += 1) {
+        const angle = (b / 16) * Math.PI * 2;
+        const from = sprint ? touch + 1.5 : touch;
+        const sx = centre.x + Math.cos(angle) * from;
+        const sz = centre.z + Math.sin(angle) * from;
+        if (libraryDenContains(sx, sz) !== inDen || !onFloor(sx, sz) || !walkableAt(collision, OX + sx, OZ + sz, PLAYER_RADIUS, LIBRARY_FLOOR_Y)) {
+          jumps.skipped += 1;
+          continue;
+        }
+        jumps.tried += 1;
+        child.stand(sx, sz, (Math.atan2(centre.x - sx, centre.z - sz) * 180) / Math.PI);
+        for (let i = 0; i < 6; i += 1) child.step();
+        const go = child.towards(centre.x - sx, centre.z - sz, sprint);
+        let jumpedAt = -1;
+        let onTop = 0;
+        let seat = 0;
+        for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+          const here = child.room();
+          if (jumpedAt < 0 && (!sprint || Math.hypot(here.x - centre.x, here.z - centre.z) <= touch + 0.4)) {
+            child.input.pressVirtual('jump');
+            jumpedAt = i;
+          }
+          child.step(jumpedAt < 0 || i - jumpedAt < Math.round(0.5 / CHILD_DT) ? go : undefined);
+          const feetNow = player.position.y - LIBRARY_FLOOR_Y; // flat-ok: her height over the reading room's own flat floor, off the sphere
+          const at = child.room();
+          if (!player.isAirborne && feetNow >= top - 0.05) onTop += 1;
+          if (!player.isAirborne && Math.abs(feetNow - seatTop) < 0.02 && onSeat(at)) seat += 1;
+        }
+        const end = child.room();
+        const stuck = wedgeDepth(collision, player.position, player.position.y);
+        if (onTop > 0) jumps.onTop += 1;
+        if (stuck > WEDGE_DEPTH) jumps.wedged += 1;
+        if (player.isAirborne) jumps.aloft += 1;
+        if (outsideBox(body, end.x, end.z) < 0) jumps.inside += 1;
+        if (seat > 0) {
+          jumps.seatTrials += 1;
+          jumps.seatFrames += seat;
+        }
+        if (!jumps.first && (onTop > 0 || stuck > WEDGE_DEPTH || player.isAirborne || outsideBox(body, end.x, end.z) < 0)) {
+          jumps.first = `${sprint ? 'a sprint' : 'a jump from beside it'} from (${sx.toFixed(2)}, ${sz.toFixed(2)}): ${onTop} frame(s) standing on its top, ended at (${end.x.toFixed(2)}, ${end.z.toFixed(2)}) wedged ${stuck.toFixed(3)} m, airborne ${player.isAirborne}`;
+        }
+        if (!library.playerIsInside) {
+          jumps.leftRoom += 1;
+          child.enter();
+          if (inDen) library.openDenInstantly();
+        }
+      }
+    }
+    return jumps;
+  };
+  const dragonJumps = jumpAt(nest, den.nestRadius, den.nestTop, (at) => Math.hypot(at.x - nest.x, at.z - nest.z) <= den.nestRadius, den.dragonFootprint, den.dragonTop);
+  const pileReach = Math.hypot(cat.pileFootprint.halfLength, cat.pileFootprint.halfDepth);
+  const catJumps = jumpAt(LIBRARY_CAT_PILE, pileReach, cat.pileTop, (at) => outsideBox(cat.pileFootprint, at.x, at.z) <= 0, cat.catFootprint, cat.catTop);
+  if (wide) narrowTops.forEach((box, i) => {
+    box.topHalf = kept[i]!;
+  });
+  for (const [what, jumps, least] of [
+    ['the baby dragon', dragonJumps, 8],
+    ['the library cat', catJumps, 20],
+  ] as const) {
+    say(
+      jumps.tried >= least && jumps.onTop === 0 && jumps.wedged === 0 && jumps.aloft === 0 && jumps.inside === 0,
+      `nobody stands on ${what}: ${jumps.tried} real jumps at it from 16 bearings, from beside it and from a sprint (${jumps.skipped} starts skipped: in a wall or another solid; at least ${least} wanted) — ` +
+        `${jumps.onTop} stood her on its top, ${jumps.wedged} left her wedged, ${jumps.aloft} left her in the air, ${jumps.inside} ended inside it${jumps.first ? `; first: ${jumps.first}` : ''}`,
+    );
+  }
+  note(
+    `the jumps' seats: the dragon's nest held her ${dragonJumps.seatFrames} frame(s) in ${dragonJumps.seatTrials} of ${dragonJumps.tried} jumps before its dragon pushed her off; ` +
+      `the cat's pile ${catJumps.seatFrames} frame(s) in ${catJumps.seatTrials} of ${catJumps.tried}; ${dragonJumps.leftRoom + catJumps.leftRoom} jump(s) carried her out of the room`,
+  );
+
+  // ------------------------------------------------------------- CAT: Pet the cat!
+  child.stand(LIBRARY_CAT_STAND.x, LIBRARY_CAT_STAND.z, LIBRARY_CAT_STAND.facing);
+  child.run(0.4);
+  const catZone = zoneById(CAT_ZONE_ID);
+  const pet = chipOf(CAT_ZONE_ID);
+  const catStandOff = catZone ? Math.hypot(catZone.standX - (OX + LIBRARY_CAT_STAND.x), catZone.standZ - (OZ + LIBRARY_CAT_STAND.z)) : Infinity;
+  const catReach = catZone ? Math.hypot(player.position.x - catZone.standX, player.position.z - catZone.standZ) : Infinity;
+  say(
+    !!catZone && pet?.label === LIBRARY_CHIPS.pet && catZone.verb === 'Pet' && catZone.highlight?.object === cat.group && catStandOff < 1e-9 && catReach <= standRadiusOf(catZone),
+    `stood ${LIBRARY_CAT_STAND.what}, '${CAT_ZONE_ID}' offers '${pet?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.pet}'), verb '${catZone?.verb ?? '?'}', its stand ${catStandOff.toFixed(3)} m off the layout's, ` +
+      `she ${catReach.toFixed(2)} m from it (reach ${catZone ? standRadiusOf(catZone) : '?'}), the rainbow ${catZone?.highlight?.object === cat.group ? 'rings' : 'does NOT ring'} the cat and her pile`,
+  );
+  const { earL, earR, head } = cat.cat;
+  const restEarL = earL.rotation.z;
+  const restEarR = earR.rotation.z;
+  // Her face: the head's front-most drawn point, in the head's own frame, followed into the room.
+  const nose = new Vector3(0, 0, -Infinity);
+  visiblePoints(head, (point) => {
+    if (point.z > nose.z) nose.copy(point);
+  }, head);
+  const faceY = (): number => {
+    head.updateWorldMatrix(true, false);
+    return head.localToWorld(nose.clone()).y;
+  };
+  let restFace = -Infinity;
+  for (let i = 0; i < 30; i += 1) {
+    child.step();
+    restFace = Math.max(restFace, faceY());
+  }
+  const restFaceShown = cat.cat.face;
+  const petsBefore = cat.pets;
+  pet?.run();
+  const purred = library.lastCreatureLine;
+  let earMoved = 0;
+  let faceRise = -Infinity;
+  let happyAt1 = false;
+  let asleepBy3 = false;
+  let hearts = 0;
+  let secondPressChanged = true;
+  let worstCatDrawn = -Infinity;
+  let catSamples = 0;
+  for (let i = 0; i < Math.round(3.2 / CHILD_DT); i += 1) {
+    if (i === Math.round(0.2 / CHILD_DT)) {
+      const pets = cat.pets;
+      const line = library.lastCreatureLine;
+      chipOf(CAT_ZONE_ID)?.run();
+      secondPressChanged = cat.pets !== pets || library.lastCreatureLine !== line;
+    }
+    child.step();
+    const t = (i + 1) * CHILD_DT;
+    if (t <= 0.5) {
+      earMoved = Math.max(earMoved, Math.abs(earL.rotation.z - restEarL), Math.abs(earR.rotation.z - restEarR));
+      faceRise = Math.max(faceRise, faceY() - restFace); // flat-ok: her face's height over its own rest, both in the reading room's flat space
+    }
+    if (Math.abs(t - 1) < CHILD_DT / 2) happyAt1 = cat.cat.face === 'happy';
+    if (Math.abs(t - 3) < CHILD_DT / 2) asleepBy3 = cat.cat.face === 'asleep';
+    hearts = Math.max(hearts, spritesUp(library.roomRoot, PALETTE.markerPink));
+    if (i % 3 === 0) {
+      catSamples += 1;
+      worstCatDrawn = Math.max(worstCatDrawn, furthestOut(cat.cat.root, cat.catFootprint));
+    }
+  }
+  say(
+    restFaceShown === 'asleep' && cat.pets === petsBefore + 1 && earMoved > 0.1 && faceRise > 0.02,
+    `asleep before (${restFaceShown}); Pet the cat! counts (${cat.pets - petsBefore}) and within 0.5 s an ear twitches ${earMoved.toFixed(3)} rad off its rest (over 0.1) ` +
+      `and she lifts her face ${(faceRise * 100).toFixed(1)} cm (over 2) — the head's lift, ${PET_SECONDS} s of pet`,
+  );
+  say(happyAt1 && asleepBy3, `she is happy at 1.0 s (${happyAt1}) and asleep again by 3 s (${asleepBy3})`);
+  say(
+    (lines.cat.purr as readonly string[]).includes(purred ?? '') && hearts >= 1,
+    `she purrs '${purred}' (one of ${lines.cat.purr.map((line) => `'${line}'`).join(', ')}) and pink hearts rise (up to ${hearts} at once)`,
+  );
+  say(!secondPressChanged, `a second press 0.2 s in, inside her ${PET_GUARD_SECONDS} s guard, changes nothing (no second pet, no second line)`);
+  say(worstCatDrawn <= DRAWN_INSIDE, `drawn is solid while she is petted: her furthest drawn point over ${catSamples} sampled frames is ${worstCatDrawn.toFixed(4)} m outside her body (at most ${DRAWN_INSIDE})`);
+
+  // ------------------------------------------------------------- A visit later: hello again.
+  say(library.requestEnterDoor(), 'out through /library-door');
+  child.run(1.2);
+  child.enter();
+  child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+  child.step();
+  say(
+    library.lastCreatureLine === lines.dragon.hello && dex().count === 1,
+    `a visit later, at its stand again, it says '${library.lastCreatureLine}' (wanted '${lines.dragon.hello}') — still one discovery (count ${dex().count})`,
+  );
+  // Leave as found: in at the arrival, the leaf shut, the den hidden.
+  child.enter();
+  note(
+    `CREATURES: the dragon's body (${den.dragonFootprint.x.toFixed(3)}, ${den.dragonFootprint.z.toFixed(3)}) ${(2 * den.dragonFootprint.halfLength).toFixed(3)} x ${(2 * den.dragonFootprint.halfDepth).toFixed(3)} facing ${den.dragonFootprint.facing}, ` +
+      `top ${den.dragonTop.toFixed(3)} (crest ${den.dragonTopHalf.toFixed(3)}); its nest a disc r ${den.nestRadius.toFixed(3)} at (${nest.x}, ${nest.z}), top ${den.nestTop.toFixed(3)}; ` +
+      `the pile (${cat.pileFootprint.x.toFixed(3)}, ${cat.pileFootprint.z.toFixed(3)}) ${(2 * cat.pileFootprint.halfLength).toFixed(3)} x ${(2 * cat.pileFootprint.halfDepth).toFixed(3)}, top ${cat.pileTop.toFixed(3)}; ` +
+      `the cat (${cat.catFootprint.x.toFixed(3)}, ${cat.catFootprint.z.toFixed(3)}) ${(2 * cat.catFootprint.halfLength).toFixed(3)} x ${(2 * cat.catFootprint.halfDepth).toFixed(3)}, top ${cat.catTop.toFixed(3)} (crest ${cat.catTopHalf.toFixed(3)}); ` +
+      `${child.frames} frames stepped so far`,
+  );
 }
 
 console.log('\nHOUSEKEEPING:');
