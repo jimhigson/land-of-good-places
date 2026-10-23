@@ -19,6 +19,9 @@
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
  * LIBRARY_CHECK_REMOVE='the owl' pnpm run check:library       # the owl's solid out: OWL must go red (her middle is reachable)
  * LIBRARY_CHECK_MUTATE=card-twice pnpm run check:library      # a second card given through the non-idempotent door: CARD must go red
+ * LIBRARY_CHECK_MUTATE=fixed-hysteresis pnpm run check:library  # the selection's band a fixed 0.6 m (before #734): SHELF WALK's arrivals must go red
+ * LIBRARY_CHECK_MUTATE=no-hysteresis pnpm run check:library  # no band at all: SHELF WALK's sway midway must go red (flicker)
+ * LIBRARY_CHECK_MUTATE=tap-loses pnpm run check:library      # a tap dropped while proximity holds anything else (before #734): SHELF WALK's taps must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -112,6 +115,15 @@
  *     children: their routes swept, their stroll inside and freeze outside,
  *     and the story-time rehearsal — summoned, sat, furniture to the player,
  *     dismissed).
+ * 17. SHELF WALK (QA, PR #734) — the big readers' shelf, six books 0.6 m
+ *     apart, walked the way QA walked it: one continuous session, a real
+ *     `Selection` wired as `Game` wires it, E through the InputSystem's own
+ *     key listener and `InteractRouter`. Every arrival on a stand opens that
+ *     stand's book — walked north, walked back south, come from the aisle,
+ *     and stood on link after link — a tap on a neighbour's book selects it
+ *     and E opens it, and a sway midway between two stands never changes the
+ *     selection (no flicker). Its three mutations put back each half of the
+ *     old rule.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -3517,7 +3529,7 @@ console.log("\nSHELF WALK — the real child walks the big readers' shelf stand 
   };
   if (mutating('fixed-hysteresis')) {
     patch('hysteresisBand', () => 0.6);
-    note('MUTATED Selection.hysteresisBand to a fixed 0.6 m whatever the gap (the rule before PR #734): every arrival on a stand must go red');
+    note('MUTATED Selection.hysteresisBand to a fixed 0.6 m whatever the gap (the rule before PR #734): the arrivals must go red — every one from the aisle; a straight walk stops on an exact tie at 0.6 m, so some of those pass by rounding');
   }
   if (mutating('no-hysteresis')) {
     patch('hysteresisBand', () => 0);
