@@ -899,13 +899,16 @@ export class World implements GameSystem {
    *   (Jim, 19 Oct 2026) — and whose line her companions, coming back out of
    *   her backpack after a ride, never form up on;
    * - the ferris wheel, whose gondola seats her companion — the front of her
-   *   line — in a chair of its own (`CompanionRide`'s `'drawn by the ride'`).
+   *   line — in a chair of its own (`CompanionRide`'s `'drawn by the ride'`);
+   * - the library's owl, who waits for any of them in her way as she does for
+   *   her: never flown into, never landed on (#718).
    */
   attachParade(parade: Parade): void {
     this.hotel.petParade = parade;
     this.building.petParade = parade;
     this.train.attachParade(parade);
     this.ferrisWheel.attachParade(parade);
+    this.library.attachParade(parade);
     parade.keepOff((x, y, z, radius) => this.train.onTheLine(x, y, z, radius));
   }
 
