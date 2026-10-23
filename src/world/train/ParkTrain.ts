@@ -247,6 +247,7 @@ interface Seat {
 }
 
 const _planForward = /* @__PURE__ */ new Vector3();
+const _upOnScratch = /* @__PURE__ */ new Vector3();
 /** A half turn about the carriage's own up: a bench facing back down it. */
 // flat-ok: the carriage's own up — a local axis, composed onto its leant frame
 const HALF_TURN = /* @__PURE__ */ new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI);
@@ -914,12 +915,29 @@ export class ParkTrain implements GameSystem, TrainService {
     for (let i = 0; i < this.seats.length; i += 1) {
       if (i === PLAYER_SEAT || i === COMPANION_SEAT) continue;
       const seat = this.seats[i];
-      if (seat && seat.taken === null) {
+      if (seat && seat.taken === null && !this.upOn(seat.car)) {
         seat.taken = 'npc';
         return i;
       }
     }
     return null;
+  }
+
+  /**
+   * **Is she up on this carriage?** — standing in its tub, over its seats. A
+   * child of the crowd never sits down on her: a seated rider is furniture to
+   * her (`NpcSystem.separateFromPlayer`), and one put in the seat where she
+   * stood shouldered her off the carriage, over its far side and down into
+   * the slot by the fence (`check:solids` clause 13, seed 2). The child takes
+   * another carriage, or waits for the next train.
+   */
+  private upOn(car: number): boolean {
+    const player = this.player;
+    const carriage = this.carriages[car];
+    if (!player || player.riding || !carriage) return false;
+    carriage.root.updateMatrixWorld();
+    const local = carriage.root.worldToLocal(_upOnScratch.copy(player.position));
+    return Math.abs(local.x) <= CARRIAGE_BODY_HALF_WIDTH + PLAYER_RADIUS && Math.abs(local.z) <= CARRIAGE_LENGTH / 2 + PLAYER_RADIUS && local.y >= CAR_FLOOR_Y;
   }
 
   seatValid(seat: number): boolean {
