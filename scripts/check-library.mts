@@ -3022,11 +3022,19 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     for (const [a, b] of waysWorld[index]!) nearest = Math.min(nearest, segmentDistance(a, b, at));
     return nearest;
   };
-  /** Up against a solid — away from her own cushion, whose side her walk ends at and which she stands up out of. */
-  const pressed = (kid: (typeof kids)[number]): boolean =>
+  /**
+   * Up against a solid by her own steering — away from her own cushion (whose
+   * side her walk ends at, and which she stands up out of), and with no other
+   * child within `SEPARATION` of her: a child the crowd's push-apart squeezes
+   * against something as another walks past is the push-apart's doing
+   * (`check:npc-separation`'s), counted apart as `squeezed`, not a lean.
+   */
+  const againstASolid = (kid: (typeof kids)[number]): boolean =>
     !kid.body.seated &&
     Math.hypot(kid.body.position.x - kid.driver.seat.x, kid.body.position.z - kid.driver.seat.z) > seatArrive + 0.2 &&
     !collision.isClearCircle(kid.body.position.x, kid.body.position.z, NPC_RADIUS + 0.01);
+  const crowded = (kid: (typeof kids)[number]): boolean => kids.some((other) => other !== kid && other.body.position.distanceTo(kid.body.position) < SEPARATION);
+  const pressed = (kid: (typeof kids)[number]): boolean => againstASolid(kid) && !crowded(kid);
   /**
    * One run of the crowd, measured: each child's frames up against a solid, the
    * longest run of them (a **lean**: pushing at something, where a brush past a
@@ -3034,6 +3042,8 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
    */
   interface Watch {
     readonly pressedFrames: number[];
+    /** Frames up against a solid with another child within SEPARATION of her — the push-apart's squeeze, reported. */
+    readonly squeezed: number[];
     readonly lean: number[];
     readonly run: number[];
     readonly off: number[];
@@ -3041,7 +3051,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
   }
   /** The longest a child may stay up against a solid: a second — a brush at a corner, never a lean. */
   const LEAN_FRAMES = Math.round(1 / CHILD_DT);
-  const watch = (): Watch => ({ pressedFrames: kids.map(() => 0), lean: kids.map(() => 0), run: kids.map(() => 0), off: kids.map(() => 0), step: 0 });
+  const watch = (): Watch => ({ pressedFrames: kids.map(() => 0), squeezed: kids.map(() => 0), lean: kids.map(() => 0), run: kids.map(() => 0), off: kids.map(() => 0), step: 0 });
   const stepWatched = (w: Watch, last: { x: number; z: number }[]): void => {
     child.step();
     kids.forEach((kid, i) => {
@@ -3051,6 +3061,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         w.lean[i] = Math.max(w.lean[i]!, w.run[i]!);
       } else {
         w.run[i] = 0;
+        if (againstASolid(kid)) w.squeezed[i] = w.squeezed[i]! + 1;
       }
       w.off[i] = Math.max(w.off[i]!, offWays(i));
       w.step = Math.max(w.step, stepOf(kid, last[i]!));
@@ -3090,7 +3101,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       { what: "the central aisle's end, the door to the story rug (central[5])", at: aisleNode('central', 5) },
       { what: "the junction Juno's and Lark's ways both pass (central[4])", at: aisleNode('central', 4) },
     ];
-    const results: { what: string; stood: LocalPoint; times: number[]; gaveUp: string[]; playerMoved: number; w: Watch; back: boolean }[] = [];
+    const results: { what: string; stood: LocalPoint; times: number[]; gaveUp: string[]; playerMoved: number; w: Watch; back: boolean; wBack: Watch }[] = [];
     for (const spot of stillSpots) {
       child.stand(spot.at.x, spot.at.z, 180);
       child.run(0.5);
@@ -3110,9 +3121,11 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       }
       const gaveUp = kids.filter((kid) => !kid.driver.arrived).map((kid) => `${kid.plan.name} (${kid.driver.mode} at ${label({ x: kid.body.position.x - OX, z: kid.body.position.z - OZ })})`);
       const playerMoved = Math.hypot(child.player.position.x - where.x, child.player.position.z - where.z);
+      // And dismissed with her still standing there: the way back passes her too.
       for (const kid of kids) kid.driver.dismiss();
-      untilStrolling(watch(), DISMISS_SECONDS);
-      results.push({ what: spot.what, stood, times, gaveUp, playerMoved, w, back: allStrolling() });
+      const wBack = watch();
+      untilStrolling(wBack, DISMISS_SECONDS, STROLL_WATCH);
+      results.push({ what: spot.what, stood, times, gaveUp, playerMoved, w, back: allStrolling(), wBack });
     }
     child.stand(desk.x, desk.z, desk.facing);
     const control = results[0]!;
@@ -3131,6 +3144,13 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         `  and on the way nobody leant on the furniture: the longest any stayed up against a solid ${eachKid(result.w.lean, (frames) => `${frames}`)} frame(s) ` +
           `(${LEAN_FRAMES} allowed: a brush, never a lean; in all ${eachKid(result.w.pressedFrames, (frames) => `${frames}`)}); ` +
           `furthest off her ways ${eachKid(result.w.off, (off) => `${off.toFixed(2)} m`)}${isControl ? '' : ' (a way round her)'}; longest step ${result.w.step.toFixed(3)} m`,
+      );
+      say(
+        result.back && result.wBack.lean.every((frames) => frames <= LEAN_FRAMES) && result.wBack.step <= NPC_RADIUS * 2,
+        `  dismissed with her still standing there, every child walks back past her to her stroll (${result.back}, watched ${STROLL_WATCH} s more): ` +
+          `the longest any stayed up against a solid ${eachKid(result.wBack.lean, (frames) => `${frames}`)} frame(s) (${LEAN_FRAMES} allowed; ` +
+          `squeezed there by a child passing ${eachKid(result.wBack.squeezed, (frames) => `${frames}`)} frame(s), the push-apart's); ` +
+          `furthest off her ways ${eachKid(result.wBack.off, (off) => `${off.toFixed(2)} m`)}; longest step ${result.wBack.step.toFixed(3)} m`,
       );
     }
   }
