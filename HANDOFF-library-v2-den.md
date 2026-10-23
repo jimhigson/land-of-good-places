@@ -60,6 +60,13 @@ committed). Commit first, then mutate, then `git checkout`.
       ringed by the rainbow, alone in its gap), `11-den-west-lantern-free.png` (a lantern over the
       niches, stars and the moon), `12-den-north-free.png` (the dragon on its nest, the niches behind).
 
+Final at d6e2e5e3: `check:library` **176 ✓, 0 ✗**, "All clauses passed." (`denart/final-green.log`).
+The park source hash at this head is **90019f97006a14e3893aa38abca0e051a4f7655ffd417772bc5d74ace2ca20a6**;
+no park was re-solved — `.parks/5.json` is the integration branch's honest seed 5 (digest
+d6721090fb3f1d3a), hydrated with `LGP_PARK_FILE`; the den moves nothing the park plan reads.
+**Every script that imports `src/` needs `LGP_PARK_FILE=$PWD/.parks/5.json`** — `check:brevity` and a
+scratch script run without it here started the seed-5 acceptance loop twice; both killed by PID.
+
 ## What den-art built
 **The den, drawn (`shell.ts` `buildLibraryDenShell`).** `createLibraryDen({ floor: fabric.floor,
 wall: fabric.wall, lintel: westMaterial })` replaces Step 11's four primitive boxes (the floor slab,
@@ -155,6 +162,11 @@ lanterns at room (−23.9, 3.9, −3.91) and (−21.99, 3.9, −7.6); the real c
   (`red-byhand-lantern-untrimmed.log`): `0.0318 m² sep 8.76e-3 at room (-22.013, 4.436, -7.609) n (0,
   0, 1) den-wallNorth | denLantern-bracket/<outline>` and the west wall's twin at (−23.909, 4.436,
   −3.887). With the trim: 0 pairs (`coplanar-room-trim3.log`).
+- **The pull book's gap, re-proved against the kit's book** (the review's clause, by hand
+  `pullBookGap` → `false` in `furnish.ts`, reverted) → exit 1, **175 ✓ 1 ✗** (`red-nogap-kitbook.log`):
+  `✗ the gold book stands alone in its gap: 43 book(s) of its row on shelf 1 (at least 10 wanted), 3
+  pass(es) through it (x 1.945..2.055 in the leaf's frame); the nearest stands -0.095 m beside it`
+  (green: 37 books, 0 through, the nearest 0.051 m).
 - **`check:coplanar`'s own ratchet on seed 5, every space** (`coplanar-gate-head.log` →
   `coplanar-gate-trim.log`, the gate's `coplanarRegressions` over the child's JSON): **19 NEW → 0**,
   all 19 in the library. Before den-art (3e058878, the detached scratch worktree
