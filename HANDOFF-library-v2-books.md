@@ -4,7 +4,10 @@ Branch `feat/library-v2-books`, worktree `.claude/worktrees/library-v2-books`, c
 integration head `feat/library-v2` @ 33bcc361 (engine + the four tracks + the API adaptation).
 Engineer, Claude Fable 5.1, 22–23 Oct 2026; **restarted 23 Oct 04:3x by Claude Opus 5.5** (the
 first agent stopped with the handoff's red transcripts and the index's doc uncommitted — both
-verified against the tree and committed as found). Scratch logs: `.claude/library-build-scratch/books/`.
+verified against the tree and committed as found); **restarted again 23 Oct 05:0x by Claude Opus 5.5**
+(found the branch pushed and clean at 3162492f; re-ran every final check and every red at that head —
+see "Final runs" and the red transcripts' first paragraph). Scratch logs: `.claude/library-build-scratch/books/`
+(this round's are the `*-4.log` files and `book-reader-shots-4/`).
 Plan: `docs/library-build/PLAN-parts-4-5.md`; the old base's record is `HANDOFF-library-books2.md`
 (items 1–6, merged into the integration at a30e7b96); the kit's record is `HANDOFF-art-story-props.md`.
 
@@ -34,16 +37,41 @@ engineers never build a visible item out of three.js primitives; a sprite or par
 - [x] `bookKinds.ts`'s stale claim (books.ts outside the parks' closure) corrected: measured with
       `parkSourceClosure`, `books.ts`, `chapterBooks/index.ts` and `bookKinds.ts` are all IN
       (`parkFacts.ts` → `World.ts` → `Library.ts` → `libraryLines.ts` → `books.ts` → the index)
-- [ ] runs: check:brevity, check:library (hydrated park), check:served-book-reader, vitests,
-      check:story-props-glb, check:assets, build — exit codes read
-- [ ] items 1–6 re-verified on the engine with their reds re-proved
-- [ ] handoff final, push
+- [x] runs at 3162492f: tsc, typecheck:test, check:brevity, check:library (hydrated park),
+      check:served-book-reader, vitests, check:story-props-glb, check:library-glb, check:assets,
+      check:flat-primitives, build — every one exit 0, counts in "Final runs" below
+- [x] items 1–6 re-verified on the engine with their reds re-proved — twice: at 8796bff0, and again at
+      3162492f with identical figures (red transcripts below)
+- [x] handoff final, pushed
+
+## Final runs (at 3162492f, park hash fb2690b5…, seed 5 restart 1 hydrated; exit codes read, counts off the screen)
+
+| check | exit | what it said |
+|---|---|---|
+| `pnpm exec tsc --noEmit` | 0 | — |
+| `pnpm run typecheck:test` | 0 | — |
+| `pnpm run check:brevity` | 0 | `354 pieces of copy are short enough; 6 still carry a recorded exception`; 10 CONTROLs ok; `12 picture books, 0 chapter books` (the chapter shape is held to its CONTROL fixtures until a book lands) |
+| `pnpm exec vitest run test/library test/store` | 0 | `Test Files 9 passed (9)`, `Tests 62 passed (62)` (`test/library` alone: `16 passed (16)`) |
+| `pnpm run check:library` | 0 | `101 ✓ 0 ✗`, `All clauses passed.`; stderr: `6 slot(s) WAIT for their books` (slots 13–18, west-4) |
+| `SERVED_CHECKS_PORT=6443 pnpm run check:served-book-reader` | 0 | `check:book-reader passed`, 1054 ok, 0 FAIL: `every picture model is drawn on a page this check opens — all 63`; `0 program link(s)` while the sheet opened; `11 pictures, the thinnest covering 21.3% of its pixels`; server pid stopped, port free after |
+| `pnpm run check:story-props-glb` | 0 | 61 nodes, both readers agree; `ships as built` |
+| `pnpm run check:library-glb` | 0 | 65 nodes, both readers agree |
+| `pnpm run check:assets` | 0 | `167 assets check out`, `28 still carry recorded drift` |
+| `pnpm run check:flat-primitives` | 0 | `107 site(s) carry an explicit // flat-ok`, `no new flat primitives, and no stale baseline entries` |
+| `pnpm run build` | 0 | `built in 359ms` |
+
+The model sheet's six spreads (`book-reader-shots-4/model-sheet-spread-*.png`) were opened and looked
+at: every kit model draws in the reader's toon look, nothing black, Nimbus grey-and-frowning and
+white-and-happy, the nibbled flower a bare stalk, the queue posts' rope swagged, the lit wheel's star
+in its bracket with the rim's lights on, confetti and rain painted over. The full gate (`check`,
+`test:procgen`) is left to the PR's CI, per the task.
 
 ## Parks, locally
 
 The merge moved the park source hash (Player.ts and NpcSystem.ts are in the closure):
-`8644cfac…` → **`45bccc92bc703c35a86d390deb73579a980dddab6894f5950934eefc05abd2d6`** (and any later
-src edit moves it again: `node scripts/lib/park-source-hash.mjs`). `.parks/` here is the
+`8644cfac…` → `45bccc92…`, and this branch's own src edits moved it on to **`fb2690b5768c825027962e72909caef7ce13612b8dd429c3ddc23e65c4c95546`**
+at 51aec20c / 3162492f (any later src edit moves it again: `node scripts/lib/park-source-hash.mjs`;
+`.claude/library-build-scratch/books/restamp.sh` restamps the manifest to the tree). `.parks/` here is the
 integration's honest seed 5 (`../library-v2/.parks/5.json`, restart 1, digest d6721090fb3f1d3a)
 with `manifest.json`'s `sourceHash` restamped to this tree's — the engine handoff's shortcut (the
 reading room is seed-independent; `acceptedRestartOf` reads `.parks/manifest.json` first, so no
@@ -171,7 +199,19 @@ started a 12-minute acceptance solve instead of a 60-second check (killed by PID
 check:library and the dev server when my own commit moved the hash after the first restamp:
 restamp after EVERY src edit, mutation or not.
 
-**Items 1–6 on the engine (books2's reds, re-proved here):**
+**Re-proved at the final head 3162492f** (23 Oct, 05:2x, the second restart; same mutations, each
+reverted with `git checkout`, `git status --short` empty after each, the manifest restamped to the
+mutated tree `33d51787…` for the brevity red and back to `fb2690b5…` after): `every` → `some` exit 1,
+`Tests 2 failed | 10 passed (12)`; `storyTimeMayRead` → `true` exit 1, `Tests 1 failed | 3 passed
+(4)`; the two-sentence ripikaBalloon page exit 1, `1 problem across 354 pieces of copy`
+(`bookPage:ripikaBalloon#1 … 2 SENTENCES`); `LIBRARY_CHECK_REMOVE='bookcase west-4'` exit 1, `99 ✓ 7 ✗`
+with the same seven lines as below; `CHECK_BOOK_READER_CHAPTER=overlong` (port 6443) exit 1, 1067 ok,
+`check:book-reader FAILED — 6 problem(s)`, the same six figures; the bench removed from the model
+sheet (port 6443) exit 1, 1053 ok, `FAIL every picture model is drawn on a page this check opens —
+never drawn: parkBench`. The `assertDrawsSomething` red and its control were not re-run: they ran at
+51aec20c, and `git diff --stat 51aec20c 3162492f` is the handoff alone. Logs: `red-*-4.log`.
+
+**Items 1–6 on the engine (books2's reds, first re-proved at 8796bff0):**
 
 - **check:brevity, the carve-out does not leak** (real data: `books.ts` ripikaBalloon page 1
   `'RiPika has a spotty balloon.'` → `'RiPika has a balloon. It is spotty.'`, manifest restamped to
@@ -250,7 +290,24 @@ frame (the hover: the same body a moment later, plan drift tested first) and car
   `check-book-reader.mts` item 10 or `furnish.ts`: the only furnish change is `export` on
   `PlacedBook`, `shelveFace`, `bookInstances`.
 - The two book engineers add `chapterBooks/<id>.ts` + an index entry each; see the layout above.
+  Re-proved at 3162492f in a scratch repo: branch a (three imports and three entries under block 1)
+  and branch b (the same under block 2) both merge clean with `-c rerere.enabled=false`, the list in
+  shelf order.
 - `blendkit.ts_const` follows re-exports (the Artist's fix) travels with the merge.
+- **A known conflict waits for the join in `src/entities/Player.ts`.** This branch carries
+  `feat/engine-solids` only up to 7ce1deae (through the art merge) plus one line of its own (8796bff0:
+  a `// flat-ok:` comment over the hover rescue's `Math.abs(p.y - this.hoverAt.y)`, because
+  check:flat-primitives was red on it). The engine has since moved to bf7b1c8b, and its 0807890d
+  rewrote that very line as `altitudeAt(p…) - altitudeAt(this.hoverAt…)` — its own fix for the
+  same finding. `git merge-tree --write-tree HEAD origin/feat/engine-solids` shows exactly one
+  conflict, that hunk. **Resolve it by taking the engine's side** (its comment and its `altitudeAt`
+  line; drop this branch's `flat-ok` line, which no longer describes anything), then run
+  check:flat-primitives and read its exit code.
+- The story-props Artist's join list (`HANDOFF-art-story-props.md`): items 1, 2, 4 and 5 are done
+  here (`PICTURE_MODELS`/`buildActor`/warm-up for all 31; `createStoryBook` delegates; the lit wheel's
+  star is fitted to the measured bracket rather than a typed size 2.2; the flower takes `colour` and
+  `nibbled`). Item 3 (Nimbus's colour and mood per page) is the book engineers' — `colour:
+  'blossomWhite'` on *Storm* p9–p10 (Decision 5), moods from `final.json`. Items 6–8 need nothing.
 
 ## Questions for Jim
 
