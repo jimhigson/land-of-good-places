@@ -78,3 +78,17 @@ The Workflow script `/Users/jim/dev/landOfGoodPlaces/.claude/library-build-scrat
 - It embeds every finished result as `CACHE_ALL`.
 - Its join prompt creates this worktree if it is missing, and treats an existing one as a restart.
 - Relaunch it once #733 has merged. In the PR step, set the base to main rather than `feat/library-v2-pr`.
+
+## The chapter books moved (23 Oct, 22:00) — take them from `feat/library-chapter-books`, not `feat/library-v2-books`
+
+The six chapter books now live on **`feat/library-chapter-books`** (worktree
+`.claude/worktrees/library-chapter-books`; PR #734, head `feat/library-chapter-books-pr` @ e03200d5,
+stacked on #733). That branch is `feat/library-v2-books` @ 9325e0f7 merged onto part 4, **plus the
+big readers' shelf fix**: walking the shelf, "Read it!" opened the book of the stand just left,
+because `Selection`'s 0.6 m hysteresis never let go between stands 0.6 m apart. Fixed in
+`src/world/Selection.ts` (3b461529), with check:library SHELF WALK (4d0dd06f) and check:tap-spacing
+rule 3 (0e0f9da7). **Part 5's join should merge `origin/feat/library-chapter-books`, not
+`origin/feat/library-v2-books`**, or the shelf bug comes back. Its handoff,
+`HANDOFF-library-chapter-books.md` ("PAUSED 23 Oct 22:00"), has the state, the red CI on part 4's
+beacon clause (diagnosed), and the plan, still open at the pause, to put the books straight onto main
+without part 4.
