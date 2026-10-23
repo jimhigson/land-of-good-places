@@ -414,7 +414,15 @@ export const LIBRARY_CASE_STAND_OUT = LIBRARY_STAND_KEEP_OUT + 0.1;
  */
 export const LIBRARY_DESK_STAND: StandSpot = { what: "the desk's front", x: 6, z: 8.7, facing: 180 };
 
-/** Behind the desk, where the owl stands (#714 part 4) — kept clear for her. */
+/**
+ * Behind the desk, where the owl stands (#718, plan Step 6): **her solid
+ * spot, not a keep-out**. It was held clear in {@link libraryStandSpots}
+ * until she arrived; now `LibraryOwl` registers a filled disc of her measured
+ * plan reach here, so a child walks up to her and bumps into her the way she
+ * bumps into the desk. `facing` is the owl's own: 0, toward the desk's front
+ * ({@link LIBRARY_DESK_STAND}) and the camera. Still a `StandSpot`, because
+ * story time (plan Step 9) lands her back on it.
+ */
 export const LIBRARY_LIBRARIAN_SPOT: StandSpot = { what: "the librarian's spot", x: 6, z: 5.3, facing: 0 };
 
 /** Where she stands to pull the secret book (#719): in front of the secret case, facing it. */
@@ -646,22 +654,26 @@ export const LIBRARY_SEAT_FRONT = 1.5;
 
 /**
  * **Every spot a child must be able to stand on, room-local** — the arrival,
- * the doorway, the desk's front, the librarian's spot, the rug, every seat's
- * front, every story cushion's seat, the secret shelf's stand, the secret
- * den's two (tagged `den`), every readable book's stand (the picture books'
- * twelve and the big readers' shelf, {@link LIBRARY_READABLE_SLOTS}), and
- * every aisle node. `props.ts`'s `libraryKeepOuts` turns these into keep-out
- * discs and refuses any collider inside one; `check:library` floods the floor
- * from the arrival and asserts every one is reached — and, while the secret
- * shelf is shut, that every `den` one is not: the den is the one pocket the
- * room is meant to have.
+ * the doorway, the desk's front, the rug, every seat's front, every story
+ * cushion's seat, the secret shelf's stand, the secret den's two (tagged
+ * `den`), every readable book's stand (the picture books' twelve and the big
+ * readers' shelf, {@link LIBRARY_READABLE_SLOTS}), and every aisle node.
+ * `props.ts`'s `libraryKeepOuts` turns these into keep-out discs and refuses
+ * any collider inside one; `check:library` floods the floor from the arrival
+ * and asserts every one is reached — and, while the secret shelf is shut,
+ * that every `den` one is not: the den is the one pocket the room is meant to
+ * have.
+ *
+ * **Not here: {@link LIBRARY_LIBRARIAN_SPOT}.** It was, until the owl arrived
+ * (#718, plan Step 6); now she stands on it, solid, and a spot a child bumps
+ * into is the opposite of one she must be able to stand on. `check:library`'s
+ * OWL clause asserts the fill does *not* reach it.
  */
 export function libraryStandSpots(): StandSpot[] {
   const spots: StandSpot[] = [
     LIBRARY_ARRIVAL,
     { what: 'the doorway', x: LIBRARY_DOOR_X, z: LIBRARY_INNER_Z - 0.4, facing: 0 },
     LIBRARY_DESK_STAND,
-    LIBRARY_LIBRARIAN_SPOT,
     { what: 'the story rug', x: LIBRARY_STORY_RUG.x, z: LIBRARY_STORY_RUG.z, facing: 180 },
     LIBRARY_SECRET_STAND,
     LIBRARY_DEN_DOORWAY_STAND,

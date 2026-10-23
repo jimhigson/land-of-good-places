@@ -33,6 +33,7 @@ cannot float over anything.
 | Park children's chat bubbles ("I'm going to The Castle") | `NpcSystem.ts` → `ui/SpeechBubble.ts` | `speech` | `npc:<name>` |
 | The hotel receptionist's script | `world/hotel/Hotel.ts` → `SpeechBubble` | `actionFeedback` | `hotel-reception` |
 | The Reptile House's answers — blurbs, "peep!", "ribbit!", "Hisss-ello!", "3 of 5 babies found!", the Noodle-o-meter reading | `world/reptileHouse/ReptileHouse.ts` (`say`) → `SpeechBubble` | `actionFeedback` | the pressed zone's id (`reptile:<exhibit>`, `reptile:baby:<n>`, `reptile:meter`) |
+| The owl librarian's lines — "Shhh!", the card ceremony, the recommendation, story time | `world/library/LibraryOwl.ts` → `SpeechBubble` | `actionFeedback` | `library-owl` |
 | "a wild bunny appears!" on the castle roof | `world/building/WildPets.ts` → `SpeechBubble` | `speech` | `wildPet:<uid>` (its catch chip's item) |
 | Dodgems: "TWEET!?" | `minigames/dodgems/tree.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:tree` |
 | Dodgems: giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:giggle:<n>` |

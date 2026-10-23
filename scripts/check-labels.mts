@@ -215,6 +215,7 @@ const view = { camera: camera.camera, width: WIDTH, height: HEIGHT };
     ['the crowd', world.npcs.screenLabels],
     ['the hotel', world.hotel.screenLabels],
     ['the reptile house', world.reptileHouse.screenLabels],
+    ['the library', world.library.screenLabels],
     ['the castle', world.building.screenLabels],
     ['the player', [player.label]],
     ['the chips', [chips]],
