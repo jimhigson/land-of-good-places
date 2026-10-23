@@ -489,8 +489,16 @@ export function libraryDenContains(x: number, z: number): boolean {
 /** Just inside the den, through its doorway, looking in (#719) — where `/library-den` stands her. */
 export const LIBRARY_DEN_DOORWAY_STAND: StandSpot = { what: "inside the secret den's doorway", x: -19.6, z: -4.3, facing: 270, den: true };
 
-/** Beside the baby dragon's nest, facing it (#719) — where she stands to say hi. */
-export const LIBRARY_DRAGON_STAND: StandSpot = { what: 'beside the baby dragon', x: -21.3, z: -5.0, facing: 225, den: true };
+/**
+ * **Beside the baby dragon's nest, facing it** (#719) — where she stands to
+ * say hi, and where a tap on the dragon walks her. Due east of the nest, so
+ * she and the dragon stand side by side on screen: the camera looks into the
+ * room along (−1, −1), and the first spot, (−21.3, −5.0) straight in front of
+ * the dragon, was on that line — her body covered the dragon from the camera
+ * the whole time she talked to it (plan Step 13, looked at in Chrome). The
+ * dragon turns its head toward her here as far as it goes.
+ */
+export const LIBRARY_DRAGON_STAND: StandSpot = { what: 'beside the baby dragon', x: -20.6, z: -6.3, facing: 270, den: true };
 
 /** The baby dragon's nest of books (#719): in the den's far corner, facing the doorway and the camera. */
 export const LIBRARY_DRAGON_NEST: LocalPoint & { readonly facing: number } = { x: -22.6, z: -6.3, facing: 45 };
