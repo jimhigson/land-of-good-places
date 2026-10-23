@@ -771,7 +771,7 @@ the PR head 118468c3 are the same 179. `git diff --stat origin/feat/library-v2-p
 round's (LABELS.md, check-labels, check-library, SpeechBubble, LibraryOwl, storyTime, this handoff); vs main 19 A,
 38 M, no deletion.
 
-**LABELS.md corrected before the CI run (2d commit of this round's docs):** the dodgems' giggles are also drawn
+**LABELS.md corrected before the CI run (66549d88):** the dodgems' giggles are also drawn
 over the scenery (`giggles.ts` builds their sprites with `depthTest: false`, since 48bf4bcc; a `SpriteLabel`'s
 sprite is its maker's), so "Drawn over the scenery" lists two labels and says who decides each — the first text
 said the owl's was the only one.
@@ -789,3 +789,20 @@ counts), 56a72882 (`storyTime.ts` `pickBook` and its `heard`/`lastHeardId`; STOR
 story and whole rounds, which now **open** the CLOCK block and let the clock go before the fresh visit). Merge
 `origin/feat/library-v2` with `-c rerere.enabled=false`; the creature bubble (part 5) is depth-tested unless it
 asks for `overScenery` — add it to LABELS.md's table if it does. Re-run check:flat-primitives after merging.
+
+### CI on the final head — green
+
+- **PR #733's head moved by fast-forward 118468c3..9a269a31..66549d88** (`git push origin feat/library-v2:feat/library-v2-pr`).
+  The run on 118468c3 (39943305407) had finished green first (88 success, Deploy skipped). The run on 9a269a31
+  (39952880544) was cancelled by the push of 66549d88 three minutes in, in its Parks stage, so nothing was lost.
+- **CI 39953269843 on 66549d88: completed, success** — 88 jobs success, 1 skipped (`Deploy`, which runs only on
+  main). Parks re-solved for the new source hash c7182d44 (stage A blocks 0–1 for all 16 seeds, stage B blocks 2–15
+  for seeds 10 and 14, as on 118468c3); `Checks` and `Procgen invariants` (the two required checks) pass; Checks
+  shards 1–9 and build, Procgen invariants shards 1–6, Coplanar faces, Entrance road, Every seed builds, Swept bus,
+  Walk reach, PR preview all pass. **Update adoption 39953269896: success** ("A reload gets the new build").
+  `gh pr checks 733`: 89 pass, 1 skipping (`r1/checks-66549d88-final.txt`).
+- Longest shards: 3 at 21m12s, 5 at 19m31s, 8 at 17m09s (`timeout-minutes: 30`).
+- Preview (from the newest "Deploy PR preview" comment): `https://pr-733-66549d8-land-of-good-places.blockstack.workers.dev`
+  — HTTP 200 for `/library?at=2.1,-8&facing=148&story=now`; its `version.txt` is 996d9e34, the PR's merge ref
+  (66549d88 into main), as every pull_request build is.
+- Everything after 66549d88 on this branch is handoff only.
