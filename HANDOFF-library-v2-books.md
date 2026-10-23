@@ -1,4 +1,4 @@
-# HANDOFF — Library v2, track D: the chapter books' engineering base, item 7 (the picture vocabulary)
+# HANDOFF — Library v2, track D: the chapter books (the engineering base, item 7, and the six books' join)
 
 Branch `feat/library-v2-books`, worktree `.claude/worktrees/library-v2-books`, cut from the
 integration head `feat/library-v2` @ 33bcc361 (engine + the four tracks + the API adaptation).
@@ -11,16 +11,142 @@ see "Final runs" and the red transcripts' first paragraph). Scratch logs: `.clau
 Plan: `docs/library-build/PLAN-parts-4-5.md`; the old base's record is `HANDOFF-library-books2.md`
 (items 1–6, merged into the integration at a30e7b96); the kit's record is `HANDOFF-art-story-props.md`.
 
-## THE BOOKS' JOIN (23 Oct, Claude Opus 5.5) — in progress; read this first
+## THE BOOKS' JOIN (23 Oct, Claude Opus 5.5) — DONE; read this first
 
-The two book branches are merged here (`git -c rerere.enabled=false merge --no-ff`): **7d30cb3c**
-(`feat/library-v2-books-a` @ 68b593f2, books 1–3) then **15e0760a** (`-b` @ 54dfbd11, books 4–6).
-Both clean; the index lists the six in `final.json`'s shelf order (scratch `join/verbatim.mts`: the
-order and all 60 pages verbatim; its order CONTROL goes red). Then: **10bab3ff** — both branches had
-chosen `trampolinePad`, so *The Loudest Shush* is now `flowerRed` and a new vitest case holds every
-book to a cover colour of its own; **a80be87c** — READABLE's `<=` is `===` and the WAIT note is gone.
-Scratch: `.claude/library-build-scratch/books-v2/join/`. Still to do: the full check runs, reading
-all six books in headless Chrome, removing the two book worktrees, this handoff's final form.
+All six chapter books are on this branch, on the big readers' shelf (west-4, readable slots 13–18),
+in `final.json`'s shelf order. Scratch (logs, instruments, every screenshot):
+`.claude/library-build-scratch/books-v2/join/`. The two book worktrees are removed (both were clean,
+and pushed: `feat/library-v2-books-a` @ 68b593f2, `-b` @ 54dfbd11 stay on origin). No dev server
+or browser of mine is left running.
+
+**What the join did, commit by commit**
+
+| commit | what |
+|---|---|
+| 7d30cb3c | `git -c rerere.enabled=false merge --no-ff origin/feat/library-v2-books-a` (books 1–3: *Duck, Sir Hopsalot!*, *Detective Biscuit*, *The Loudest Shush*): clean |
+| 15e0760a | the same for `origin/feat/library-v2-books-b` (books 4–6: *The Giant Footprints*, *Biscuit and the Storm*, *Catch That Chicken!*): clean. `chapterBooks/index.ts` auto-merged — each branch had inserted under its own block's comment line — and lists the six in shelf order, imports and list alike. Both branches carried the identical `check-book-reader.mts` section-8 hunk (b cherry-picked a's d0f3f282), so it is in once: `LAST` = the last **picture** book |
+| 10bab3ff | **The Loudest Shush's cover is `flowerRed` (coral)**, not `trampolinePad` — both book engineers had picked `trampolinePad`, so the merge put two evening-violet books on one shelf and two alike bookmarks in the Cute-o-dex. A new vitest case (`chapter-books.test.ts` case 4) holds every book to a cover colour of its own, **compared by colour, not by palette key** (`markerSky` and `ballPitD` are both #87c9ff). Case 3 now says what it measures with six books on the real shelf |
+| a80be87c | `check:library` READABLE: `CHAPTER_BOOKS.length <= chapter slots` is `===`, the "slot(s) WAIT" note and the null "waiting" pairing are gone (every slot expects its book, as before the shelf was laid out ahead of its books). The index's and `shelfBooks.ts`'s docs no longer promise a WAIT note |
+| 149000dd | handoff checkpoint |
+
+**Final runs** (src tree = a80be87c's; park hash `3f854c9d…`, seed 5 restart 1 hydrated by restamping
+`.parks/manifest.json` with `join/restamp.sh`; every exit code read, counts off the screen):
+
+| check | exit | what it said |
+|---|---|---|
+| `pnpm exec tsc --noEmit` | 0 | 0 lines |
+| `pnpm run typecheck:test` | 0 | 0 errors |
+| `pnpm run check:brevity` | 0 | `the library's books — 12 picture books, 6 chapter books (60 chapter pages)`; `432 pieces of copy are short enough; 6 still carry a recorded exception`; 10 `CONTROL ok` |
+| `pnpm exec vitest run test/library test/store` | 0 | `Test Files 9 passed (9)`, `Tests 63 passed (63)` (62 + case 4) |
+| `pnpm run check:library` | 0 | `101 ✓`, 0 ✗, `All clauses passed.`; `✓ 6 big readers' slots for the 6 chapter books`; `READABLE: 18 books (BOOKS.length), 18 slots, 18 zones pressed through a stub opener`; 77 keep-outs |
+| `SERVED_CHECKS_PORT=6551 pnpm run check:served-book-reader` | 0 | `check:book-reader passed`, **2806 ok, 0 FAIL**; `6 real chapter book(s) measured, 164 worded chapter face(s) held to their boxes`; each of the 18 books `0 program link(s)`; chapter books' thinnest picture 53.5 / 52.2 / 51.6 / 54.0 / 51.0 / 18.0 % (shelf order); phone upright smallest picture 63 / 73 / 63 / 73 / 73 / 73 %; phone on its side: the turn-upright card (allowed, announced); `every picture model is drawn … all 63`; section 8: `goodnightPark completes the dex`, `showing []`, then each prize alone; server pid 63490 stopped by the harness, port free after |
+| scratch `join/verbatim.mts` (the index as the game imports it vs `final.json`) | 0 | `the index is in final.json's shelf order, and every id, title and page matches (60 pages, 6 titles)`; CONTROL=order exit 1 (`the index is not in final.json's shelf order`); CONTROL=text exit 1 (`catchThatChicken p10: differs at char 0`) — the first text control I wrote was vacuous (it replaced a full stop p10 does not end with, and went green), caught by running it, and repaired |
+| reading pass, scratch `join/read.mjs` (port 6552, my own vite, stopped by its process group 63807) | 0 | `READ: every book opened, turned to its end, no page error` |
+
+**The reading pass.** All six books read cover to end in Jim's installed Chrome (headless, throwaway
+profile, `channel: 'chrome'`) through the reader's own `/book?id=<id>&seed=5`, turning with real clicks
+on the page buttons: every spread at 1280×800 (6 a book, 36) and every page on a phone held upright at
+390×844 (12 a book, 72). **All 108 screenshots opened**, and what each showed is written down in
+`join/read/NOTES.txt` (written while each was open). Every page's words sit inside the page at both
+sizes, no picture is cropped or black, nothing floats, every book reaches The End with no page
+error. The coral *Shush* reads well (boards, page frames, end hearts) and sits apart from the pink book
+in Mrs Crumpet's pile. Mrs Crumpet's pile on *Storm* p4 is the same mint/lilac/pink pile as *Shush*'s
+(book engineer b's join item 3: checked). Two defects, both in park models, neither introduced here:
+
+1. **Grandpa Tock has no eyes** (*The Giant Footprints* p6–p8, and the Reptile House's tortoise
+   itself). **Measured** (scratch `join/tock-face.mts`, on `createTortoise(0x70c4)`, the factory the
+   pictures and the park both use): a ray from in front at each face part meets the head mesh first
+   for 8 of 10 parts — the eyes sit **0.077 m inside the head's front surface** (eye centre z 0.892,
+   head surface in front of it at z 0.969; head box x −0.147..0.147, y 0.298..0.648, z
+   0.455..1.016), the catchlights 0.043–0.069 inside, the blush 0.019–0.020 inside; only the w-mouth's
+   two arcs are in front. **CONTROL**: the same face moved 0.12 m forward → 10 of 10 seen, so the
+   instrument can tell a face on the head from one inside it. Root cause: `reptiles.ts` puts the
+   tortoise's `geometryFace` at head-local z 0.4 on a head whose front is ≈ 0.477. In the pictures
+   only a cream disc with two blush slivers shows (zooms `join/zoom-p7-tock.png`,
+   `join/zoom-p8-tock.png`), so his "asleep / drowsy / awake" moods read the same. Not fixed here
+   (Decision J5): it is the Reptile House's tortoise too.
+2. **Trilla's face is hidden** on 8 of *The Loudest Shush*'s 11 pictures (the editor's moods), and
+   *Catch That Chicken!* draws her `surprised` throughout to show her eyes — the known `pets.ts`
+   tummy-patch defect both book engineers measured (their handoffs, "For the join" item 1). Not fixed
+   here, for the same reason.
+
+**Decisions (with reasons) — for the PR body**
+
+- **J1. The merge needed no hand resolution, and was verified rather than trusted**: both merges were
+  clean with rerere off; the index came out in shelf order because each branch wrote under its own
+  block line (the base's layout). The order and the words were then measured against `final.json` by
+  an instrument whose two controls go red.
+- **J2. The Loudest Shush is coral (`flowerRed`), Catch That Chicken! keeps the evening violet**: the
+  duplicate came from the merge, not from either branch. Book engineer b chose the violet for the
+  bedtime book (a reason); book engineer a chose it only as "none is a picture book's". Coral is the
+  shelf's only red and differs by colour from all 17 other covers. One small visible change (a
+  cover, its page frames and its bookmark); the new test makes a repeat impossible to miss.
+- **J3. READABLE is `===` now, and the game code still tolerates a waiting slot**: the check is where
+  "a chapter book went missing" should go red (CI, loudly), as the base, both book engineers and the
+  integration's handoff all asked; `shelfBooks.ts`'s `WAITING_SLOTS` (the integration's Decision 3:
+  wait loudly rather than refuse to build the World) is left as it is — empty now — so a player's
+  game never throws over a missing book.
+- **J4. Case 3 of `chapter-books.test.ts` measures the real six-book shelf**: its old name ("never
+  hands over Big reader … while it holds no chapter book") described the branch that no longer runs —
+  a green line implying cover it did not give. It now checks picture books alone → no card, every
+  chapter book but the last → no card, the last → the card.
+- **J5. The two hidden faces are reported, not fixed, in this step**: both are park models
+  (`reptiles.ts`, `pets.ts`) whose fix changes what a child sees in the Reptile House and on every
+  puff pet in the park, not only in the books; this step is the books' join. Both are handed to the
+  join with root cause, instrument and the fix (below). The book data already asks for the right
+  moods, so the pictures gain the faces with no edit to them (after Trilla's fix, restore the
+  editor's moods in `catchThatChicken.ts`, book engineer b's join item 1).
+
+**Red transcripts (each with the input it was proved against)**
+
+- **Cover case, found red on the merge itself** (15e0760a, before 10bab3ff):
+  `pnpm exec vitest run test/library/chapter-books.test.ts` → exit 1, `Tests 1 failed | 4 passed (5)`:
+  `AssertionError: books sharing a cover colour, of the 18 on the shelf: expected [ Array(1) ] to deeply
+  equal []` with `"#8f7fe8: loudestShush (trampolinePad) and catchThatChicken (trampolinePad)"`. After
+  the cover change → exit 0, `5 passed (5)`. Log `join/red-vitest-covers.log`.
+- **Case 3** (`readBooks.ts` `bigReaderEarned`: `chapterBooks.every(` → `chapterBooks.some(`, real
+  shelf of 6) → exit 1, `Tests 2 failed | 3 passed (5)`: `Big reader with 'catchThatChicken' still
+  unread: expected true to be false` (the other failure was case 4, not yet fixed at that moment).
+  Reverted with `git checkout`. Log `join/red-vitest-case3-some.log`.
+- **READABLE, the control on the OLD clause first**: `catchThatChicken` taken out of
+  `CHAPTER_BOOKS` (`chapterBooks/index.ts`), manifest restamped to the mutated tree `81c7abf3…` →
+  **exit 0**, 101 ✓: `✓ 6 big readers' slots for the 5 chapter books`, `1 slot(s) WAIT for their
+  books … slot 18 (west-4, shelf 0, 1.5 m along)` — the old `<=` could not see a book go missing. Log
+  `join/control-library-old-check-missing-book.log`.
+- **READABLE, the NEW clause** (a80be87c's check, the same mutation and restamp) → **exit 1**, 100 ✓
+  3 ✗: `✗ 6 big readers' slots for the 5 chapter books`; `✗ slot 18 (west-4, shelf 0, 1.5 m along)
+  should hold 'ripikaBalloon': its mesh stands 16.216 m OUTSIDE west-4's drawn box`; `✗
+  'library-book:ripikaBalloon' should be stood at slot 18's stand (big reader 6's stand (west-4),
+  (-16.10, 2.50)): it is 15.161 m off it`; `3 clause(s) FAILED.` Reverted and restamped back
+  (`0c868e80…`) → exit 0, 101 ✓. Log `join/red-library-missing-book.log`.
+- **The words instrument** and **the tortoise instrument**: their controls, above.
+
+**For the join (`feat/library-v2`)** — `git merge-tree --write-tree HEAD origin/feat/library-v2`
+(@ f19cd1fc) at 149000dd: **one conflict, `src/entities/Player.ts`**, exactly the hunk named below
+("A known conflict waits for the join"): take the engine's side, drop this branch's flat-ok line,
+run `check:flat-primitives`. `pagePictures.ts` auto-merges: f19cd1fc made the same `// flat-ok`
+annotation on `strapJetpack`, character for character.
+
+1. Grandpa Tock's eyes (`src/art/models/reptiles.ts` `createTortoise`): put the face on the head's
+   measured front surface — measure the head mesh's front at the eyes' (x, y), never type a new z —
+   then re-run `join/tock-face.mts` (it must say 10 of 10 seen) and look at *The Giant Footprints*
+   p6–p8 and the Reptile House. Visible, so name it in the PR body.
+2. Trilla's face (`src/art/models/pets.ts` `createPuffCreature`): book engineers a's and b's item 1
+   (measured, with an in-page proof of the fix). Then restore the editor's moods in
+   `catchThatChicken.ts` (`happy` p4, p5, p8, p9, p10; `sad` p7) and look again at *Shush*, *Trilla
+   Goes Up High* and *RiPika's Balloon* p4–p5.
+3. Book engineer a's item 2 (a `cart` actor option seating a pet at `SEAT_HEIGHT`, replacing
+   `sirHopsalot.ts`'s `ON_SEAT` stage direction): still open, optional.
+4. Done here, nothing to do: READABLE `===` (a's 4, b's 2, the base's "when all six are in"); the
+   section-8 `LAST` fix in once (a's 3, b's 4); Mrs Crumpet's pile (b's 3); Nimbus `blossomWhite` on
+   *Storm* p9–p10 (the Artist's item 3, done by b).
+
+**Questions for Jim (none blocks anything)**
+
+1. Grandpa Tock and Trilla should show their faces (the two park-model fixes above) — they change
+   the Reptile House's tortoise and every puff pet, so: yes to both?
+2. By eye: *The Loudest Shush* in coral; Nimbus's white is the palette's `blossomWhite`; the lit
+   wheel's star fills 0.9 of its bracket.
 
 Jim's rulings that bind this track: the chapter books (14 Oct, *"~30 words per page … jokes,
 adventure, adversaries, conflict, but resolve well"*; the twelve picture books unchanged) and Blender
@@ -53,9 +179,12 @@ engineers never build a visible item out of three.js primitives; a sprite or par
       check:flat-primitives, build — every one exit 0, counts in "Final runs" below
 - [x] items 1–6 re-verified on the engine with their reds re-proved — twice: at 8796bff0, and again at
       3162492f with identical figures (red transcripts below)
-- [x] handoff final, pushed
+- [x] handoff final, pushed (the base, at 3188e56d)
+- [x] **the books' join**: both book branches merged, the cover duplicate fixed, READABLE `===`, every
+      check re-run, all six books read in headless Chrome, the two book worktrees removed — see
+      "THE BOOKS' JOIN" at the top, which supersedes the base's runs and join list below
 
-## Final runs (at 3162492f, park hash fb2690b5…, seed 5 restart 1 hydrated; exit codes read, counts off the screen)
+## Final runs of the base (at 3162492f, park hash fb2690b5…, seed 5 restart 1 hydrated; exit codes read, counts off the screen) — superseded by the join's, at the top
 
 | check | exit | what it said |
 |---|---|---|
@@ -164,9 +293,9 @@ src/world/library/chapterBooks/
 - Every chapter-book file is inside the parks' source closure: every edit moves the park hash, so
   restamp `.parks/manifest.json` (see "Parks, locally") before any World-building check. The World
   throws at load for a book in the wrong list or a shared id, and `shelfBooks.ts` throws for a
-  picture book on a chapter slot. While fewer than six are in, the last slots WAIT (check:library
-  says so on stderr); when all six are in, make READABLE's `CHAPTER_BOOKS.length <= chapterSlots`
-  `===` and drop the WAIT note (`HANDOFF-library-v2.md`, "For the join").
+  picture book on a chapter slot. While fewer than six were in, the last slots WAITED (check:library
+  said so on stderr); with all six in, READABLE's `CHAPTER_BOOKS.length <= chapterSlots` is `===`
+  and the WAIT note is gone (done at the join, a80be87c).
 - Nothing in a picture may be a primitive. A thing no model covers is a request to the Artist.
 
 ## Decisions (with reasons) — Jim is away; each is also for the PR body
@@ -295,15 +424,13 @@ into the integration unrun), and my `pagePictures.ts:577` `box.max.y - box.min.y
 frame (the hover: the same body a moment later, plan drift tested first) and carries a
 `// flat-ok: <reason>` now (8796bff0) → exit 0, `107 site(s) carry an explicit // flat-ok: reason`.
 
-## For the join (feat/library-v2)
+## For the join (feat/library-v2) — the base's list; the join's own list is at the top
 
 - `PICTURE_MODELS` is 63; item 9b's model sheet draws them all. Track A/B/C engineers touching
   `check-book-reader.mts` item 10 or `furnish.ts`: the only furnish change is `export` on
   `PlacedBook`, `shelveFace`, `bookInstances`.
-- The two book engineers add `chapterBooks/<id>.ts` + an index entry each; see the layout above.
-  Re-proved at 3162492f in a scratch repo: branch a (three imports and three entries under block 1)
-  and branch b (the same under block 2) both merge clean with `-c rerere.enabled=false`, the list in
-  shelf order.
+- ~~The two book engineers add `chapterBooks/<id>.ts` + an index entry each~~ — done: both branches
+  merged clean here (7d30cb3c, 15e0760a), the list in shelf order, as the scratch-repo proof said.
 - `blendkit.ts_const` follows re-exports (the Artist's fix) travels with the merge.
 - **A known conflict waits for the join in `src/entities/Player.ts`.** This branch carries
   `feat/engine-solids` only up to 7ce1deae (through the art merge) plus one line of its own (8796bff0:
@@ -322,6 +449,6 @@ frame (the hover: the same body a moment later, plan drift tested first) and car
 
 ## Questions for Jim
 
-None blocking. Two he may want to overrule by eye once a page draws them: Nimbus's white is the
-palette's `blossomWhite` (not the Artist's `ART.wingWhite`); the lit wheel's star fills 0.9 of its
-bracket.
+See "Questions for Jim" in the join's section at the top (it carries the base's two by-eye questions —
+Nimbus's `blossomWhite`, the star at 0.9 of its bracket — and adds the two hidden faces and the coral
+*Shush*). None blocks anything.
