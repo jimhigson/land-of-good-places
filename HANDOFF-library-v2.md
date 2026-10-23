@@ -341,3 +341,37 @@ merge the tracks, never the art branches.
 
 **No new blocker or guard, no new decision for Jim** in this merge; the open question above (the
 den is reachable by a jet pack over the west wall until Step 12's guard) stands as it was.
+
+## Story-time stage (23 Oct 2026, Opus 5.5) — tracks A and B merged, the reviews judged, Step 9, Step 10
+
+Scratch: `.claude/library-build-scratch/st9/` (`runs/<tag>/<check>.log`, each ending `exit=N`;
+`run-checks.sh <tag> <check>…` runs checks in parallel in this worktree; `restamp.mjs` as the tracks').
+
+### The merges (each `git -c rerere.enabled=false merge --no-ff`)
+
+| merge | commit | conflicts, and how each was resolved |
+|---|---|---|
+| A, `feat/library-v2-owl` @ 9aef6809 | b5fb3645 | none |
+| B, `feat/library-v2-kids` @ fb1cc3ed | 02a72dca | `Library.ts`: imports unioned (owl's `LibraryOwl`/`hasLibraryCard`/`gameStore`, kids' `LibraryKids`/`libraryKidDriver`); `releasePlayer` and `standOutside` take both sides — kids' `showRoom(false)` (room and children together) then the owl's `owl.leave()`. `check-library.mts`: the header's item 14 keeps the owl's text, its OWL/CARD/RECOMMEND/SHUSH item stays 15 and SIT/KIDS become **16**; imports unioned (owl's faceLife/state/readBooks/recommendation/libraryCard/LibraryOwl lines, kids' kidHeight/NpcSystem/residentLooks/libraryKidDriver/LibraryKids lines, `books.ts` once with `type LibraryBook`); the layout import list takes `LIBRARY_KID_PLANS` and `LIBRARY_LIBRARIAN_SPOT`. |
+
+`origin/feat/engine-solids` has not moved (003d6489, an ancestor since 679c3b31). **package.json:**
+neither track touches it; parsed, the merged `scripts` equals the pre-merge head's (179 names, 0
+differ). Clause order in check:library: A's block (OWL → CARD → RECOMMEND → SHUSH) runs before B's
+(SIT → KIDS), as the markers stand; KIDS leaves her at the desk's front, not riding.
+
+### Checks after the merges (seed 5: the honest park of 679c3b31, restamped 4e30969a → 49c4571d)
+
+| check | exit | off the screen |
+|---|---|---|
+| `tsc --noEmit` | 0 | |
+| `typecheck:test` | 0 | |
+| `check:library` | 0 | **158 ✓, 0 ✗** (101 + 34 owl + 23 kids), "All clauses passed." |
+| `check:labels` | 0 | 55 labels registered, 12570 frames, no overlap |
+| `check:tap-spacing` | 0 | 10 spaces, **146 zones**, 27 portal bands; 246 zone-band, 20 close zone-zone pairs; 20 same-action warnings |
+| `check:brevity` | 0 | 354 pieces, 6 recorded exceptions |
+| `check:exits` | 0 | "check:exits OK"; the library 795 exits, 155 off the lattice, 0 nowhere; both Sit chips "moved 1.25 m" |
+| `check:hotel` | 0 | 34 children (7 hotel residents), "check:hotel OK" |
+| `check:npc-presence` | 0 | "npc presence OK" |
+| `check:jitter` | 0 | 34 children, 9000 frames, worst own step 0.177 m (Luca), bound 1 m |
+| `check:crowd` | 0 | trace `frames=90000 children=12`, `covered climbs=9 trips=61 …` (no NOT EXERCISED) |
+| `check:solids` (core) | 0 | the library: 14 tops, 0 drop regions, 679 jumps; "check:solids OK" |
