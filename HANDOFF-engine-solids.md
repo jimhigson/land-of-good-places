@@ -529,8 +529,11 @@ Done this round (each its own commit, pushed):
   (PLATFORM_ARRIVE 0.6 → two cannot both arrive; the first there got half the overlap a frame: 2.6 → 1.17 m from the line
   in 1 s, off the edge at f1910), then after 3 s `offTheLine` set him down 2.74 m away in one frame — an "own step" of
   2.743 (bound 1). Fixes: (a) each platform has TWO places to wait (`TrainStop.waits`, a child's width apart on the open
-  end, far one first; `Station.WAIT_ALONGS` 2.55 and 0.75), one child to a place (`TrainService.claimWait/releaseWait`;
-  the trip claims at commitment, releases on boarding/abandon; full → no trip this time); (b) a waiting child holds her
+  end, far one first; `Station.WAIT_ALONGS` 2.7 and 0.9 — the nearer is 1.0 m from the chip's stand spot, so a child
+  walking up to it while the player stands there is held 1.52 m from her, 0.5 m short of the spot, inside the 0.6 m
+  arrival radius: she waits there instead of walking into the player's back for a minute), one child to a place
+  (`TrainService.claimWait/releaseWait`; the trip claims at commitment, releases on boarding/abandon; full → no trip
+  this time); (b) a waiting child holds her
   ground (`GroundHolder.holdsGround` on the driver, `NpcCharacter.holdsGround`; furniture in `separateFrom` and to the
   walking player); (c) the set-down is a declared write `NpcCharacter.setDown` (via stepThroughDoor), hooked by
   check:jitter like stepThroughDoor. check:labels RED (shard 4) after 8a48066b: a crowd path change surfaced a label

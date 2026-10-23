@@ -78,14 +78,22 @@ const ROOF_TOP = PLATFORM_HEIGHT + CANOPY_HEIGHT + ROOF_THICKNESS / 2 + (ROOF_WI
  * of the engine's eaves.
  *
  * Two of them, a child's width ({@link CHILD_FOOTPRINT}) apart, the far one
- * first: the nearer stands 0.95 m clear of the post at −0.2, the far one's body
- * ends 0.15 m inside the platform's end. One child to a spot
- * (`TrainService.claimWait`): two sent to one spot pushed each other, and the
- * first there was shoved a metre across the platform and off its edge onto the
- * track, where the train she was waiting for stood for her.
+ * first: 2.7 m along, the child's body (`CHILD_FOOTPRINT / 2`) ending at the
+ * platform's end (`PLATFORM_LENGTH / 2`), and 0.9 m along, her collision circle
+ * (`NPC_RADIUS`, 0.5 m) 0.49 m clear of the post's (0.22 m, at −0.2 along and
+ * 0.95 across). One child to a spot (`TrainService.claimWait`):
+ * two sent to one spot pushed each other, and the first there was shoved a
+ * metre across the platform and off its edge onto the track, where the train she
+ * was waiting for stood for her.
+ *
+ * The nearer spot is 1.0 m from where the player's chip stands her ({@link
+ * Station.standX}). She is not shoved while she stands still, so a child walking
+ * up to it is held 1.52 m from her (`NpcSystem.PLAYER_SEPARATION`) — 0.5 m
+ * short of the spot, inside the 0.6 m that counts as arrived: she waits there,
+ * and does not walk into the player's back for a minute.
  */
 const WAIT_ACROSS = 0.45;
-const WAIT_ALONG = 2.55;
+const WAIT_ALONG = 2.7;
 const WAIT_ALONGS: readonly number[] = [WAIT_ALONG, WAIT_ALONG - CHILD_FOOTPRINT];
 
 const BENCH_LENGTH = 2.0;
