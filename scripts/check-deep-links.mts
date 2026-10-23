@@ -53,7 +53,16 @@ import {
   REPTILE_LOG_CENTRE_X,
 } from '../src/world/reptileHouse/layout.ts';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
-import { LIBRARY_ARRIVAL, LIBRARY_DESK_STAND, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_SECRET_STAND } from '../src/world/library/layout.ts';
+import {
+  LIBRARY_ARRIVAL,
+  LIBRARY_DESK_STAND,
+  LIBRARY_ORIGIN_X,
+  LIBRARY_ORIGIN_Z,
+  LIBRARY_PLAYER_SEATS,
+  LIBRARY_SECRET_STAND,
+  libraryCushion,
+  libraryFacingStoryChair,
+} from '../src/world/library/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -245,6 +254,17 @@ const LIBRARY_AT = { x: Number(LIBRARY_SECRET_STAND.x.toFixed(2)), z: Number(LIB
 /** And at the desk's front, where she talks to the owl (#718) — the link the owl's preview is sent with. */
 const LIBRARY_DESK_AT = { x: Number(LIBRARY_DESK_STAND.x.toFixed(2)), z: Number(LIBRARY_DESK_STAND.z.toFixed(2)) };
 
+/**
+ * And by her first story cushion, turned to the storyteller's chair, with
+ * `&story=now` (#718, plan Step 9) — the story-time link: she is inside and
+ * story time is under way (not `'idle'`) within five seconds. Where exactly she
+ * stands is the put-down rule's (the cushion is a solid), so this asks the
+ * room and the story, not a spot.
+ */
+const LIBRARY_STORY_SEAT = libraryCushion(LIBRARY_PLAYER_SEATS[0]).at;
+const LIBRARY_STORY_FACING = Math.round(libraryFacingStoryChair(LIBRARY_STORY_SEAT));
+const LIBRARY_STORY_PATH = `/library?at=${LIBRARY_STORY_SEAT.x},${LIBRARY_STORY_SEAT.z}&facing=${LIBRARY_STORY_FACING}&story=now`;
+
 /** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
 const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
 
@@ -264,6 +284,35 @@ const CHECKS: DeepLinkCheck[] = [
   {
     ...libraryCheck(`/library?at=${LIBRARY_DESK_AT.x},${LIBRARY_DESK_AT.z}&facing=${LIBRARY_DESK_STAND.facing}`, LIBRARY_DESK_AT, LIBRARY_DESK_STAND.what, LIBRARY_DESK_STAND.facing),
     primerPath: '/library',
+  },
+  {
+    path: LIBRARY_STORY_PATH,
+    primerPath: '/library',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            return g?.world?.library?.playerIsInside === true && typeof g.world.library.storyPhase === 'string' && g.world.library.storyPhase !== 'idle';
+          },
+          undefined,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.library?.playerIsInside ?? null,
+          phase: g?.world?.library?.storyPhase ?? null,
+          owlFlying: g?.world?.library?.owl?.flying ?? null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Library was not entered (inside=${s.inside})` };
+      if (s.phase === null || s.phase === 'idle') return { ok: false, detail: `inside, but story time did not start within 5 s (phase ${s.phase})` };
+      return { ok: true, detail: `inside the Library by ${LIBRARY_PLAYER_SEATS[0]}, story time '${s.phase}' within 5 s (the owl on the wing: ${s.owlFlying})` };
+    },
   },
   {
     // Outside the Library's door, in the park, on the plot's own doormat.
