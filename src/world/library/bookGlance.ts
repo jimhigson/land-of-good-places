@@ -10,9 +10,10 @@ import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
  * **The owl shows her where the book is** — the camera's glance at the
  * glowing book while the owl recommends it.
  *
- * "Say hello!" at the owl's desk names a book — "Try “Cat Bus Day” next!" —
- * and "It is glowing on its shelf!": the book's cover glows and a beacon of
- * sky-blue sparkles rises off the top of its case (`LibraryOwl.glow`). But the
+ * "Say hello!" at the owl's desk names a book — "Try “The Cat Bus's Long
+ * Day” next!" — and "It is glowing on its shelf!": the book's cover glows
+ * and a beacon of sky-blue sparkles rises off the top of its case
+ * (`LibraryOwl.glow`). But the
  * reading room is 36 m by 26 m and the camera frames about 27 m by 15 m round
  * her, so from the desk **most of the shelves are off the screen**: measured
  * with every one of the 18 books made the glowing one in turn, only 3 of them
