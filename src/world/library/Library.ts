@@ -138,9 +138,11 @@ import type { OpenAreaPoint } from '../dismount';
  *
  * A walled pocket of the reading room behind its west wall — no space of its
  * own (plan Decision 20). The west wall has a doorway the secret shelf's
- * width, a lintel over it from the shelf's top to the wall's, and the den's
- * floor and three walls beyond ({@link denRoot}, `shell.ts`'s
- * `buildLibraryDenShell`). The shelf is {@link secretShelf}, a leaf on a
+ * width, a lintel over it from the shelf's top to the wall's, and beyond it
+ * the den the 3D Artist modelled (`libraryDen.glb`): its floor, three walls
+ * lined with book niches, stars, a moon and two glowing lanterns
+ * ({@link denRoot}, `shell.ts`'s `buildLibraryDenShell`, which holds the drawn
+ * den to the layout as it loads and makes it solid). The shelf is {@link secretShelf}, a leaf on a
  * hinge (`secretShelf.ts`): shut, it fills the doorway and the den is the one
  * sealed pocket the room has, hidden; **Pull the book!** on the gold book
  * swings it slowly away into the den, and it lies open along the den's south

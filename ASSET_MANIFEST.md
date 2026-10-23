@@ -692,3 +692,19 @@ material, no UV, no pivot, no face. Colours are `LIBRARY_DEN_GLB_STYLES` in
   stand 25 mm off a wall, inside an ink outline's own thickness, above every
   reach. The south wall and the lintel are hidden or faded by the game's own
   rules, not shortened.
+- **In the game** (Library v2 track C, plan Step den-art, 23 Oct 2026):
+  `shell.ts`'s `buildLibraryDenShell` draws `createLibraryDen` in the reading
+  room's own paint, where `libraryDenPlacement()` stands it — and refuses to
+  build unless every drawn figure (the doorway, the three inner faces, the
+  walls, the lintel's band, the floor slab's edges) is `layout.ts`'s within
+  5 mm. `den-lintel` is moved into the west wall's group in that wall's faded
+  material; the niches hold 476 of the library kit's book blocks
+  (`furnish.ts`'s `shelveDenNiches`, a seed of the den's own); the two
+  lanterns hang over a pier of each far wall with their bottoms at the
+  reading room's sconce height (3.9 m), out of every reach as the sconces are,
+  with no body. The secret shelf's pull book is `secretBook`
+  (`secretShelf.ts`), its star winking with the shelf's twinkle. The copies
+  of the faces a part rests on are deleted from its ink outline
+  (`src/art/style/outlineHiddenFaces.ts`: the lantern's back plate on its
+  wall, the book's underside on its board), so the kit adds no coplanar seam.
+  `check:library`'s THE DEN, DRAWN measures the drawn den against its bodies.
