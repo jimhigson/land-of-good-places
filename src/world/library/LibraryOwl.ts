@@ -14,14 +14,14 @@ import { createFaceLife, type FaceLife } from '../../art/style/faceLife';
 import { visibleBounds, visibleReachXZ } from '../../art/style/measure';
 import { SpritePuffs } from '../../art/effects/spritePuffs';
 import { createLibraryOwl, type OwlHandle } from '../../art/models/libraryCreatures';
-import { libraryArmchairSize, libraryBookcaseSize } from '../../art/models/libraryAssets';
+import { libraryArmchairSize, libraryBookcaseSize, libraryDeskSize } from '../../art/models/libraryAssets';
 import type { LibraryProps } from './props';
 import type { FurnishedShelfBook } from './furnish';
 import { LIBRARY_LINES } from './libraryLines';
 import { giveLibraryCard, hasLibraryCard } from './libraryCard';
 import { recommendFor } from './recommendation';
 import { isBookRead } from './readBooks';
-import { LIBRARY_FLOOR_Y, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, pieceToRoom, type StandSpot } from './layout';
+import { LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIAN_SPOT, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, pieceToRoom, type StandSpot } from './layout';
 
 /**
  * **The owl librarian at her desk** (#718, plan Step 6) — Jim, 13 October
@@ -168,6 +168,20 @@ export const OWL_WING_BEAT_RATE = 9;
  */
 export const OWL_PERCH_BACK = 0.15;
 
+/**
+ * **Where her card passes to the child**: over the middle of her desk's top,
+ * room-local — the desk's own spot (`LIBRARY_FURNITURE`) and its measured top
+ * and footprint (`libraryDeskSize`), never typed. The card's sparkles rise from
+ * here.
+ */
+export function cardHandOver(): Readonly<RoomPoint> {
+  const desk = LIBRARY_FURNITURE.find((piece) => piece.kind === 'desk');
+  if (!desk) throw new Error('LibraryOwl: no desk in LIBRARY_FURNITURE, so there is nowhere to hand her card over');
+  const size = libraryDeskSize();
+  const at = pieceToRoom(desk, size.centreX, size.centreZ);
+  return { x: at.x, y: size.top, z: at.z };
+}
+
 /** Her cruise height over the room's floor: the stacks' measured top and {@link OWL_CRUISE_OVER_STACKS} — never typed. */
 export function owlCruiseHeight(): number {
   return libraryBookcaseSize('stack').height + OWL_CRUISE_OVER_STACKS;
@@ -235,20 +249,40 @@ const BREATH_RATE = 1.7;
 /** Her bubble's tail points this far over the top of her head, wherever she is — `check:library`'s STORY measures it there on every frame she speaks. */
 export const OWL_BUBBLE_OVER_HEAD = 0.42;
 /**
- * The hand-over: sparkles over her, and two quick flaps of the wing that holds
- * her book — **forward**, over her desk (`wingR.rotation.x`, the shush wing's
- * own axis), the book lifted toward the child across it. Forward rather than
- * out to her side because her wings are drawn and her solid is not a wing: a
- * sideways flap swings the wing 0.9 m from her middle, 0.24 m past her solid,
- * at her west side, where a child can stand against her (measured); forward,
- * every point past her solid is over the desk, where nobody can. `check:library`
- * measures the drawn owl at her widest, live, on both wings.
+ * The hand-over: sparkles rising off her desk, and two waves of the wing that
+ * holds her book — **forward and up**, over her desk (`wingR.rotation.x`, the
+ * shush wing's own axis), the book lifted high, the way a card is held up to be
+ * seen. Forward rather than out to her side because her wings are drawn and her
+ * solid is not a wing: a sideways flap swings the wing 0.9 m from her middle,
+ * 0.24 m past her solid, at her west side, where a child can stand against her
+ * (measured); forward, every point past her solid is over the desk, where
+ * nobody can, and at the top of the wave the wing is back inside her solid's
+ * reach (0.665 m). `check:library` measures the drawn owl at her widest, live,
+ * on both wings.
+ *
+ * The sparkles rise off the desk's middle — where the card passes, between her
+ * and the child — and not over her head: there her own bubble, drawn over the
+ * scenery, stood in front of them (browser QA round 1: "the card sparkles
+ * hardly show"). Bigger than the glowing book's twinkles, so they read at the
+ * camera's distance; `check:library`'s CARD measures them clear of her bubble
+ * on screen.
  */
-const CARD_SPARKLES = 6;
-const FLAP_SECONDS = 0.8;
-/** How far the book wing lifts forward at the top of each flap (radians about its pivot; negative is forward). */
-export const CARD_FLAP_LIFT = 0.9;
-/** How many sprites the one pool holds — enough for the card's six and a twinkle pair or two in flight. */
+export const CARD_SPARKLES = 12;
+/** In this many little clouds, across the desk from her side to the child's, so they read as a path the card takes rather than one blob. */
+const CARD_SPARKLE_CLOUDS = 3;
+/** The card's sparkles' size (metres), against the glowing book's twinkles' 0.3. */
+export const CARD_SPARKLE_SCALE = 0.55;
+/**
+ * Their colour: the sky of the glowing book's cover light, not the room's warm
+ * light — warm sparkles over a lamp-lit desk barely showed (headless Chrome,
+ * 23 Oct).
+ */
+const CARD_SPARKLE_COLOUR = PALETTE.markerSky;
+/** How long her two waves of the card take (seconds). */
+export const FLAP_SECONDS = 1.4;
+/** How far the book wing lifts at the top of each wave (radians about its pivot; negative is forward, past −π/2 up over her shoulder). */
+export const CARD_FLAP_LIFT = 2.0;
+/** How many sprites the twinkles' pool holds — a pair or two in flight, and the Story listener's eight. */
 const PUFF_POOL = 12;
 /** Sprites rise from a little over a book's base, so they come off the book rather than out of the board under it. */
 const TWINKLE_RISE = 0.25;
@@ -457,6 +491,8 @@ export class LibraryOwl {
   private readonly shelfBooks: readonly FurnishedShelfBook[];
   private readonly face: FaceLife;
   private readonly puffs: SpritePuffs;
+  /** The card's sparkles — their own pool, bigger than the twinkles ({@link CARD_SPARKLE_SCALE}). */
+  readonly cardSparkles: SpritePuffs;
   private readonly fx = new Rng(LIBRARY_FX_SEED);
   private readonly breathPhase: number;
   private readonly scratch = new Vector3();
@@ -541,6 +577,7 @@ export class LibraryOwl {
     this.anchorBubble();
 
     this.puffs = new SpritePuffs(roomRoot, PUFF_POOL, PALETTE.fairyWarm, 0.3);
+    this.cardSparkles = new SpritePuffs(roomRoot, CARD_SPARKLES, CARD_SPARKLE_COLOUR, CARD_SPARKLE_SCALE);
     this.breathPhase = new Rng(LIBRARY_OWL_SEED).range(0, Math.PI * 2);
     this.face = createFaceLife((expression) => this.handle.setExpression(expression));
   }
@@ -715,8 +752,9 @@ export class LibraryOwl {
    * **The card ceremony.** The card is hers **on the press** — not at the end
    * of the script, so a child who walks off mid-sentence still has it — and the
    * hand-over line ({@link LIBRARY_LINES}'s `cardCheerAt`) is the celebration:
-   * the room flashes, a chime plays, sparkles rise over the owl and she flaps
-   * the wing that holds her book. The hotel's check-in is the precedent.
+   * the room flashes, a chime plays, sparkles rise off her desk where the card
+   * passes, and she waves the card high in the wing that holds her book. The
+   * hotel's check-in is the precedent.
    */
   private giveCard(player: Player): void {
     giveLibraryCard();
@@ -728,8 +766,15 @@ export class LibraryOwl {
   private cheer(): void {
     this.controls.flash();
     playSurpriseChime();
-    const at = this.handle.root.position;
-    this.puffs.puff(at.x, at.y + this.handle.height + 0.3, at.z, this.fx, CARD_SPARKLES);
+    // Across the desk toward the child, from a little her side of its middle to past its front edge: the
+    // card's way over. Not from its back edge: a cloud there rose into the tail of her bubble (check:library's CARD).
+    const over = cardHandOver();
+    const depth = libraryDeskSize().depth;
+    const facing = (this.spot.facing * Math.PI) / 180;
+    for (let i = 0; i < CARD_SPARKLE_CLOUDS; i += 1) {
+      const along = (-0.2 + (0.8 * i) / (CARD_SPARKLE_CLOUDS - 1)) * depth;
+      this.cardSparkles.puff(over.x + Math.sin(facing) * along, over.y + 0.05, over.z + Math.cos(facing) * along, this.fx, CARD_SPARKLES / CARD_SPARKLE_CLOUDS);
+    }
     this.flapFor = FLAP_SECONDS;
   }
 
@@ -765,6 +810,7 @@ export class LibraryOwl {
     this.live(dt, elapsed, player);
     this.glow(dt, elapsed);
     this.puffs.update(dt);
+    this.cardSparkles.update(dt);
     if (this.speech) {
       this.anchorBubble();
       this.bubble.updateScreenSize(camera);
@@ -873,7 +919,7 @@ export class LibraryOwl {
     if (this.flapFor > 0) {
       this.flapFor = Math.max(0, this.flapFor - dt);
       const t = (FLAP_SECONDS - this.flapFor) / FLAP_SECONDS;
-      // Two flaps over the flap's time; negative lifts the book wing forward, over the desk.
+      // Two waves over the wave's time; negative lifts the book wing forward over the desk and, past −π/2, up high.
       wingR.rotation.x = -Math.abs(Math.sin(t * Math.PI * 2)) * CARD_FLAP_LIFT;
     } else {
       wingR.rotation.x = damp(wingR.rotation.x, 0, WING_HALF_LIFE, dt);
