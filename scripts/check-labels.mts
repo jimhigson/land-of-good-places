@@ -34,12 +34,13 @@
  *  4. **The hotel lobby.** Reception: check in, and let the receptionist talk.
  *  5. **The Library** (#718). The owl at her desk: her card handed over, then
  *     a book recommended, her bubble over her own chip; a shelf book's
- *     "Read it!" chip; then story time with her sat on her story cushion —
- *     the owl's call from her desk, her silent flight over the stacks to the
- *     big chair (she calls first and flies when it is said: browser QA round
- *     1 found the call's bubble hiding her whole flight), the children
- *     walking to the rug, and the first pages read over the rug, the
- *     cushion's "Get up" chip up below them. Each visit is asked what it was
+ *     "Read it!" chip; then story time, called with her at the owl's desk —
+ *     the call said there, then the owl's silent flight over the stacks to
+ *     the big chair (she calls first and flies when it is said: browser QA
+ *     round 1 found the call's bubble hiding her whole flight) while the
+ *     child goes to her story cushion and sits, the children walking to the
+ *     rug, and the first pages read over the rug, the cushion's "Get up"
+ *     chip up below them. Each visit is asked what it was
  *     for (the card held, a book recommended, her seated, the reading
  *     reached), not only whether a chip was up — and story time is asked what
  *     it showed: the frames the owl's bubble was drawn while she called from
@@ -667,17 +668,14 @@ let wingSpeakingFrames = 0;
     recommended = world.library.owl.recommendedBookId !== null;
   }
   if (firstRead) libraryRead = visit(firstRead, false, 3);
-  // Story time, sat on her cushion: the call, the flight, the gathering and the first of the reading.
-  if (cushion) {
-    visit(cushion, true, 0.5);
-    seatedForStory = world.library.playerIsSeated;
-  }
-  quietly(() => world.library.requestStoryTime());
+  // Story time, called with her at the owl's desk — the owl says the call there, before she flies, so it
+  // is in shot — and then, while the owl flies over the stacks, on to her cushion to sit through the
+  // gathering and the first of the reading.
   const owlNow = world.library.owl;
-  for (let i = 0; i < Math.round(30 / DT); i += 1) {
+  /** One frame of story time, counted: what this scene is for, measured, not assumed. */
+  const storyFrame = (): void => {
     step();
     if (world.library.storyPhase !== 'idle') storyFrames += 1;
-    // What this scene is for, measured, not assumed: her bubble and the cushion's chip up together over the rug.
     const bubbleUp = isDrawn(owlNow.bubble);
     if (world.library.storyPhase === 'reading') {
       readingFrames += 1;
@@ -691,7 +689,16 @@ let wingSpeakingFrames = 0;
       if (bubbleUp) callBubbleFrames += 1;
     }
     if (owlNow.flying && owlNow.speaking) wingSpeakingFrames += 1;
+  };
+  if (owl) visit(owl, false, 0.2);
+  quietly(() => world.library.requestStoryTime());
+  // At the desk until she takes off (whatever she was saying is finished first, then the call).
+  for (let i = 0; i < Math.round(20 / DT) && !owlNow.flying; i += 1) storyFrame();
+  if (cushion) {
+    visit(cushion, true, 0.5);
+    seatedForStory = world.library.playerIsSeated;
   }
+  for (let i = 0; i < Math.round(30 / DT); i += 1) storyFrame();
   quietly(() => world.library.standUp());
   run(0.5);
 }
