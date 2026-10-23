@@ -906,3 +906,42 @@ head (feet 1.651). Green at 5c02a0d7: **221 ✓ 0 ✗**, every scenario "inside 
 Other checks at 12533eff: check:labels exit 0 (library: her call drawn on 208 of 208 frames at the desk, 0 frames
 spoken on the wing; reading bubble 1368, chip 1369, both 1368); check:flat-primitives, check:tap-spacing,
 check:solids, check:exits (235 s), check:brevity all exit 0 (`qa1/runs/g1`, `g2`).
+
+### The minors (745cb651, cbe0b608, 9a2fe385, 7965e947, a79c265f)
+
+3. **The card greyed in the backpack — fixed.** `InventoryDrawer`: a row with no action is a keepsake
+   (`data-keepsake`), drawn at full strength; still `aria-disabled` (no press promised). check:book-reader item 11
+   (served): the owl's own press hands the card over, `I` opens the backpack, the card's row reads opacity **1**,
+   aria-disabled; CONTROL: the same row given `data-available='false'` by hand reads **0.5**. Green: 1056 ok.
+   **Red** (the old two lines back, `red-qa1-g-card-greyed.log`): `FAIL her library card in her backpack … drawn at
+   opacity 0.5, aria-disabled true, keepsake null (3 rows)`.
+4. **Big reader unearnable — fixed.** `SECRETS` lists `secret.bigReader` only while `CHAPTER_BOOKS` holds a book
+   (the shelf the one owner; `state/secrets.ts` reads the data-only `chapterBooks/index.ts`). At this head the dex
+   has 6 secrets, total 76; with part 5's books the card comes back by itself. vitest `chapter-books` case 4.
+   **Red** (`|| true`, `red-qa1-f-bigreader-listed.log`): `Tests 1 failed | 12 passed (13)` — `Big reader listed:
+   true, with 0 chapter book(s) on the shelf`. **For part 5:** nothing to do; the row appears with the books.
+5. **The card sparkles under her bubble — fixed.** Their own pool (`cardSparkles`, 12, sky blue, 0.55 m), in three
+   clouds across the desk from a little her side of its middle to past its front edge (`cardHandOver`: the desk's
+   spot and measured top); the card waved high (`CARD_FLAP_LIFT` 2.0 rad, `FLAP_SECONDS` 1.4 — at the top of the
+   wave the wing is back inside her solid's reach, 0.665 m; mid-wave past it only over the desk, bins −50..−30°).
+   CARD measures every live sparkle on the 1280×720 screen against her bubble's painted rectangle (pill + tail,
+   projected): **852 sparkle-frames on 71 frames of the hand-over line, 0 behind her bubble**. **Red** (the old puff
+   over her head, `red-qa1-h-sparkles-over-head.log`): `708 of them behind her bubble … e.g. a sparkle at (758, 404) px
+   inside her bubble's (672, 369)–(830, 417)`. Found on the way: a cloud from the desk's back edge rose into her
+   bubble's tail (46, then 1 of 852) — the clouds start nearer the child.
+6. **The flight under her call bubble — fixed** (with the majors: she calls at her desk, then flies; reds above).
+7. **The owl hidden from cushion 1 — judged real, not fixed here: a layout question for Jim.** Measured (headless
+   Chrome, 1280×800, the reading owl's drawn pixels with the children there against with them hidden, one paused
+   moment, `qa1/look/occlusion.mjs`): **15.4 % of her hidden from cushion 1, 7.4 % from cushion 3** — her face and
+   glasses show, her body is behind Fenn's head on cushion 5 (5, −9.5). The camera looks along (−x, −z) from 38°,
+   nearly orthographic, so whoever sits south-east of the chair covers her. Moving cushion 5 off that line runs into
+   the plan's seat rules (two children ≥ SEPARATION 1.8 m, a child and her cushion ≥ PLAYER_SEPARATION 1.52 m —
+   cushion 3 is 1.75 m from 5); **moving the story chair 1 m east** (to (5, −11.1)) clears every seat (screen
+   offsets ≥ 1.19 m) but puts the chair off the rug's middle. Both are visible changes to a merged layout (#716)
+   and the plan's Decision 13 — for Jim; the PR's question is updated with these numbers.
+8. **The glow hard to spot from the desk — fixed.** A **beacon**: one sky-blue sparkle (0.7 m) every 0.25 s rises
+   off the top of the glowing book's own case, right over it (`glowBeaconBase`: its bookcase kind's measured
+   height + 0.1) — a little column of light over the stacks. RECOMMEND at the desk's front for 3 s: a sparkle in
+   the open over `stack-3-3` (3.20 m), on screen and in clear view of the camera (a ray from it past every opaque
+   room mesh), on **171 of 180 frames** (724 sparkle-frames, 0 hidden). **Red** (the beacon's puff removed,
+   `red-qa1-i-no-beacon.log`): `on 0 (0 sparkle-frames …)` — the book's own twinkles never rise over its case.
