@@ -19,6 +19,9 @@
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
  * LIBRARY_CHECK_REMOVE='the owl' pnpm run check:library       # the owl's solid out: OWL must go red (her middle is reachable)
  * LIBRARY_CHECK_MUTATE=card-twice pnpm run check:library      # a second card given through the non-idempotent door: CARD must go red
+ * LIBRARY_CHECK_MUTATE=fixed-hysteresis pnpm run check:library  # the selection's band a fixed 0.6 m (before #734): SHELF WALK's arrivals must go red
+ * LIBRARY_CHECK_MUTATE=no-hysteresis pnpm run check:library  # no band at all: SHELF WALK's sway midway must go red (flicker)
+ * LIBRARY_CHECK_MUTATE=tap-loses pnpm run check:library      # a tap dropped while proximity holds anything else (before #734): SHELF WALK's taps must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -112,6 +115,15 @@
  *     children: their routes swept, their stroll inside and freeze outside,
  *     and the story-time rehearsal — summoned, sat, furniture to the player,
  *     dismissed).
+ * 17. SHELF WALK (QA, PR #734) — the big readers' shelf, six books 0.6 m
+ *     apart, walked the way QA walked it: one continuous session, a real
+ *     `Selection` wired as `Game` wires it, E through the InputSystem's own
+ *     key listener and `InteractRouter`. Every arrival on a stand opens that
+ *     stand's book — walked north, walked back south, come from the aisle,
+ *     and stood on link after link — a tap on a neighbour's book selects it
+ *     and E opens it, and a sway midway between two stands never changes the
+ *     selection (no flicker). Its three mutations put back each half of the
+ *     old rule.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -124,7 +136,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Raycaster, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Texture } from 'three';
+import { Box3, Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Raycaster, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -179,7 +191,9 @@ import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { END_HALF, LibraryProps, libraryKeepOuts, segmentDistance, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
 import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/library/furnish.ts';
-import { SHELF_BOOK_ZONE_PREFIX, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
+import { SHELF_BOOK_ZONE_PREFIX, SHELF_BOOKS, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
+import { Selection } from '../src/world/Selection.ts';
+import { InteractRouter } from '../src/world/InteractRouter.ts';
 import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
@@ -290,6 +304,9 @@ const MUTATIONS = [
   'open-leaf-hollow',
   'resident-in-den',
   'block-walk',
+  'fixed-hysteresis',
+  'no-hysteresis',
+  'tap-loses',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -1402,13 +1419,9 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
       (wrongKind.length > 0 ? ` — wrong: ${wrongKind.map(({ book, slot }) => `${book.id} (${book.kind}) on ${slot ? `a ${slot.kind} slot` : 'no slot'}`).join(', ')}` : ''),
   );
   say(pictureSlots.length === PICTURE_BOOKS.length, `${pictureSlots.length} picture-book slots for the ${PICTURE_BOOKS.length} picture books`);
-  say(CHAPTER_BOOKS.length <= chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
-  if (CHAPTER_BOOKS.length < chapterSlots.length) {
-    note(
-      `${chapterSlots.length - CHAPTER_BOOKS.length} of the ${chapterSlots.length} big readers' slots wait for their chapter books — ` +
-        `BOOKS (${BOOKS.length}) and LIBRARY_READABLE_SLOTS (${LIBRARY_READABLE_SLOTS.length}) must be equal before track A's shelf books are paired with them`,
-    );
-  }
+  // The six chapter books are all on the shelf (the books' join), so no big
+  // readers' slot waits any more: one missing goes red here, never a WAIT.
+  say(CHAPTER_BOOKS.length === chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
   const shelves = libraryBookcaseSize('wall').shelfTops;
   say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
 
@@ -1418,18 +1431,7 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // naming the books.
   const shift = mutating('shift-books') ? 1 : 0;
   if (shift > 0) note('SHIFTED the pairing this check expects by one on purpose (slot i must hold BOOKS[i+1]) — this run must go red, naming the books');
-  // A slot past the last book waits for one (the big readers' shelf, until its
-  // chapter books land): it holds nothing, and nothing below asks it to.
-  const expected = LIBRARY_READABLE_SLOTS.map((slot, i): { slot: (typeof LIBRARY_READABLE_SLOTS)[number]; book: (typeof BOOKS)[number] | null } => ({
-    slot,
-    book: i < BOOKS.length ? BOOKS[(i + shift) % BOOKS.length]! : null,
-  }));
-  const waiting = expected.filter(({ book }) => book === null);
-  note(
-    waiting.length === 0
-      ? `every one of the ${LIBRARY_READABLE_SLOTS.length} slots holds a book`
-      : `${waiting.length} slot(s) WAIT for their books, so nothing is asserted about what stands in them: ${waiting.map(({ slot }) => `slot ${slot.index + 1} (${slot.bookcase}, shelf ${slot.shelf}, ${slot.along} m along)`).join(', ')}`,
-  );
+  const expected = LIBRARY_READABLE_SLOTS.map((slot, i) => ({ slot, book: BOOKS[(i + shift) % BOOKS.length]! }));
 
   // Every `library.book.<id>` mesh in the room (an outline is `<…>.outline`).
   const named = new Map<string, Mesh[]>();
@@ -1455,7 +1457,6 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   let worstOut = { what: 'none', by: -Infinity };
   let placedOk = 0;
   for (const { slot, book } of expected) {
-    if (!book) continue;
     const mesh = named.get(book.id)?.[0];
     const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
     const box = boxes.get(`bookcase ${slot.bookcase}`);
@@ -1552,7 +1553,6 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // Each zone in its slot, read against the expected pairing.
   let zonesOk = 0;
   for (const { slot, book } of expected) {
-    if (!book) continue;
     const zone = zones.find((candidate) => candidate.id === shelfBookZoneId(book.id));
     const mesh = named.get(book.id)?.[0];
     if (!zone || !mesh) {
@@ -3644,6 +3644,296 @@ function owlBubbleBehindTheRoom(): { points: number; behind: number; first: stri
   }
   // Which bubble was measured: hers, over her head and drawn — never a stale sprite left somewhere else.
   return { points, behind, first, depthTested: sprite.material.depthTest, offHerHead: owlBubbleOffHerHead(), drawn: sprite.visible };
+}
+console.log("\nSHELF WALK — the real child walks the big readers' shelf stand to stand, both ways, in one session, and presses E at every stand; taps a neighbour's book; sways midway between two stands (QA, PR #734):");
+{
+  const player = child.player;
+  const input = child.input;
+  /**
+   * The six chapter books on west-4, in shelf order, and their stands (room-local). Read off
+   * `SHELF_BOOKS`, the pairing the game itself builds the shelf from — never typed here.
+   */
+  const shelf = SHELF_BOOKS.filter((entry) => entry.book.kind === 'chapter').map((entry) => ({
+    id: entry.book.id,
+    zoneId: shelfBookZoneId(entry.book.id),
+    x: entry.slot.stand.x,
+    z: entry.slot.stand.z,
+    facing: entry.slot.stand.facing,
+  }));
+  /**
+   * Standing ON a stand, to the readout's precision: QA stopped on each by the F3 readout, which reads
+   * to 0.1 m, so within 5 cm. The walk's own stop is held to it below — a stop further off is the
+   * instrument failing, and says so, never a pass.
+   */
+  const ON_STAND = 0.05;
+  /** How far she may coast once the stick is let go near a spot: the light touch below is solved from it. */
+  const COAST = 0.05;
+  const touch = Math.min(1, Math.sqrt(2 * PLAYER_DECELERATION * COAST) / PLAYER_MAX_SPEED);
+
+  // The mutations this clause arms: each puts back one half of the rule it measures, in the check only.
+  const innards = Selection.prototype as unknown as Record<string, unknown>;
+  const restore: (() => void)[] = [];
+  const patch = (name: string, value: unknown): void => {
+    const before = innards[name];
+    if (typeof before !== 'function') throw new Error(`SHELF WALK: Selection has no '${name}' to mutate — this run would assert nothing`);
+    innards[name] = value;
+    restore.push(() => {
+      innards[name] = before;
+    });
+  };
+  if (mutating('fixed-hysteresis')) {
+    patch('hysteresisBand', () => 0.6);
+    note('MUTATED Selection.hysteresisBand to a fixed 0.6 m whatever the gap (the rule before PR #734): the arrivals must go red — every one from the aisle; a straight walk stops on an exact tie at 0.6 m, so some of those pass by rounding');
+  }
+  if (mutating('no-hysteresis')) {
+    patch('hysteresisBand', () => 0);
+    note('MUTATED Selection.hysteresisBand to 0 (no hysteresis at all): the sway midway between two stands must go red');
+  }
+  if (mutating('tap-loses')) {
+    patch('tapOutlives', () => false);
+    note('MUTATED Selection.tapOutlives to false (a tap dropped whenever proximity holds anything else, the rule before PR #734): the taps must go red');
+  }
+
+  // The selection, wired as `Game` wires it: the world's zones, blocked while a book is open
+  // (`Game.selectionBlocked` asks `bookReader.isOpen`); she walks herself, so no navigator.
+  let readerOpen = false;
+  const opened: string[] = [];
+  library.attachBookReader({
+    open: (bookId) => {
+      opened.push(bookId);
+      readerOpen = true;
+      return true;
+    },
+    isOpen: () => readerOpen,
+  });
+  const canvas = { dataset: {} } as unknown as HTMLCanvasElement;
+  const selection = new Selection(player, camera, canvas, {
+    zones: () => world.interactZones(),
+    blocked: () => readerOpen,
+    walkTo: () => {},
+    walking: () => false,
+    flash: () => {},
+  });
+  // E reaches the selection the one way the game's E does: the key's own listener on the InputSystem,
+  // `takeInteractPress`, `InteractRouter`, `Selection.handleInteractPress`.
+  const router = new InteractRouter([], selection);
+  const listeners = new Map<string, (event: unknown) => void>();
+  const keyTarget = {
+    addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, listener),
+    removeEventListener: (type: string) => listeners.delete(type),
+  };
+  input.attach(keyTarget as unknown as Window);
+  const pressE = (): void => {
+    listeners.get('keydown')?.({ code: 'KeyE', key: 'e', repeat: false, target: null, preventDefault() {} });
+    listeners.get('keyup')?.({ code: 'KeyE', key: 'e', target: null });
+  };
+  const context = { dt: CHILD_DT, elapsed: 0, input, playerPosition: player.position, cameraForward: camera.forward, frame: 0 } as unknown as FrameContext;
+  /** One frame: the child's (input, player, camera, library, crowd), then `Game`'s order after them — the selection, then E's router. */
+  const frame = (steer?: Steer): void => {
+    child.step(steer);
+    context.frame = child.frames;
+    context.elapsed = child.frames * CHILD_DT;
+    selection.update(context);
+    router.update(context);
+  };
+  const run = (seconds: number, steer?: Steer): void => {
+    for (let i = 0; i < Math.round(seconds / CHILD_DT); i += 1) frame(steer);
+  };
+  /** Walk her on the stick onto room-local (x, z) and let her come to rest: full tilt from afar, then the light touch. */
+  const walkTo = (x: number, z: number): void => {
+    for (let i = 0; i < Math.round(8 / CHILD_DT); i += 1) {
+      const here = child.room();
+      const left = Math.hypot(x - here.x, z - here.z);
+      if (left <= COAST) break;
+      frame(child.towards(x - here.x, z - here.z, false, left > 1.6 ? 1 : touch));
+    }
+    run(0.6);
+  };
+  const where = (): string => `(${child.room().x.toFixed(2)}, ${child.room().z.toFixed(2)})`;
+  const offStand = (stand: { readonly x: number; readonly z: number }): number => Math.hypot(child.room().x - stand.x, child.room().z - stand.z);
+  /** E on the stand she is standing on: what was selected, and what opened — then the book closed, as the reader's ✕ closes it. */
+  const pressHere = (): { selected: string; opened: string | null } => {
+    const selected = selection.selected?.id ?? 'nothing';
+    const before = opened.length;
+    pressE();
+    frame();
+    const got = opened.length > before ? opened[opened.length - 1]! : null;
+    run(0.3);
+    readerOpen = false;
+    run(0.3);
+    return { selected, opened: got };
+  };
+  const results: { what: string; ok: boolean }[] = [];
+  const arrive = (how: string, stand: (typeof shelf)[number]): void => {
+    const off = offStand(stand);
+    const at = where();
+    const { selected, opened: got } = pressHere();
+    const ok = off <= ON_STAND && selected === stand.zoneId && got === stand.id;
+    results.push({ what: `${how}: '${stand.id}'`, ok });
+    say(
+      ok,
+      `${how}, onto '${stand.id}''s stand (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}): stopped at ${at}, ${off.toFixed(3)} m off it (${ON_STAND} allowed); ` +
+        `selected '${selected}', and E opened ${got === null ? 'NOTHING' : `'${got}'`}${got === stand.id ? '' : ` — WRONG, wanted '${stand.id}'`}`,
+    );
+  };
+
+  // The geometry this clause is proved against, read off the built shelf and the selection itself.
+  const zoneOf = (id: string): InteractZone | undefined => world.interactZones().find((zone) => zone.id === id);
+  /** The selection's own band between two zones, or null where this build's Selection has none (the rule before PR #734: a fixed 0.6 m). */
+  const band = (a: string, b: string): number | null => {
+    const one = zoneOf(a);
+    const two = zoneOf(b);
+    const ask = (selection as unknown as { hysteresisBand?: (x: InteractZone, y: InteractZone) => number }).hysteresisBand;
+    return one && two && typeof ask === 'function' ? ask.call(selection, one, two) : null;
+  };
+  const bandText = (value: number | null): string => (value === null ? 'none (no hysteresisBand: a fixed 0.6 m)' : `${value.toFixed(3)} m`);
+  const { PARK_SEED_ASKED, PARK_RESTART } = await import('../src/world/parkManifest.ts');
+  const gaps = shelf.slice(1).map((stand, i) => Math.hypot(stand.x - shelf[i]!.x, stand.z - shelf[i]!.z));
+  note(
+    `SHELF WALK geometry: seed ${PARK_SEED_ASKED} restart ${PARK_RESTART}, the reading room at (${OX}, ${OZ}); west-4's stands, room-local, facing ${shelf[0]?.facing}: ` +
+      shelf.map((stand) => `${stand.id} (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)})`).join(', ') +
+      `; gaps ${gaps.map((gap) => gap.toFixed(3)).join(', ')} m; the selection's band between neighbours ` +
+      shelf.slice(1).map((stand, i) => bandText(band(shelf[i]!.zoneId, stand.zoneId))).join(', ') +
+      `; stand radius ${zoneOf(shelf[0]!.zoneId) ? standRadiusOf(zoneOf(shelf[0]!.zoneId)!) : '?'} m; the stick's light touch ${touch.toFixed(3)} (coast ${COAST} m)`,
+  );
+  say(shelf.length === 6 && shelf.every((stand) => zoneOf(stand.zoneId) !== undefined), `six chapter books on the big readers' shelf, each with a Read zone (${shelf.length} found)`);
+
+  // 1. North, on foot: onto the first stand (the PR's own link stands her there), then walked to each next one.
+  const first = shelf[0]!;
+  child.stand(first.x, first.z, first.facing);
+  run(0.6);
+  arrive('stood on the first stand, as /library?at= does', first);
+  for (let i = 1; i < shelf.length; i += 1) {
+    walkTo(shelf[i]!.x, shelf[i]!.z);
+    arrive(`walked north from '${shelf[i - 1]!.id}'`, shelf[i]!);
+  }
+  // 2. South, on foot, all the way back.
+  for (let i = shelf.length - 2; i >= 0; i -= 1) {
+    walkTo(shelf[i]!.x, shelf[i]!.z);
+    arrive(`walked south from '${shelf[i + 1]!.id}'`, shelf[i]!);
+  }
+  // 3. From the room: out from the stand she is at into the aisle, then onto the next stand along.
+  const aisleOut = 1.5;
+  for (let i = 1; i < shelf.length; i += 1) {
+    const from = shelf[i - 1]!;
+    const out = { x: from.x + aisleOut, z: from.z };
+    const outClear = collision.isClearCircle(OX + out.x, OZ + out.z, PLAYER_RADIUS);
+    walkTo(out.x, out.z);
+    const heldOut = selection.selected?.id ?? 'nothing';
+    walkTo(shelf[i]!.x, shelf[i]!.z);
+    arrive(`from the aisle at (${out.x.toFixed(2)}, ${out.z.toFixed(2)}) (clear floor: ${outClear}; held there: '${heldOut}')`, shelf[i]!);
+  }
+  // 4. The deep links one after another: stood on the stand before (the save's spot), then on this one.
+  for (let i = 1; i < shelf.length; i += 1) {
+    const before = shelf[i - 1]!;
+    child.stand(before.x, before.z, before.facing);
+    run(0.6);
+    const heldBefore = selection.selected?.id ?? 'nothing';
+    child.stand(shelf[i]!.x, shelf[i]!.z, shelf[i]!.facing);
+    run(0.6);
+    arrive(`stood on it straight from '${before.id}''s stand, as the next /library?at= link does (held before: '${heldBefore}')`, shelf[i]!);
+  }
+
+  const walked = results.filter((result) => result.ok).length;
+  say(walked === results.length, `${walked} of ${results.length} arrivals on a stand — on foot both ways, from the aisle, and by link after link — opened that stand's own book`);
+
+  // 5. A tap on a neighbour's book, standing on a stand: it selects that book, and E opens it.
+  camera.camera.updateMatrixWorld(true);
+  let tapsOk = 0;
+  let taps = 0;
+  for (let i = 0; i < shelf.length; i += 1) {
+    for (const j of [i - 1, i + 1]) {
+      const target = shelf[j];
+      if (!target) continue;
+      const here = shelf[i]!;
+      child.stand(here.x, here.z, here.facing);
+      // A fresh pick where she stands (a book opened and closed clears the selection, as the reader
+      // does), so this measures the tap alone and never the hysteresis — that is 1-4's question.
+      readerOpen = true;
+      frame();
+      readerOpen = false;
+      run(0.6);
+      const heldBefore = selection.selected?.id ?? 'nothing';
+      const mesh = library.roomRoot.getObjectByName(`library.book.${target.id}`);
+      camera.camera.updateMatrixWorld(true);
+      const aim = mesh ? new Box3().setFromObject(mesh).getCenter(new Vector3()).project(camera.camera) : null;
+      const tapped = aim ? selection.handleTap(aim.x, aim.y) : false;
+      frame();
+      const { selected, opened: got } = pressHere();
+      const ok = tapped && heldBefore === here.zoneId && selected === target.zoneId && got === target.id;
+      taps += 1;
+      if (ok) tapsOk += 1;
+      say(
+        ok,
+        `on '${here.id}''s stand (holding '${heldBefore}'), a tap on '${target.id}''s book at NDC (${aim ? `${aim.x.toFixed(3)}, ${aim.y.toFixed(3)}` : 'no mesh'}) ` +
+          `${tapped ? 'landed on a zone' : 'MISSED every zone'}: selected '${selected}', and E opened ${got === null ? 'NOTHING' : `'${got}'`}${got === target.id ? '' : ` — WRONG, wanted '${target.id}'`}`,
+      );
+    }
+  }
+  say(taps === 10 && tapsOk === taps, `${tapsOk} of ${taps} taps on a neighbour's book selected that book, and E opened it`);
+
+  // 6. Midway between two stands, swaying a hand's breadth either side: the selection holds still.
+  const north = shelf[2]!;
+  const south = shelf[3]!;
+  const mid = { x: (north.x + south.x) / 2, z: (north.z + south.z) / 2 };
+  /** A hand's breadth either side of the midpoint: well inside the band the rule keeps for a shelf like this (a quarter of the gap). */
+  const SWAY = 0.08;
+  /** How far past SWAY a stop may coast before the instrument, not the rule, is to blame. */
+  const SWAY_SLACK = 0.04;
+  walkTo(mid.x, mid.z);
+  const settled = selection.selected?.id ?? 'nothing';
+  let changes = 0;
+  let last = settled;
+  let nearest = Infinity;
+  let furthest = 0;
+  const along = (): number => {
+    const here = child.room();
+    // signed distance from the midpoint along the shelf line, + towards the north stand
+    const dx = north.x - south.x;
+    const dz = north.z - south.z;
+    const length = Math.hypot(dx, dz);
+    return ((here.x - mid.x) * dx + (here.z - mid.z) * dz) / length;
+  };
+  const watch = (): void => {
+    const now = selection.selected?.id ?? 'nothing';
+    if (now !== last) changes += 1;
+    last = now;
+    const a = along();
+    nearest = Math.min(nearest, a);
+    furthest = Math.max(furthest, a);
+  };
+  const swayTo = (sign: number): void => {
+    const length = Math.hypot(north.x - south.x, north.z - south.z);
+    const x = mid.x + (sign * SWAY * (north.x - south.x)) / length;
+    const z = mid.z + (sign * SWAY * (north.z - south.z)) / length;
+    for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+      const here = child.room();
+      const left = Math.hypot(x - here.x, z - here.z);
+      if (left <= COAST) break;
+      frame(child.towards(x - here.x, z - here.z, false, touch));
+      watch();
+    }
+    for (let i = 0; i < Math.round(0.6 / CHILD_DT); i += 1) {
+      frame();
+      watch();
+    }
+  };
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    swayTo(1);
+    swayTo(-1);
+  }
+  const swayBand = band(north.zoneId, south.zoneId);
+  const inside = Math.max(-nearest, furthest) <= SWAY + SWAY_SLACK;
+  say(
+    inside && changes === 0 && settled !== 'nothing',
+    `midway between '${north.id}' and '${south.id}' (${mid.x.toFixed(2)}, ${mid.z.toFixed(2)}), swaying ${SWAY} m either way 4 times ` +
+      `(she reached ${nearest.toFixed(3)} .. +${furthest.toFixed(3)} m along the shelf): the selection changed ${changes} time(s) from '${settled}' (0 wanted — no flicker; ` +
+      `the band between the two: ${bandText(swayBand)})${inside ? '' : ' — the sway left its hand\'s breadth: the instrument, not the rule, failed'}`,
+  );
+
+  input.detach(keyTarget as unknown as Window);
+  library.attachBookReader(null);
+  for (const undo of restore) undo();
 }
 console.log('\nSTORY — the owl calls, flies to the big chair, the children sit, she reads a whole book, and everyone wanders off:');
 {

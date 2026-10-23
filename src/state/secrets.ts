@@ -1,5 +1,5 @@
 import { gameStore } from './store';
-// Data only (its one import is a type), so a state module may read it without pulling the world in.
+// Data only (the index and the six chapter books it lists import nothing but types), so a state module may read it without pulling the world in.
 import { CHAPTER_BOOKS } from '../world/library/chapterBooks/index';
 
 /**

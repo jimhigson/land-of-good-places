@@ -22,9 +22,11 @@ import { LIBRARY_READABLE_SLOTS, type ReadableSlot } from './layout';
  * shelf (`layout.ts`'s six chapter-book slots on `west-4`) is laid out whole
  * while its chapter books land a few at a time (`chapterBooks/index.ts`, track
  * D of #714): a waiting slot is a gap in the row with its stand kept clear,
- * exactly as every slot stood before the twelve picture books landed (#720),
- * and `check:library`'s READABLE says how many wait on every run. Only the
- * last slots may wait — a gap *between* books would be a book missing.
+ * exactly as every slot stood before the twelve picture books landed (#720).
+ * Only the last slots may wait — a gap *between* books would be a book
+ * missing. All six chapter books are in now, so none waits, and
+ * `check:library`'s READABLE holds every slot to its book: a slot found
+ * waiting again goes red there.
  */
 export interface ShelfBook {
   readonly book: LibraryBook;

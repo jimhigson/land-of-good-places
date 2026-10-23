@@ -256,8 +256,10 @@ STANDIN_CHILD = 0xE86F9B
 """The scale figure, in a colour nothing in the hotel is, so nobody mistakes it
 for a piece of the asset."""
 
-KID_HEIGHT = hb.ts_const("src/art/models/kid.ts", "KID_HEIGHT")
-"""2.12 m — a child in the **default** hair and no hat, read from `kid.ts`."""
+KID_HEIGHT = hb.ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
+"""2.12 m — a child in the **default** hair and no hat, read from `kidHeight.ts`
+(the leaf `kid.ts` re-exports it from; `hotel_build`'s own `ts_const` is the
+grandfathered copy and does not follow re-exports the way `blendkit`'s does)."""
 
 
 def standins():
