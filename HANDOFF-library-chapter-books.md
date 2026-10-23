@@ -17,7 +17,10 @@ Never push to `feat/library-v2` or `feat/library-v2-pr` (the part-4 pipeline own
 - [x] worktree cut from origin/feat/library-v2 @ 9a269a31, pnpm 12.1.0 / node 26.5.0, branch pushed
 - [x] merge `origin/feat/library-v2-books` @ 9325e0f7 (rerere off) → **4333fc84**
 - [x] package.json step-set proof (parsed) — PROOF OK, control red
-- [ ] parks hydrated for the merged source hash (honest seed-5 solve running, hash 53dde20f…)
+- [x] part 4 moved (66549d88, LABELS.md + its handoff, docs only): merged → **16ee9be8**; park hash
+      unchanged 53dde20f…; step-set proof re-run, PROOF OK
+- [ ] parks hydrated for the merged source hash (honest seed-5 solve running, hash 53dde20f…;
+      `chapter-books/parks-fresh.sh` says FRESH/STALE before every World-building check)
 - [ ] local checks (table below)
 - [ ] the look (six chapter books at 1280x800 and 390x844; a picture book; the owl's desk)
 - [ ] PR opened, stacked on #733
@@ -62,6 +65,23 @@ its parents' sets — `check:shard-1` 26 / 27 → 27 (+`check:story-props-glb`, 
 `check:all` 6, `check:crowd` 5, the `blend:*` chains). `check:shard-8` (one step) equals both
 parents' text. **Control** (the pre-merge HEAD as the "result"): exit 1, `5 PROBLEM(S)` —
 `LOST [check:story-props-glb]` in `check:shard-1` and the four story-props names missing.
+
+## Checks (exit codes read; counts off the screen; logs `chapter-books/runs/<tag>/`)
+
+| check | exit | off the screen |
+|---|---|---|
+| `tsc --noEmit` | 0 | 1166 files, 233478 lines (all 7 `chapterBooks/` files among them) |
+| `typecheck:test` | 0 | |
+| `check:story-props-glb` | 0 | 61 nodes, both readers agree; "ships as built" |
+| `check:library-glb` | 0 | 65 nodes, both readers agree |
+| `check:assets` | 0 | 167 assets check out, 28 still carry recorded drift |
+| `check:flat-primitives` | 0 | 109 flat-ok sites, "no new flat primitives, and no stale baseline entries" |
+| vitest `test/library` + `test/store/library-card` | 0 | 4 files, 21 passed, 0 skipped (pageCurl 4, big-reader 8, chapter-books 5, card 4) |
+
+The books' own files are byte-identical to `origin/feat/library-v2-books` after the merge
+(`git diff --stat origin/feat/library-v2-books HEAD -- chapterBooks/ final.json storyProps.glb
+storyPropsGlb.ts reader/ books.ts readBooks.ts shelfBooks.ts bookKinds.ts test/library/` is empty):
+"as-is" by construction.
 
 ## Taking over at zero notice
 
