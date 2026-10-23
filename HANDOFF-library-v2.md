@@ -375,3 +375,68 @@ differ). Clause order in check:library: A's block (OWL → CARD → RECOMMEND �
 | `check:jitter` | 0 | 34 children, 9000 frames, worst own step 0.177 m (Luca), bound 1 m |
 | `check:crowd` | 0 | trace `frames=90000 children=12`, `covered climbs=9 trips=61 …` (no NOT EXERCISED) |
 | `check:solids` (core) | 0 | the library: 14 tops, 0 drop regions, 679 jumps; "check:solids OK" |
+
+### The integration review's findings, judged
+
+1. **Primitive picture items (blocker) — real; already fixed at its root on track D, lands at the join.**
+   `createStoryCloud` (squashed spheres), `pictureProps.ts` and the `prop` vocabulary came in with the
+   books2 WIP. Track D's cece064a ("the picture vocabulary is the story-props kit, never a primitive")
+   deletes `pictureProps.ts`, drops `PropPart`/`PropShape`/`parts`, and draws `stormCloud` with the kit's
+   Nimbus (`reader/storyProps.ts` `createStoryCloud`, from `storyProps.glb`) — read on
+   `origin/feat/library-v2-books` @ 9325e0f7. Not duplicated here: a second, different edit of the same
+   hunks would conflict with D's at the join. **At this head no page draws them** (`git grep`: only
+   check-book-reader's model sheet, items 9/9b, names `prop`/`stormCloud`; `CHAPTER_BOOKS` is `[]`), so a
+   player sees none. The PR body no longer advertises "storm cloud, primitive props". **For the join:**
+   after merging D, `git grep -n "pictureProps\|buildPictureProp\|PropPart" -- src scripts` must be empty.
+2. **'Get up' popped her 1.25 m sideways (major) — real, fixed (68999c55).** `standUp()` gives `endRide`
+   the cushion's measured top (`libraryCushionSize().top`, the solid's own top), where her feet were
+   before she sat; the put-down rule's clause 2 accepts a solid's top and hands it back unchanged
+   (`check:exits`: both Sit chips now "→ its own Get up chip" with no move; it said "moved 1.25 m").
+   Decision 2 above is reversed: the doc's "the floor, never the seat" is about a chair's seat (inside the
+   chair, by the table); a cushion is a soft solid open on every side, the hotel nap's mattress.
+   SIT asserts she stands on the top where she sat, inside no solid there (`deepestSolidOverlap` at her
+   height), and walks off onto the floor. **Red** (by hand, `y: LIBRARY_FLOOR_Y + top * 0`;
+   `st9/red-getup-floor.log`; cushion-1 at room (2.1, −8), r 0.45, top 0.360) → exit 1, 157 ✓ 1 ✗:
+   `✗ 'Get up' stands her up … where she sat: 1.250 m from the cushion's middle (0.05 allowed), her feet 0.000 m up on its top (0.360) … at (2.96, -7.09)`.
+3. **The den shell from primitives (minor) — real; fixed on track C, lands at the join.** Track C merged
+   `art/library-v2-den` (9356cb61, layout.ts resolved to one definition) and draws the den from the kit
+   (9595c447: floor, walls with book niches, the lintel, stars, moon, lanterns; ae44e5ed: the pull book),
+   colliders unchanged. The room's own shell (#720, on main) is pre-existing. **For the join:** after C,
+   one definition each of `LIBRARY_DEN_DEPTH`/`DOOR_HALF`/`LIBRARY_DEN_INNER` in `layout.ts`.
+4. **The jet pack into an invisible den (minor) — real as written; question for Jim amended.** The library
+   never writes `player.flyCeiling` (only `Building.ts` does), so the pack flies 12 m indoors; over the
+   5.2 m west wall she lands in the den, whose floor and walls are drawn hidden while the shelf is shut
+   (`denRoot.visible = false`) though their colliders stand: an invisible floor among invisible walls until
+   she flies out. Not a trap (she flies out as she flew in — check:solids' jet-pack rule). Track C's
+   Step 12 (the den shown whenever she is in it, the guard opening the leaf instantly) closes it at the
+   join, after this milestone; no blocker added. The question below says so.
+5. **The PR body's look-at line with nothing to see (minor) — real, fixed in the PR body** at this
+   milestone: the lintel bullet is gone; the links are the owl, the card, the glow, the shush, the
+   children and story time.
+
+### The review of Step 6 (the owl), judged
+
+1. **OWL measured her solid against itself (major) — real, fixed (8ec1ffd9).** check:library now measures
+   the drawn owl on a FRESH model across every pose she holds at her desk (head anywhere in ±1.0 rad,
+   21 turns; breath ±0.02) — 0.668 m — asserts the registered solid covers it (2 mm), and marches and
+   AISLES against that drawn reach. Measured so, the rest pose's 0.655 was 13 mm short (her glasses sit
+   forward of the head's pivot), so `LibraryOwl.radius` is now `standingReach()` over the same poses
+   (0.668; AISLES' nearest, entrance-hall, 0.012 m clear). **Found beyond the finding:** a live instrument
+   (`measurePastHerSolid`) measures where her drawn body reaches past her solid at her widest and asks
+   whether a child could stand there. The **sideways card flap** (`wingR.rotation.z` −0.9) swung the book
+   wing 0.889 m from her middle at bearings −90..−75°, where a child can stand against her. **The flap is
+   now forward, over the desk** (`wingR.rotation.x`, the shush wing's axis): past her solid only at
+   −50..−30° and 40..50° (the shush wing), and a child can stand at none of them. Decision (Jim away):
+   change the gesture's axis rather than grow her solid (a 0.9 m disc would be an invisible blocker the
+   other 99% of the time, and breaks the aisle).
+2. **talk()'s mid-script guard had no clause (minor) — real, fixed (8ec1ffd9):** CARD presses again
+   mid-ceremony and asserts the script goes on.
+
+Reds (seed 5; the owl at room (6, 5.3) facing 0, the desk at (6, 6.8), its front stand (6, 8.7); logs `st9/red-*.log`):
+- `standingReach(…) * 0.8` (r 0.534) → exit 1, 158 ✓ 3 ✗: `✗ her solid covers her as drawn: r 0.534 against her drawn plan reach 0.668 m …`,
+  `✗ 28 marches at her … the deepest a body's edge got into her drawn disc (r 0.668, measured apart) is 0.134 m (allowance 0.03)`,
+  `✗ her wings at their widest … past her solid (r 0.534) at bearings -135 … 115°, and a child can stand against her solid at 8 of them (-95, -90, -85, -75, 75, 85, 90, 95°)`.
+- the rest pose only (`visibleReachXZ(this.handle.root)`) → exit 1, 160 ✓ 1 ✗: `✗ her solid covers her as drawn: r 0.655 against her drawn plan reach 0.668 m …`.
+- the old sideways flap (`wingR.rotation.z = …`) → exit 1, 159 ✓ 2 ✗: `✗ … she flapped the wing that holds her book forward, over her desk: rotation.x down to 0.00`,
+  `✗ her wings at their widest … reach 0.889 m from her middle; past her solid (r 0.668) at bearings -90 … -50, 40, 45, 50°, and a child can stand against her solid at 4 of them (-90, -85, -80, -75°): a wing through a child`.
+- `talk()` without `if (this.midScript) return;` → exit 1, 156 ✓ 5 ✗: `✗ pressed again mid-ceremony ('Say hello!'), she carries on: still "Hello again, little reader!" (mid-script true), nothing recommended (fountainWish), 1 card`, and the card lines, the flap, the glow and the mid-card shush lines after it.
