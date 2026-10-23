@@ -3060,16 +3060,23 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
   const lastOf = (): { x: number; z: number }[] => kids.map((kid) => ({ x: kid.body.position.x, z: kid.body.position.z }));
   const eachKid = (values: readonly number[], fmt: (value: number) => string): string => kids.map((kid, i) => `${kid.plan.name} ${fmt(values[i]!)}`).join(', ');
   const allStrolling = (): boolean => kids.every((kid) => kid.driver.mode === 'stroll');
-  /** Steps until every child strolls again, at most `seconds`; measured into `w`. */
-  const untilStrolling = (w: Watch, seconds: number): number => {
+  /**
+   * Steps until every child strolls again, at most `seconds`, **and then `after`
+   * seconds more** — where a child sent off from the wrong place would walk her
+   * unswept line — measured into `w`.
+   */
+  const untilStrolling = (w: Watch, seconds: number, after = 0): number => {
     const last = lastOf();
     let t = 0;
     while (t < seconds && !allStrolling()) {
       stepWatched(w, last);
       t += CHILD_DT;
     }
+    for (let i = 0; i < Math.round(after / CHILD_DT); i += 1) stepWatched(w, last);
     return t;
   };
+  /** How long a child is watched once she strolls again: her stroll's first leg and some. */
+  const STROLL_WATCH = 10;
 
   // 8. The gathering with her standing still where a child at story time is most likely to stand
   //    (the review of Step 8): the central aisle's end, the door to the story rug (central[5]), and
@@ -3140,7 +3147,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     const midModes = kids.map((kid) => kid.driver.mode).join('/');
     for (const kid of kids) kid.driver.dismiss();
     const wMid = watch();
-    untilStrolling(wMid, 30);
+    untilStrolling(wMid, 30, STROLL_WATCH);
     runs.push({ what: `dismissed mid-walk (modes ${midModes})`, w: wMid, strolling: allStrolling(), secondModes: '' });
     // (b) CONTROL: at her cushion's edge, dismissed once.
     // (c) At her cushion's edge, dismissed, and dismissed again 2 s into the way back.
@@ -3160,7 +3167,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         secondModes = kids.map((kid) => kid.driver.mode).join('/');
         for (const kid of kids) kid.driver.dismiss();
       }
-      untilStrolling(w, 30);
+      untilStrolling(w, 30, STROLL_WATCH);
       runs.push({ what: twice ? 'dismissed at her cushion, and again 2 s into the way back' : 'CONTROL: dismissed once at her cushion', w, strolling: allStrolling(), secondModes });
     }
     // (d) Summoned again while on the way back (a story called as the last one's children walk off):
@@ -3196,7 +3203,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     for (const run of runs) {
       say(
         run.strolling && run.w.lean.every((frames) => frames <= LEAN_FRAMES) && run.w.off.every((off) => off <= OFF_AISLE) && run.w.step <= NPC_RADIUS * 2,
-        `${run.what}${run.secondModes ? ` (the second dismissal found them ${run.secondModes})` : ''}: every child back to her stroll (${run.strolling}); ` +
+        `${run.what}${run.secondModes ? ` (the second dismissal found them ${run.secondModes})` : ''}: every child back to her stroll (${run.strolling}), watched ${STROLL_WATCH} s more; ` +
           `the longest any stayed up against a solid ${eachKid(run.w.lean, (frames) => `${frames}`)} frame(s) (${LEAN_FRAMES} allowed; in all ${eachKid(run.w.pressedFrames, (frames) => `${frames}`)}); ` +
           `furthest off her ways ${eachKid(run.w.off, (off) => `${off.toFixed(2)} m`)} (${OFF_AISLE.toFixed(2)} allowed); longest step ${run.w.step.toFixed(3)} m`,
       );
