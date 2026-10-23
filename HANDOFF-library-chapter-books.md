@@ -313,3 +313,9 @@ list above and carry on from the first unticked box. `.parks/` holds all 16 hone
   PROOF OK, tsc 0, hash **2b2fe559**), PR head fast-forwarded 69ba3716..**e03200d5** (that cancels
   39994583659 — superseded, not red); **CI 39995947413 + Update adoption 39995947169** on e03200d5.
   Seed 5 re-solving locally for 2b2fe559; then the targeted checks on e03200d5.
+- The local seed-5 solve for 2b2fe559 was **stopped by me (by PID, my worktree's processes only)** after
+  49 min with no verdict: the machine was at load 42–50 from other agents, and one attempt sat 31 min in
+  `check:stall-accommodate` (a search script, always solves). CI solves the same hash on its runners;
+  its **`parks-2b2fe559…` artifact** (16 seeds, this exact tree) is what the final local checks use —
+  `gh run download <run> -n parks-<hash> -D <dir>`, copy `*.json` into `.parks/`, then `parks-fresh.sh`.
+  `.parks/` has no top-level manifest until then: run nothing World-building before it is restored.
