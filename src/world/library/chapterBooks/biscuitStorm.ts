@@ -233,7 +233,6 @@ export const biscuitStorm: LibraryBook = {
       text: 'So Nimbus joined the Grand Fountain Picnic, and kept everyone cool in its shade. Biscuit even shared his sandwiches. Nimbus had forty-one. Biscuit had one. And whose tummy rumbled all the way home?',
       picture: {
         cast: [
-          { model: 'statue', size: 0.3, at: [-2.3, 0, -3.4] },
           { model: 'stormCloud', colour: 'blossomWhite', mood: 'happy', size: 1.1, at: [-0.5, 1.65, -1.4] },
           { model: 'picnicBlanket', at: [0, 0, -0.2] },
           // Nimbus's forty-one: the heap is exactly that many.

@@ -192,11 +192,11 @@ export const giantFootprints: LibraryBook = {
       text: 'In his race cart, Grandpa Tock didn’t need to duck. When a duck bar came, he just popped his head into his shell! At the finish he cried, ‘Again! But slower, please.’',
       picture: {
         cast: [
-          { model: 'rainbowArch', size: 1.2, at: [-1.2, 0, -6.8], turn: 35 },
-          { model: 'cart', colour: 'markerMint', size: 0.8, turn: 35 },
+          { model: 'rainbowArch', size: 1.2, at: [-2.0, 0, -6.0], turn: 55 },
+          { model: 'cart', colour: 'markerMint', size: 0.8, turn: 55 },
           // In the tub at the seat (SEAT_HEIGHT 0.958 at park scale, doubled), head in his shell.
-          { model: 'tortoise', pose: 'tuck', size: 1.8, at: [0, 2.1, 0], turn: 35 },
-          { model: 'duckBar', size: 2, turn: 35 },
+          { model: 'tortoise', pose: 'tuck', size: 1.8, at: [0, 2.1, 0], turn: 55 },
+          { model: 'duckBar', size: 2, turn: 55 },
         ],
         sky: 'skyDayBottom',
         ground: 'grassLight',
