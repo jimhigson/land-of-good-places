@@ -519,7 +519,20 @@ The Fable agent below died after its gate run at bf7b1c8b (04:32) without record
 - Seed 6 (seen in the feet-judged proof run, census on): clause 8 "✗ once her line has followed her off it, the train goes on
   past where they stood — it never did in 40 s" and clause 13 "✗ walking into it standing at Sunny Side … at the carriage
   197.5 m round: 0.03 m inside it". Not from the mutation (it touches only the census sim). CI's chain runs seed 5 only.
-  Being run on all 16 seeds (census skipped): `/tmp/es-seeds11/<seed>.log`.
+- **Clauses 8 and 13 on all 16 parks** (census skipped, `/tmp/es-seeds11/<seed>.log` at bf7b1c8b): red on 10 (0 1 3 4 6
+  7 8 10 13 14). Diagnosed one by one (failure messages now carry who holds the train, where she walked, her put-down):
+  one game defect — a boarding child took the seat in the carriage she stood on and, as furniture to her, shouldered
+  her off the far side (seed 2, once the others were fixed) → `ParkTrain.upOn` in `claimSeat`, proof `riders-sit-on-her`
+  (seed 2); the rest the clauses' own choreography (her hop-out blocked a metre past the fence; a slantwise walk off a
+  carriage's end; the holder 3 m ahead letting the train creep into her; wedges measured from the walk sampler while
+  she stood on a carriage's top; her line left at her trail's point beside a carriage). Commit 906510e8. After it:
+  15 of 16 clean (`/tmp/es-seeds12`, census skipped); **seed 6 still red** — see the next item.
+- **Seed 6, Sunny Side, the carriage 197.5 m round (KNOWN GAP, not fixed)**: the carriage's rim stands 0.576–0.595 m over
+  the platform there (its tilt on the planet), straddling the step's limit (0.62 − 0.03 = 0.59). Walking into its side she
+  starts up onto it (0.13 m in, frames 15–19, at 0.576), then is set back 0.23 m in one frame and stands pressed at 0.594
+  (not a step). The clause sees 0.031 m inside it on the frame at 0.5906. Platform 0.34 m and rim CAR_FLOOR_Y + 0.48 =
+  1.06 m put every carriage within a centimetre or two of the limit on every park; only the lean decides. A visible
+  change to either height is Jim's call — question for Jim in the PR body.
 - The 38 reds at bf7b1c8b (geometry: seed 5's park, source hash 581ed3c1…, CI's parks restamped; feet-judged on seed 6;
   round-four train proofs with SOLIDS_SKIP_CENSUS=1, the rest with the census; core = the buildings):
   - `solids-train-ignores-her`: ✗ at every station (2 of 2): on the line 2.2 m past its nose as it waits, the train stays at least her own width (1.24 m) short of her and stands the 14 s — Sunny Side: it stays 1.08 m short of her and stands 12.8 s of 14; Bluebel
