@@ -46,6 +46,19 @@ import { REPTILE_INNER_X, REPTILE_INNER_Z } from './shell';
  * hall and measures the camera the game actually ends up with: the animals
  * unoccluded from the real eye, a fair share of the frame, the eye inside the
  * hall all the way down, and the moves smooth.
+ *
+ * ## The one over-the-shoulder shot in the game
+ *
+ * The Library's story time takes its shot here too (Jim, 24 October 2026:
+ * *"the camera … comes down to player-level and goes to over the shoulder
+ * camera, with the other children listening and the reader visible"* —
+ * `library/storyCamera.ts`): the same solver, the same director, in its own
+ * room. What was the hall's alone is a {@link ShotRoom} now, and story time
+ * asks two things of the solver that an exhibit does not ({@link ShotRules}):
+ * that its subjects hide one another — a child's head in front of the owl is
+ * what that shot is solved to see past — and that the frame holds every one
+ * of them whole, on a phone held upright too. Asked for nothing, the solver
+ * is the exhibits' exactly.
  */
 
 /** Seconds for the camera to come down to the shot. */
@@ -103,6 +116,60 @@ export const EYE_CLEARANCE = 0.3;
 /** The eye stands over open floor this wide, so it is never inside a case, a bed or a planter. */
 const EYE_FLOOR_CLEAR = 0.35;
 
+/**
+ * **The room a shot is taken in** — four walls round an open top, which is
+ * the space the eye may move through: inside the walls, or over their tops.
+ * Each such room is its own flat space off the sphere, so `y` is up in it.
+ */
+export interface ShotRoom {
+  /** The middle of its floor plan, world metres. */
+  readonly originX: number;
+  readonly originZ: number;
+  /** From the middle to the inner face of its walls, along x and along z. */
+  readonly innerX: number;
+  readonly innerZ: number;
+  /** Its floor, world y. */
+  readonly floorY: number;
+  /** How tall its walls stand over its floor: over them, the room is open to the camera. */
+  readonly wallHeight: number;
+}
+
+/** The Reptile House's hall, as its layout and its shell build it. */
+export const REPTILE_HALL: ShotRoom = {
+  originX: REPTILE_HOUSE_ORIGIN_X,
+  originZ: REPTILE_HOUSE_ORIGIN_Z,
+  innerX: REPTILE_INNER_X,
+  innerZ: REPTILE_INNER_Z,
+  floorY: REPTILE_HOUSE_FLOOR_Y,
+  wallHeight: REPTILE_WALL_HEIGHT,
+};
+
+/**
+ * **What a shot asks of the solver beyond an exhibit's** — story time's two
+ * (`library/storyCamera.ts`). Both off, the solver is the exhibits' exactly.
+ */
+export interface ShotRules {
+  /**
+   * **The subjects hide one another** — each from the others, never from
+   * itself. An exhibit's animals never block each other's shot (twelve babies
+   * tumbling round their mum are what a crowd *is*); story time's are
+   * children sat in rows in front of the owl, and a child's head between the
+   * eye and the owl is exactly what that shot must see past. A subject listed
+   * inside another (the owl's head, inside the owl) belongs to the outer one.
+   */
+  readonly mutual?: boolean;
+  /**
+   * **The frame holds every subject whole** — every corner of every
+   * subject's box, and each of `points` (the owl's bubble's anchor: a bubble
+   * is drawn only while its anchor is in shot, #415), at least `margin` (a
+   * share of the half-frame) in from the screen's edges, rather than only
+   * their middle somewhere near the middle. A candidate eye from which that
+   * takes a zoom further out than `CAMERA_ZOOM_MIN` is turned down; otherwise
+   * the shot frames no tighter than it allows.
+   */
+  readonly contain?: { readonly points: readonly Vector3[]; readonly margin: number };
+}
+
 /** One sightline target and whether it was seen. */
 export interface ShotSample {
   readonly point: Vector3;
@@ -139,6 +206,8 @@ export interface ShotWorld {
   readonly camera: IsoCamera;
   /** Things that never block a sightline (the snake pools: an animal is not an obstacle). */
   readonly seeThrough: readonly Object3D[];
+  /** The room the hall stands in: where the eye may be, on its way down and once it is there. */
+  readonly room: ShotRoom;
 }
 
 const SCRATCH_BOX = new Box3();
@@ -146,8 +215,8 @@ const RAYCASTER = new Raycaster();
 const DIRECTIONS = [
   new Vector3(1, 0, 0),
   new Vector3(-1, 0, 0),
-  new Vector3(0, 1, 0), // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
-  new Vector3(0, -1, 0), // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+  new Vector3(0, 1, 0), // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
+  new Vector3(0, -1, 0), // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
   new Vector3(0, 0, 1),
   new Vector3(0, 0, -1),
 ];
@@ -191,17 +260,40 @@ const CROWD_SEEN_TO_SOLVE = 0.75;
 export interface ShotTarget {
   readonly point: Vector3;
   readonly crowd: boolean;
+  /**
+   * The index, among the subjects, of the outermost subject this one is part
+   * of (its own, when it is part of none) — the one subject whose meshes may
+   * not hide it when the subjects hide one another ({@link ShotRules.mutual}).
+   */
+  readonly owner: number;
+}
+
+/**
+ * For each subject, the outermost subject it is part of: the last subject met
+ * walking up from it through its parents (itself, when none is above it).
+ */
+export function subjectOwners(subjects: readonly Object3D[]): number[] {
+  const index = new Map(subjects.map((subject, i) => [subject, i] as const));
+  return subjects.map((subject, i) => {
+    let owner = i;
+    for (let at: Object3D | null = subject; at; at = at.parent) {
+      const found = index.get(at);
+      if (found !== undefined) owner = found;
+    }
+    return owner;
+  });
 }
 
 /** The animals' world box and one sightline target per animal (its middle). */
 export function subjectOf(subjects: readonly Object3D[]): { box: Box3; targets: ShotTarget[] } {
   const box = new Box3();
   const targets: ShotTarget[] = [];
-  for (const subject of subjects) {
+  const owners = subjectOwners(subjects);
+  subjects.forEach((subject, i) => {
     boxOf(subject, SCRATCH_BOX);
     box.union(SCRATCH_BOX);
-    targets.push({ point: SCRATCH_BOX.getCenter(new Vector3()), crowd: subject.userData['exhibitCrowd'] === true });
-  }
+    targets.push({ point: SCRATCH_BOX.getCenter(new Vector3()), crowd: subject.userData['exhibitCrowd'] === true, owner: owners[i] ?? i });
+  });
   return { box, targets };
 }
 
@@ -213,10 +305,10 @@ export function subjectOf(subjects: readonly Object3D[]): { box: Box3; targets: 
  */
 const SIGHTLINE_TUBE = 0.07;
 
-/** Seen from `eye` down a whole {@link SIGHTLINE_TUBE}. */
-function robustlySeen(eye: Vector3, target: Vector3, occluders: OccluderSet, report?: SolveReport): boolean {
+/** Seen from `eye` down a whole {@link SIGHTLINE_TUBE}, nothing of subject `owner`'s own counting. */
+function robustlySeen(eye: Vector3, target: Vector3, occluders: OccluderSet, report?: SolveReport, owner = -1): boolean {
   const along = target.clone().sub(eye).normalize();
-  const side = new Vector3(0, 1, 0).cross(along); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+  const side = new Vector3(0, 1, 0).cross(along); // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
   if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
   side.normalize();
   const up = along.clone().cross(side).normalize();
@@ -225,7 +317,7 @@ function robustlySeen(eye: Vector3, target: Vector3, occluders: OccluderSet, rep
   for (const [a, b] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
     from.copy(eye).addScaledVector(side, a * SIGHTLINE_TUBE).addScaledVector(up, b * SIGHTLINE_TUBE);
     to.copy(target).addScaledVector(side, a * SIGHTLINE_TUBE).addScaledVector(up, b * SIGHTLINE_TUBE);
-    const hit = firstHit(from, to, occluders);
+    const hit = firstHit(from, to, occluders, owner);
     if (hit) {
       if (report) report.blockers[hit] = (report.blockers[hit] ?? 0) + 1;
       return false;
@@ -244,7 +336,7 @@ function shotSees(eye: Vector3, targets: readonly ShotTarget[], occluders: Occlu
   const seen: boolean[] = targets.map(() => false);
   for (const [index, target] of targets.entries()) {
     if (target.crowd) continue;
-    if (!robustlySeen(eye, target.point, occluders, report)) return null;
+    if (!robustlySeen(eye, target.point, occluders, report, target.owner)) return null;
     seen[index] = true;
   }
   const crowd = targets.filter((target) => target.crowd).length;
@@ -252,7 +344,7 @@ function shotSees(eye: Vector3, targets: readonly ShotTarget[], occluders: Occlu
   let missed = 0;
   for (const [index, target] of targets.entries()) {
     if (!target.crowd) continue;
-    seen[index] = !sightlineBlocked(eye, target.point, occluders);
+    seen[index] = !sightlineBlocked(eye, target.point, occluders, target.owner);
     if (!seen[index]) {
       missed += 1;
       if (missed > mayMiss) return null;
@@ -294,19 +386,26 @@ function shownInScene(object: Object3D): boolean {
 /**
  * Every opaque mesh that can stand between an eye and an animal: drawn,
  * visible, not glass, not one of the animals themselves and not under
- * anything in `ignore`.
+ * anything in `ignore`. Each mesh under `owners[k]` is marked as subject
+ * `k`'s ({@link OccluderSet.owners}), so a sightline to that subject can pass
+ * through its own body ({@link ShotRules.mutual}); a mesh reached from two
+ * roots is collected once.
  */
-export function collectOccluders(roots: readonly Object3D[], ignore: readonly Object3D[]): OccluderSet {
+export function collectOccluders(roots: readonly Object3D[], ignore: readonly Object3D[], owners: ReadonlyMap<Object3D, number> = new Map()): OccluderSet {
   const skip = new Set<Object3D>();
   for (const root of ignore) root.traverse((child) => skip.add(child));
+  const ownerOf = new Map<Object3D, number>();
+  for (const [root, owner] of owners) root.traverse((child) => ownerOf.set(child, owner));
   const meshes: Mesh[] = [];
+  const seen = new Set<Object3D>();
   for (const root of roots) {
     root.updateWorldMatrix(true, true);
     root.traverse((child) => {
-      if (skip.has(child)) return;
+      if (skip.has(child) || seen.has(child)) return;
       if (!(child instanceof Mesh) && !(child instanceof InstancedMesh)) return;
       if (!shownInScene(child)) return;
       if (isSeeThrough(child.material)) return;
+      seen.add(child);
       meshes.push(child);
     });
   }
@@ -316,18 +415,22 @@ export function collectOccluders(roots: readonly Object3D[], ignore: readonly Ob
   // own proxy instead, so the cull sees the one fern actually in the way.
   const expanded: Mesh[] = [];
   const spheres: Sphere[] = [];
+  const meshOwners: number[] = [];
   for (const mesh of meshes) {
+    const owner = ownerOf.get(mesh) ?? -1;
     if (mesh instanceof InstancedMesh) {
       for (const proxy of instanceProxies(mesh)) {
         expanded.push(proxy);
         spheres.push(worldSphere(proxy));
+        meshOwners.push(owner);
       }
     } else {
       expanded.push(mesh);
       spheres.push(worldSphere(mesh));
+      meshOwners.push(owner);
     }
   }
-  return { meshes: expanded, spheres };
+  return { meshes: expanded, spheres, owners: meshOwners };
 }
 
 function worldSphere(mesh: Mesh): Sphere {
@@ -369,33 +472,36 @@ function instanceProxies(mesh: InstancedMesh): Mesh[] {
 export interface OccluderSet {
   readonly meshes: readonly Mesh[];
   readonly spheres: readonly Sphere[];
+  /** Per mesh, the subject it is part of (an index into the shot's subjects), or −1 — see {@link collectOccluders}. */
+  readonly owners: readonly number[];
 }
 
 const SCRATCH_CLOSEST = new Vector3();
 const SCRATCH_SEGMENT = new Line3();
 
-/** The meshes whose bounding sphere comes within `pad` of the segment `a`–`b`. */
-function alongSegment(set: OccluderSet, a: Vector3, b: Vector3, pad: number): Mesh[] {
+/** The meshes whose bounding sphere comes within `pad` of the segment `a`–`b`, none of subject `skip`'s own. */
+function alongSegment(set: OccluderSet, a: Vector3, b: Vector3, pad: number, skip = -1): Mesh[] {
   SCRATCH_SEGMENT.set(a, b);
   const out: Mesh[] = [];
   set.spheres.forEach((sphere, index) => {
+    if (skip >= 0 && set.owners[index] === skip) return;
     SCRATCH_SEGMENT.closestPointToPoint(sphere.center, true, SCRATCH_CLOSEST);
     if (SCRATCH_CLOSEST.distanceTo(sphere.center) <= sphere.radius + pad) out.push(set.meshes[index]!);
   });
   return out;
 }
 
-/** Whether anything in `occluders` crosses the open segment from `eye` to `target`. */
-export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: OccluderSet): boolean {
-  return firstHit(eye, target, occluders) !== null;
+/** Whether anything in `occluders` — nothing of subject `owner`'s own — crosses the open segment from `eye` to `target`. */
+export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: OccluderSet, owner = -1): boolean {
+  return firstHit(eye, target, occluders, owner) !== null;
 }
 
-/** The name of the first thing crossing the segment from `eye` to `target`, or `null`. */
-function firstHit(eye: Vector3, target: Vector3, occluders: OccluderSet): string | null {
+/** The name of the first thing crossing the segment from `eye` to `target`, nothing of subject `owner`'s own, or `null`. */
+function firstHit(eye: Vector3, target: Vector3, occluders: OccluderSet, owner = -1): string | null {
   const toward = target.clone().sub(eye);
   const length = toward.length();
   if (length < 1e-6) return null;
-  const candidates = alongSegment(occluders, eye, target, 0.01);
+  const candidates = alongSegment(occluders, eye, target, 0.01, owner);
   if (candidates.length === 0) return null;
   RAYCASTER.set(eye, toward.divideScalar(length));
   RAYCASTER.near = 0;
@@ -418,23 +524,23 @@ export function eyeTooClose(eye: Vector3, occluders: OccluderSet, clearance = EY
   return false;
 }
 
-/** Whether a world point is inside the hall's walls, clear of them by `margin`. */
-export function insideHall(point: Vector3, margin = WALL_MARGIN): boolean {
+/** Whether a world point is inside the room's walls, clear of them by `margin`. */
+export function insideHall(point: Vector3, room: ShotRoom, margin = WALL_MARGIN): boolean {
   return (
-    Math.abs(point.x - REPTILE_HOUSE_ORIGIN_X) <= REPTILE_INNER_X - margin &&
-    Math.abs(point.z - REPTILE_HOUSE_ORIGIN_Z) <= REPTILE_INNER_Z - margin &&
-    point.y > REPTILE_HOUSE_FLOOR_Y + 0.5
+    Math.abs(point.x - room.originX) <= room.innerX - margin &&
+    Math.abs(point.z - room.originZ) <= room.innerZ - margin &&
+    point.y > room.floorY + 0.5
   );
 }
 
 /**
  * Whether an eye on its way down is somewhere a camera may be: over the
- * hall's open top (above its walls), or inside them. Never below the wall
- * tops outside the hall — that is the camera through a wall.
+ * room's open top (above its walls), or inside them. Never below the wall
+ * tops outside the room — that is the camera through a wall.
  */
-export function eyeInHallSpace(point: Vector3): boolean {
-  if (point.y >= REPTILE_HOUSE_FLOOR_Y + REPTILE_WALL_HEIGHT + 0.3) return true;
-  return insideHall(point, 0.2);
+export function eyeInHallSpace(point: Vector3, room: ShotRoom): boolean {
+  if (point.y >= room.floorY + room.wallHeight + 0.3) return true;
+  return insideHall(point, room, 0.2);
 }
 
 const wrapDegrees = (degrees: number): number => ((((degrees + 180) % 360) + 360) % 360) - 180;
@@ -442,7 +548,7 @@ const wrapDegrees = (degrees: number): number => ((((degrees + 180) % 360) + 360
 /** The yaw/pitch/distance `IsoCamera.setShotOverride` takes for an eye looking at a focus. */
 export function shotAngles(eye: Vector3, focus: Vector3): { yawDegrees: number; pitchDegrees: number; distance: number } {
   const dx = eye.x - focus.x;
-  const dy = eye.y - focus.y; // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+  const dy = eye.y - focus.y; // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
   const dz = eye.z - focus.z;
   return {
     yawDegrees: (Math.atan2(dx, dz) * 180) / Math.PI,
@@ -505,7 +611,7 @@ export function screenExtent(camera: IsoCamera, eye: Vector3, focus: Vector3, zo
   lens.near = 0.1;
   lens.far = 100;
   lens.position.copy(eye);
-  lens.up.set(0, 1, 0); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+  lens.up.set(0, 1, 0); // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
   lens.lookAt(focus);
   lens.updateMatrixWorld();
   lens.updateProjectionMatrix();
@@ -515,7 +621,7 @@ export function screenExtent(camera: IsoCamera, eye: Vector3, focus: Vector3, zo
   let maxY = -1;
   const corner = new Vector3();
   for (let i = 0; i < 8; i += 1) {
-    corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+    corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens); // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
     minX = Math.min(minX, corner.x);
     maxX = Math.max(maxX, corner.x);
     minY = Math.min(minY, corner.y);
@@ -525,6 +631,52 @@ export function screenExtent(camera: IsoCamera, eye: Vector3, focus: Vector3, zo
   const width = Math.max(0, clampN(maxX) - clampN(minX)) / 2;
   const height = Math.max(0, clampN(maxY) - clampN(minY)) / 2;
   return { share: width * height, span: Math.max(width, height) };
+}
+
+const SCRATCH_FORWARD = new Vector3();
+const SCRATCH_RIGHT = new Vector3();
+const SCRATCH_UP = new Vector3();
+const SCRATCH_CORNER = new Vector3();
+const WORLD_UP = new Vector3(0, 1, 0); // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
+
+/**
+ * **The closest zoom from `eye`, looking at `focus`, at which every corner of
+ * `boxes` and every one of `points` is in shot**, `margin` (a share of the
+ * half-frame) in from the screen's edges — the lens as `IsoCamera.applyFrustum`
+ * solves it for this eye (`fov = 2·atan(halfHeight / distance)`, `halfHeight =
+ * cameraViewHalfHeight(aspect) / zoom`), turned as `lookAt` turns it.
+ * Unclamped: 0 when one of them is not in front of the eye at all.
+ */
+export function containZoom(camera: IsoCamera, eye: Vector3, focus: Vector3, boxes: readonly Box3[], points: readonly Vector3[], margin: number): number {
+  const aspect = camera.camera.aspect;
+  const forward = SCRATCH_FORWARD.copy(focus).sub(eye);
+  const distance = forward.length();
+  if (distance < 1e-6) return 0;
+  forward.divideScalar(distance);
+  const right = SCRATCH_RIGHT.crossVectors(forward, WORLD_UP);
+  if (right.lengthSq() < 1e-9) return 0;
+  right.normalize();
+  const up = SCRATCH_UP.crossVectors(right, forward);
+  /** The tangent of the half-height angle the frame needs, so far. */
+  let need = 0;
+  const holds = (point: Vector3): boolean => {
+    const dx = point.x - eye.x;
+    const dy = point.y - eye.y; // flat-ok: a shot's room is its own flat space off the sphere
+    const dz = point.z - eye.z;
+    const depth = dx * forward.x + dy * forward.y + dz * forward.z;
+    if (depth < camera.camera.near) return false;
+    need = Math.max(need, Math.abs(dx * right.x + dy * right.y + dz * right.z) / (depth * aspect), Math.abs(dx * up.x + dy * up.y + dz * up.z) / depth);
+    return true;
+  };
+  for (const box of boxes) {
+    for (let i = 0; i < 8; i += 1) {
+      SCRATCH_CORNER.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z); // flat-ok: a shot's room is its own flat space off the sphere
+      if (!holds(SCRATCH_CORNER)) return 0;
+    }
+  }
+  for (const point of points) if (!holds(point)) return 0;
+  if (need <= 0) return Infinity;
+  return cameraViewHalfHeight(aspect) / ((need / (1 - margin)) * distance);
 }
 
 export function shotZoom(camera: IsoCamera, subject: Box3): number {
@@ -553,8 +705,9 @@ export function solveExhibitShot(
   facing: number,
   body: Object3D | null,
   report?: SolveReport,
+  rules: ShotRules = {},
 ): ExhibitShot | null {
-  const steps = solveExhibitShotSteps(world, exhibitId, subjects, cast, player, facing, body, report);
+  const steps = solveExhibitShotSteps(world, exhibitId, subjects, cast, player, facing, body, report, undefined, undefined, rules);
   for (;;) {
     const step = steps.next();
     if (step.done) return step.value;
@@ -578,16 +731,41 @@ export function* solveExhibitShotSteps(
   report?: SolveReport,
   preferred?: Vector3,
   her?: Box3,
+  rules: ShotRules = {},
 ): Generator<void, ExhibitShot | null> {
   const { box, targets } = subjectOf(subjects);
   if (box.isEmpty()) return null;
   const focus = box.getCenter(new Vector3());
-  const ignore = [...subjects, ...cast, ...world.seeThrough];
-  const occluders = collectOccluders(body ? [world.hall, body] : [world.hall], ignore);
+  const room = world.room;
+  // Subjects that hide one another are occluders like the room, each mesh
+  // marked as its own subject's, so a sightline passes through only the body
+  // it is looking at (`ShotRules.mutual`); otherwise none of them is one.
+  const owners = new Map<Object3D, number>();
+  if (rules.mutual) {
+    for (const { owner } of targets) {
+      const outer = subjects[owner];
+      if (outer) owners.set(outer, owner);
+    }
+  }
+  const mutualRoots = [...owners.keys()];
+  const ignore = [...(rules.mutual ? [] : subjects), ...cast, ...world.seeThrough];
+  const occluders = collectOccluders([world.hall, ...(body ? [body] : []), ...mutualRoots], ignore, owners);
   // The eye must not be inside her, either, but she is not something to keep
   // clear of by a hand's breadth — the shot is over her shoulder.
-  const near = collectOccluders([world.hall], ignore);
-  const zoom = shotZoom(world.camera, box);
+  const near = collectOccluders([world.hall, ...mutualRoots], ignore);
+  const framing = shotZoom(world.camera, box);
+  const contain = rules.contain;
+  // The outer subjects' boxes: a part's (the owl's head) is inside its whole's.
+  const boxes = contain ? [...new Set(targets.map((target) => target.owner))].flatMap((owner) => (subjects[owner] ? [boxOf(subjects[owner], new Box3())] : [])) : [];
+  /**
+   * The zoom this eye frames the shot at — or null, when it cannot hold
+   * everything {@link ShotRules.contain} asks for at any zoom the camera has.
+   */
+  const zoomFrom = (eye: Vector3): number | null => {
+    if (!contain) return framing;
+    const fit = containZoom(world.camera, eye, focus, boxes, contain.points, contain.margin);
+    return fit < CAMERA_ZOOM_MIN ? null : Math.min(framing, fit);
+  };
   const herBox = her ?? (body ? bodyBoxOf(body) : null);
   const rig = rigPose(player, world.camera.targetZoom);
 
@@ -609,19 +787,24 @@ export function* solveExhibitShotSteps(
   // Every candidate, cheapest-to-reject tests first, then in order of how
   // close each is to the shot we would draw by hand: the first that passes
   // everything is the best there is, so nothing after it is ever cast.
-  const candidates: { eye: Vector3; cost: number }[] = [];
+  const candidates: { eye: Vector3; cost: number; zoom: number }[] = [];
   for (const swing of EYE_SWINGS) {
     const bearing = behind + (swing * Math.PI) / 180;
     for (const back of EYE_BACKS) {
       for (const height of EYE_HEIGHTS) {
         const out = start + back;
-        const eye = new Vector3(focus.x + Math.sin(bearing) * out, REPTILE_HOUSE_FLOOR_Y + height, focus.z + Math.cos(bearing) * out);
-        if (!insideHall(eye)) {
+        const eye = new Vector3(focus.x + Math.sin(bearing) * out, room.floorY + height, focus.z + Math.cos(bearing) * out);
+        if (!insideHall(eye, room)) {
           if (report) report.outside += 1;
           continue;
         }
         if (!world.collision.isClearCircle(eye.x, eye.z, EYE_FLOOR_CLEAR)) {
           if (report) report.overSolid += 1;
+          continue;
+        }
+        const zoom = zoomFrom(eye);
+        if (zoom === null) {
+          if (report) report.uncontained += 1;
           continue;
         }
         // Over her shoulder, not through her: how much of the frame she
@@ -639,20 +822,21 @@ export function* solveExhibitShotSteps(
           if (report) report.tooSmall += 1;
           continue;
         }
-        candidates.push({ eye, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees) + share * 4 + Math.max(0, 0.35 - span) * 6 });
+        candidates.push({ eye, zoom, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees) + share * 4 + Math.max(0, 0.35 - span) * 6 });
       }
     }
   }
   candidates.sort((a, b) => a.cost - b.cost);
   // The eye that worked last time from here goes first: every test still runs
   // on it, so it is only ever a guess about where to start looking.
-  if (preferred && insideHall(preferred) && (!herBox || screenShare(world.camera, preferred, focus, zoom, herBox) <= HER_SHARE_TO_SOLVE)) {
-    candidates.unshift({ eye: preferred.clone(), cost: -1 });
+  const preferredZoom = preferred && insideHall(preferred, room) ? zoomFrom(preferred) : null;
+  if (preferred && preferredZoom !== null && (!herBox || screenShare(world.camera, preferred, focus, preferredZoom, herBox) <= HER_SHARE_TO_SOLVE)) {
+    candidates.unshift({ eye: preferred.clone(), cost: -1, zoom: preferredZoom });
   }
 
-  let best: { eye: Vector3; seen: boolean[]; cost: number } | null = null;
+  let best: { eye: Vector3; seen: boolean[]; cost: number; zoom: number } | null = null;
   let tried = 0;
-  for (const { eye, cost } of candidates) {
+  for (const { eye, cost, zoom } of candidates) {
     if (tried > 0) yield;
     tried += 1;
     if (eyeTooClose(eye, near)) {
@@ -666,11 +850,11 @@ export function* solveExhibitShotSteps(
     }
     // And the way there and back: the eye sweeps down from the rig, and a
     // shot whose own approach crosses a wall, the log or a vine is no shot.
-    if (!approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near)) {
+    if (!approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near, room)) {
       if (report) report.approach += 1;
       continue;
     }
-    best = { eye, seen, cost };
+    best = { eye, seen, cost, zoom };
     break;
   }
   const clear = best ? 1 : 0;
@@ -681,7 +865,7 @@ export function* solveExhibitShotSteps(
     focus,
     eye: best.eye,
     ...angles,
-    zoom,
+    zoom: best.zoom,
     subject: box,
     samples: targets.map((target, index) => ({ point: target.point, seen: best.seen[index] ?? false })),
     cast,
@@ -699,6 +883,8 @@ export interface SolveReport {
   approach: number;
   herTooBig: number;
   tooSmall: number;
+  /** Eyes from which the frame could not hold everything {@link ShotRules.contain} asks for. */
+  uncontained: number;
   /** The smallest share of the frame she would have filled from any eye that got that far. */
   herLeast?: number;
   /** What blocked the stars' sightlines, by mesh name, over every candidate. */
@@ -724,17 +910,17 @@ export function eyeOfPose(pose: Pose, out = new Vector3()): Vector3 {
 
 /**
  * Whether the eye's path down from the rig to `shot` and back up again stays
- * in the hall's space and clear of everything drawn — sampled on the same
+ * in the room's space and clear of everything drawn — sampled on the same
  * blend {@link ExhibitCamera} drives, so it is the path the camera takes.
  */
-function approachClear(rig: Pose, shot: Pose, near: OccluderSet): boolean {
+function approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom): boolean {
   const scratch = { focus: new Vector3() };
   const eye = new Vector3();
   for (const [from, to] of [[rig, shot], [shot, rig]] as const) {
     for (let i = 1; i < APPROACH_SAMPLES; i += 1) {
       eyeOfPose(blendPose(from, to, smoothstep(i / APPROACH_SAMPLES), scratch), eye);
-      if (!eyeInHallSpace(eye)) return false;
-      if (eye.y < REPTILE_HOUSE_FLOOR_Y + REPTILE_WALL_HEIGHT + 3 && eyeTooClose(eye, near, APPROACH_CLEARANCE)) return false;
+      if (!eyeInHallSpace(eye, room)) return false;
+      if (eye.y < room.floorY + room.wallHeight + 3 && eyeTooClose(eye, near, APPROACH_CLEARANCE)) return false;
     }
   }
   return true;
@@ -889,15 +1075,21 @@ export class ExhibitCamera {
    * A chip was pressed on exhibit `id`, whose reacting animals are
    * `subjects`. Solves the shot from where she stands now and starts the
    * move — from wherever the camera is, so a second chip mid-shot glides on
-   * to the next animal rather than jumping home first.
+   * to the next animal rather than jumping home first. `rules` are what the
+   * shot asks of the solver beyond an exhibit's ({@link ShotRules}: story
+   * time's).
    */
-  start(id: string, subjects: readonly Object3D[], cast: readonly Object3D[], player: ShotPlayer): boolean {
+  start(id: string, subjects: readonly Object3D[], cast: readonly Object3D[], player: ShotPlayer, rules: ShotRules = {}): boolean {
     if (player.riding) return false;
-    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, herTooBig: 0, tooSmall: 0, blockers: {} };
+    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, herTooBig: 0, tooSmall: 0, uncontained: 0, blockers: {} };
     this.lastReport = report;
     const remembered = this.memory.get(id);
     const preferred = remembered && Math.hypot(remembered.at.x - player.position.x, remembered.at.z - player.position.z) < REMEMBER_WITHIN ? remembered.eye : undefined;
-    this.pending = { id, subjects, steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred, herBodyBox(player.position, player.topHeight)) };
+    this.pending = {
+      id,
+      subjects,
+      steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred, herBodyBox(player.position, player.topHeight), rules),
+    };
     this.anchor.copy(player.position);
     this.lastPlayer = player;
     // Most shots solve inside this first slice; a hard one finishes over the

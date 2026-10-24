@@ -94,6 +94,7 @@ import {
   sightlinesPass,
   eyeInHallSpace,
   insideHall,
+  REPTILE_HALL,
   subjectOf,
 } from '../src/world/reptileHouse/exhibitCamera.ts';
 import { EXHIBIT_PLACEMENTS, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z } from '../src/world/reptileHouse/layout.ts';
@@ -304,7 +305,7 @@ for (const [label, width, height] of VIEWPORTS) {
     let lastHalf = frameHalfHeight();
     const watch = (): void => {
       const eye = camera.camera.position;
-      if (!eyeInHallSpace(eye)) pathFaults.push(`eye outside the hall below the wall tops at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`);
+      if (!eyeInHallSpace(eye, REPTILE_HALL)) pathFaults.push(`eye outside the hall below the wall tops at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`);
       if (eye.y < 6) { // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
         const near = tooClose(eye, occluders([]));
         if (near) pathFaults.push(`eye within ${LENS_CLEARANCE} m of ${near} at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`);
@@ -366,7 +367,7 @@ for (const [label, width, height] of VIEWPORTS) {
     const her = frameShare(herBodyBox(player.position, player.topHeight));
     say(her.share <= HER_SHARE_MAX, `  over her shoulder: she covers ${(her.share * 100).toFixed(1)}% of the frame (at most ${HER_SHARE_MAX * 100}%)`);
     say(Math.abs(centre.x) <= MAX_CENTRE_OFF && Math.abs(centre.y) <= MAX_CENTRE_OFF && centre.z < 1, `  centred: their middle at NDC (${centre.x.toFixed(2)}, ${centre.y.toFixed(2)})`);
-    say(insideHall(eye, 0.3), `  the settled eye is inside the hall at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)}), ${eye.distanceTo(shot.focus).toFixed(2)} m from the animals`);
+    say(insideHall(eye, REPTILE_HALL, 0.3), `  the settled eye is inside the hall at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)}), ${eye.distanceTo(shot.focus).toFixed(2)} m from the animals`);
     for (const panel of extra) house.hallRoot.remove(panel);
 
     // Hold, then home.
