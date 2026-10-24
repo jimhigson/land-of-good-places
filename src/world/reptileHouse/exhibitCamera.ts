@@ -1,4 +1,5 @@
-import { Box3, InstancedMesh, Line3, Matrix4, Mesh, PerspectiveCamera, Raycaster, Sphere, Vector3, type Material, type Object3D } from 'three';
+import { Box3, InstancedMesh, Line3, Matrix4, Mesh, Object3D, PerspectiveCamera, Raycaster, Sphere, Vector3, type Material } from 'three';
+import { visiblePoints } from '../../art/style/measure';
 import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, PLAYER_RADIUS, cameraViewHalfHeight } from '../../core/constants';
 import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
 import type { CollisionWorld } from '../Collision';
@@ -159,6 +160,16 @@ export interface ShotRules {
    */
   readonly mutual?: boolean;
   /**
+   * **Each subject seen whole, not only its middle**: besides each subject's
+   * middle, this many of each outer subject's own drawn points, spread over it
+   * (farthest-point sampling from its middle), are sightline targets — every
+   * one a star. An exhibit sees each animal's middle and the tube round it;
+   * story time's children have heads half their height, and the owl behind
+   * them can show her middle past one while a child's hair covers the rest of
+   * her (measured: 40% of her drawn points, from cushion 1).
+   */
+  readonly spread?: number;
+  /**
    * **The frame holds every subject whole** — every corner of every
    * subject's box, and each of `points` (the owl's bubble's anchor: a bubble
    * is drawn only while its anchor is in shot, #415), at least `margin` (a
@@ -284,17 +295,55 @@ export function subjectOwners(subjects: readonly Object3D[]): number[] {
   });
 }
 
-/** The animals' world box and one sightline target per animal (its middle). */
-export function subjectOf(subjects: readonly Object3D[]): { box: Box3; targets: ShotTarget[] } {
+/**
+ * The animals' world box and one sightline target per animal (its middle) —
+ * and, with `spread`, that many more over each outer subject's own drawn
+ * points ({@link ShotRules.spread}).
+ */
+export function subjectOf(subjects: readonly Object3D[], spread = 0): { box: Box3; targets: ShotTarget[] } {
   const box = new Box3();
   const targets: ShotTarget[] = [];
   const owners = subjectOwners(subjects);
   subjects.forEach((subject, i) => {
     boxOf(subject, SCRATCH_BOX);
     box.union(SCRATCH_BOX);
-    targets.push({ point: SCRATCH_BOX.getCenter(new Vector3()), crowd: subject.userData['exhibitCrowd'] === true, owner: owners[i] ?? i });
+    const middle = SCRATCH_BOX.getCenter(new Vector3());
+    const crowd = subject.userData['exhibitCrowd'] === true;
+    const owner = owners[i] ?? i;
+    targets.push({ point: middle, crowd, owner });
+    if (spread > 0 && owner === i) for (const point of spreadPoints(subject, middle, spread)) targets.push({ point, crowd, owner });
   });
   return { box, targets };
+}
+
+/** An identity frame: {@link visiblePoints} reports in it, so its points are world points. */
+const WORLD_FRAME = new Object3D();
+
+/**
+ * `count` of `subject`'s drawn points (`visiblePoints`: its visible meshes'
+ * vertices, world), each the one furthest from every point picked before it,
+ * starting from `from` — spread over the whole of it, edges first.
+ */
+function spreadPoints(subject: Object3D, from: Vector3, count: number): Vector3[] {
+  const all: number[] = [];
+  visiblePoints(subject, (point) => all.push(point.x, point.y, point.z), WORLD_FRAME);
+  const n = all.length / 3;
+  if (n === 0) return [];
+  // Each vertex's distance (squared) to the nearest point picked so far.
+  const nearest = new Float64Array(n);
+  for (let i = 0; i < n; i += 1) nearest[i] = (all[i * 3]! - from.x) ** 2 + (all[i * 3 + 1]! - from.y) ** 2 + (all[i * 3 + 2]! - from.z) ** 2;
+  const picked: Vector3[] = [];
+  while (picked.length < Math.min(count, n)) {
+    let far = 0;
+    for (let i = 1; i < n; i += 1) if (nearest[i]! > nearest[far]!) far = i;
+    const point = new Vector3(all[far * 3]!, all[far * 3 + 1]!, all[far * 3 + 2]!);
+    picked.push(point);
+    for (let i = 0; i < n; i += 1) {
+      const d = (all[i * 3]! - point.x) ** 2 + (all[i * 3 + 1]! - point.y) ** 2 + (all[i * 3 + 2]! - point.z) ** 2;
+      if (d < nearest[i]!) nearest[i] = d;
+    }
+  }
+  return picked;
 }
 
 /**
@@ -491,6 +540,29 @@ function alongSegment(set: OccluderSet, a: Vector3, b: Vector3, pad: number, ski
   return out;
 }
 
+/**
+ * **The part of `set` that can stand between `eye` and anything within
+ * `reach` of `at`**: every mesh whose bounding sphere comes within `reach` of
+ * the segment from the eye to `at`. A sightline from the eye to a point within
+ * `reach` of `at` never strays further than `reach` from that segment, so
+ * asking only these gives the same answer — and the reading room's nine
+ * thousand instanced shelf books, each its own proxy, are a handful of them.
+ */
+export function occludersToward(set: OccluderSet, eye: Vector3, at: Vector3, reach: number): OccluderSet {
+  SCRATCH_SEGMENT.set(eye, at);
+  const meshes: Mesh[] = [];
+  const spheres: Sphere[] = [];
+  const owners: number[] = [];
+  set.spheres.forEach((sphere, index) => {
+    SCRATCH_SEGMENT.closestPointToPoint(sphere.center, true, SCRATCH_CLOSEST);
+    if (SCRATCH_CLOSEST.distanceTo(sphere.center) > sphere.radius + reach) return;
+    meshes.push(set.meshes[index]!);
+    spheres.push(sphere);
+    owners.push(set.owners[index] ?? -1);
+  });
+  return { meshes, spheres, owners };
+}
+
 /** Whether anything in `occluders` — nothing of subject `owner`'s own — crosses the open segment from `eye` to `target`. */
 export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: OccluderSet, owner = -1): boolean {
   return firstHit(eye, target, occluders, owner) !== null;
@@ -642,13 +714,22 @@ const WORLD_UP = new Vector3(0, 1, 0); // flat-ok: a shot's room is its own flat
 /**
  * **The closest zoom from `eye`, looking at `focus`, at which every corner of
  * `boxes` and every one of `points` is in shot**, `margin` (a share of the
- * half-frame) in from the screen's edges — the lens as `IsoCamera.applyFrustum`
+ * half-frame) in from the screen's edges. Unclamped; 0 when one of them is not
+ * in front of the eye at all.
+ *
+ * Two tests, because two things decide "in shot". A box — something drawn —
+ * is in shot when it is inside the lens: the lens as `IsoCamera.applyFrustum`
  * solves it for this eye (`fov = 2·atan(halfHeight / distance)`, `halfHeight =
- * cameraViewHalfHeight(aspect) / zoom`), turned as `lookAt` turns it.
- * Unclamped: 0 when one of them is not in front of the eye at all.
+ * cameraViewHalfHeight(aspect) / zoom`), turned as `lookAt` turns it. A point
+ * is a **label's anchor**, and a label is drawn only while the camera's own
+ * test says its anchor is in shot (`IsoCamera.isOnScreen`, #415): its offset
+ * from the eye along the screen's axes against the frame's half-size *at the
+ * focus* — stricter than the lens for an anchor beyond the focus, which is
+ * where the owl reads from — so a point is held to that test.
  */
 export function containZoom(camera: IsoCamera, eye: Vector3, focus: Vector3, boxes: readonly Box3[], points: readonly Vector3[], margin: number): number {
   const aspect = camera.camera.aspect;
+  const base = cameraViewHalfHeight(aspect);
   const forward = SCRATCH_FORWARD.copy(focus).sub(eye);
   const distance = forward.length();
   if (distance < 1e-6) return 0;
@@ -657,26 +738,27 @@ export function containZoom(camera: IsoCamera, eye: Vector3, focus: Vector3, box
   if (right.lengthSq() < 1e-9) return 0;
   right.normalize();
   const up = SCRATCH_UP.crossVectors(right, forward);
-  /** The tangent of the half-height angle the frame needs, so far. */
+  /** The tangent of the lens's half-height angle the boxes need, so far. */
   let need = 0;
-  const holds = (point: Vector3): boolean => {
-    const dx = point.x - eye.x;
-    const dy = point.y - eye.y; // flat-ok: a shot's room is its own flat space off the sphere
-    const dz = point.z - eye.z;
-    const depth = dx * forward.x + dy * forward.y + dz * forward.z;
-    if (depth < camera.camera.near) return false;
-    need = Math.max(need, Math.abs(dx * right.x + dy * right.y + dz * right.z) / (depth * aspect), Math.abs(dx * up.x + dy * up.y + dz * up.z) / depth);
-    return true;
-  };
+  /** The frame's half-height at the focus the points need, so far (metres). */
+  let reach = 0;
   for (const box of boxes) {
     for (let i = 0; i < 8; i += 1) {
       SCRATCH_CORNER.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z); // flat-ok: a shot's room is its own flat space off the sphere
-      if (!holds(SCRATCH_CORNER)) return 0;
+      const v = SCRATCH_CORNER.sub(eye);
+      const depth = v.dot(forward);
+      if (depth < camera.camera.near) return 0;
+      need = Math.max(need, Math.abs(v.dot(right)) / (depth * aspect), Math.abs(v.dot(up)) / depth);
     }
   }
-  for (const point of points) if (!holds(point)) return 0;
-  if (need <= 0) return Infinity;
-  return cameraViewHalfHeight(aspect) / ((need / (1 - margin)) * distance);
+  for (const point of points) {
+    const v = SCRATCH_CORNER.copy(point).sub(eye);
+    if (v.dot(forward) < camera.camera.near) return 0;
+    reach = Math.max(reach, Math.abs(v.dot(right)) / aspect, Math.abs(v.dot(up)));
+  }
+  const byBoxes = need > 0 ? base / ((need / (1 - margin)) * distance) : Infinity;
+  const byPoints = reach > 0 ? (base * (1 - margin)) / reach : Infinity;
+  return Math.min(byBoxes, byPoints);
 }
 
 export function shotZoom(camera: IsoCamera, subject: Box3): number {
@@ -733,9 +815,11 @@ export function* solveExhibitShotSteps(
   her?: Box3,
   rules: ShotRules = {},
 ): Generator<void, ExhibitShot | null> {
-  const { box, targets } = subjectOf(subjects);
+  const { box, targets } = subjectOf(subjects, rules.spread ?? 0);
   if (box.isEmpty()) return null;
   const focus = box.getCenter(new Vector3());
+  // Every sightline ends inside the subjects' box: this far round its middle, and the tube's width.
+  const sightReach = box.getSize(new Vector3()).length() / 2 + SIGHTLINE_TUBE + 0.02;
   const room = world.room;
   // Subjects that hide one another are occluders like the room, each mesh
   // marked as its own subject's, so a sightline passes through only the body
@@ -843,7 +927,7 @@ export function* solveExhibitShotSteps(
       if (report) report.tooClose += 1;
       continue;
     }
-    const seen = shotSees(eye, targets, occluders, report);
+    const seen = shotSees(eye, targets, occludersToward(occluders, eye, focus, sightReach), report);
     if (!seen) {
       if (report) report.blocked += 1;
       continue;

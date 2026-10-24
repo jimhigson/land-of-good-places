@@ -277,6 +277,8 @@ export class Library implements GameSystem {
   readonly baseSink: number;
   /** Her two story cushions (`LIBRARY_PLAYER_SEATS`), each with its drawn piece. */
   private readonly playerSeats: readonly PlayerSeat[];
+  /** Every furnished piece as drawn, by its `LIBRARY_FURNITURE` / `LIBRARY_BOOKCASES` id (`furnishReadingRoom`'s own map). */
+  private readonly pieces: ReadonlyMap<string, Object3D>;
   /** The cushion she is sitting on, or null when she is not. */
   private seatedOn: LibraryPlayerSeat | null = null;
   /**
@@ -347,6 +349,7 @@ export class Library implements GameSystem {
     this.roomRoot.add(this.denRoot);
     this.denWalls = buildLibraryDenShell(this.denRoot, this.props, surfaces, shell.fabric).walls;
     const furnished = furnishReadingRoom(this.roomRoot, this.props);
+    this.pieces = furnished.pieces;
     this.stacks = furnished.stacks;
     this.bookCount = furnished.bookCount;
     this.shelfBooks = furnished.shelfBooks;
@@ -479,6 +482,15 @@ export class Library implements GameSystem {
     return this.props.standables;
   }
 
+  /**
+   * The drawn piece of the furniture `id` names (`LIBRARY_FURNITURE`'s ids:
+   * `'story-chair'`, `'cushion-4'`…), or undefined — what story time's camera
+   * (`storyCamera.ts`) is told its listeners and their reader sit on.
+   */
+  furniture(id: string): Object3D | undefined {
+    return this.pieces.get(id);
+  }
+
   /** The building's name over its door, and the owl's speech bubble (#718). */
   get screenLabels(): readonly ManagedLabel[] {
     return [this.nameLabel, this.owl.bubble];
@@ -573,11 +585,21 @@ export class Library implements GameSystem {
    * **from anywhere, the room included** (a save written inside restores her
    * there before a link runs; the Reptile House's lesson). `at` is room-local
    * metres; without it, just inside the door, facing up the central aisle.
+   *
+   * With `sit` (`/library?sit=1`): she arrives sitting on that story cushion,
+   * facing the storyteller's chair — stood on it and sat down behind the iris,
+   * the Sit chip's own way down ({@link seatOn}), so the room opens on her
+   * listening. `at` is then the cushion's own spot.
    */
-  requestEnter(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
+  requestEnter(at?: { readonly x: number; readonly z: number; readonly facing?: number }, sit?: LibraryPlayerSeat): boolean {
     const player = this.player;
     if (!player || player.riding || this.spaces.isChanging) return false;
-    this.spaces.changeTo(() => this.enterRoom(at));
+    const seat = sit === undefined ? undefined : this.playerSeats.find((candidate) => candidate.id === sit);
+    const spot = seat ? { x: seat.at.x, z: seat.at.z, facing: seat.facing } : at;
+    this.spaces.changeTo(() => {
+      this.enterRoom(spot);
+      if (seat) this.seatOn(player, seat);
+    });
     return true;
   }
 
@@ -734,10 +756,20 @@ export class Library implements GameSystem {
     const player = this.player;
     const seat = this.playerSeats.find((candidate) => candidate.id === id);
     if (!player || !seat || !this.inside || player.riding || this.spaces.isChanging) return;
+    this.seatOn(player, seat);
+  }
+
+  /**
+   * The sitting itself, {@link sit}'s and the `sit` link's ({@link
+   * requestEnter}, behind the iris, where `sit`'s guard against a change of
+   * space would refuse it): the ride, the pose on the floor at the cushion,
+   * facing the chair, and the posture after `beginRide` has reset it.
+   */
+  private seatOn(player: Player, seat: PlayerSeat): void {
     player.beginRide(this.cushionHolder);
     player.setRidePose(LIBRARY_ORIGIN_X + seat.at.x, LIBRARY_FLOOR_Y, LIBRARY_ORIGIN_Z + seat.at.z, (seat.facing * Math.PI) / 180);
     player.ridePosture = 'listening';
-    this.seatedOn = id;
+    this.seatedOn = seat.id;
   }
 
   /**

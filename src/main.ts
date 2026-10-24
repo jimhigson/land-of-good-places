@@ -350,11 +350,20 @@ type DeepLink =
    * than forty seconds in (`storyTime.ts`'s `STORY_FIRST_AFTER`):
    * `/library?at=2.1,-8&facing=150&story=now` stands her by her story cushion
    * as the owl calls everyone to the rug.
+   * `&sit=1` (or `3`) has her arrive **sitting** on that story cushion,
+   * facing the chair; `at` is not needed then. `/library?sit=1&story=now` is
+   * story time from her cushion: the owl calls, flies, the children sit, and
+   * as the owl starts to read the camera comes down over her shoulder
+   * (`storyCamera.ts`). Carried as typed and read by `Game.enterLibrarySpawn`
+   * against `layout.ts`'s `LIBRARY_PLAYER_SEATS`, the one list of her
+   * cushions — which this entry chunk does not load (the world is a lazy
+   * import, `loadGame`).
    */
   | {
       readonly kind: 'library';
       readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
       readonly story?: true;
+      readonly sit?: string;
     }
   /**
    * `/book?id=<bookId>` — **one of the library's books, open in the reader**
@@ -404,10 +413,12 @@ function parseLibraryLink(search: string): DeepLink {
   const raw = params.get('at');
   const at = parseSpawnPoint(raw);
   const facingRaw = params.get('facing');
-  const link: { kind: 'library'; at?: { x: number; z: number; facing?: number }; story?: true } = { kind: 'library' };
+  const link: { kind: 'library'; at?: { x: number; z: number; facing?: number }; story?: true; sit?: string } = { kind: 'library' };
   const story = params.get('story');
   if (story === 'now') link.story = true;
   else if (story !== null) console.warn(`Land of Good Places: /library story=${story} — only story=now is understood (story time from her first frame inside).`);
+  const sit = params.get('sit');
+  if (sit !== null) link.sit = sit;
   if (at) {
     const spot: { x: number; z: number; facing?: number } = { x: at.x, z: at.z };
     const facing = facingRaw === null ? Number.NaN : Number(facingRaw);
@@ -1384,7 +1395,7 @@ async function finishLaunch(
       case 'library':
         // Fails loud, like `/reptile-house`: a reading room that will not open
         // is the thing this link exists to check.
-        if (!game.enterLibrarySpawn(deepLink.at, deepLink.story === true)) {
+        if (!game.enterLibrarySpawn(deepLink.at, deepLink.story === true, deepLink.sit)) {
           console.error(
             'Land of Good Places: /library did not enter the Library — see Library.requestEnter ' +
               '(she may be riding, or a change of space is already running).',
