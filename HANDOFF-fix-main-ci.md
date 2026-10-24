@@ -56,6 +56,20 @@ Do NOT merge. Do not touch the den/part-5 or engine-follow-up work.
 3. Non-blocking, now in the module doc and the PR body: the checks copy Game's two wiring lines; a tap
    during the glance walks her (selection blocked).
 
+QA round 1 ("not approved", issuecomment-6382237467) saw the same defect in the game (phone: the title
+slides off in ~0.2 s on Cat Bus, Goodnight Park, Biscuit and the Storm; laptop: The Dragon Who Reads). Added
+**check:labels: the naming line drawn on every frame she says it** (label manager's own verdict, 390×844):
+183 of 183; **red** with 98226e17's window: "FAIL F the owl's words … drawn on only 7 of the 183 frames".
+
+**Final (head 786ab804):** full `pnpm run check` alone exit 0, 2120 s (`runs/full7-check.log`); test:procgen
+alone exit 0, 259 s, 48 files, 2168 tests, 0 skipped (`runs/final2-procgen.log`); CI run 40080380417
+success (25 success, 6 skipped) — Checks pass, Procgen invariants pass; Update adoption 40080380420 pass.
+Newest preview https://pr-735-786ab80-land-of-good-places.blockstack.workers.dev (build 3d06f27f = main +
+786ab804, tree identical), looked at in headless Chrome at both sizes (`look/preview-786ab80/`, sheets):
+the title over the owl for its whole line on both; laptop whole picture on the glow line; phone the corner
+case centred; home with "Say hello!". PR head kept at 786ab804; this handoff's last commit is on
+`fix/main-ci-after-library-handoff`.
+
 Reds re-run on the final code (`runs/reds3.out`): no-glance 268 ✓ 33 ✗; glance-stays 264 ✓ 37 ✗; draw-back
 0.4 292 ✓ 9 ✗; title-in-window 286 ✓ 15 ✗; no-move-cancel 300 ✓ 1 ✗; book-off-centre 286 ✓ 15 ✗. Green:
 check:library 301 ✓; check:labels exit 0 (glance 170 frames, chip on 0); typecheck:test, flat-primitives,
