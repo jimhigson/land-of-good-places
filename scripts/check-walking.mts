@@ -76,6 +76,27 @@
  * that constant for why a check that reads its own expectations from the thing
  * under test cannot go red.
  *
+ * ## Every press from the same, open spot
+ *
+ * Each case's presses all start from one spot with
+ * {@link SAVE_SPOT_CLEARANCE} of clear ground round it — the nearest such
+ * spot to where the case left her ({@link clearHome}) — and she is put back on
+ * it, at rest, before every press ({@link standAt}), never left wherever the
+ * last press coasted to. How far a press carries her, and how far she coasts
+ * after the key is let go, are set by how many frames the renderer manages
+ * (see {@link MAX_HOLD_MS}), so a chain of presses wanders differently on
+ * every machine: on a loaded Mac (24 Oct 2026, load 22) the keychain case's
+ * `ArrowRight` coasted her to (−0.80, 17.94) on seed 5, against the keychain
+ * stall, and `KeyW` — straight into it — got 0.190 m in 5100 ms and failed,
+ * while the same code passed idle and on CI. The keys were fine; the case's
+ * premise, "every direction has room", was not true — not even of the spot
+ * the view hands her back on, (−2.46, 17.50), from which `ArrowRight` and
+ * `KeyD` walk into the stall (0.027 m in 5100 ms, measured), and the chain
+ * passed only because the presses before them happened to carry her away.
+ * `CHECK_WALKING_MUTATE=coast-to-stall` leaves her where the loaded run coasted
+ * to after the keychain case's `ArrowRight`: the next press must still start
+ * from the open spot.
+ *
  * Needs a Chromium install (`channel: 'chromium'`) — same as
  * `check-deep-links.mts`, which this file is shaped after. It reads
  * `window.game`, so it wants the dev server rather than `vite preview`
@@ -105,6 +126,17 @@ const SHOT_DIR = process.env.CHECK_WALKING_SHOTS ?? '/tmp/check-walking';
  * `CHECK_WALKING_SEED=n` walks another park.
  */
 const SEED = Number(process.env.CHECK_WALKING_SEED ?? CANONICAL_PARK_SEED);
+
+/**
+ * `CHECK_WALKING_MUTATE=coast-to-stall` — after the keychain case's `ArrowRight`,
+ * she is left where a loaded run's coasting left her, (−0.80, 17.94) on seed 5,
+ * against the stall (see "Every press from the same spot" above). Anything else
+ * set here is refused, so a typo cannot pass as a red proof.
+ */
+const MUTATE = process.env.CHECK_WALKING_MUTATE ?? '';
+if (MUTATE !== '' && MUTATE !== 'coast-to-stall') throw new Error(`CHECK_WALKING_MUTATE=${MUTATE} is not one of this check's mutations: coast-to-stall`);
+/** Where the loaded run's `ArrowRight` coasted her to, seed 5's keychain case. */
+const COASTED_TO: Place = { x: -0.8, z: 17.94 };
 const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}`;
 
 /**
@@ -142,10 +174,12 @@ const MIN_METRES = PLAYER_RADIUS;
 const MAX_HOLD_MS = 5000;
 
 /**
- * Clear ground round the returning save's stand point, in metres. The eight
- * walks chain end to start and wandered about 3.5 m from where they began
- * (measured on seed 5), so a disc this size leaves every one room to cover
- * {@link MIN_METRES} whichever way it points.
+ * Clear ground round the spot every case's presses start from, in metres
+ * ({@link clearHome}). Every press starts there, at rest ({@link standAt}), and
+ * covers at most a couple of metres before it is let go and she coasts to a
+ * stop, so a disc this size leaves every one room to cover {@link MIN_METRES}
+ * whichever way it points. (It was the returning save's alone, sized when the
+ * eight walks chained end to start and wandered about 3.5 m, seed 5.)
  */
 const SAVE_SPOT_CLEARANCE = 5;
 
@@ -342,7 +376,49 @@ async function walkOnce(page: Page, code: string): Promise<{ metres: number; det
   return { metres, detail };
 }
 
-/** Presses every movement key at whatever park is on screen, and judges it. */
+/**
+ * **The nearest spot to `from` with {@link SAVE_SPOT_CLEARANCE} of clear
+ * ground round it** — asked of the built park's own collision, in rings out to
+ * 40 m — or null if there is none. See "Every press from the same, open spot"
+ * in this file's header.
+ */
+function clearHome(page: Page, from: Place): Promise<Place | null> {
+  return page.evaluate(
+    ({ from, clearance }) => {
+      const game = (window as unknown as {
+        game?: { world: { collision: { isClearCircle(x: number, z: number, r: number): boolean } } };
+      }).game;
+      if (!game) return null;
+      for (let ring = 0; ring <= 40; ring += 0.5) {
+        const around = Math.max(1, Math.round(ring * 4));
+        for (let k = 0; k < around; k += 1) {
+          const bearing = (k / around) * Math.PI * 2;
+          const x = from.x + Math.cos(bearing) * ring;
+          const z = from.z + Math.sin(bearing) * ring;
+          if (game.world.collision.isClearCircle(x, z, clearance)) return { x, z };
+        }
+      }
+      return null;
+    },
+    { from, clearance: SAVE_SPOT_CLEARANCE },
+  );
+}
+
+/**
+ * **Puts her back on `home`, at rest** — through the game's own
+ * `Player.teleport`, which sets her down by the put-down rule and zeroes her
+ * velocity — so the press after it starts there. See "Every press from the
+ * same, open spot" in this file's header.
+ */
+async function standAt(page: Page, home: Place): Promise<void> {
+  await page.evaluate((spot) => {
+    const game = (window as unknown as { game?: any }).game;
+    game?.player?.teleport(spot.x, spot.z);
+  }, home);
+  await settle(page);
+}
+
+/** Presses every movement key at whatever park is on screen, and judges it — every press from where the case stood her. */
 async function walkEveryWay(page: Page, label: string): Promise<void> {
   const state = await readPlayer(page);
   if (!state.hasGame) {
@@ -357,8 +433,23 @@ async function walkEveryWay(page: Page, label: string): Promise<void> {
     );
   }
 
+  const left = state.place;
+  const home = left ? await clearHome(page, left) : null;
+  if (!left || !home) {
+    fouls.push(`${label}: no point within 40 m of where the case left her is clear for ${SAVE_SPOT_CLEARANCE} m, so there was nowhere open to press from`);
+    return;
+  }
+  say(
+    `  [${label}] every press from (${home.x.toFixed(2)}, ${home.z.toFixed(2)}), clear for ${SAVE_SPOT_CLEARANCE} m — ` +
+      `${Math.hypot(home.x - left.x, home.z - left.z).toFixed(2)} m from where the case left her, (${left.x.toFixed(2)}, ${left.z.toFixed(2)})`,
+  );
   for (const code of MOVE_KEYS) {
+    await standAt(page, home);
     const { metres, detail } = await walkOnce(page, code);
+    if (MUTATE === 'coast-to-stall' && label === 'after keychain view' && code === 'ArrowRight') {
+      await page.evaluate((spot) => (window as unknown as { game?: any }).game?.player?.teleport(spot.x, spot.z), COASTED_TO);
+      say(`  [${label}] MUTATED: left at (${COASTED_TO.x}, ${COASTED_TO.z}) after ${code}, where a loaded run coasted to — the next press must still start from (${home.x.toFixed(2)}, ${home.z.toFixed(2)})`);
+    }
     const ok = Number.isFinite(metres) && metres >= MIN_METRES;
     say(`  [${label}] ${code.padEnd(10)} ${ok ? 'OK' : 'FAILED'}: ${detail}`);
     if (!ok) {
@@ -605,10 +696,11 @@ await runCase('after keychain view', async (page) => {
     );
     return;
   }
-  // She is left standing at the view's own composed stand point, which sits a
-  // full `REACH` from the cart by construction — so every one of the eight
-  // directions below has more than {@link MIN_METRES} of room before anything
-  // solid, whichever way the seed put the stall.
+  // She is handed back beside the stall, and not every direction from there
+  // has room (`ArrowRight` from (−2.46, 17.50) on seed 5 walks into it): the
+  // presses start from the nearest open spot instead — see "Every press from
+  // the same, open spot" in this file's header. What this case exists for, the
+  // hand-back, is asserted above, before she is moved.
   await walkEveryWay(page, 'after keychain view');
 });
 

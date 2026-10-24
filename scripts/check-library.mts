@@ -22,6 +22,8 @@
  * LIBRARY_CHECK_MUTATE=fixed-hysteresis pnpm run check:library  # the selection's band a fixed 0.6 m (before #734): SHELF WALK's arrivals must go red
  * LIBRARY_CHECK_MUTATE=no-hysteresis pnpm run check:library  # no band at all: SHELF WALK's sway midway must go red (flicker)
  * LIBRARY_CHECK_MUTATE=tap-loses pnpm run check:library      # a tap dropped while proximity holds anything else (before #734): SHELF WALK's taps must go red
+ * LIBRARY_CHECK_MUTATE=no-glance pnpm run check:library      # the owl's glance at her book never wired (main before it): FOUND FROM THE DESK must go red, book by book
+ * LIBRARY_CHECK_MUTATE=glance-stays pnpm run check:library   # the glance's focus kept after it lets go: RECOMMEND's "the camera comes home" must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -148,10 +150,12 @@ import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, 
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { BLINK_DURATION } from '../src/art/style/faceLife.ts';
-import { gameStore } from '../src/state/index.ts';
-import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, storyTimeMayRead, type LibraryBook } from '../src/world/library/books.ts';
+import { gameStore, type CuteThing } from '../src/state/index.ts';
+import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, bookCollectionId, storyTimeMayRead, type LibraryBook } from '../src/world/library/books.ts';
 import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
+import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
+import { FALLBACK_UNIT_PX } from '../src/core/uiScale.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import {
   BREATH_DEPTH,
@@ -307,6 +311,8 @@ const MUTATIONS = [
   'fixed-hysteresis',
   'no-hysteresis',
   'tap-loses',
+  'no-glance',
+  'glance-stays',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -1774,7 +1780,7 @@ type Steer = (input: InputSystem) => void;
  * also takes the probe's place in the Library). One {@link RealChild.step} is
  * the game's own order for everything a library clause reads, at 1/60 s:
  *
- *     input.update → (steer) → player.update → camera.update → library.update → world.npcs.update
+ *     input.update → (steer) → player.update → the glance's camera claim → camera.update → library.update → world.npcs.update
  *
  * `world.npcs.update` is in it so the library's children (#718, Step 8) walk
  * exactly as the game walks them.
@@ -1816,6 +1822,30 @@ interface RealChild {
   also(system: { update(context: FrameContext): void }): void;
 }
 
+/**
+ * **`Game`'s camera claim from the reading room** — the owl's glance at the book she recommends
+ * (`bookGlance.ts`), applied exactly as `Game.tick` applies it: after the player and before the camera,
+ * its claim set as the camera's focus override, or the override cleared. It is the one claimant in the
+ * reading room, as it is in this check, so the camera every clause measures from here on is the camera
+ * the game draws. `no-glance` takes it out (main before it); `glance-stays` keeps its last focus after it
+ * lets go.
+ */
+const bookGlance = new BookGlance(library);
+let glanceKept: Vector3 | null = null;
+const glanceFrame = (player: Player): void => {
+  if (mutating('no-glance')) {
+    camera.clearFocusOverride();
+    return;
+  }
+  let claim: Readonly<Vector3> | null = bookGlance.apply(camera, player);
+  if (mutating('glance-stays')) {
+    if (claim) glanceKept = claim.clone();
+    else claim = glanceKept;
+  }
+  if (claim) camera.setFocusOverride(claim);
+  else camera.clearFocusOverride();
+};
+
 const child: RealChild = (() => {
   const player = quietly(() => new Player(world.collision, camera, new Vector3(OX + LIBRARY_ARRIVAL.x, LIBRARY_FLOOR_Y, OZ + LIBRARY_ARRIVAL.z)));
   scene.add(player.group);
@@ -1832,6 +1862,7 @@ const child: RealChild = (() => {
     context.elapsed = frames * CHILD_DT;
     quietly(() => {
       player.update(context);
+      glanceFrame(player);
       camera.update(context, player.position, player.velocity);
       library.update(context);
       world.npcs.update(context);
@@ -2319,6 +2350,258 @@ console.log('\nCARD — her library card, on the first press at the desk:');
   note(`CARD: ${cardsHeld()} card(s); ${said.size} distinct line(s) said; flap ${flapLow.toFixed(2)}; ${child.frames} frames stepped so far`);
 }
 
+/** A screen the check measures the glance on, in CSS pixels. */
+interface CheckScreen {
+  readonly width: number;
+  readonly height: number;
+  readonly what: string;
+}
+/** The landscape screen the owl's clauses lay labels out on ({@link SCREEN}), named for the reports. */
+const LAPTOP: CheckScreen = { ...SCREEN, what: 'landscape' };
+/** A phone held upright — the device Eleri mostly plays on (GAME_DESIGN.md's HIGHLIGHT rule) — the glance's other screen. */
+const PHONE: CheckScreen = { width: 390, height: 844, what: 'a phone held upright' };
+/** A world point on `screen`, through the game's own camera as it stands (CSS pixels, y down). */
+const pointOn = (at: Readonly<Vector3>, screen: CheckScreen): { x: number; y: number; on: boolean } => {
+  camera.camera.updateMatrixWorld();
+  const v = at.clone().project(camera.camera);
+  const x = ((v.x + 1) / 2) * screen.width;
+  const y = ((1 - v.y) / 2) * screen.height;
+  return { x, y, on: v.z < 1 && x >= 0 && x <= screen.width && y >= 0 && y <= screen.height };
+};
+/** Everything of the room and its children a sparkle can be hidden behind, this frame: drawn, opaque, not the owl (a stack fades as she passes behind it). */
+const roomOccluders = (): Mesh[] => {
+  const opaque = (material: Material): boolean => material.visible && material.depthWrite && (!material.transparent || material.opacity >= 0.999);
+  const drawnNode = (node: Object3D): boolean => {
+    for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return false;
+    return true;
+  };
+  const meshes: Mesh[] = [];
+  for (const root of [library.roomRoot, library.kidsRoot]) {
+    root.traverse((node) => {
+      if (!(node instanceof Mesh) || !drawnNode(node)) return;
+      for (let at: Object3D | null = node; at; at = at.parent) if (at === owl.handle.root) return;
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      if (materials.some(opaque)) meshes.push(node);
+    });
+  }
+  return meshes;
+};
+
+/**
+ * **The smallest a sparkle of the glow may be drawn and still count as found** — GAME_DESIGN.md's TEXT RULE
+ * minimum, one UI unit: the smallest thing the game ever asks a six-year-old to read, so the least it may
+ * ask her to spot. In CSS pixels; `style.css`'s `clamp(20px, 0.62vw + 0.55vh + 8px, 38px)` sits on its
+ * floor on both screens measured here (390×844: 15.1 px by the formula; 1280×720: 19.9 px), so this is
+ * `FALLBACK_UNIT_PX`, the floor itself. **Deliberately not the glance's own number** (`GLANCE_DRAW_BACK`,
+ * how far it draws back): a check that reads its threshold from the code under test cannot fail on it —
+ * review of #735: with `GLANCE_DRAW_BACK = 0.4` the old clause stayed green while a phone drew the *Cat
+ * Bus* book's glow at zoom 0.46, a sparkle 10.5 px across.
+ */
+const GLOW_MIN_PX = FALLBACK_UNIT_PX;
+
+/**
+ * **What the child at the desk sees while the owl recommends a book** — from her press of "Say hello!"
+ * (already made) until the owl falls quiet, and on until the camera is hers again (2 s at most), with the
+ * owl's glance at the book (`bookGlance.ts`) applied as `Game` applies it ({@link glanceFrame}).
+ *
+ * On every frame of the naming line ("Try “…” next!"): whether the owl's bubble can be drawn — its anchor
+ * in shot, the bubble's own gate (`SpeechBubble.updateScreenSize`) — so the title can be read. On every
+ * frame of the glow line ("It is glowing on its shelf!"): whether a sparkle of the book's glow — its
+ * beacon's or its twinkles' — stands in the open over the top of the book's own case, on the screen and in
+ * clear view of the camera (a ray from the eye reaching it past every opaque mesh of the room and its
+ * children, taken that frame), and whether one drawn at least {@link GLOW_MIN_PX} across does (a sparkle's
+ * drawn width: its own world scale, laid along the camera's screen right and projected); on the frames the
+ * glance holds everything (`GlanceShot.whole`), whether the owl's bubble's anchor is in shot and the child
+ * is on the screen, feet and head; on the frames it looks at the book itself, whether the case's top over
+ * the book is drawn in the middle half of the screen. After the last line: how many frames until the
+ * glance has let go, the zoom she had is back, and the camera orbits her again — within 0.25 m of the point
+ * it orbited her at on the last frame before the glance took it (she stands still throughout, so that is
+ * where its follow puts it — measured, not re-derived).
+ */
+interface RecommendWatch {
+  readonly lines: Set<string>;
+  readonly caseId: string;
+  readonly caseTop: number;
+  glowFrames: number;
+  seenFrames: number;
+  seenSprites: number;
+  hidden: number;
+  lowest: number;
+  /** Frames of the naming line, and of them the frames the owl's bubble's anchor was in shot (her words can be drawn). */
+  nameFrames: number;
+  nameBubbleFrames: number;
+  /** Glow-line frames a sparkle of the glow at least {@link GLOW_MIN_PX} across was seen. */
+  bigFrames: number;
+  /** The smallest, over the glow-line frames the glow was seen, of the widest sparkle seen that frame (px). */
+  glowPx: number;
+  /** Glow-line frames the glance looked at the book itself and the owl's bubble's anchor was still in shot. */
+  bookBubbleFrames: number;
+  /** Glow-line frames the glance held everything — her, the owl and the book — and of them, the frames she and the owl's bubble's anchor were in shot. */
+  wholeFrames: number;
+  /**
+   * Glow-line frames the glance looked at the book itself; of them, the frames the camera had arrived — its
+   * focus within {@link ARRIVED} of the shot's, across the floor (it slides there in the line's first moments,
+   * now that the glance opens on the glow line) — and of those, the frames the case's top over the book was
+   * drawn in the middle half of the screen.
+   */
+  bookFrames: number;
+  arrivedFrames: number;
+  centredFrames: number;
+  bubbleFrames: number;
+  childFrames: number;
+  glanceFrames: number;
+  /** The glance's shot on the glow line's last frame. */
+  shot: GlanceShot | null;
+  /** Where the beacon's base was on the screen on the glow line's last frame. */
+  beaconAt: { x: number; y: number; on: boolean } | null;
+  zoomBefore: number;
+  /** Where the camera orbited her on the last frame before the glance took it (null: it never did). */
+  followedAt: Vector3 | null;
+  /** Frames from the owl falling quiet until the camera is home (−1: not within 2 s). */
+  homeAfter: number;
+  /** How far the camera's focus was from {@link followedAt}, and its zoom, when the watch ended. */
+  homeOff: number;
+  zoomAfter: number;
+}
+/** How near the camera's focus must be to a book-itself shot's, across the floor, to have arrived at it (metres). */
+const ARRIVED = 1;
+/** How far off a book, across the floor, a sparkle of its glow can be: a puff's ±0.3 m in x and z, corner to corner, and a hair. */
+const OVER_BOOK = 0.3 * Math.SQRT2 + 0.02;
+const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendWatch => {
+  const placed = library.shelfBooks.find((candidate) => candidate.book.id === book.id);
+  const spec = placed ? LIBRARY_BOOKCASES.find((candidate) => candidate.id === placed.slot.bookcase) : undefined;
+  const watch: RecommendWatch = {
+    lines: new Set<string>(),
+    caseId: placed?.slot.bookcase ?? '?',
+    caseTop: spec ? libraryBookcaseSize(spec.kind).height : Number.NaN,
+    glowFrames: 0,
+    seenFrames: 0,
+    seenSprites: 0,
+    hidden: 0,
+    lowest: Infinity,
+    nameFrames: 0,
+    nameBubbleFrames: 0,
+    bigFrames: 0,
+    glowPx: Infinity,
+    bookBubbleFrames: 0,
+    wholeFrames: 0,
+    bookFrames: 0,
+    arrivedFrames: 0,
+    centredFrames: 0,
+    bubbleFrames: 0,
+    childFrames: 0,
+    glanceFrames: 0,
+    shot: null,
+    beaconAt: null,
+    zoomBefore: camera.targetZoom,
+    followedAt: null,
+    homeAfter: -1,
+    homeOff: Number.NaN,
+    zoomAfter: Number.NaN,
+  };
+  const ray = new Raycaster();
+  const eye = new Vector3();
+  const player = child.player;
+  const followed = new Vector3();
+  let glanced = false;
+  /** The case's top over the book, world: where the beacon rises from. */
+  const caseTopAt = placed ? placed.mesh.getWorldPosition(new Vector3()).setY(LIBRARY_FLOOR_Y + watch.caseTop) : null;
+  /** How wide a sprite is drawn, in pixels: its world scale laid along the camera's screen right, through the camera as it is. */
+  const drawnPx = (sprite: Object3D, at: Readonly<Vector3>): number => {
+    const half = camera.screenRightAxis.clone().multiplyScalar(sprite.getWorldScale(new Vector3()).x / 2);
+    const a = pointOn(at.clone().sub(half), screen);
+    const b = pointOn(at.clone().add(half), screen);
+    return Math.hypot(b.x - a.x, b.y - a.y); // flat-ok: two points on the screen, CSS pixels — not heights in the world
+  };
+  const naming = LIBRARY_LINES.owl.recommend(book.title);
+  for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
+    if (!glanced) followed.copy(camera.focusPoint);
+    child.step();
+    if (owl.lastSaid !== null) watch.lines.add(owl.lastSaid);
+    if (bookGlance.active) {
+      watch.glanceFrames += 1;
+      if (!glanced) watch.followedAt = followed.clone();
+      glanced = true;
+    }
+    if (owl.speaking && owl.lastSaid === naming) {
+      watch.nameFrames += 1;
+      if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.nameBubbleFrames += 1;
+    }
+    if (!owl.speaking || owl.lastSaid !== LIBRARY_LINES.owl.recommendGlow) continue;
+    watch.glowFrames += 1;
+    watch.shot = bookGlance.shot;
+    if (caseTopAt) watch.beaconAt = pointOn(caseTopAt, screen);
+    if (bookGlance.shot?.whole) {
+      watch.wholeFrames += 1;
+      const feet = pointOn(player.position, screen);
+      const head = pointOn(player.position.clone().setY(player.position.y + player.topHeight), screen);
+      if (feet.on && head.on) watch.childFrames += 1;
+      if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.bubbleFrames += 1;
+    } else if (bookGlance.shot) {
+      watch.bookFrames += 1;
+      if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.bookBubbleFrames += 1;
+      const focus = camera.focusPoint;
+      const target = bookGlance.shot.focus;
+      if (Math.hypot(focus.x - target.x, focus.z - target.z) <= ARRIVED) {
+        watch.arrivedFrames += 1;
+        const at = watch.beaconAt;
+        if (at && Math.abs(at.x - screen.width / 2) <= screen.width / 4 && Math.abs(at.y - screen.height / 2) <= screen.height / 4) watch.centredFrames += 1;
+      }
+    }
+    camera.camera.updateMatrixWorld();
+    eye.setFromMatrixPosition(camera.camera.matrixWorld);
+    const meshes = roomOccluders();
+    const overBook = placed ? placed.mesh.getWorldPosition(new Vector3()) : null;
+    let seenNow = false;
+    let widest = 0;
+    for (const sprite of [...owl.beacon.sprites, ...owl.twinkles.sprites]) {
+      if (!sprite.visible) continue;
+      const at = sprite.getWorldPosition(new Vector3());
+      const up = at.y - LIBRARY_FLOOR_Y; // flat-ok: a height over the reading room's own flat floor
+      // Over this book: a puff lands within ±0.3 m of it in x and z (`SpritePuffs.puff`), so a sparkle still
+      // rising off another book's case is not this one's.
+      if (!overBook || Math.hypot(at.x - overBook.x, at.z - overBook.z) > OVER_BOOK) continue;
+      if (!pointOn(at, screen).on || up < watch.caseTop) continue;
+      watch.lowest = Math.min(watch.lowest, up);
+      const towards = at.clone().sub(eye);
+      const distance = towards.length();
+      ray.set(eye, towards.normalize());
+      ray.far = distance - 0.05;
+      if (ray.intersectObjects(meshes, false).length > 0) {
+        watch.hidden += 1;
+        continue;
+      }
+      watch.seenSprites += 1;
+      seenNow = true;
+      widest = Math.max(widest, drawnPx(sprite, at));
+    }
+    if (seenNow) {
+      watch.seenFrames += 1;
+      watch.glowPx = Math.min(watch.glowPx, widest);
+      if (widest >= GLOW_MIN_PX) watch.bigFrames += 1;
+    }
+  }
+  const homeOff = (): number => (watch.followedAt ? camera.focusPoint.distanceTo(watch.followedAt) : Number.NaN);
+  for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
+    if (!bookGlance.active && Math.abs(camera.zoom - watch.zoomBefore) < 0.01 && camera.targetZoom === watch.zoomBefore && (!watch.followedAt || homeOff() < 0.25)) {
+      watch.homeAfter = i;
+      break;
+    }
+    child.step();
+  }
+  watch.homeOff = homeOff();
+  watch.zoomAfter = camera.zoom;
+  return watch;
+};
+/** One book's watch, in a report's words. */
+const watchSays = (book: LibraryBook, watch: RecommendWatch): string =>
+  `'${book.id}' on '${watch.caseId}' (${watch.caseTop.toFixed(2)} m): seen on ${watch.seenFrames} of ${watch.glowFrames} frames of the glow line ` +
+  `(${watch.seenSprites} sparkle-frames; ${watch.hidden} hidden by the room; the lowest at ${Number.isFinite(watch.lowest) ? watch.lowest.toFixed(2) : '—'} m)` +
+  `${watch.beaconAt ? `, its case's top drawn at (${Math.round(watch.beaconAt.x)}, ${Math.round(watch.beaconAt.y)})${watch.beaconAt.on ? '' : ' OFF THE SCREEN'}` : ''}; ` +
+  `the glance on ${watch.glanceFrames} frames${watch.shot ? `, zoom ${watch.shot.zoom.toFixed(2)}${watch.shot.whole ? ', everything in shot' : `, the book itself (everything did not fit), arrived on ${watch.arrivedFrames} of its ${watch.bookFrames} frames and its case's top in the middle half of the screen on ${watch.centredFrames} of those, the owl's bubble in shot on ${watch.bookBubbleFrames}`}` : ', NO SHOT'}; ` +
+  `a sparkle ${GLOW_MIN_PX} px across or more seen on ${watch.bigFrames} (the widest seen ${Number.isFinite(watch.glowPx) ? watch.glowPx.toFixed(1) : '—'} px at its narrowest); ` +
+  `the naming line's bubble in shot on ${watch.nameBubbleFrames} of its ${watch.nameFrames} frames`;
+
 console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl's order, and it glows until it is read:");
 {
   /** The rule, restated: the first book in RECOMMENDATION_ORDER she has not read. */
@@ -2335,6 +2618,9 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
       ?.actions?.()[0]?.label;
   const glowing = (): string[] => library.shelfBooks.filter((placed) => placed.material.emissiveIntensity > 0.2).map((placed) => placed.book.id);
   say(glowing().length === 0 && owl.recommendedBookId === null, `before the press no book glows (${glowing().length} over 0.2) and nothing is recommended`);
+  // She presses at the desk's front, standing still, listening — where the glance is measured from.
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  child.run(0.3);
   owlOffer()[0]?.run();
   let lit = -1;
   for (let i = 0; i < 60; i += 1) {
@@ -2353,75 +2639,90 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
     chipFor(first.id) === LIBRARY_CHIPS.readGlowing && chipFor(otherId) === LIBRARY_CHIPS.read,
     `its Read chip says '${chipFor(first.id) ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.readGlowing}'); another book's ('${otherId}') says '${chipFor(otherId) ?? 'nothing'}' ('${LIBRARY_CHIPS.read}')`,
   );
-  const said = untilQuiet(20);
+  // Found from the desk (browser QA round 1: from here the glowing book was a pale sliver 5 px wide among
+  // the spines; 23 Oct: from here most books' beacons were off the screen). While she names the book and
+  // says it is glowing, the owl's glance draws the camera back until the child, the owl and the book are
+  // all in shot: on the glow line's frames a sparkle of its glow must stand in the open over the top of
+  // the book's own case, on the screen and in clear view of the camera — the shot the game draws, the
+  // glance applied as `Game` applies it. FOUND FROM THE DESK, below, asks the same of every book.
+  const watched = watchRecommendation(first, LAPTOP);
+  const said = watched.lines;
   say(
     said.has(LIBRARY_LINES.owl.recommend(first.title)) && said.has(LIBRARY_LINES.owl.recommendGlow) && !owl.speaking,
     `she said "${LIBRARY_LINES.owl.recommend(first.title)}" — the first unread title in RECOMMENDATION_ORDER — and "${LIBRARY_LINES.owl.recommendGlow}" (${said.size} lines, then quiet)`,
   );
-  // Found from the desk (browser QA round 1: from here the glowing book was a pale sliver 5 px wide among
-  // the spines): 3 s at the desk's front, the camera where the game puts it, and every frame the glow's
-  // sparkles asked whether one stands in the open over the top of the book's own case, on the screen and
-  // in clear view of the camera — a ray from it reaching the sparkle past every opaque mesh of the room.
+  say(
+    watched.glowFrames > 0 && watched.seenFrames >= watched.glowFrames * 0.8,
+    `found from the desk (browser QA round 1: from here the glowing book was a sliver among the spines): while she says it is glowing, the camera shows it — ` +
+      `${watchSays(first, watched)}, on the ${LAPTOP.width}×${LAPTOP.height} screen — 80% of the line wanted` +
+      `${watched.glowFrames === 0 ? ' — THE GLOW LINE WAS NEVER SAID: this asserts nothing' : ''}`,
+  );
+  say(
+    watched.bubbleFrames === watched.wholeFrames && watched.childFrames === watched.wholeFrames,
+    `and while it holds everything, she and the owl are in the picture: on the ${watched.wholeFrames} of the glow line's ${watched.glowFrames} frames the glance held everything, ` +
+      `the child was on the screen, feet and head, on ${watched.childFrames}, and the owl's bubble's anchor in shot (so her words can be drawn) on ${watched.bubbleFrames} — every one wanted`,
+  );
+  say(
+    watched.bookFrames === 0 || (watched.arrivedFrames > 0 && watched.centredFrames === watched.arrivedFrames),
+    `and when it looks at the book itself, the book is in the middle once the camera is there: its case's top drawn in the middle half of the screen on ${watched.centredFrames} ` +
+      `of the ${watched.arrivedFrames} frames the camera had arrived (its focus within ${ARRIVED} m of the shot's), of the ${watched.bookFrames} it looked at the book — every one wanted`,
+  );
+  if (watched.wholeFrames === 0) note("RECOMMEND: the owl's first pick was shown book itself on every frame of the glow line, so 'she and the owl are in the picture' asserted nothing here");
+  if (watched.bookFrames === 0) note("RECOMMEND: the owl's first pick was shown with everything in shot on every frame of the glow line, so 'the book is in the middle' asserted nothing here; FOUND FROM THE DESK asks it of the books that are shown book first");
+  say(
+    watched.glowFrames > 0 && watched.bigFrames >= watched.glowFrames * 0.8,
+    `and it never draws back so far the glow is lost: a sparkle of it at least ${GLOW_MIN_PX} px across (the TEXT RULE's minimum, the smallest thing she is asked to read) ` +
+      `seen on ${watched.bigFrames} of the glow line's ${watched.glowFrames} frames, the widest seen ${Number.isFinite(watched.glowPx) ? watched.glowPx.toFixed(1) : '—'} px at its narrowest — 80% wanted`,
+  );
+  say(
+    watched.nameFrames > 0 && watched.nameBubbleFrames === watched.nameFrames,
+    `and she names the book where it can be read: on ${watched.nameBubbleFrames} of the ${watched.nameFrames} frames of "${LIBRARY_LINES.owl.recommend(first.title)}" ` +
+      `the owl's bubble's anchor was in shot (so her bubble can be drawn) — every one wanted`,
+  );
+  say(
+    watched.followedAt !== null && watched.homeAfter >= 0 && watched.homeAfter <= Math.round(1.5 / CHILD_DT),
+    `and the camera comes home: ${watched.homeAfter >= 0 ? `${watched.homeAfter} frames` : 'NOT within 2 s'} after her last line the glance has let go, ` +
+      `the zoom is back at the ${watched.zoomBefore.toFixed(2)} she had (${watched.zoomAfter.toFixed(3)}) and the camera orbits her again (${watched.homeOff.toFixed(3)} m off the point it orbited her at before the glance; 0.25 wanted, within 1.5 s)`,
+  );
+  // A step hands the camera straight back. Pressed again (the same book, unread), the glance takes the
+  // camera as she names it; a nudge of the stick mid-glance and it is hers on that frame, the zoom she had
+  // given back, and it does not come back for the rest of the recommendation though she stands still again.
   {
-    const placed = library.shelfBooks.find((candidate) => candidate.book.id === first.id);
-    const spec = placed ? LIBRARY_BOOKCASES.find((candidate) => candidate.id === placed.slot.bookcase) : undefined;
-    const caseTop = spec ? libraryBookcaseSize(spec.kind).height : Number.NaN;
     child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
     child.run(0.3);
-    const opaque = (material: Material): boolean => material.visible && material.depthWrite && (!material.transparent || material.opacity >= 0.999);
-    const drawnNode = (node: Object3D): boolean => {
-      for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return false;
-      return true;
-    };
-    const meshes: Mesh[] = [];
-    for (const root of [library.roomRoot, library.kidsRoot]) {
-      root.traverse((node) => {
-        if (!(node instanceof Mesh) || !drawnNode(node)) return;
-        for (let at: Object3D | null = node; at; at = at.parent) if (at === owl.handle.root) return;
-        const materials = Array.isArray(node.material) ? node.material : [node.material];
-        if (materials.some(opaque)) meshes.push(node);
-      });
-    }
-    const ray = new Raycaster();
-    const eye = new Vector3();
-    let frames = 0;
-    let framesSeen = 0;
-    let seenSprites = 0;
-    let hidden = 0;
-    let lowest = Infinity;
-    for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+    const zoomHad = camera.targetZoom;
+    owlOffer()[0]?.run();
+    let waited = 0;
+    while (!bookGlance.active && owl.speaking && waited < Math.round(12 / CHILD_DT)) {
       child.step();
-      frames += 1;
-      camera.camera.updateMatrixWorld();
-      eye.setFromMatrixPosition(camera.camera.matrixWorld);
-      let seenNow = false;
-      for (const sprite of [...owl.beacon.sprites, ...owl.twinkles.sprites]) {
-        if (!sprite.visible) continue;
-        const at = sprite.getWorldPosition(new Vector3());
-        const up = at.y - LIBRARY_FLOOR_Y; // flat-ok: a height over the reading room's own flat floor
-        const screen = screenPoint(at);
-        if (!screen.ahead || screen.x < 0 || screen.x > SCREEN.width || screen.y < 0 || screen.y > SCREEN.height) continue;
-        if (up < caseTop) continue;
-        lowest = Math.min(lowest, up);
-        const towards = at.clone().sub(eye);
-        const distance = towards.length();
-        ray.set(eye, towards.normalize());
-        ray.far = distance - 0.05;
-        if (ray.intersectObjects(meshes, false).length > 0) {
-          hidden += 1;
-          continue;
-        }
-        seenSprites += 1;
-        seenNow = true;
+      waited += 1;
+    }
+    const took = bookGlance.active;
+    child.run(0.6);
+    const zoomIn = camera.targetZoom;
+    const nudge = child.towards(1, 0, false, 0.4);
+    let releasedAfter = -1;
+    for (let i = 0; i < 6; i += 1) {
+      child.step(nudge);
+      if (!bookGlance.active) {
+        releasedAfter = i + 1;
+        break;
       }
-      if (seenNow) framesSeen += 1;
+    }
+    const zoomBack = camera.targetZoom;
+    let cameBack = 0;
+    for (let i = 0; i < Math.round(12 / CHILD_DT) && owl.speaking; i += 1) {
+      child.step();
+      if (bookGlance.active) cameBack += 1;
     }
     say(
-      framesSeen >= frames * 0.8,
-      `found from the desk (browser QA round 1: from here the glowing book was a sliver among the spines): over ${frames} frames at the desk's front, a sparkle of its glow stood in the open ` +
-        `over the top of '${placed?.slot.bookcase ?? '?'}' (${caseTop.toFixed(2)} m), on the ${SCREEN.width}×${SCREEN.height} screen and in clear view of the camera, on ${framesSeen} ` +
-        `(${seenSprites} sparkle-frames; ${hidden} hidden by the room; the lowest at ${Number.isFinite(lowest) ? lowest.toFixed(2) : '—'} m) — 80% wanted`,
+      took && releasedAfter === 1 && zoomBack === zoomHad && cameBack === 0,
+      `a step hands the camera straight back: pressed again, the glance took the camera after ${waited} frames (${took}; zoom ${zoomIn.toFixed(2)}, she had ${zoomHad.toFixed(2)}); ` +
+        `a nudge of the stick and it let go ${releasedAfter >= 0 ? `on frame ${releasedAfter}` : 'NOT within 6 frames'} (1 wanted: she is no longer standing still — a drift of ${GLANCE_MOVE_CANCEL} m off where she stood counts too), ` +
+        `the zoom target back at ${zoomBack.toFixed(2)}, and it took the camera again on ${cameBack} frames of the rest of her recommendation (0 wanted)`,
     );
+    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+    child.run(1.5);
   }
   // Read to the end: the glow goes on the next frames, the recommendation clears, the chip is plain again.
   markBookRead(first);
@@ -4857,6 +5158,69 @@ console.log('\nCLOCK and ABORT — the next story comes STORY_EVERY after the la
     `CLOCK: the next story called ${calledNext.toFixed(2)} s after story ${told}'s landing, reading '${nextBook?.id ?? 'none'}'; a fresh visit's called ${called.toFixed(2)} s in; ` +
       `ABORT left at '${phaseLeft}'; ${child.frames} frames stepped so far`,
   );
+}
+
+console.log("\nFOUND FROM THE DESK — every book made the one the owl recommends, in turn: while she says it is glowing, the camera shows it, landscape and on a phone held upright:");
+{
+  // Each book in turn is made the first unread of the owl's order — every book before it in
+  // RECOMMENDATION_ORDER read through `markBookRead`, its own bookmark taken out — so "Say hello!" at the
+  // desk's front recommends it by the owl's own rule (`recommendFor`); the store is put back exactly
+  // afterwards. The owl's first pick changes whenever a book is added (the order is a seeded shuffle of
+  // every book): RECOMMEND measures whichever it is, and this measures all of them, so no pick can pass by
+  // being lucky — part 4's beacon passed on part 4's shelf only because its first pick stood in view.
+  const collection = gameStore.get().collection as Record<string, CuteThing>;
+  const saved = new Map(Object.entries(collection).map(([id, entry]) => [id, { ...entry }]));
+  const restore = (): void => {
+    for (const id of Object.keys(collection)) if (!saved.has(id)) delete collection[id];
+    for (const [id, entry] of saved) collection[id] = { ...entry };
+  };
+  const recommendedBefore = owl.recommendedBookId;
+  untilQuiet(20);
+  const rows: { screen: CheckScreen; book: LibraryBook; watch: RecommendWatch; recommended: string | null }[] = [];
+  for (const screen of [LAPTOP, PHONE]) {
+    camera.resize(screen.width, screen.height);
+    RECOMMENDATION_ORDER.forEach((book, k) => {
+      restore();
+      for (const earlier of RECOMMENDATION_ORDER.slice(0, k)) markBookRead(earlier);
+      delete collection[bookCollectionId(book.id)];
+      child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+      child.run(0.3);
+      owlOffer()[0]?.run();
+      const recommended = owl.recommendedBookId;
+      rows.push({ screen, book, watch: watchRecommendation(book, screen), recommended });
+    });
+  }
+  camera.resize(SCREEN.width, SCREEN.height);
+  restore();
+  for (const { screen, book, watch, recommended } of rows) {
+    say(
+      recommended === book.id && watch.glowFrames > 0 && watch.seenFrames >= watch.glowFrames * 0.8 && watch.childFrames === watch.wholeFrames && watch.bubbleFrames === watch.wholeFrames &&
+        (watch.bookFrames === 0 || (watch.arrivedFrames > 0 && watch.centredFrames === watch.arrivedFrames)) &&
+        watch.bigFrames >= watch.glowFrames * 0.8 && watch.nameFrames > 0 && watch.nameBubbleFrames === watch.nameFrames &&
+        (watch.followedAt === null || watch.homeAfter >= 0),
+      `${screen.what} (${screen.width}×${screen.height}): ${watchSays(book, watch)} — 80% wanted; of the ${watch.wholeFrames} frames it held everything, she on the screen on ${watch.childFrames}, ` +
+        `the owl's bubble's anchor in shot on ${watch.bubbleFrames} (all wanted); the camera home ${watch.homeAfter >= 0 ? `${watch.homeAfter} frames after` : 'NOT within 2 s of'} her last line` +
+        `${recommended === book.id ? '' : ` — SHE RECOMMENDED '${recommended ?? 'nothing'}', NOT '${book.id}': the store was not set as this clause meant`}`,
+    );
+  }
+  const fitted = (what: string): string => {
+    const these = rows.filter((row) => row.screen.what === what);
+    return `${these.filter((row) => row.watch.shot?.whole === true).length} of ${these.length} ${what}`;
+  };
+  const zooms = rows.map((row) => row.watch.shot?.zoom ?? Number.NaN).filter(Number.isFinite);
+  note(
+    `FOUND FROM THE DESK: ${rows.length} recommendations (${BOOKS.length} books × 2 screens); the child, the owl and the book all in one shot on ${fitted(LAPTOP.what)} and ${fitted(PHONE.what)} ` +
+      `(the rest the book itself); the glance's zoom ${Math.min(...zooms).toFixed(2)}..${Math.max(...zooms).toFixed(2)}`,
+  );
+  // Put back as found: the store as it was (above), and her recommendation — the owl's own rule on it.
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  child.run(0.3);
+  if (recommendedBefore !== null) {
+    owlOffer()[0]?.run();
+    untilQuiet(20);
+  }
+  child.run(1.5);
+  note(`FOUND FROM THE DESK: the store put back; the owl recommending '${owl.recommendedBookId ?? 'nothing'}' (before: '${recommendedBefore ?? 'nothing'}'); ${child.frames} frames stepped so far`);
 }
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──
