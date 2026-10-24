@@ -36,6 +36,17 @@ Do NOT merge. Do not touch the den/part-5 or engine-follow-up work.
 - PR head kept at 98226e17 (green, previewed); this handoff's last commit lives on
   `fix/main-ci-after-library-handoff` so pushing it does not restart the PR's CI or change its preview.
 
+## REVIEW ROUND 1 (24 Oct, "Verdict: changes requested", issuecomment-6382015987) — in progress
+
+1. Book-itself shots hide the owl's bubble, the naming line included (anchor in shot 4–15 of 143–183
+   frames of "Try “…” next!", 0/170 of the glow line; phone 11/18 books incl. her first seven picks,
+   landscape 4/18). Fix: the glance opens on the glow line only; new clause: the bubble anchor in shot on
+   every frame of the naming line, all 36 cases, proved red on 98226e17's glance.
+2. "never draws back so far the glow is lost" read its threshold from GLANCE_DRAW_BACK (0.4 stayed green,
+   300 ✓, phone catBusDay at zoom 0.46, 10.5 px). Fix: a floor the code does not own — a sparkle drawn at
+   least the TEXT RULE's minimum (one UI unit, 20 px on both screens) — and the 0.4 mutation shown red.
+3. Non-blocking, in the PR body and the doc: the checks copy Game's wiring; a tap during the glance walks her.
+
 ## The beacon — root cause and the fix (decided)
 
 **Root.** The owl's recommendation is a seeded shuffle of all 18 books; her first pick on main is
