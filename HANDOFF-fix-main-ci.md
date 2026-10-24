@@ -36,16 +36,30 @@ Do NOT merge. Do not touch the den/part-5 or engine-follow-up work.
 - PR head kept at 98226e17 (green, previewed); this handoff's last commit lives on
   `fix/main-ci-after-library-handoff` so pushing it does not restart the PR's CI or change its preview.
 
-## REVIEW ROUND 1 (24 Oct, "Verdict: changes requested", issuecomment-6382015987) — in progress
+## REVIEW ROUND 1 (24 Oct, "Verdict: changes requested", issuecomment-6382015987) — done
 
-1. Book-itself shots hide the owl's bubble, the naming line included (anchor in shot 4–15 of 143–183
-   frames of "Try “…” next!", 0/170 of the glow line; phone 11/18 books incl. her first seven picks,
-   landscape 4/18). Fix: the glance opens on the glow line only; new clause: the bubble anchor in shot on
-   every frame of the naming line, all 36 cases, proved red on 98226e17's glance.
-2. "never draws back so far the glow is lost" read its threshold from GLANCE_DRAW_BACK (0.4 stayed green,
-   300 ✓, phone catBusDay at zoom 0.46, 10.5 px). Fix: a floor the code does not own — a sparkle drawn at
-   least the TEXT RULE's minimum (one UI unit, 20 px on both screens) — and the 0.4 mutation shown red.
-3. Non-blocking, in the PR body and the doc: the checks copy Game's wiring; a tap during the glance walks her.
+1. **The naming line in view.** Book-itself shots took the title away with the owl (bubble anchor in shot
+   4–15 of 143–183 frames of "Try “…” next!", 0/170 of the glow line; phone 11/18 books incl. her first
+   seven picks, landscape 4/18). **Fix:** the glance opens on the glow line only (`window()`). New clause
+   (RECOMMEND + all 36 sweep cases): the bubble anchor in shot on every frame of the naming line — now
+   143–183 of 143–183 everywhere. **Red** on 98226e17's glance and by hand (the title back in the window):
+   exit 1, 286 ✓ 15 ✗, the reviewer's numbers exactly. The glow line's bubble in a book-itself shot is in
+   shot for 3–14 of 170 frames, then gone — accepted: the line is "It is glowing on its shelf!", and the
+   glowing shelf is what she is looking at (a 20 px sparkle seen on 153–164 of those 170 frames). Because
+   the slide now happens in the glow line, centring is asked once the camera has arrived (focus within 1 m
+   of the shot's): arrived on 124–134 of 169 frames, centred on all of them.
+2. **A floor the glance does not own.** "Never draws back so far the glow is lost" now counts a sparkle only
+   if drawn ≥ `GLOW_MIN_PX` = `FALLBACK_UNIT_PX` (20 px — the TEXT RULE's minimum; style.css's clamp sits on
+   it at both screens), its width measured from the sprite's own world scale. **Red:** `GLANCE_DRAW_BACK =
+   0.4` → exit 1, 292 ✓ 9 ✗ (phone catBusDay whole at zoom 0.46: a 20 px sparkle on 0 of 170 frames, the
+   widest 14.0 px). `GLANCE_DRAW_BACK` is no longer imported by the check.
+3. Non-blocking, now in the module doc and the PR body: the checks copy Game's two wiring lines; a tap
+   during the glance walks her (selection blocked).
+
+Reds re-run on the final code (`runs/reds3.out`): no-glance 268 ✓ 33 ✗; glance-stays 264 ✓ 37 ✗; draw-back
+0.4 292 ✓ 9 ✗; title-in-window 286 ✓ 15 ✗; no-move-cancel 300 ✓ 1 ✗; book-off-centre 286 ✓ 15 ✗. Green:
+check:library 301 ✓; check:labels exit 0 (glance 170 frames, chip on 0); typecheck:test, flat-primitives,
+tap-spacing, jitter, exits all exit 0.
 
 ## The beacon — root cause and the fix (decided)
 
