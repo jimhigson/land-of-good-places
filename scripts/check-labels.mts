@@ -48,7 +48,12 @@
  *     her desk, and, while she read, the frames her bubble, the Get up chip,
  *     and both together were drawn. None may be zero (the review of the join:
  *     with her bubble left over her desk, 17 m away, no word of the story was
- *     drawn over the rug, and the scene's other counts did not change).
+ *     drawn over the rug, and the scene's other counts did not change). And
+ *     the line that names the book she recommends ("Try “…” next!") must be
+ *     drawn on **every** frame she says it: the owl's glance at the book
+ *     (`bookGlance.ts`) once took the camera — and her bubble with it — as she
+ *     began it, and on a phone the title was up for a tenth of a second
+ *     (review and QA of #735).
  *
  * ## What is asserted, every frame
  *
@@ -129,6 +134,7 @@ import { BookGlance } from '../src/world/library/bookGlance.ts';
 import { hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import { gameStore } from '../src/state/index.ts';
 import { LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
+import { bookById } from '../src/world/library/books.ts';
 import { lineSeconds } from '../src/ui/speechTiming.ts';
 import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -198,6 +204,9 @@ const input = new InputSystem();
 const bookGlance = new BookGlance(world.library);
 let glanceFrames = 0;
 let glanceChipFrames = 0;
+/** The frames the owl said the line naming the book she recommends, and the frames her bubble was drawn while she did. */
+let namingFrames = 0;
+let namingDrawnFrames = 0;
 const canvas = document.createElement('div') as unknown as HTMLCanvasElement;
 const selection = new Selection(player, camera, canvas, {
   zones: () => world.interactZones(),
@@ -684,7 +693,15 @@ let wingSpeakingFrames = 0;
     // The recommendation, to its last line and the camera home after it: while the owl names her book and
     // says it is glowing, the camera draws back to show it (`bookGlance.ts`), so the whole glance is laid out.
     if (visit(owl, true, 0.5)) owlSelected += 1; // a book recommended
-    for (let i = 0; i < Math.round(20 / DT) && world.library.owl.speaking; i += 1) step();
+    const pick = world.library.owl.recommendedBookId;
+    const naming = pick === null ? null : LIBRARY_LINES.owl.recommend(bookById(pick)?.title ?? '');
+    for (let i = 0; i < Math.round(20 / DT) && world.library.owl.speaking; i += 1) {
+      step();
+      if (naming !== null && world.library.owl.speaking && world.library.owl.lastSaid === naming) {
+        namingFrames += 1;
+        if (isDrawn(world.library.owl.bubble)) namingDrawnFrames += 1;
+      }
+    }
     run(2);
     recommended = world.library.owl.recommendedBookId !== null;
   }
@@ -742,7 +759,8 @@ process.stderr.write(
     `a shelf book's chip ${libraryRead ? 'up' : 'NOT up'}, story time on ${storyFrames} frames (${readingFrames} reading) with her ${seatedForStory ? 'sat on her cushion' : 'NOT seated'}: ` +
     `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
     `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
-    `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them. ` +
+    `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them; ` +
+    `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -760,6 +778,14 @@ if (owlSelected < 2) coverageGaps.push(`the library owl was selected on only ${o
 if (!cardGiven) coverageGaps.push('the library owl never handed over her card');
 if (!recommended) coverageGaps.push('the library owl never recommended a book');
 if (glanceFrames === 0) coverageGaps.push("the owl's glance at the book she recommended never took the camera, so no label was laid out under it");
+if (namingFrames === 0) coverageGaps.push('the owl never said the line naming the book she recommended, so whether it can be read was never asked');
+if (namingDrawnFrames < namingFrames) {
+  fail(
+    'F the owl\'s words',
+    `the line naming the book she recommends was drawn on only ${namingDrawnFrames} of the ${namingFrames} frames she said it — every one wanted: ` +
+      'a child who cannot read the title never learns which book the owl meant (the glance must not take her bubble while she names it)',
+  );
+}
 if (glanceChipFrames > 0) {
   fail(
     'C precedence',
