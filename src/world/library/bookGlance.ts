@@ -1,7 +1,6 @@
 import { Vector3, type Object3D } from 'three';
 import { CAMERA_ZOOM_MIN } from '../../core/constants';
 import type { IsoCamera } from '../../core/IsoCamera';
-import { bookById } from './books';
 import type { FurnishedShelfBook } from './furnish';
 import { LIBRARY_LINES } from './libraryLines';
 import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
@@ -22,15 +21,26 @@ import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
  * main). The owl told a six-year-old a book was glowing, and the glow was
  * somewhere she could not see and had no way to guess.
  *
- * So while the owl names the book and says it is glowing, the camera slides
- * over to it — the book's case, its glowing cover and the beacon rising over
- * it — drawing back a little, if that is enough, until **she, the owl and the
- * glowing book are all in the picture**, and otherwise looking at the book
- * itself; and when the owl has finished, it comes back to her. The owl's
- * words stay true and are shown: the book she named is right there, glowing,
- * and the child has seen which way to walk. She can be shown again any time:
- * "Say hello!" recommends the same book until it is read
- * (`recommendation.ts`).
+ * So the owl names the book with the camera where it was — her bubble over
+ * her, the title there to be read — and then, **while she says it is
+ * glowing**, the camera slides over to it: the book's case, its glowing cover
+ * and the beacon rising over it, drawing back a little, if that is enough,
+ * until **she, the owl and the glowing book are all in the picture**, and
+ * otherwise looking at the book itself. When the owl has finished it comes
+ * back to her. The owl's words stay true and are shown: the book she named is
+ * right there, glowing, and the child has seen which way to walk. She can be
+ * shown again any time: "Say hello!" recommends the same book until it is
+ * read (`recommendation.ts`).
+ *
+ * **Only the glow line.** The glance used to open on the line that names the
+ * book; but a bubble is drawn only while its speaker is in shot (#415), so
+ * whenever everything did not fit, the camera left the owl and took the title
+ * with it — on a phone held upright, the title of 11 of the 18 books (her
+ * first seven picks among them) was up for a tenth of a second (review of
+ * #735, measured). Named in view, the title is read for its whole line. The
+ * glow line's own bubble then goes when the camera looks at the book itself:
+ * the line is "It is glowing on its shelf!", and the glowing shelf is what she
+ * is looking at instead.
  *
  * ## It never takes the controls
  *
@@ -51,7 +61,12 @@ import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
  * and the camera's own damping eases it there and back. {@link apply} is the
  * single place this touches the camera: `Game.tick` calls it, and so do
  * `check:library` and `check:labels`, in `Game`'s order, so the checks measure
- * the camera the game draws.
+ * the camera the game draws. **They copy `Game`'s two lines of wiring — the
+ * claim folded into the focus override, and `active` in `selectionBlocked` —
+ * rather than run them** (`Game` builds a real `WebGLRenderer` and cannot be
+ * built in Node; `arrivalShot` is the precedent), so taking either out of
+ * `Game` alone would not turn those checks red. The served look in a real
+ * browser (`/library?at=6,8.7&facing=180`) is what sees `Game`'s own copy.
  *
  * ## The framing is solved, never typed
  *
@@ -81,6 +96,9 @@ import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
  * it that normally puts it away, which is not drawn while the camera looks at
  * a book she is out of shot of (seen in headless Chrome: the chip clamped to
  * the bottom of a phone's screen, offering a press that would do nothing).
+ * One consequence, harmless: a tap on the park while it holds selects nothing,
+ * so it walks her towards where she tapped (`TapNavigator`) — most likely the
+ * glowing book it is showing her — and the walk hands the camera back.
  *
  * Kept outside the park closure (`scripts/lib/park-source-hash.mjs`): only
  * `Game` and the checks import it, so a camera move cannot change a park.
@@ -193,9 +211,10 @@ export class BookGlance {
 
   /**
    * The book to show this frame, or null. The window is the owl at her desk
-   * saying the two lines of her recommendation that name the book and its
-   * glow; the glance opens in it only on a child standing still, and once she
-   * moves it is spent until the window closes.
+   * saying the glow line of her recommendation ("It is glowing on its
+   * shelf!") — never the line that names the book, which she says in view
+   * (see the module doc); the glance opens in it only on a child standing
+   * still, and once she moves it is spent until the window closes.
    */
   private showing(player: GlancePlayer): FurnishedShelfBook | null {
     const placed = this.window();
@@ -220,15 +239,12 @@ export class BookGlance {
     return placed;
   }
 
-  /** The glowing book while the owl, at her desk, names it or says it is glowing — else null. */
+  /** The glowing book while the owl, at her desk, says it is glowing — else null. */
   private window(): FurnishedShelfBook | null {
     const { owl } = this.library;
     const id = owl.recommendedBookId;
     if (!this.library.playerIsInside || !owl.atDesk || !owl.speaking || id === null) return null;
-    const book = bookById(id);
-    if (!book) return null;
-    const said = owl.lastSaid;
-    if (said !== LIBRARY_LINES.owl.recommend(book.title) && said !== LIBRARY_LINES.owl.recommendGlow) return null;
+    if (owl.lastSaid !== LIBRARY_LINES.owl.recommendGlow) return null;
     return this.library.shelfBooks.find((candidate) => candidate.book.id === id) ?? null;
   }
 
