@@ -55,11 +55,13 @@ import { REPTILE_INNER_X, REPTILE_INNER_Z } from './shell';
  * camera, with the other children listening and the reader visible"* —
  * `library/storyCamera.ts`): the same solver, the same director, in its own
  * room. What was the hall's alone is a {@link ShotRoom} now, and story time
- * asks two things of the solver that an exhibit does not ({@link ShotRules}):
- * that its subjects hide one another — a child's head in front of the owl is
- * what that shot is solved to see past — and that the frame holds every one
- * of them whole, on a phone held upright too. Asked for nothing, the solver
- * is the exhibits' exactly.
+ * asks of the solver what an exhibit does not ({@link ShotRules}): that its
+ * subjects hide one another — a child's head in front of the owl is what that
+ * shot is solved to see past — that each is seen as a whole, not only its
+ * middle, and that nothing but another subject ever covers any of it (never
+ * the room, never her own body); that the frame holds every one of them, on a
+ * phone held upright too; and that the fan of eyes stands round her by her own
+ * facing. Asked for nothing, the solver is the exhibits' exactly.
  */
 
 /** Seconds for the camera to come down to the shot. */
@@ -146,8 +148,8 @@ export const REPTILE_HALL: ShotRoom = {
 };
 
 /**
- * **What a shot asks of the solver beyond an exhibit's** — story time's two
- * (`library/storyCamera.ts`). Both off, the solver is the exhibits' exactly.
+ * **What a shot asks of the solver beyond an exhibit's** — story time's
+ * (`library/storyCamera.ts`). All off, the solver is the exhibits' exactly.
  */
 export interface ShotRules {
   /**
@@ -321,7 +323,7 @@ export interface ShotTarget {
   readonly whole?: {
     readonly subject: number;
     readonly share: number;
-    /** The point a hand's breadth further out from the subject's middle, across the floor: nothing but another subject may stand in front of that either. */
+    /** The point a hand's breadth further out from the subject's middle, across the floor: nothing of the room may stand in front of that either (see {@link edgeOf}). */
     readonly edge: Vector3;
   };
 }
