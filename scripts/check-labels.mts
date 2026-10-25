@@ -131,6 +131,7 @@ import { terrainHeight } from '../src/world/terrain.ts';
 import { spaceAt, SPACE_GARDEN, SPACE_REPTILE_HOUSE, SPACE_HOTEL_LOBBY, SPACE_LIBRARY } from '../src/world/spaces.ts';
 import { OWL_ZONE_ID } from '../src/world/library/LibraryOwl.ts';
 import { BookGlance } from '../src/world/library/bookGlance.ts';
+import { StoryCamera } from '../src/world/library/storyCamera.ts';
 import { hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import { gameStore } from '../src/state/index.ts';
 import { LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
@@ -202,6 +203,12 @@ const input = new InputSystem();
  * counted ({@link glanceFrames}), and the frames a chip was drawn while it held ({@link glanceChipFrames}).
  */
 const bookGlance = new BookGlance(world.library);
+/**
+ * And story time's camera (`storyCamera.ts`): while the owl reads and she sits on a story cushion, the camera
+ * comes down over her shoulder — applied after the glance, its claim folded into the same one focus write, as
+ * `Game.tick` folds it — so the library scene's story is laid out on the camera the game draws then.
+ */
+const storyCamera = new StoryCamera(world.library, world.collision, camera, player);
 let glanceFrames = 0;
 let glanceChipFrames = 0;
 /** The frames the owl said the line naming the book she recommends, and the frames her bubble was drawn while she did. */
@@ -548,7 +555,9 @@ function step(): void {
   quietly(() => {
     player.update(context);
     const glanceClaim = bookGlance.apply(camera, player);
-    if (glanceClaim) camera.setFocusOverride(glanceClaim);
+    const storyClaim = storyCamera.apply(camera, player, DT);
+    const claim = storyClaim ?? glanceClaim;
+    if (claim) camera.setFocusOverride(claim);
     else camera.clearFocusOverride();
     if (bookGlance.active) glanceFrames += 1;
     camera.update(context, player.position, velocity);
@@ -672,6 +681,9 @@ let callSpeakingFrames = 0;
 let callBubbleFrames = 0;
 /** The frames she spoke on the wing — none: her flights are silent (`storyTime.ts`). */
 let wingSpeakingFrames = 0;
+/** While the owl reads with story time's camera holding over her shoulder: the frames, and of them the frames her bubble and the Get up chip were both drawn. */
+let storyShotFrames = 0;
+let storyShotBothFrames = 0;
 {
   // The Reptile House's last press may have left her on its tortoise: off it first, as a tap would.
   if (player.riding) quietly(() => player.rideHolder?.letGo());
@@ -721,6 +733,10 @@ let wingSpeakingFrames = 0;
       if (bubbleUp) readingBubbleFrames += 1;
       if (chipUp) readingChipFrames += 1;
       if (bubbleUp && chipUp) readingBothFrames += 1;
+      if (storyCamera.state === 'hold' && owlNow.speaking) {
+        storyShotFrames += 1;
+        if (bubbleUp && chipUp) storyShotBothFrames += 1;
+      }
     }
     if (world.library.storyPhase === 'gathering' && owlNow.atDesk && owlNow.speaking) {
       callSpeakingFrames += 1;
@@ -760,6 +776,7 @@ process.stderr.write(
     `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
     `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
     `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them; ` +
+    `story time's camera held over her shoulder on ${storyShotFrames} frames of the reading, her bubble and the Get up chip both drawn on ${storyShotBothFrames}; ` +
     `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
@@ -801,6 +818,14 @@ if (readingBubbleFrames === 0) coverageGaps.push("the library owl's bubble was n
 if (readingChipFrames === 0) coverageGaps.push("the story cushion's Get up chip was never drawn while the owl read");
 if (readingBothFrames === 0) coverageGaps.push("the owl's bubble and the cushion's Get up chip were never drawn together while she read");
 if (callBubbleFrames === 0) coverageGaps.push(`the owl's bubble was never drawn while she called story time from her desk (${callSpeakingFrames} frames she said it)`);
+if (storyShotFrames === 0) coverageGaps.push("story time's camera never held over her shoulder while the owl read, so nothing was laid out under it");
+if (storyShotBothFrames < storyShotFrames) {
+  fail(
+    'F the owl\'s words',
+    `with story time's camera over her shoulder, the owl's bubble and the cushion's Get up chip were both drawn on only ${storyShotBothFrames} of the ${storyShotFrames} frames she read — ` +
+      'every one wanted: her page is the story, and the chip is how she gets up',
+  );
+}
 for (const gap of coverageGaps) fail('E coverage', `${gap} — the assertions above would be vacuous`);
 
 if (failures.size > 0) {

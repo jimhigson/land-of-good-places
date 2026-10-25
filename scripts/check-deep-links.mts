@@ -265,6 +265,14 @@ const LIBRARY_STORY_SEAT = libraryCushion(LIBRARY_PLAYER_SEATS[0]).at;
 const LIBRARY_STORY_FACING = Math.round(libraryFacingStoryChair(LIBRARY_STORY_SEAT));
 const LIBRARY_STORY_PATH = `/library?at=${LIBRARY_STORY_SEAT.x},${LIBRARY_STORY_SEAT.z}&facing=${LIBRARY_STORY_FACING}&story=now`;
 
+/**
+ * And `&sit=1` with it — story time **from her cushion** (the link Jim is sent for story time's camera,
+ * `storyCamera.ts`): inside, sitting on her first cushion (`playerIsSeated`, on its spot), and story time under
+ * way within five seconds. The cushion's number is the layout's own (`LIBRARY_PLAYER_SEATS`).
+ */
+const LIBRARY_SIT_NUMBER = LIBRARY_PLAYER_SEATS[0].replace('cushion-', '');
+const LIBRARY_SIT_PATH = `/library?sit=${LIBRARY_SIT_NUMBER}&story=now`;
+
 /** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
 const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
 
@@ -312,6 +320,42 @@ const CHECKS: DeepLinkCheck[] = [
       if (s.inside !== true) return { ok: false, detail: `the Library was not entered (inside=${s.inside})` };
       if (s.phase === null || s.phase === 'idle') return { ok: false, detail: `inside, but story time did not start within 5 s (phase ${s.phase})` };
       return { ok: true, detail: `inside the Library by ${LIBRARY_PLAYER_SEATS[0]}, story time '${s.phase}' within 5 s (the owl on the wing: ${s.owlFlying})` };
+    },
+  },
+  {
+    path: LIBRARY_SIT_PATH,
+    primerPath: '/library',
+    assert: async (page) => {
+      const want = { x: LIBRARY_ORIGIN_X + LIBRARY_STORY_SEAT.x, z: LIBRARY_ORIGIN_Z + LIBRARY_STORY_SEAT.z };
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            const library = g?.world?.library;
+            return library?.playerIsInside === true && library.playerIsSeated === true && typeof library.storyPhase === 'string' && library.storyPhase !== 'idle';
+          },
+          undefined,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        const library = g?.world?.library;
+        return {
+          hasGame: !!g,
+          inside: library?.playerIsInside ?? null,
+          seated: library?.playerIsSeated ?? null,
+          phase: library?.storyPhase ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Library was not entered (inside=${s.inside})` };
+      if (s.seated !== true) return { ok: false, detail: `inside, but not sitting on ${LIBRARY_PLAYER_SEATS[0]} (seated=${s.seated})` };
+      const off = s.playerPos ? Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z) : Infinity;
+      if (off > 0.05) return { ok: false, detail: `sitting, but ${off.toFixed(2)} m from ${LIBRARY_PLAYER_SEATS[0]}'s middle` };
+      if (s.phase === null || s.phase === 'idle') return { ok: false, detail: `sitting on ${LIBRARY_PLAYER_SEATS[0]}, but story time did not start within 5 s (phase ${s.phase})` };
+      return { ok: true, detail: `sitting on ${LIBRARY_PLAYER_SEATS[0]} (${off.toFixed(3)} m from its middle), story time '${s.phase}' within 5 s` };
     },
   },
   {

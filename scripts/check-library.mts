@@ -24,6 +24,9 @@
  * LIBRARY_CHECK_MUTATE=tap-loses pnpm run check:library      # a tap dropped while proximity holds anything else (before #734): SHELF WALK's taps must go red
  * LIBRARY_CHECK_MUTATE=no-glance pnpm run check:library      # the owl's glance at her book never wired (main before it): FOUND FROM THE DESK must go red, book by book
  * LIBRARY_CHECK_MUTATE=glance-stays pnpm run check:library   # the glance's focus kept after it lets go: RECOMMEND's "the camera comes home" must go red
+ * LIBRARY_CHECK_MUTATE=no-story-camera pnpm run check:library      # story time's camera never wired (main before it): STORY CAMERA must go red
+ * LIBRARY_CHECK_MUTATE=story-camera-stays pnpm run check:library   # its focus kept after it lets go: STORY CAMERA's "home" must go red
+ * LIBRARY_CHECK_MUTATE=story-camera-low pnpm run check:library     # an eye straight behind her at 2.5 m: STORY CAMERA's occlusion must go red (the control)
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -155,6 +158,8 @@ import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, bookCollectionId, storyTimeMayRead
 import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
+import { LIBRARY_SHOT_ROOM, StoryCamera, storySeats } from '../src/world/library/storyCamera.ts';
+import { EXHIBIT_SHOT_EASE_CANCEL, EXHIBIT_SHOT_EASE_IN, EXHIBIT_SHOT_EASE_OUT, HER_SHARE_MAX, SHOT_FLOOR_GRAZE, eyeInHallSpace, herBodyBox, shotAngles } from '../src/world/reptileHouse/exhibitCamera.ts';
 import { FALLBACK_UNIT_PX } from '../src/core/uiScale.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import {
@@ -313,6 +318,9 @@ const MUTATIONS = [
   'tap-loses',
   'no-glance',
   'glance-stays',
+  'no-story-camera',
+  'story-camera-stays',
+  'story-camera-low',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -1832,6 +1840,16 @@ interface RealChild {
  */
 const bookGlance = new BookGlance(library);
 let glanceKept: Vector3 | null = null;
+/**
+ * **And story time's camera** (`storyCamera.ts`): while the owl reads and she sits on a story cushion, the
+ * camera comes down over her shoulder. Applied as `Game.tick` applies it — after the glance, its claim
+ * folded into the same one focus write. Built on the real child's own `Player` (below, once she exists).
+ * `no-story-camera` takes it out (main before it); `story-camera-stays` keeps its last focus after it
+ * lets go; `story-camera-low` overwrites its pose with an eye straight behind her at a child's height, the
+ * view through the child on cushion 4 — the control on STORY CAMERA's occlusion instrument.
+ */
+let storyCamera: StoryCamera | null = null;
+let storyKept: Vector3 | null = null;
 const glanceFrame = (player: Player): void => {
   if (mutating('no-glance')) {
     camera.clearFocusOverride();
@@ -1842,14 +1860,35 @@ const glanceFrame = (player: Player): void => {
     if (claim) glanceKept = claim.clone();
     else claim = glanceKept;
   }
+  if (storyCamera && !mutating('no-story-camera')) {
+    let story: Readonly<Vector3> | null = storyCamera.apply(camera, player, CHILD_DT);
+    if (mutating('story-camera-stays')) {
+      if (story) storyKept = story.clone();
+      else story = storyKept;
+    }
+    if (story && mutating('story-camera-low')) story = lowShot(player);
+    if (story) claim = story;
+  }
   if (claim) camera.setFocusOverride(claim);
   else camera.clearFocusOverride();
+};
+/**
+ * `story-camera-low`'s pose: the eye two metres straight behind her, at 2.5 m — a child's height and a bit —
+ * looking at the story chair. Snapped, so the measured frame is this one; the focus it claims is the chair.
+ */
+const lowShot = (player: Player): Vector3 => {
+  const chair = new Vector3(OX + LIBRARY_STORY_CHAIR.at.x, LIBRARY_FLOOR_Y + 1.2, OZ + LIBRARY_STORY_CHAIR.at.z);
+  const eye = new Vector3(player.position.x - Math.sin(player.facing) * 2, LIBRARY_FLOOR_Y + 2.5, player.position.z - Math.cos(player.facing) * 2);
+  const { yawDegrees, pitchDegrees, distance } = shotAngles(eye, chair);
+  camera.snapShotOverride(yawDegrees, pitchDegrees, distance);
+  return chair;
 };
 
 const child: RealChild = (() => {
   const player = quietly(() => new Player(world.collision, camera, new Vector3(OX + LIBRARY_ARRIVAL.x, LIBRARY_FLOOR_Y, OZ + LIBRARY_ARRIVAL.z)));
   scene.add(player.group);
   quietly(() => world.attachPlayer(player));
+  storyCamera = new StoryCamera(library, world.collision, camera, player);
   const input = new InputSystem();
   const context = { dt: CHILD_DT, elapsed: 0, input, playerPosition: player.position, cameraForward: camera.forward, frame: 0 };
   const extra: { update(frame: FrameContext): void }[] = [];
@@ -5221,6 +5260,385 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
   }
   child.run(1.5);
   note(`FOUND FROM THE DESK: the store put back; the owl recommending '${owl.recommendedBookId ?? 'nothing'}' (before: '${recommendedBefore ?? 'nothing'}'); ${child.frames} frames stepped so far`);
+}
+
+/**
+ * **STORY CAMERA** — Jim, 24 Oct 2026: *"during story time, I'd like the camera to enter a sequence where it
+ * comes down to player-level and goes to over the shoulder camera, with the other children listening and the
+ * reader visible"* (`storyCamera.ts`: the exhibit camera's director and solver, from her cushion). From each of
+ * her two cushions, on a laptop (1280×800) and on a phone held upright (390×844), with story time's camera
+ * applied as `Game` applies it ({@link glanceFrame}) and the labels resolved every frame as `Game` resolves
+ * them:
+ *
+ * - **it comes down**: once the owl reads with her on her cushion, the shot is solved and holds, the real eye
+ *   on the solved one, within {@link DOWN_WITHIN} s of the first page — or of her sitting down, in the case that
+ *   sits down after the reading has begun;
+ * - **the way down** stays in the room's space (over its open top or inside its walls, never through one), no
+ *   drawn surface within {@link LENS_REACH} of the lens, and it is smooth: at most {@link TURN_PER_FRAME}° of
+ *   turn and {@link FRAME_JUMP} of framing change a frame;
+ * - **in shot**: every drawn point of the owl and of the three children projects inside the frame, and the
+ *   owl's bubble's anchor is on the screen (`IsoCamera.isOnScreen`, the bubble's own test);
+ * - **unoccluded, measured against the real scene** — this check's own instrument, not the solver's: a ray from
+ *   the camera's real eye to every 7th drawn point of each (above {@link SHOT_FLOOR_GRAZE}, a sole's own), at
+ *   three moments of the hold (the listeners sway), against every opaque mesh drawn in the room, the children
+ *   and her own body, never the one being looked at nor what the audience sits on (`storySeats`): **nothing of
+ *   the room and nothing of hers hides a single point of any of them**; the owl's head is wholly seen and at
+ *   least {@link OWL_SEEN_MIN} of her; every child's head at least {@link HEAD_SEEN_MIN} and every child at
+ *   least {@link LISTENER_SEEN_MIN} — the rest is one listener in front of another;
+ * - **her page is drawn**: the label manager draws the owl's bubble on every frame of the hold she reads on;
+ *   and her cushion offers its 'Get up' chip throughout (`check:labels` measures the chip drawn with it);
+ * - **home**: she gets up — the chip, a jump, and `Library.standUp` (a tap's own road, `Game.onTap`) — and
+ *   within {@link HOME_WITHIN_CANCEL} s the camera is on the rig again (`poseDistance` 0), at the zoom she had,
+ *   orbiting her; or the story ends with her still sitting and it eases home on its own within
+ *   {@link HOME_WITHIN_END} s of the last word; and afterwards the stick walks her (nothing is trapped).
+ *
+ * The thresholds are this clause's own (never `storyCamera.ts`'s shares, which a check could not fail on):
+ * measured on the built room, 24 Oct 2026, the shot shows 84–90% of the owl, her head whole, and 96–100% of
+ * every child; from behind the audience at a child's height some of the owl is always behind a listener.
+ *
+ * Proved red by `LIBRARY_CHECK_MUTATE=no-story-camera` (the shot never comes), `story-camera-stays` (its focus
+ * kept after it lets go: home goes red) and `story-camera-low` (an eye straight behind her at 2.5 m: the
+ * control — the instrument must see the child on cushion 4 in front of the owl).
+ */
+/** Seconds from the first page (or her sitting down) for the shot to have come down and settled. */
+const DOWN_WITHIN = EXHIBIT_SHOT_EASE_IN + 4;
+/** Seconds after she gets up for the camera to be home: the cancel ease and a beat. */
+const HOME_WITHIN_CANCEL = EXHIBIT_SHOT_EASE_CANCEL + 0.5;
+/** Seconds after the last word for it to have eased home on its own: the hold's least time, the ease and a beat. */
+const HOME_WITHIN_END = EXHIBIT_SHOT_EASE_OUT + 3;
+/** No drawn surface nearer the lens than this on the way down — the lens's near plane is 0.1 m. */
+const LENS_REACH = 0.15;
+/** Degrees the view may turn in one 60 fps frame, and the share the frame's height may change by — the exhibit camera's. */
+const TURN_PER_FRAME = 4;
+const FRAME_JUMP = 0.25;
+/** The least of the owl the real eye sees, of each child's head, of each child — the rest behind another listener. */
+const OWL_SEEN_MIN = 0.7;
+const HEAD_SEEN_MIN = 0.8;
+const LISTENER_SEEN_MIN = 0.45;
+/** Every this-many-th drawn point is measured. */
+const STORY_SIGHT_EVERY = 7;
+
+/** One subject's sightlines from the real eye: how many points, how many seen, and what hid the rest. */
+interface StorySight {
+  points: number;
+  seen: number;
+  byRoom: number;
+  byHer: number;
+  first: string;
+}
+/** Everything opaque drawn in the room, its children and her body, this frame. */
+const storyMeshes = (): Mesh[] => {
+  const opaque = (material: Material): boolean => material.visible && (!material.transparent || material.opacity >= 0.5) && material.colorWrite !== false;
+  const meshes: Mesh[] = [];
+  for (const root of [library.roomRoot, library.kidsRoot, child.player.group]) {
+    root.updateWorldMatrix(true, true);
+    root.traverse((node) => {
+      if (!(node instanceof Mesh)) return;
+      for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return;
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      if (materials.some(opaque)) meshes.push(node);
+    });
+  }
+  return meshes;
+};
+const inside = (node: Object3D, root: Object3D): boolean => {
+  for (let at: Object3D | null = node; at; at = at.parent) if (at === root) return true;
+  return false;
+};
+/** `part` of `subject` from the real eye — see the clause's doc. */
+const storySight = (subject: Object3D, part: Object3D, meshes: readonly Mesh[], seats: readonly Object3D[]): StorySight => {
+  const eye = camera.camera.position.clone();
+  const mine = meshes.filter((mesh) => !inside(mesh, subject) && !seats.some((seat) => inside(mesh, seat)));
+  const out: StorySight = { points: 0, seen: 0, byRoom: 0, byHer: 0, first: '' };
+  const ray = new Raycaster();
+  let k = 0;
+  visiblePoints(
+    part,
+    (point) => {
+      if (point.y < LIBRARY_FLOOR_Y + SHOT_FLOOR_GRAZE) return; // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere
+      if (k++ % STORY_SIGHT_EVERY !== 0) return;
+      out.points += 1;
+      const towards = point.clone().sub(eye);
+      const distance = towards.length();
+      ray.set(eye, towards.normalize());
+      ray.near = 0;
+      ray.far = distance - 0.01;
+      const hit = ray.intersectObjects(mine, false)[0];
+      if (!hit) {
+        out.seen += 1;
+        return;
+      }
+      const her = inside(hit.object, child.player.group);
+      const listener = inside(hit.object, library.kidsRoot) || inside(hit.object, library.owl.handle.root);
+      if (her) out.byHer += 1;
+      else if (!listener) out.byRoom += 1;
+      if (!out.first && !listener) out.first = `(${(point.x - OX).toFixed(2)}, ${(point.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(point.z - OZ).toFixed(2)}) behind ${her ? 'HER OWN BODY' : `'${hit.object.name || hit.object.parent?.name || '?'}'`}`; // flat-ok: room-local, the reading room's own flat space
+    },
+    scene,
+  );
+  return out;
+};
+/** The worst of `part`'s drawn points on the screen: the largest |NDC| any reaches (1 is the frame's edge), and how many are behind the eye. */
+const storyInShot = (part: Object3D): { worst: number; behind: number } => {
+  camera.camera.updateMatrixWorld();
+  let worst = 0;
+  let behind = 0;
+  let k = 0;
+  visiblePoints(
+    part,
+    (point) => {
+      if (k++ % STORY_SIGHT_EVERY !== 0) return;
+      const v = point.clone().project(camera.camera);
+      if (v.z >= 1) behind += 1;
+      worst = Math.max(worst, Math.abs(v.x), Math.abs(v.y));
+    },
+    scene,
+  );
+  return { worst, behind };
+};
+const share = (sight: StorySight): number => sight.seen / Math.max(1, sight.points);
+/** The share of the frame's area `box` covers through the live camera (the exhibit check's measure). */
+const screenShareOf = (box: Box3): number => {
+  camera.camera.updateMatrixWorld();
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < 8; i += 1) {
+    const v = new Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera.camera); // flat-ok: a box's corners, in the reading room's own flat space
+    minX = Math.min(minX, v.x);
+    maxX = Math.max(maxX, v.x);
+    minY = Math.min(minY, v.y);
+    maxY = Math.max(maxY, v.y);
+  }
+  const clampN = (v: number): number => Math.max(-1, Math.min(1, v));
+  return ((clampN(maxX) - clampN(minX)) / 2) * ((clampN(maxY) - clampN(minY)) / 2);
+};
+
+console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over her shoulder to the owl and the children listening, from either cushion, on a laptop and a phone, and goes home when she gets up or the story ends:");
+{
+  const owl = library.owl;
+  const kids = library.children;
+  const player = child.player;
+  const story = storyCamera;
+  if (!story) throw new Error('STORY CAMERA: the story camera was never built');
+  if (mutating('no-story-camera')) note('the story camera NOT WIRED on purpose — this run must go red');
+  if (mutating('story-camera-stays')) note("the story camera's focus KEPT after it lets go, on purpose — this run must go red");
+  if (mutating('story-camera-low')) note('the story camera AIMED LOW, straight behind her at 2.5 m, on purpose — this run must go red');
+  const seats = storySeats(library);
+  /** How she gets up, or that she does not and the story ends under her. */
+  type Up = 'chip' | 'jump' | 'standUp' | 'story ends';
+  const cases: { seat: (typeof LIBRARY_PLAYER_SEATS)[number]; screen: { width: number; height: number; what: string }; up: Up; sitsLate: boolean }[] = [
+    { seat: LIBRARY_PLAYER_SEATS[0], screen: { width: 1280, height: 800, what: 'a laptop' }, up: 'chip', sitsLate: false },
+    { seat: LIBRARY_PLAYER_SEATS[1], screen: { width: 1280, height: 800, what: 'a laptop' }, up: 'jump', sitsLate: true },
+    { seat: LIBRARY_PLAYER_SEATS[0], screen: { width: 390, height: 844, what: 'a phone held upright' }, up: 'standUp', sitsLate: false },
+    { seat: LIBRARY_PLAYER_SEATS[1], screen: { width: 390, height: 844, what: 'a phone held upright' }, up: 'story ends', sitsLate: false },
+  ];
+  for (const { seat, screen, up, sitsLate } of cases) {
+    const label = `${seat}, ${screen.what} (${screen.width}×${screen.height})`;
+    camera.resize(screen.width, screen.height);
+    const view = { camera: camera.camera, width: screen.width, height: screen.height };
+    const frame = (steer?: Steer): void => {
+      child.step(steer);
+      world.labels.resolve(view, CHILD_DT);
+    };
+    const cushion = libraryCushion(seat);
+    // Out and in again, so each case starts from a fresh visit with story time idle (the door abandons any story).
+    if (library.playerIsInside && !quietly(() => library.requestEnterDoor())) throw new Error(`STORY CAMERA ${label}: /library-door refused her`);
+    child.run(0.3);
+    if (sitsLate) {
+      // Stood beside her cushion, she asks for a story, and sits down only once the owl has begun to read.
+      child.enter({ x: cushion.at.x, z: cushion.at.z + 1.2, facing: libraryFacingStoryChair(cushion.at) });
+    } else {
+      // The `/library?sit=` road: she arrives sitting on it.
+      if (!quietly(() => library.requestEnter(undefined, seat))) throw new Error(`STORY CAMERA ${label}: requestEnter refused her`);
+      camera.snapTo(player.position);
+    }
+    child.run(0.5);
+    const zoomBefore = camera.targetZoom;
+    library.requestStoryTime();
+    let wait = 0;
+    while (library.storyPhase !== 'reading' && wait < GATHER_TIMEOUT + 20) {
+      frame();
+      wait += CHILD_DT;
+    }
+    const reading = library.storyPhase === 'reading';
+    if (sitsLate) {
+      // Onto the cushion's top, and the Sit chip: the reading has begun, so the shot comes from this moment.
+      child.run(1);
+      player.teleportTo(OX + cushion.at.x, LIBRARY_FLOOR_Y + libraryCushionSize().top, OZ + cushion.at.z, (libraryFacingStoryChair(cushion.at) * Math.PI) / 180);
+      child.run(0.3);
+      library
+        .interactZones()
+        .find((zone) => zone.id === `library-sit:${seat}`)
+        ?.actions?.()
+        .find((action) => action.id === PRIMARY_ACTION)
+        ?.run();
+    }
+    const seatedAt = library.playerIsSeated && library.storyPhase === 'reading';
+    // Down: watched every frame until the shot holds and the real eye is on the solved one.
+    const faults: string[] = [];
+    let worstTurn = 0;
+    let worstJump = 0;
+    const lastDir = camera.camera.getWorldDirection(new Vector3());
+    const halfHeight = (): number => Math.tan((camera.camera.fov * Math.PI) / 360) * camera.camera.position.distanceTo(camera.focusPoint);
+    let lastHalf = halfHeight();
+    const lens = storyMeshes();
+    const lensRay = new Raycaster();
+    const watch = (): void => {
+      const eye = camera.camera.position;
+      if (!eyeInHallSpace(eye, LIBRARY_SHOT_ROOM)) faults.push(`the eye outside the room below its wall tops at (${(eye.x - OX).toFixed(2)}, ${(eye.y - LIBRARY_FLOOR_Y).toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`); // flat-ok: room-local, the reading room's own flat space
+      for (const d of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const) { // flat-ok: the six axes, in the reading room's own flat space
+        lensRay.set(eye, new Vector3(...d));
+        lensRay.near = 0;
+        lensRay.far = LENS_REACH;
+        const hit = lensRay.intersectObjects(lens, false)[0];
+        if (hit) faults.push(`'${hit.object.name || '?'}' within ${LENS_REACH} m of the lens at (${(eye.x - OX).toFixed(2)}, ${(eye.y - LIBRARY_FLOOR_Y).toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`); // flat-ok: room-local
+      }
+      const dir = camera.camera.getWorldDirection(new Vector3());
+      worstTurn = Math.max(worstTurn, (dir.angleTo(lastDir) * 180) / Math.PI);
+      lastDir.copy(dir);
+      const half = halfHeight();
+      worstJump = Math.max(worstJump, Math.abs(half - lastHalf) / Math.max(lastHalf, 1e-6));
+      lastHalf = half;
+    };
+    let down = 0;
+    const settled = (): boolean => story.state === 'hold' && !!story.shot && camera.camera.position.distanceTo(story.shot.eye) <= 0.05;
+    while (!settled() && down < DOWN_WITHIN + 1) {
+      frame();
+      watch();
+      down += CHILD_DT;
+    }
+    const shot = story.shot;
+    say(
+      reading && seatedAt && settled() && down <= DOWN_WITHIN,
+      `${label}: ${sitsLate ? 'she sat down after the reading had begun, and' : 'the owl reading, she on her cushion:'} the camera came down over her shoulder and holds, ` +
+        `${down.toFixed(2)} s after ${sitsLate ? 'she sat' : 'the first page'} (${DOWN_WITHIN.toFixed(1)} allowed; ${story.state}, ` +
+        `the real eye ${shot ? camera.camera.position.distanceTo(shot.eye).toFixed(3) : '?'} m from the solved one)` +
+        `${reading ? '' : ` — STORY TIME NEVER READ (phase ${library.storyPhase})`}${seatedAt ? '' : ' — SHE WAS NOT SITTING'}`,
+    );
+    const eye = camera.camera.position.clone();
+    const back = Math.hypot(eye.x - player.position.x, eye.z - player.position.z);
+    note(
+      `STORY CAMERA ${label}: eye at room (${(eye.x - OX).toFixed(2)}, ${(eye.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(eye.z - OZ).toFixed(2)}), ${back.toFixed(2)} m from her across the floor, ` + // flat-ok: room-local
+        `yaw ${shot?.yawDegrees.toFixed(0) ?? '?'}° pitch ${shot?.pitchDegrees.toFixed(0) ?? '?'}° zoom ${shot?.zoom.toFixed(2) ?? '?'}; candidate ${shot?.tried ?? '?'}; unsolved so far ${story.unsolved}`,
+    );
+    say(
+      faults.length === 0 && worstTurn <= TURN_PER_FRAME && worstJump <= FRAME_JUMP,
+      `  the way down: in the room's space with nothing within ${LENS_REACH} m of the lens on every frame${faults.length ? ` — ${faults.length} faults, first: ${faults[0]}` : ''}; ` +
+        `smooth, at most ${worstTurn.toFixed(2)}° of turn and ${(worstJump * 100).toFixed(1)}% of framing change in a frame (${TURN_PER_FRAME}° and ${FRAME_JUMP * 100}% allowed)`,
+    );
+    // The hold: three moments, a second apart, the listeners swaying.
+    const subjects = [
+      { name: 'the owl', root: owl.handle.root, head: owl.handle.head },
+      ...kids.map((kid) => ({ name: kid.plan.name, root: kid.model.root as Object3D, head: kid.model.head as Object3D })),
+    ];
+    const worst = subjects.map(() => ({ whole: 1, head: 1, byRoom: 0, byHer: 0, first: '', inShot: 0, behind: 0, points: 0, headPoints: 0 }));
+    let bubbleFrames = 0;
+    let bubbleDrawn = 0;
+    let anchorOff = 0;
+    let chipOffered = 0;
+    let herShare = 0;
+    for (let moment = 0; moment < 3; moment += 1) {
+      const meshes = storyMeshes();
+      subjects.forEach((subject, i) => {
+        const whole = storySight(subject.root, subject.root, meshes, seats);
+        const head = storySight(subject.root, subject.head, meshes, seats);
+        const shown = storyInShot(subject.root);
+        const w = worst[i]!;
+        w.whole = Math.min(w.whole, share(whole));
+        w.head = Math.min(w.head, share(head));
+        w.byRoom += whole.byRoom + head.byRoom;
+        w.byHer += whole.byHer + head.byHer;
+        w.first ||= whole.first || head.first;
+        w.inShot = Math.max(w.inShot, shown.worst);
+        w.behind += shown.behind;
+        w.points = whole.points;
+        w.headPoints = head.points;
+      });
+      const her = herBodyBox(player.position, player.topHeight);
+      herShare = Math.max(herShare, screenShareOf(her));
+      for (let i = 0; i < 60; i += 1) {
+        frame();
+        if (owl.speaking && library.storyPhase === 'reading') {
+          bubbleFrames += 1;
+          if (owl.bubble.sprite.visible) bubbleDrawn += 1;
+          if (!camera.isOnScreen(owl.bubble.worldAnchor())) anchorOff += 1;
+        }
+        const offer = library.interactZones().find((zone) => zone.id === `library-sit:${seat}`)?.actions?.() ?? [];
+        if (offer.length === 1 && offer[0]?.id === 'get-up' && offer[0].label === LIBRARY_CHIPS.getUp) chipOffered += 1;
+      }
+    }
+    say(
+      worst.every((w) => w.inShot <= 1 && w.behind === 0),
+      `  in shot: every drawn point of the owl and the three children inside the frame (${subjects.map((subject, i) => `${subject.name} out to ${worst[i]!.inShot.toFixed(2)}`).join(', ')}; 1 is the frame's edge)` +
+        `${worst.some((w) => w.behind > 0) ? ' — SOME BEHIND THE EYE' : ''}`,
+    );
+    say(
+      worst.every((w) => w.byRoom === 0 && w.byHer === 0),
+      `  nothing of the room and nothing of hers hides any of them (from the real eye, at three moments: ${subjects.map((subject, i) => `${subject.name} ${worst[i]!.byRoom} by the room, ${worst[i]!.byHer} by her`).join('; ')})` +
+        `${worst.find((w) => w.first)?.first ? ` — e.g. ${worst.find((w) => w.first)!.first}` : ''}`,
+    );
+    say(
+      worst[0]!.head === 1 && worst[0]!.whole >= OWL_SEEN_MIN,
+      `  the reader: the owl's head wholly seen (${Math.round(worst[0]!.head * 100)}% of ${worst[0]!.headPoints} points, at its least) and ${Math.round(worst[0]!.whole * 100)}% of her (${OWL_SEEN_MIN * 100}% wanted; ${worst[0]!.points} points)`,
+    );
+    say(
+      worst.slice(1).every((w) => w.head >= HEAD_SEEN_MIN && w.whole >= LISTENER_SEEN_MIN),
+      `  the children listening: ${subjects.slice(1).map((subject, i) => `${subject.name} ${Math.round(worst[i + 1]!.whole * 100)}% (head ${Math.round(worst[i + 1]!.head * 100)}%)`).join(', ')} ` +
+        `at their least (each ${LISTENER_SEEN_MIN * 100}%, each head ${HEAD_SEEN_MIN * 100}% wanted — the rest one listener in front of another)`,
+    );
+    say(
+      bubbleFrames > 0 && bubbleDrawn === bubbleFrames && anchorOff === 0 && chipOffered === 180,
+      `  her page is drawn: the owl's bubble on ${bubbleDrawn} of the ${bubbleFrames} frames she read on, its anchor on the screen on ${bubbleFrames - anchorOff}; her cushion offered '${LIBRARY_CHIPS.getUp}' on ${chipOffered} of 180 frames` +
+        `${bubbleFrames === 0 ? ' — THE OWL NEVER READ THROUGH THE HOLD: this asserts nothing about her bubble' : ''}`,
+    );
+    note(`STORY CAMERA ${label}: she covers ${(herShare * 100).toFixed(1)}% of the frame (the exhibit camera's own bound ${HER_SHARE_MAX * 100}%)`);
+    // Home: up — the chip, a jump, the tap's road — or the story ends under her.
+    let home = 0;
+    let homeAfter = Number.NaN;
+    let endedAt = Number.NaN;
+    if (up === 'story ends') {
+      let t = 0;
+      while (library.storyPhase === 'reading' && t < 240) {
+        frame();
+        t += CHILD_DT;
+      }
+      endedAt = t;
+    } else if (up === 'chip') {
+      library.interactZones().find((zone) => zone.id === `library-sit:${seat}`)?.actions?.()[0]?.run();
+    } else if (up === 'jump') {
+      child.input.pressVirtual('jump');
+    } else {
+      library.standUp();
+    }
+    const limit = up === 'story ends' ? HOME_WITHIN_END : HOME_WITHIN_CANCEL;
+    while (home < limit + 2) {
+      frame();
+      home += CHILD_DT;
+      if (Number.isNaN(homeAfter) && !story.active && camera.poseDistance === 0) homeAfter = home;
+    }
+    const orbit = Math.hypot(camera.focusPoint.x - player.position.x, camera.focusPoint.z - player.position.z);
+    say(
+      homeAfter <= limit && Math.abs(camera.targetZoom - zoomBefore) < 1e-9 && orbit <= 0.3,
+      `  home: ${up === 'story ends' ? `the story ended ${endedAt.toFixed(1)} s on with her still sitting, and` : `she got up by ${up === 'standUp' ? "Library.standUp (a tap's own road)" : `the ${up}`}, and`} ` +
+        `the camera was on the rig again ${Number.isNaN(homeAfter) ? 'NEVER' : `${homeAfter.toFixed(2)} s`} after (${limit.toFixed(2)} allowed; pose ${camera.poseDistance.toFixed(4)} m off it), ` +
+        `at zoom ${camera.targetZoom.toFixed(3)} (she had ${zoomBefore.toFixed(3)}), orbiting her (${orbit.toFixed(2)} m across the floor, 0.3 allowed)`,
+    );
+    if (library.playerIsSeated) library.standUp();
+    child.run(0.3);
+    // Nothing trapped: the stick walks her, away from the rug.
+    const from = child.room();
+    child.run(1, child.towards(0, 1));
+    const walked = Math.hypot(child.room().x - from.x, child.room().z - from.z);
+    say(walked >= 1 && !player.riding, `  and the stick walks her afterwards: ${walked.toFixed(2)} m in a second (at least 1), riding ${player.riding}`);
+  }
+  camera.resize(SCREEN.width, SCREEN.height);
+  // Back at the desk's front, as the clauses before this one leave her.
+  if (!quietly(() => library.requestEnterDoor())) throw new Error('STORY CAMERA: /library-door refused her');
+  child.run(0.3);
+  child.enter({ x: LIBRARY_DESK_STAND.x, z: LIBRARY_DESK_STAND.z, facing: LIBRARY_DESK_STAND.facing });
+  child.run(0.5);
 }
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──
