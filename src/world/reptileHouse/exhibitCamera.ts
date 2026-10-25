@@ -710,7 +710,7 @@ function instanceProxies(mesh: InstancedMesh): Mesh[] {
 export interface OccluderSet {
   readonly meshes: readonly Mesh[];
   readonly spheres: readonly Sphere[];
-  /** Per mesh, the subject it is part of (an index into the shot's subjects), or −1 — see {@link collectOccluders}. */
+  /** Per mesh, the subject it is part of (an index into the shot's subjects), {@link HER} for her own body, or −1 for the room — see {@link collectOccluders}. */
   readonly owners: readonly number[];
 }
 
@@ -763,8 +763,8 @@ function firstHit(eye: Vector3, target: Vector3, occluders: OccluderSet, owner =
 
 /**
  * The first thing crossing the segment from `eye` to `target`, nothing of
- * subject `owner`'s own: its name, and whose it is — a subject's index, or −1
- * for the room and her own body — or `null`.
+ * subject `owner`'s own: its name, and whose it is — a subject's index,
+ * {@link HER} for her own body, or −1 for the room — or `null`.
  */
 export function firstBlocker(eye: Vector3, target: Vector3, occluders: OccluderSet, owner = -1): { readonly name: string; readonly owner: number } | null {
   const toward = target.clone().sub(eye);
