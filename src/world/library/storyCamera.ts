@@ -1,8 +1,9 @@
 import type { Object3D, Vector3 } from 'three';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { CollisionWorld } from '../Collision';
-import { ExhibitCamera, type ExhibitShot, type ShotInput, type ShotRoom, type ShotRules, type SolveReport } from '../reptileHouse/exhibitCamera';
+import { ExhibitCamera, asWhole, type ExhibitShot, type ShotInput, type ShotRoom, type ShotRules, type SolveReport } from '../reptileHouse/exhibitCamera';
 import type { CharacterModel } from '../../entities/CharacterModel';
+import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_INNER_X, LIBRARY_INNER_Z, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, LIBRARY_STORY_RUG, LIBRARY_WALL_HEIGHT } from './layout';
 import type { LibraryOwl } from './LibraryOwl';
 import type { StoryPhase } from './storyTime';
@@ -85,11 +86,49 @@ export const STORY_FRAME_MARGIN = 0.12;
 export const STORY_SHOT_ID = 'story-time';
 
 /**
- * How many of each listener's and the owl's own drawn points, spread over her,
- * must be seen as well as her middle (`ShotRules.spread`): enough that a head
- * half a child's height cannot cover a part of anyone between them.
+ * How many of the owl's, her head's and each listener's head's own drawn
+ * points, spread over them, the shot is solved to see as well as their middles
+ * (`ShotRules.spread`): enough that a head half a child's height cannot hide a
+ * part of anyone between two of them.
  */
 export const STORY_SPREAD = 16;
+
+/**
+ * **What the shot must see, and how much of it** — the reader and her
+ * listeners, from a cushion in the audience. Measured on the built room
+ * (24 Oct 2026): the children's heads are half their height and a metre and a
+ * half across with their hair, and cushions 4 and 5 sit square in front of the
+ * storyteller's chair, so from behind the audience at a child's height some of
+ * the owl is always behind a listener's head — from cushion 1, the best eye
+ * over her shoulder sees 57% of the owl at 3 m up, 77% at 3.5 m, 88% at 4 m and
+ * 92% at 4.5 m; seeing all of everyone takes an eye 6 m up, looking down on
+ * the rug. So the shot holds what makes it story time:
+ *
+ * - **the owl's head — her face, her glasses — all of it** (`asWhole`, share 1);
+ * - **most of the owl**: {@link STORY_OWL_SEEN} of her;
+ * - **most of every listener's head**: {@link STORY_HEAD_SEEN} of each, and
+ *   each listener's middle;
+ *
+ * and nothing but a listener can cover any of them — no bookcase, no lamp,
+ * never her own head (the solver's sightlines run against everything drawn in
+ * the room and her body; `check:library`'s STORY CAMERA measures the real eye
+ * on every drawn point).
+ */
+export const STORY_OWL_SEEN = 0.75;
+export const STORY_HEAD_SEEN = 0.85;
+/** And of every listener as a whole, at least this share — the rest behind another listener, and only another listener. */
+export const STORY_LISTENER_SEEN = 0.5;
+
+/**
+ * **The story shot we would draw by hand** — what the exhibit camera's fan is
+ * tried from first (`ShotRules.ideal`; it decides nothing about what the shot
+ * must see): an eye a little over the listeners' heads (twice a child's
+ * height), close behind her and well off her shoulder, where her own head is
+ * beside the audience in the picture rather than in front of it. Measured
+ * from cushion 1, that is the lowest eye from which nothing of hers hides
+ * anyone and three quarters of the owl shows (24 Oct 2026).
+ */
+export const STORY_IDEAL = { height: 2 * KID_HEIGHT, back: 1.6, swing: 50 } as const;
 
 /**
  * **What the audience sits on, which hides nobody**: the owl's story chair,
@@ -215,9 +254,15 @@ export class StoryCamera {
   /** The shot of the owl and the three children, from where she sits — solved over the next few frames. */
   private start(): void {
     const { owl, children } = this.library;
-    const subjects: Object3D[] = [owl.handle.root, owl.handle.head];
-    for (const child of children) subjects.push(child.model.root, child.model.head);
-    const rules: ShotRules = { mutual: true, spread: STORY_SPREAD, contain: { points: [owl.bubble.worldAnchor()], margin: STORY_FRAME_MARGIN } };
+    const subjects: Object3D[] = [...asWhole([owl.handle.root], STORY_OWL_SEEN), ...asWhole([owl.handle.head], 1)];
+    for (const child of children) subjects.push(...asWhole([child.model.root], STORY_LISTENER_SEEN), ...asWhole([child.model.head], STORY_HEAD_SEEN));
+    const rules: ShotRules = {
+      mutual: true,
+      spread: STORY_SPREAD,
+      contain: { points: [owl.bubble.worldAnchor()], margin: STORY_FRAME_MARGIN },
+      overHerShoulder: true,
+      ideal: STORY_IDEAL,
+    };
     this.director.start(STORY_SHOT_ID, subjects, storySeats(this.library), this.her, rules);
   }
 }

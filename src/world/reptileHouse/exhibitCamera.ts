@@ -160,13 +160,14 @@ export interface ShotRules {
    */
   readonly mutual?: boolean;
   /**
-   * **Each subject seen whole, not only its middle**: besides each subject's
-   * middle, this many of each outer subject's own drawn points, spread over it
-   * (farthest-point sampling from its middle), are sightline targets — every
-   * one a star. An exhibit sees each animal's middle and the tube round it;
-   * story time's children have heads half their height, and the owl behind
-   * them can show her middle past one while a child's hair covers the rest of
-   * her (measured: 40% of her drawn points, from cushion 1).
+   * **Seen as a whole, not only its middle**: besides its middle, this many of
+   * the own drawn points of each subject marked {@link asWhole}, spread over it
+   * (farthest-point sampling from its middle), are sightline targets, owned by
+   * its outer subject — and at least the share it was marked with must be seen
+   * (all of them, for a share of 1). An exhibit sees each animal's middle and
+   * the tube round it; story time's children have heads half their height, and
+   * the owl behind them can show her middle past one while a child's hair
+   * covers the rest of her (measured: 40% of her drawn points, from cushion 1).
    */
   readonly spread?: number;
   /**
@@ -179,7 +180,25 @@ export interface ShotRules {
    * the shot frames no tighter than it allows.
    */
   readonly contain?: { readonly points: readonly Vector3[]; readonly margin: number };
+  /**
+   * **The fan stands round her, from her back** — the eyes tried are behind
+   * her and over her shoulders by her own facing, not round the subjects'
+   * middle along the line through her. At an exhibit she faces the animal, so
+   * the two are the same; at story time she faces the storyteller's chair, and
+   * the audience's middle is off to one side of it, so "behind her" from the
+   * middle is beside her.
+   */
+  readonly overHerShoulder?: boolean;
+  /**
+   * **The shot we would draw by hand**, where it is not an exhibit's
+   * (`IDEAL_SWING`, `IDEAL_BACK`, `IDEAL_HEIGHT`): the order the fan is tried
+   * in, nearest first. It decides nothing about what a shot must see.
+   */
+  readonly ideal?: { readonly swing?: number; readonly back?: number; readonly height?: number };
 }
+
+/** Her own body's mark among a shot's occluders ({@link OccluderSet.owners}): not a subject, and not the room. */
+const HER = -2;
 
 /** One sightline target and whether it was seen. */
 export interface ShotSample {
@@ -258,6 +277,23 @@ export function asCrowd<T extends Object3D>(objects: readonly T[]): T[] {
   return [...objects];
 }
 
+/**
+ * Marks subjects a shot must see **as a whole** ({@link ShotRules.spread}):
+ * its sightlines reach a spread of each one's own drawn points as well as its
+ * middle, and at least `share` of those points must be seen — 1, the whole of
+ * it.
+ */
+export function asWhole<T extends Object3D>(objects: readonly T[], share = 1): T[] {
+  for (const object of objects) object.userData['shotWhole'] = share;
+  return [...objects];
+}
+
+/** The share of its spread points a subject marked {@link asWhole} must have seen, or null when it is not marked. */
+export function wholeShare(subject: Object3D): number | null {
+  const share = subject.userData['shotWhole'] as unknown;
+  return typeof share === 'number' && share > 0 ? Math.min(1, share) : null;
+}
+
 /** The share of a crowd a shot must see — what `check:exhibit-camera` holds the real eye to. */
 export const CROWD_SEEN = 2 / 3;
 /**
@@ -277,6 +313,17 @@ export interface ShotTarget {
    * not hide it when the subjects hide one another ({@link ShotRules.mutual}).
    */
   readonly owner: number;
+  /**
+   * For one of a whole subject's spread points ({@link ShotRules.spread}): the
+   * index of that subject, whose points are counted together, and the share of
+   * them that must be seen. Absent on a middle.
+   */
+  readonly whole?: {
+    readonly subject: number;
+    readonly share: number;
+    /** The point a hand's breadth further out from the subject's middle, across the floor: nothing but another subject may stand in front of that either. */
+    readonly edge: Vector3;
+  };
 }
 
 /**
@@ -300,33 +347,88 @@ export function subjectOwners(subjects: readonly Object3D[]): number[] {
  * and, with `spread`, that many more over each outer subject's own drawn
  * points ({@link ShotRules.spread}).
  */
-export function subjectOf(subjects: readonly Object3D[], spread = 0): { box: Box3; targets: ShotTarget[] } {
+export function subjectOf(subjects: readonly Object3D[], spread = 0, floorY = -Infinity): { box: Box3; targets: ShotTarget[] } {
   const box = new Box3();
   const targets: ShotTarget[] = [];
   const owners = subjectOwners(subjects);
   subjects.forEach((subject, i) => {
     boxOf(subject, SCRATCH_BOX);
     box.union(SCRATCH_BOX);
-    const middle = SCRATCH_BOX.getCenter(new Vector3());
-    const crowd = subject.userData['exhibitCrowd'] === true;
-    const owner = owners[i] ?? i;
-    targets.push({ point: middle, crowd, owner });
-    if (spread > 0 && owner === i) for (const point of spreadPoints(subject, middle, spread)) targets.push({ point, crowd, owner });
+    targets.push({ point: SCRATCH_BOX.getCenter(new Vector3()), crowd: subject.userData['exhibitCrowd'] === true, owner: owners[i] ?? i });
   });
+  if (spread > 0) {
+    const steps = spreadTargets(subjects, spread, floorY);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) {
+        targets.push(...step.value);
+        break;
+      }
+    }
+  }
   return { box, targets };
+}
+
+/**
+ * The spread targets of every subject marked {@link asWhole}
+ * ({@link ShotRules.spread}): `count` of its own drawn points each, owned by
+ * its outer subject and carrying its share — a subject at a time, yielding
+ * between them (a child is ten thousand vertices).
+ */
+function* spreadTargets(subjects: readonly Object3D[], count: number, floorY: number): Generator<void, ShotTarget[]> {
+  const owners = subjectOwners(subjects);
+  const out: ShotTarget[] = [];
+  for (const [i, subject] of subjects.entries()) {
+    const share = wholeShare(subject);
+    if (share === null) continue;
+    yield;
+    const middle = boxOf(subject, SCRATCH_BOX).getCenter(new Vector3());
+    for (const point of spreadPoints(subject, middle, count, floorY + SHOT_FLOOR_GRAZE)) {
+      out.push({ point, crowd: false, owner: owners[i] ?? i, whole: { subject: i, share, edge: edgeOf(point, middle) } });
+    }
+  }
+  return out;
 }
 
 /** An identity frame: {@link visiblePoints} reports in it, so its points are world points. */
 const WORLD_FRAME = new Object3D();
 
 /**
- * `count` of `subject`'s drawn points (`visiblePoints`: its visible meshes'
- * vertices, world), each the one furthest from every point picked before it,
- * starting from `from` — spread over the whole of it, edges first.
+ * **How near the room's floor a drawn point is the floor's own**, metres: a
+ * sole, and the ink round it, which reaches a centimetre or two under the
+ * boards. Nothing is missed there that a child could miss; a sightline to
+ * such a point only grazes the floor it stands on. `check:library`'s STORY
+ * CAMERA measures what it measures above it too.
  */
-function spreadPoints(subject: Object3D, from: Vector3, count: number): Vector3[] {
+export const SHOT_FLOOR_GRAZE = 0.03;
+
+/**
+ * `count` of `subject`'s drawn points (`visiblePoints`: its visible meshes'
+ * vertices, world) above `above`, each the one furthest from every point
+ * picked before it, starting from `from` — spread over the whole of it, edges
+ * first.
+ */
+function spreadPoints(subject: Object3D, from: Vector3, count: number, above: number): Vector3[] {
   const all: number[] = [];
-  visiblePoints(subject, (point) => all.push(point.x, point.y, point.z), WORLD_FRAME);
+  visiblePoints(
+    subject,
+    (point) => {
+      if (point.y >= above) all.push(point.x, point.y, point.z); // flat-ok: a shot's room is its own flat space off the sphere
+    },
+    WORLD_FRAME,
+  );
+  // Sampled from at most SPREAD_FROM of them, every k-th: a child is ten thousand vertices, and
+  // farthest-point sampling costs every one of them for every point picked.
+  const stride = Math.max(1, Math.ceil(all.length / 3 / SPREAD_FROM));
+  if (stride > 1) {
+    let kept = 0;
+    for (let i = 0; i < all.length / 3; i += stride, kept += 1) {
+      all[kept * 3] = all[i * 3]!;
+      all[kept * 3 + 1] = all[i * 3 + 1]!;
+      all[kept * 3 + 2] = all[i * 3 + 2]!;
+    }
+    all.length = kept * 3;
+  }
   const n = all.length / 3;
   if (n === 0) return [];
   // Each vertex's distance (squared) to the nearest point picked so far.
@@ -344,6 +446,24 @@ function spreadPoints(subject: Object3D, from: Vector3, count: number): Vector3[
     }
   }
   return picked;
+}
+
+/**
+ * `point` a hand's breadth ({@link SIGHTLINE_TUBE}) further out from `from`,
+ * across the floor: a sightline that only just grazes the edge of what is in
+ * front of a subject is one this catches, rather than one that slips between
+ * two of its points.
+ */
+function edgeOf(point: Vector3, from: Vector3): Vector3 {
+  const dx = point.x - from.x;
+  const dz = point.z - from.z;
+  const across = Math.hypot(dx, dz);
+  const out = point.clone();
+  if (across > 1e-6) {
+    out.x += (dx / across) * SIGHTLINE_TUBE;
+    out.z += (dz / across) * SIGHTLINE_TUBE;
+  }
+  return out;
 }
 
 /**
@@ -376,17 +496,69 @@ function robustlySeen(eye: Vector3, target: Vector3, occluders: OccluderSet, rep
 }
 
 /**
- * The sightlines from `eye`, stars first and failing fast: `null` as soon as
- * a star is hidden or too much of the crowd is for {@link CROWD_SEEN} to be
- * reachable, else every target's result. Equivalent to {@link sightlinesPass}
- * over all of them, without casting the rays that cannot change the answer.
+ * How many sightlines a solve casts before it yields: a candidate that asks
+ * for a whole audience's spread points still leaves each frame's slice of
+ * solving ({@link SOLVE_BUDGET_MS}) a slice.
  */
-function shotSees(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, report?: SolveReport): boolean[] | null {
+const SIGHTLINES_PER_STEP = 12;
+
+/** How many candidate eyes a solve frames before it yields. */
+const CANDIDATES_PER_STEP = 40;
+
+/** How many times finer the spread a passing candidate is confirmed on ({@link ShotRules.spread}). */
+const SPREAD_CONFIRM = 6;
+
+/** The most of a subject's drawn points a spread is sampled from (every k-th, see {@link spreadPoints}). */
+const SPREAD_FROM = 2000;
+
+/**
+ * The sightlines from `eye`, stars first and failing fast: `null` as soon as
+ * a star is hidden, a whole subject's share ({@link ShotRules.spread}) or too
+ * much of the crowd is for {@link CROWD_SEEN} to be reachable, else every
+ * target's result. Equivalent to {@link sightlinesPass} over all of them,
+ * without casting the rays that cannot change the answer — and a step at a
+ * time, yielding every {@link SIGHTLINES_PER_STEP} sightlines.
+ */
+function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, report?: SolveReport): Generator<void, boolean[] | null> {
   const seen: boolean[] = targets.map(() => false);
+  let cast = 0;
   for (const [index, target] of targets.entries()) {
-    if (target.crowd) continue;
+    if (target.crowd || target.whole) continue;
     if (!robustlySeen(eye, target.point, occluders, report, target.owner)) return null;
     seen[index] = true;
+    cast += 5;
+    if (cast >= SIGHTLINES_PER_STEP) {
+      cast = 0;
+      yield;
+    }
+  }
+  // Each whole subject's spread points, counted against the share it must have seen — and only
+  // another subject may cover any of them: the room, or her own body, never.
+  const points = new Map<number, number>();
+  for (const { whole } of targets) if (whole) points.set(whole.subject, (points.get(whole.subject) ?? 0) + 1);
+  const misses = new Map<number, number>();
+  for (const [index, target] of targets.entries()) {
+    const whole = target.whole;
+    if (!whole) continue;
+    const blocker = firstBlocker(eye, target.point, occluders, target.owner);
+    const edge = firstBlocker(eye, whole.edge, occluders, target.owner);
+    cast += 2;
+    if (cast >= SIGHTLINES_PER_STEP) {
+      cast = 0;
+      yield;
+    }
+    for (const hit of [blocker, edge]) if (hit && report) report.blockers[hit.name] = (report.blockers[hit.name] ?? 0) + 1;
+    // The room or her own body on the point itself, or the room a hand's breadth beside it (the
+    // corner of a case grazing a child's back): never. Her body near a subject's edge is her
+    // shoulder, which is the shot.
+    if ((blocker && blocker.owner < 0) || (edge && edge.owner === -1)) return null;
+    if (blocker === null) {
+      seen[index] = true;
+      continue;
+    }
+    const missed = (misses.get(whole.subject) ?? 0) + 1;
+    misses.set(whole.subject, missed);
+    if (missed > mayMissOf(points.get(whole.subject) ?? 0, whole.share)) return null;
   }
   const crowd = targets.filter((target) => target.crowd).length;
   const mayMiss = crowd - Math.ceil(CROWD_SEEN_TO_SOLVE * crowd);
@@ -411,15 +583,30 @@ function shotSees(eye: Vector3, targets: readonly ShotTarget[], occluders: Occlu
 export function sightlinesPass(targets: readonly ShotTarget[], seen: readonly boolean[]): boolean {
   let crowd = 0;
   let crowdSeen = 0;
+  const points = new Map<number, number>();
+  const misses = new Map<number, number>();
   for (const [index, target] of targets.entries()) {
     const ok = seen[index] ?? false;
+    if (target.whole) {
+      points.set(target.whole.subject, (points.get(target.whole.subject) ?? 0) + 1);
+      if (!ok) misses.set(target.whole.subject, (misses.get(target.whole.subject) ?? 0) + 1);
+      continue;
+    }
     if (!target.crowd && !ok) return false;
     if (target.crowd) {
       crowd += 1;
       if (ok) crowdSeen += 1;
     }
   }
+  for (const target of targets) {
+    if (target.whole && (misses.get(target.whole.subject) ?? 0) > mayMissOf(points.get(target.whole.subject) ?? 0, target.whole.share)) return false;
+  }
   return crowd === 0 || crowdSeen >= CROWD_SEEN * crowd;
+}
+
+/** How many of `points` a subject marked {@link asWhole} with `share` may have hidden. */
+function mayMissOf(points: number, share: number): number {
+  return Math.floor(points * (1 - share) + 1e-9);
 }
 
 function isSeeThrough(material: Material | Material[]): boolean {
@@ -528,12 +715,11 @@ export interface OccluderSet {
 const SCRATCH_CLOSEST = new Vector3();
 const SCRATCH_SEGMENT = new Line3();
 
-/** The meshes whose bounding sphere comes within `pad` of the segment `a`–`b`, none of subject `skip`'s own. */
-function alongSegment(set: OccluderSet, a: Vector3, b: Vector3, pad: number, skip = -1): Mesh[] {
+/** The meshes whose bounding sphere comes within `pad` of the segment `a`–`b`. */
+function alongSegment(set: OccluderSet, a: Vector3, b: Vector3, pad: number): Mesh[] {
   SCRATCH_SEGMENT.set(a, b);
   const out: Mesh[] = [];
   set.spheres.forEach((sphere, index) => {
-    if (skip >= 0 && set.owners[index] === skip) return;
     SCRATCH_SEGMENT.closestPointToPoint(sphere.center, true, SCRATCH_CLOSEST);
     if (SCRATCH_CLOSEST.distanceTo(sphere.center) <= sphere.radius + pad) out.push(set.meshes[index]!);
   });
@@ -570,17 +756,37 @@ export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: Occlu
 
 /** The name of the first thing crossing the segment from `eye` to `target`, nothing of subject `owner`'s own, or `null`. */
 function firstHit(eye: Vector3, target: Vector3, occluders: OccluderSet, owner = -1): string | null {
+  return firstBlocker(eye, target, occluders, owner)?.name ?? null;
+}
+
+/**
+ * The first thing crossing the segment from `eye` to `target`, nothing of
+ * subject `owner`'s own: its name, and whose it is — a subject's index, or −1
+ * for the room and her own body — or `null`.
+ */
+export function firstBlocker(eye: Vector3, target: Vector3, occluders: OccluderSet, owner = -1): { readonly name: string; readonly owner: number } | null {
   const toward = target.clone().sub(eye);
   const length = toward.length();
   if (length < 1e-6) return null;
-  const candidates = alongSegment(occluders, eye, target, 0.01, owner);
+  SCRATCH_SEGMENT.set(eye, target);
+  const candidates: Mesh[] = [];
+  const whose = new Map<Object3D, number>();
+  occluders.spheres.forEach((sphere, index) => {
+    const own = occluders.owners[index] ?? -1;
+    if (owner >= 0 && own === owner) return;
+    SCRATCH_SEGMENT.closestPointToPoint(sphere.center, true, SCRATCH_CLOSEST);
+    if (SCRATCH_CLOSEST.distanceTo(sphere.center) > sphere.radius + 0.01) return;
+    const mesh = occluders.meshes[index]!;
+    candidates.push(mesh);
+    whose.set(mesh, own);
+  });
   if (candidates.length === 0) return null;
   RAYCASTER.set(eye, toward.divideScalar(length));
   RAYCASTER.near = 0;
   // A hair short of the target, so the far side of a thin animal is never "in front" of it.
   RAYCASTER.far = Math.max(0, length - 0.05);
   const hit = RAYCASTER.intersectObjects(candidates, false)[0];
-  return hit ? hit.object.name || hit.object.parent?.name || '(unnamed)' : null;
+  return hit ? { name: hit.object.name || hit.object.parent?.name || '(unnamed)', owner: whose.get(hit.object) ?? -1 } : null;
 }
 
 /** Whether any drawn surface is within {@link EYE_CLEARANCE} of the eye, along the six axes. */
@@ -768,9 +974,14 @@ export function shotZoom(camera: IsoCamera, subject: Box3): number {
 }
 
 /** Lower is better: how far a clear candidate is from the shot we would draw by hand. */
-function shotCost(swing: number, back: number, height: number, yawDegrees: number): number {
+function shotCost(swing: number, back: number, height: number, yawDegrees: number, ideal: ShotRules['ideal'] = {}): number {
   const rigTurn = Math.abs(wrapDegrees(yawDegrees - CAMERA_YAW_DEGREES));
-  return Math.abs(Math.abs(swing) - IDEAL_SWING) / 10 + Math.abs(back - IDEAL_BACK) + Math.abs(height - IDEAL_HEIGHT) + rigTurn / 90;
+  return (
+    Math.abs(Math.abs(swing) - (ideal.swing ?? IDEAL_SWING)) / 10 +
+    Math.abs(back - (ideal.back ?? IDEAL_BACK)) +
+    Math.abs(height - (ideal.height ?? IDEAL_HEIGHT)) +
+    rigTurn / 90
+  );
 }
 
 /**
@@ -815,7 +1026,12 @@ export function* solveExhibitShotSteps(
   her?: Box3,
   rules: ShotRules = {},
 ): Generator<void, ExhibitShot | null> {
-  const { box, targets } = subjectOf(subjects, rules.spread ?? 0);
+  const middles = subjectOf(subjects);
+  const box = middles.box;
+  // A subject seen as a whole is judged on its spread, not on a tube to its middle as well.
+  const judged = (list: readonly ShotTarget[]): ShotTarget[] => (rules.spread ? list.filter((_, i) => wholeShare(subjects[i]!) === null) : [...list]);
+  const targets = judged(middles.targets);
+  if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY)));
   if (box.isEmpty()) return null;
   const focus = box.getCenter(new Vector3());
   // Every sightline ends inside the subjects' box: this far round its middle, and the tube's width.
@@ -832,11 +1048,15 @@ export function* solveExhibitShotSteps(
     }
   }
   const mutualRoots = [...owners.keys()];
+  if (body) owners.set(body, HER);
   const ignore = [...(rules.mutual ? [] : subjects), ...cast, ...world.seeThrough];
+  yield;
   const occluders = collectOccluders([world.hall, ...(body ? [body] : []), ...mutualRoots], ignore, owners);
+  yield;
   // The eye must not be inside her, either, but she is not something to keep
   // clear of by a hand's breadth — the shot is over her shoulder.
   const near = collectOccluders([world.hall, ...mutualRoots], ignore);
+  yield;
   const framing = shotZoom(world.camera, box);
   const contain = rules.contain;
   // The outer subjects' boxes: a part's (the owl's head) is inside its whole's.
@@ -854,11 +1074,12 @@ export function* solveExhibitShotSteps(
   const rig = rigPose(player, world.camera.targetZoom);
 
   // "Behind her": along the line from the animals through her. Stood right
-  // on top of the focus, her own back is the answer instead.
+  // on top of the focus, her own back is the answer instead — and always,
+  // over her shoulder (`ShotRules.overHerShoulder`), with the fan round her.
   let behindX = player.x - focus.x;
   let behindZ = player.z - focus.z;
   const reach = Math.hypot(behindX, behindZ);
-  if (reach < 0.5) {
+  if (reach < 0.5 || rules.overHerShoulder) {
     behindX = -Math.sin(facing);
     behindZ = -Math.cos(facing);
   } else {
@@ -866,18 +1087,23 @@ export function* solveExhibitShotSteps(
     behindZ /= reach;
   }
   const behind = Math.atan2(behindX, behindZ);
-  const start = Math.max(reach, 0.5);
+  const origin = rules.overHerShoulder ? player : focus;
+  const start = rules.overHerShoulder ? 0 : Math.max(reach, 0.5);
 
   // Every candidate, cheapest-to-reject tests first, then in order of how
   // close each is to the shot we would draw by hand: the first that passes
   // everything is the best there is, so nothing after it is ever cast.
   const candidates: { eye: Vector3; cost: number; zoom: number }[] = [];
+  let built = 0;
   for (const swing of EYE_SWINGS) {
     const bearing = behind + (swing * Math.PI) / 180;
     for (const back of EYE_BACKS) {
       for (const height of EYE_HEIGHTS) {
+        // A step at a time: each eye is framed through a lens or three, and there are hundreds.
+        built += 1;
+        if (built % CANDIDATES_PER_STEP === 0) yield;
         const out = start + back;
-        const eye = new Vector3(focus.x + Math.sin(bearing) * out, room.floorY + height, focus.z + Math.cos(bearing) * out);
+        const eye = new Vector3(origin.x + Math.sin(bearing) * out, room.floorY + height, origin.z + Math.cos(bearing) * out);
         if (!insideHall(eye, room)) {
           if (report) report.outside += 1;
           continue;
@@ -906,7 +1132,7 @@ export function* solveExhibitShotSteps(
           if (report) report.tooSmall += 1;
           continue;
         }
-        candidates.push({ eye, zoom, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees) + share * 4 + Math.max(0, 0.35 - span) * 6 });
+        candidates.push({ eye, zoom, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees, rules.ideal) + share * 4 + Math.max(0, 0.35 - span) * 6 });
       }
     }
   }
@@ -919,6 +1145,8 @@ export function* solveExhibitShotSteps(
   }
 
   let best: { eye: Vector3; seen: boolean[]; cost: number; zoom: number } | null = null;
+  /** The finer spread a passing candidate is confirmed on, sampled the first time one passes. */
+  let fine: ShotTarget[] | null = null;
   let tried = 0;
   for (const { eye, cost, zoom } of candidates) {
     if (tried > 0) yield;
@@ -927,16 +1155,25 @@ export function* solveExhibitShotSteps(
       if (report) report.tooClose += 1;
       continue;
     }
-    const seen = shotSees(eye, targets, occludersToward(occluders, eye, focus, sightReach), report);
+    const seen = yield* shotSeesSteps(eye, targets, occludersToward(occluders, eye, focus, sightReach), report);
     if (!seen) {
       if (report) report.blocked += 1;
       continue;
     }
     // And the way there and back: the eye sweeps down from the rig, and a
     // shot whose own approach crosses a wall, the log or a vine is no shot.
-    if (!approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near, room)) {
+    if (!(yield* approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near, room))) {
       if (report) report.approach += 1;
       continue;
+    }
+    // Seen whole on the coarse spread, confirmed on a finer one before it is taken: sixteen points
+    // can sit either side of the corner of a bookcase that a child's back is behind.
+    if (rules.spread) {
+      fine ??= [...judged(middles.targets), ...(yield* spreadTargets(subjects, rules.spread * SPREAD_CONFIRM, world.room.floorY))];
+      if (!(yield* shotSeesSteps(eye, fine, occludersToward(occluders, eye, focus, sightReach), report))) {
+        if (report) report.unconfirmed += 1;
+        continue;
+      }
     }
     best = { eye, seen, cost, zoom };
     break;
@@ -969,6 +1206,8 @@ export interface SolveReport {
   tooSmall: number;
   /** Eyes from which the frame could not hold everything {@link ShotRules.contain} asks for. */
   uncontained: number;
+  /** Eyes that saw every whole subject on the coarse spread and not on the finer one ({@link SPREAD_CONFIRM}). */
+  unconfirmed: number;
   /** The smallest share of the frame she would have filled from any eye that got that far. */
   herLeast?: number;
   /** What blocked the stars' sightlines, by mesh name, over every candidate. */
@@ -997,7 +1236,7 @@ export function eyeOfPose(pose: Pose, out = new Vector3()): Vector3 {
  * in the room's space and clear of everything drawn — sampled on the same
  * blend {@link ExhibitCamera} drives, so it is the path the camera takes.
  */
-function approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom): boolean {
+function* approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom): Generator<void, boolean> {
   const scratch = { focus: new Vector3() };
   const eye = new Vector3();
   for (const [from, to] of [[rig, shot], [shot, rig]] as const) {
@@ -1005,10 +1244,15 @@ function approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom)
       eyeOfPose(blendPose(from, to, smoothstep(i / APPROACH_SAMPLES), scratch), eye);
       if (!eyeInHallSpace(eye, room)) return false;
       if (eye.y < room.floorY + room.wallHeight + 3 && eyeTooClose(eye, near, APPROACH_CLEARANCE)) return false;
+      // A step at a time: every sample asks every drawn surface in the room.
+      if (i % APPROACH_SAMPLES_PER_STEP === 0) yield;
     }
   }
   return true;
 }
+
+/** Approach samples between yields — each asks every drawn surface in the room ({@link eyeTooClose}). */
+const APPROACH_SAMPLES_PER_STEP = 10;
 
 // ---------------------------------------------------------------- director
 
@@ -1165,7 +1409,7 @@ export class ExhibitCamera {
    */
   start(id: string, subjects: readonly Object3D[], cast: readonly Object3D[], player: ShotPlayer, rules: ShotRules = {}): boolean {
     if (player.riding) return false;
-    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, herTooBig: 0, tooSmall: 0, uncontained: 0, blockers: {} };
+    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, herTooBig: 0, tooSmall: 0, uncontained: 0, unconfirmed: 0, blockers: {} };
     this.lastReport = report;
     const remembered = this.memory.get(id);
     const preferred = remembered && Math.hypot(remembered.at.x - player.position.x, remembered.at.z - player.position.z) < REMEMBER_WITHIN ? remembered.eye : undefined;
