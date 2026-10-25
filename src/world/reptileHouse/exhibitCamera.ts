@@ -1,5 +1,4 @@
-import { Box3, InstancedMesh, Line3, Matrix4, Mesh, Object3D, PerspectiveCamera, Raycaster, Sphere, Vector3, type Material } from 'three';
-import { visiblePoints } from '../../art/style/measure';
+import { Box3, InstancedMesh, Line3, Matrix4, Mesh, PerspectiveCamera, Raycaster, Sphere, Vector3, type BufferAttribute, type InterleavedBufferAttribute, type Material, type Object3D } from 'three';
 import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, PLAYER_RADIUS, cameraViewHalfHeight } from '../../core/constants';
 import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
 import type { CollisionWorld } from '../Collision';
@@ -359,7 +358,7 @@ export function subjectOf(subjects: readonly Object3D[], spread = 0, floorY = -I
     targets.push({ point: SCRATCH_BOX.getCenter(new Vector3()), crowd: subject.userData['exhibitCrowd'] === true, owner: owners[i] ?? i });
   });
   if (spread > 0) {
-    const steps = spreadTargets(subjects, spread, floorY);
+    const steps = spreadTargets(subjects, spread, floorY, subjects.map(freeze), targets.map((target) => target.point));
     for (;;) {
       const step = steps.next();
       if (step.done) {
@@ -375,25 +374,61 @@ export function subjectOf(subjects: readonly Object3D[], spread = 0, floorY = -I
  * The spread targets of every subject marked {@link asWhole}
  * ({@link ShotRules.spread}): `count` of its own drawn points each, owned by
  * its outer subject and carrying its share — a subject at a time, yielding
- * between them (a child is ten thousand vertices).
+ * between them (a child is ten thousand vertices), from its drawn meshes as
+ * they were {@link freeze frozen} and its middle as it was then.
  */
-function* spreadTargets(subjects: readonly Object3D[], count: number, floorY: number): Generator<void, ShotTarget[]> {
+function* spreadTargets(
+  subjects: readonly Object3D[],
+  count: number,
+  floorY: number,
+  frozen: readonly FrozenMeshes[],
+  middles: readonly Vector3[],
+): Generator<void, ShotTarget[]> {
   const owners = subjectOwners(subjects);
   const out: ShotTarget[] = [];
   for (const [i, subject] of subjects.entries()) {
     const share = wholeShare(subject);
-    if (share === null) continue;
+    const meshes = frozen[i];
+    const middle = middles[i];
+    if (share === null || !meshes || !middle) continue;
     yield;
-    const middle = boxOf(subject, SCRATCH_BOX).getCenter(new Vector3());
-    for (const point of spreadPoints(subject, middle, count, floorY + SHOT_FLOOR_GRAZE)) {
+    for (const point of spreadPoints(meshes, middle, count, floorY + SHOT_FLOOR_GRAZE)) {
       out.push({ point, crowd: false, owner: owners[i] ?? i, whole: { subject: i, share, edge: edgeOf(point, middle) } });
     }
   }
   return out;
 }
 
-/** An identity frame: {@link visiblePoints} reports in it, so its points are world points. */
-const WORLD_FRAME = new Object3D();
+/** A subject's drawn meshes as they stood at one moment: each one's vertices, and its world matrix then. */
+type FrozenMeshes = readonly { readonly position: BufferAttribute | InterleavedBufferAttribute; readonly matrix: Matrix4 }[];
+
+/**
+ * **`subject`'s drawn meshes, held as they stand now** — every visible mesh's
+ * vertices with a copy of its world matrix (an instanced one's per instance),
+ * the rules `visiblePoints` keeps. A solve spreads over frames while a child
+ * sways; sampled from these, its points are this frame's, whichever frame
+ * each is sampled in.
+ */
+function freeze(subject: Object3D): FrozenMeshes {
+  subject.updateWorldMatrix(true, true);
+  const out: { position: BufferAttribute | InterleavedBufferAttribute; matrix: Matrix4 }[] = [];
+  const instance = new Matrix4();
+  subject.traverse((object) => {
+    if (!(object instanceof Mesh) || !object.visible) return;
+    for (let node = object.parent; node; node = node.parent) if (!node.visible) return;
+    const position = object.geometry.getAttribute('position') as BufferAttribute | InterleavedBufferAttribute | undefined;
+    if (!position) return;
+    if (object instanceof InstancedMesh) {
+      for (let n = 0; n < object.count; n += 1) {
+        object.getMatrixAt(n, instance);
+        out.push({ position, matrix: new Matrix4().multiplyMatrices(object.matrixWorld, instance) });
+      }
+    } else {
+      out.push({ position, matrix: object.matrixWorld.clone() });
+    }
+  });
+  return out;
+}
 
 /**
  * **How near the room's floor a drawn point is the floor's own**, metres: a
@@ -405,20 +440,20 @@ const WORLD_FRAME = new Object3D();
 export const SHOT_FLOOR_GRAZE = 0.03;
 
 /**
- * `count` of `subject`'s drawn points (`visiblePoints`: its visible meshes'
+ * `count` of a subject's drawn points ({@link freeze}: its visible meshes'
  * vertices, world) above `above`, each the one furthest from every point
  * picked before it, starting from `from` — spread over the whole of it, edges
  * first.
  */
-function spreadPoints(subject: Object3D, from: Vector3, count: number, above: number): Vector3[] {
+function spreadPoints(meshes: FrozenMeshes, from: Vector3, count: number, above: number): Vector3[] {
   const all: number[] = [];
-  visiblePoints(
-    subject,
-    (point) => {
+  const point = new Vector3();
+  for (const { position, matrix } of meshes) {
+    for (let i = 0; i < position.count; i += 1) {
+      point.fromBufferAttribute(position, i).applyMatrix4(matrix);
       if (point.y >= above) all.push(point.x, point.y, point.z); // flat-ok: a shot's room is its own flat space off the sphere
-    },
-    WORLD_FRAME,
-  );
+    }
+  }
   // Sampled from at most SPREAD_FROM of them, every k-th: a child is ten thousand vertices, and
   // farthest-point sampling costs every one of them for every point picked.
   const stride = Math.max(1, Math.ceil(all.length / 3 / SPREAD_FROM));
@@ -1041,7 +1076,6 @@ export function* solveExhibitShotSteps(
   // A subject seen as a whole is judged on its spread, not on a tube to its middle as well.
   const judged = (list: readonly ShotTarget[]): ShotTarget[] => (rules.spread ? list.filter((_, i) => wholeShare(subjects[i]!) === null) : [...list]);
   const targets = judged(middles.targets);
-  if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY)));
   if (box.isEmpty()) return null;
   const focus = box.getCenter(new Vector3());
   // Every sightline ends inside the subjects' box: this far round its middle, and the tube's width.
@@ -1052,7 +1086,7 @@ export function* solveExhibitShotSteps(
   // it is looking at (`ShotRules.mutual`); otherwise none of them is one.
   const owners = new Map<Object3D, number>();
   if (rules.mutual) {
-    for (const { owner } of targets) {
+    for (const { owner } of middles.targets) {
       const outer = subjects[owner];
       if (outer) owners.set(outer, owner);
     }
@@ -1060,13 +1094,18 @@ export function* solveExhibitShotSteps(
   const mutualRoots = [...owners.keys()];
   if (body) owners.set(body, HER);
   const ignore = [...(rules.mutual ? [] : subjects), ...cast, ...world.seeThrough];
-  yield;
+  // **Everything the solve reads of the scene, as it stands this frame**: the occluders held where
+  // they are (`collectOccluders`) and the whole subjects' drawn meshes frozen — so the eye it
+  // chooses is this frame's answer, however many frames the solve then spreads over while the
+  // listeners sway (two runs of one scene once chose two eyes).
   const occluders = collectOccluders([world.hall, ...(body ? [body] : []), ...mutualRoots], ignore, owners);
-  yield;
   // The eye must not be inside her, either, but she is not something to keep
   // clear of by a hand's breadth — the shot is over her shoulder.
   const near = collectOccluders([world.hall, ...mutualRoots], ignore);
+  const frozen = rules.spread ? subjects.map((subject) => (wholeShare(subject) === null ? [] : freeze(subject))) : [];
+  const middlePoints = middles.targets.map((target) => target.point);
   yield;
+  if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY, frozen, middlePoints)));
   const framing = shotZoom(world.camera, box);
   const contain = rules.contain;
   // The outer subjects' boxes: a part's (the owl's head) is inside its whole's.
@@ -1179,7 +1218,7 @@ export function* solveExhibitShotSteps(
     // Seen whole on the coarse spread, confirmed on a finer one before it is taken: sixteen points
     // can sit either side of the corner of a bookcase that a child's back is behind.
     if (rules.spread) {
-      fine ??= [...judged(middles.targets), ...(yield* spreadTargets(subjects, rules.spread * SPREAD_CONFIRM, world.room.floorY))];
+      fine ??= [...judged(middles.targets), ...(yield* spreadTargets(subjects, rules.spread * SPREAD_CONFIRM, world.room.floorY, frozen, middlePoints))];
       if (!(yield* shotSeesSteps(eye, fine, occludersToward(occluders, eye, focus, sightReach), report))) {
         if (report) report.unconfirmed += 1;
         continue;
