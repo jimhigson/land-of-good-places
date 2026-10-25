@@ -1,6 +1,6 @@
 # HANDOFF — story time camera (`feat/story-time-camera`)
 
-Engineer, Opus 5.5, 24 Oct 2026. Worktree `.claude/worktrees/story-camera`.
+Engineer, Opus 5.5, 24–25 Oct 2026. Worktree `.claude/worktrees/story-camera`.
 
 ## The ask (Jim, 24 Oct 2026, verbatim)
 
@@ -10,37 +10,41 @@ small change now please"
 
 ## What is built (pushed)
 
-- `src/world/reptileHouse/exhibitCamera.ts` — the one over-the-shoulder shot. Generalised, exhibits unchanged:
-  `ShotWorld.room` (`ShotRoom`; `REPTILE_HALL`), and opt-in `ShotRules`: `mutual` (subjects hide one another,
-  never themselves — `subjectOwners`, `OccluderSet.owners`), `spread` (each outer subject also seen through N of
-  its own drawn points, farthest-point sampled), `contain` (the frame holds every subject box, lens test, and
-  label anchors by `IsoCamera.isOnScreen`'s own focus-plane test — `containZoom`). `occludersToward` pre-culls
-  to the eye→focus segment (the room's instanced books are 9291 proxies otherwise).
+- `src/world/reptileHouse/exhibitCamera.ts` — the one over-the-shoulder shot (director + solver), generalised,
+  exhibits unchanged (check:exhibit-camera 339 ✓ before and after; its framing numbers vary ±0.2% run to run on
+  the same code — the solve spreads over frames on a 4 ms wall-clock budget, pre-existing). New: `ShotRoom`
+  (`REPTILE_HALL`), `ShotRules` {`mutual`, `spread`, `contain`, `overHerShoulder`, `ideal`}, `asWhole(objs, share)`,
+  `firstBlocker` (whose mesh: subject index, −1 room, −2 her), `occludersToward` (pre-cull), confirm on a 6×
+  spread, a room-only edge margin (7 cm), yields in every heavy step (`spreadTargets`, occluders, framing the fan
+  every 40 eyes, 12 sightlines a step, approach every 10 samples).
 - `src/world/library/storyCamera.ts` — `StoryCamera`, Game-level like `bookGlance.ts` (outside the park closure).
-  Wanted = inside && seated && phase 'reading' && owl perched; starts on the rising edge; `cancel()` when she
-  gets up/leaves; `bubbleLeft = Infinity` while reading, so the director's natural ease home follows the story's
-  end. Input view `SEATED` never cancels (seated, the stick does nothing); `riding:false` (a cushion is a seat).
-  Seats (`storySeats`: chair, rug, the kids' cushions) are the director's `cast`: never occluders.
-- `Game.tick`: `storyCamera.apply(camera, player, dt)` after the glance, claim folded into `focusClaim`.
-- Deep link: `/library?sit=1&story=now` (`main.ts` carries `sit` raw — the entry chunk must not import
-  `layout.ts`/`libraryKit`; `Game.enterLibrarySpawn` resolves it against `LIBRARY_PLAYER_SEATS`).
-  `Library.requestEnter(at, sit)` seats her behind the iris via `seatOn` (the Sit chip's own path).
+  Wanted = inside && seated && 'reading' && owl perched; starts on the rising edge; cancel when she gets up/leaves;
+  `bubbleLeft = Infinity` while reading. Shares: owl's head 1, owl 0.75, each head 0.85, each listener 0.5; the
+  room or her body on any point fails an eye. `STORY_IDEAL` = 2×KID_HEIGHT up, 1.6 m back, 50° off her back.
+- `Game.tick` applies it after the glance. Deep link `/library?sit=1&story=now` (`sit` carried raw by `main.ts`
+  — the entry chunk must not import `layout.ts`; `Game.enterLibrarySpawn` resolves it; `Library.requestEnter(at,
+  sit)` → `seatOn` behind the iris). `Library.furniture(id)` exposes the furnished pieces (the seats).
+- Checks: check:library STORY CAMERA (4 cases: cushion 1/3 × 1280×800/390×844; chip / jump / standUp / story
+  ends; one sits after the reading began), mutations `no-story-camera`, `story-camera-stays`, `story-camera-low`;
+  check:labels wiring + "bubble and Get up chip both drawn on every held reading frame"; check:deep-links `/library?sit=1&story=now`.
 
-## Findings (measured)
+## The finding that shaped it (measured, 24–25 Oct)
 
-- Seed 5's accepted restart is **1** (726 s to find on main's source). Locally `LGP_PARK_RESTART=1` builds it
-  without re-running acceptance after closure edits (exhibitCamera.ts and Library.ts are in the closure).
-- check:exhibit-camera: 339 ✓ before and after; every chosen eye identical. Its framing numbers vary ±0.2% run to
-  run on the SAME code (the solve spreads over frames on a 4 ms wall-clock budget) — pre-existing, always green.
-- The kids' heads are ~1.4 m tall (KID_HEIGHT 2.12, chibi). With only middle+head targets (exhibit rules) the
-  solver took eyes from which **40% of the owl's drawn points were behind Juno's hair** (cushion 1). With every
-  subject required whole (spread 16, mutual), **no eye in the exhibit fan (heights ≤ 5.3 m) passes** from either
-  cushion. Scanning the room to see what is achievable (`.claude/scratch/proto-scan.mts`, not committed).
+The children's heads are ~1.4 m tall and ~1.5 m across with hair (KID_HEIGHT 2.12); cushions 4 and 5 sit square
+in front of the story chair. Over her shoulder, the best eye sees of the owl: 51% at 2.5 m up, 57% at 3 m, 77% at
+3.5 m, 88% at 4 m, 92% at 4.5 m — and her OWN head hides part of someone from almost every eye below 4 m. All
+of everyone whole needs an eye 6 m up (top-down). So the shot comes down to ~4.3–4.8 m (just over the listeners'
+heads), 1.6 m behind her, off her shoulder: owl 84–90% (head 100%), children 96–100%, nothing of the room or hers
+in front of anyone. A layout change (cushions 4/5 apart, or the chair moved — HANDOFF-library-v2 "the cushion-1
+view") would let it come lower; that is Jim's call.
+
+## Local running
+
+- Seed 5's accepted restart is **1**: `LGP_PARK_RESTART=1` skips the 12-minute acceptance loop locally.
+- Prototypes in `.claude/scratch/` (ignored, never committed).
 
 ## Status
 
-- [x] solver generalised, check:exhibit-camera still green
-- [x] story camera + Game wiring + deep link (tsc clean)
-- [ ] decide what "unoccluded" can be at player level (scan running)
-- [ ] check:library clause (every cushion × 1280x800 and 390x844), proved red; check:labels / check:deep-links
-- [ ] checks, PR, CI, browser look, frame sheet
+- [x] solver + story camera + deep link + check wiring
+- [ ] check:library STORY CAMERA green, reds proved (geometry pasted)
+- [ ] targeted checks, full check, test:procgen; PR; CI; browser look + frame sheet
