@@ -128,9 +128,12 @@ export const STORY_LISTENER_SEEN = 0.5;
  * tried from first (`ShotRules.ideal`; it decides nothing about what the shot
  * must see): an eye a little over the listeners' heads (twice a child's
  * height), close behind her and well off her shoulder, where her own head is
- * beside the audience in the picture rather than in front of it. Measured
- * from cushion 1, that is the lowest eye from which nothing of hers hides
- * anyone and three quarters of the owl shows (24 Oct 2026).
+ * beside the audience in the picture rather than in front of it. The lowest
+ * eye that passes everything is a step above it: measured from both cushions
+ * on both screens (25 Oct 2026), 5.3 m up, 1.6 m behind her — anything lower
+ * and her own shoulder brushes the outline of a listener as he sways (the
+ * hand's-breadth edge, `ShotRules.spread`), or the owl drops below three
+ * quarters seen.
  */
 export const STORY_IDEAL = { height: 2 * KID_HEIGHT, back: 1.6, swing: 50 } as const;
 

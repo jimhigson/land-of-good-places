@@ -46,5 +46,17 @@ view") would let it come lower; that is Jim's call.
 ## Status
 
 - [x] solver + story camera + deep link + check wiring
-- [ ] check:library STORY CAMERA green, reds proved (geometry pasted)
-- [ ] targeted checks, full check, test:procgen; PR; CI; browser look + frame sheet
+- [x] check:library green: exit 0, 337 ✓ (STORY CAMERA, 4 cases). Eyes (room-local): cushion 1 (2.86, 4.80 up,
+  −6.59) both screens; cushion 3 (5.14, 4.80, −6.59) laptop, (7.46, 5.30, −7.63) phone.
+- Reds (seed 5 restart 1; room at (−600, −600); cushion 1 room (2.1, −8), cushion 3 (5.9, −8), chair (4, −11.1)):
+  - `no-story-camera`: exit 1, 331 ✓ 6 ✗ — never comes down ×4 ("6.02 s after the first page … idle"); from the
+    rig, cushion 3: "Fenn 0 by the room, 1569 by her — e.g. (5.00, 0.20 up, -9.50) behind HER OWN BODY".
+  - `story-camera-low` (the control: eye straight behind her at 2.5 m, room (1.05, 2.50 up, −4.50) from cushion 1):
+    exit 1, 314 ✓ 23 ✗ — "the owl's head wholly seen (5% of 259 points) and 3% of her"; "the owl … 1206 by her;
+    Juno … 5182 by her — e.g. (3.81, 0.36 up, -11.19) behind HER OWN BODY"; "Juno 22% (head 34%) … Fenn 15%".
+  - `story-camera-stays`: exit 1, 299 ✓ 38 ✗ — but only FOUND FROM THE DESK (36) and 2 occlusion lines: the kept
+    focus is where the glide home ended, on her, so STORY CAMERA's home read green while she stood still. Fixed:
+    the walk clause now asks the camera to follow her (orbit ≤ 0.3 m a second after she stops). Rerunning.
+- [ ] check:labels, tap-spacing, exits, jitter; full check; test:procgen
+- [x] **PR #736** opened (base main). CI running.
+- [ ] CI green; look on the preview (`.claude/scratch/look.mjs <preview-url> <out>`), frame sheet

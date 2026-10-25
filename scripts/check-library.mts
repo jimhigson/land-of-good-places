@@ -5290,7 +5290,8 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
  * - **home**: she gets up — the chip, a jump, and `Library.standUp` (a tap's own road, `Game.onTap`) — and
  *   within {@link HOME_WITHIN_CANCEL} s the camera is on the rig again (`poseDistance` 0), at the zoom she had,
  *   orbiting her; or the story ends with her still sitting and it eases home on its own within
- *   {@link HOME_WITHIN_END} s of the last word; and afterwards the stick walks her (nothing is trapped).
+ *   {@link HOME_WITHIN_END} s of the last word; and afterwards the stick walks her and the camera follows
+ *   her there (nothing is trapped, and nothing of the shot is left behind).
  *
  * The thresholds are this clause's own (never `storyCamera.ts`'s shares, which a check could not fail on):
  * measured on the built room, 24 Oct 2026, the shot shows 84–90% of the owl, her head whole, and 96–100% of
@@ -5627,11 +5628,18 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     );
     if (library.playerIsSeated) library.standUp();
     child.run(0.3);
-    // Nothing trapped: the stick walks her, away from the rug.
+    // Nothing trapped: the stick walks her, away from the rug, and the camera follows her there as it
+    // always does — a camera left orbiting where the shot ended reads as home only while she stands still.
     const from = child.room();
     child.run(1, child.towards(0, 1));
     const walked = Math.hypot(child.room().x - from.x, child.room().z - from.z);
-    say(walked >= 1 && !player.riding, `  and the stick walks her afterwards: ${walked.toFixed(2)} m in a second (at least 1), riding ${player.riding}`);
+    child.run(1);
+    const follows = Math.hypot(camera.focusPoint.x - player.position.x, camera.focusPoint.z - player.position.z);
+    say(
+      walked >= 1 && !player.riding && follows <= 0.3,
+      `  and the stick walks her afterwards: ${walked.toFixed(2)} m in a second (at least 1), riding ${player.riding}; a second after she stops, the camera orbits her ` +
+        `${follows.toFixed(2)} m across the floor from her (0.3 allowed: it followed her)`,
+    );
   }
   camera.resize(SCREEN.width, SCREEN.height);
   // Back at the desk's front, as the clauses before this one leave her.

@@ -323,7 +323,7 @@ export interface ShotTarget {
   readonly whole?: {
     readonly subject: number;
     readonly share: number;
-    /** The point a hand's breadth further out from the subject's middle, across the floor: nothing of the room may stand in front of that either (see {@link edgeOf}). */
+    /** The point a hand's breadth further out from the subject's middle, across the floor: nothing of the room or of hers may stand in front of that either (see {@link edgeOf}). */
     readonly edge: Vector3;
   };
 }
@@ -550,10 +550,9 @@ function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders:
       yield;
     }
     for (const hit of [blocker, edge]) if (hit && report) report.blockers[hit.name] = (report.blockers[hit.name] ?? 0) + 1;
-    // The room or her own body on the point itself, or the room a hand's breadth beside it (the
-    // corner of a case grazing a child's back): never. Her body near a subject's edge is her
-    // shoulder, which is the shot.
-    if ((blocker && blocker.owner < 0) || (edge && edge.owner === -1)) return null;
+    // The room or her own body on the point itself, or a hand's breadth beside it (the corner of a
+    // case grazing a child's back, her shoulder brushing a listener's outline as they sway): never.
+    if ((blocker && blocker.owner < 0) || (edge && edge.owner < 0)) return null;
     if (blocker === null) {
       seen[index] = true;
       continue;
@@ -663,8 +662,17 @@ export function collectOccluders(roots: readonly Object3D[], ignore: readonly Ob
         meshOwners.push(owner);
       }
     } else {
-      expanded.push(mesh);
-      spheres.push(worldSphere(mesh));
+      // Where it is now, held: a solve spreads over frames while a child sways or an animal
+      // breathes, and its answer must be the scene's as it stood when it began, not a race
+      // between the solve and the clock (two runs of one scene chose two eyes).
+      const still = new Mesh(mesh.geometry, mesh.material);
+      still.name = mesh.name;
+      still.matrixAutoUpdate = false;
+      still.matrixWorldAutoUpdate = false;
+      still.matrixWorld.copy(mesh.matrixWorld);
+      if (!mesh.name && mesh.parent) still.name = mesh.parent.name;
+      expanded.push(still);
+      spheres.push(worldSphere(still));
       meshOwners.push(owner);
     }
   }
