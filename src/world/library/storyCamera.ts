@@ -36,11 +36,15 @@ import type { StoryPhase } from './storyTime';
  * top, and home the same way; `ExhibitCamera.apply` the single place it writes
  * the camera. This file decides only *when*, and *of what*: the room
  * ({@link LIBRARY_SHOT_ROOM}), the subjects (the owl and her head; each child
- * and her head), and the two rules story time asks of the solver
+ * and her head), and what story time asks of the solver beyond an exhibit
  * (`ShotRules`): **the subjects hide one another** — a child's head between
- * the eye and the owl is what this shot is solved to see past — and **the
- * frame holds them all**, and the owl's bubble's anchor (a bubble is drawn
- * only while its anchor is in shot, #415), on whatever screen is there.
+ * the eye and the owl is what this shot is solved to see past; **each is seen
+ * as a whole**, through a spread of its own drawn points, not only its middle
+ * (see {@link STORY_OWL_SEEN} for how much of each); **the frame holds them
+ * all**, and the owl's bubble's anchor (a bubble is drawn only while its anchor
+ * is in shot, #415), on whatever screen is there; and the fan of eyes stands
+ * **round her, from her back** — she faces the storyteller's chair, and the
+ * audience's middle is off to one side of it.
  *
  * ## It never takes the controls
  *
@@ -107,7 +111,7 @@ export const STORY_SPREAD = 16;
  * - **the owl's head — her face, her glasses — all of it** (`asWhole`, share 1);
  * - **most of the owl**: {@link STORY_OWL_SEEN} of her;
  * - **most of every listener's head**: {@link STORY_HEAD_SEEN} of each, and
- *   each listener's middle;
+ *   {@link STORY_LISTENER_SEEN} of every listener;
  *
  * and nothing but a listener can cover any of them — no bookcase, no lamp,
  * never her own head (the solver's sightlines run against everything drawn in
