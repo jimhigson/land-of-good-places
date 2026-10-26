@@ -5622,7 +5622,7 @@ const lensPass = (meshes: readonly Mesh[]): LensPass => {
           const d1 = -to.z - lens.near;
           if ((d0 < 0 && d1 > 0) || (d0 > 0 && d1 < 0)) {
             const t = d0 / (d0 - d1);
-            crossing.push([from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t]);
+            crossing.push([from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t]); // flat-ok: the lens's own frame (view space), its y the screen's up
           }
         }
         if (crossing.length === 2 && segmentInRect(crossing[0]![0], crossing[0]![1], crossing[1]![0], crossing[1]![1], halfWidth, halfHeight)) cut = true;
