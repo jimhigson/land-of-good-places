@@ -62,24 +62,28 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
 - Seed 5's accepted restart is **1**: `LGP_PARK_RESTART=1` skips the 12-minute acceptance loop locally.
 - Prototypes in `.claude/scratch/` (ignored, never committed).
 
+## Real browser (26 Oct, dev server, seed 5, a profile with no save)
+
+- A profile with no save wears the default character's 1 m party hat (`defaultCharacterChoice`), 2.98 m to its
+  top. Bare-headed, check:library chose different eyes from cushion 3 than the game. Now its STORY CAMERA clause
+  dresses her the same way (catalogue model on `hatAnchor`, `player.wornHat` stub for `topHeight`; store untouched).
+- Solve time was up to 4.4 s of the story (phone, cushion 3: the 113th candidate). Fixed by `firstFrom` in
+  `exhibitCamera.ts`: a candidate asks first whatever turned the last down; same eye, 1251 → 357 steps, 1.1 s.
+  Probe: `.claude/scratch/probe-solve.mjs <base> <sit> <w> <h> "&seed=5" [hat]` (dev server only, `window.game`).
+- Hats, phone, cushion 3: party/flower 1.1 s; bobble/crown/snake 1.9–2.3 s; cap/ripika/puff 2.7–3.1 s; **sun: no
+  shot** (cushion 1 finds one). On a phone her name label can be cut by the left edge. Both reported, not fixed.
+- Exhibits vs main's own CI (ee1ad33a): settled eyes within 2.5 cm except skink 0.34 m, lagoon 9 cm (all pass).
+- Dev park reuse after a camera-only edit: copy `.parks/dev/<old16>/5` to `.parks/dev/<new16>/5` (the park does
+  not depend on the camera; saves a 15-minute rebuild). Never for CI.
+
 ## Status
 
-- [x] solver + story camera + deep link + check wiring
-- [x] check:library green: exit 0, 337 ✓ (STORY CAMERA, 4 cases). Eyes (room-local): cushion 1 (2.86, 4.80 up,
-  −6.59) both screens; cushion 3 (5.14, 4.80, −6.59) laptop, (7.46, 5.30, −7.63) phone.
-- Reds (seed 5 restart 1; room at (−600, −600); cushion 1 room (2.1, −8), cushion 3 (5.9, −8), chair (4, −11.1)):
-  - `no-story-camera`: exit 1, 331 ✓ 6 ✗ — never comes down ×4 ("6.02 s after the first page … idle"); from the
-    rig, cushion 3: "Fenn 0 by the room, 1569 by her — e.g. (5.00, 0.20 up, -9.50) behind HER OWN BODY".
-  - `story-camera-low` (the control: eye straight behind her at 2.5 m, room (1.05, 2.50 up, −4.50) from cushion 1):
-    exit 1, 314 ✓ 23 ✗ — "the owl's head wholly seen (5% of 259 points) and 3% of her"; "the owl … 1206 by her;
-    Juno … 5182 by her — e.g. (3.81, 0.36 up, -11.19) behind HER OWN BODY"; "Juno 22% (head 34%) … Fenn 15%".
-  - `story-camera-stays`: exit 1, 299 ✓ 38 ✗ — but only FOUND FROM THE DESK (36) and 2 occlusion lines: the kept
-    focus is where the glide home ended, on her, so STORY CAMERA's home read green while she stood still. Fixed:
-    the walk clause now asks the camera to follow her (orbit ≤ 0.3 m a second after she stops). Rerunning.
-- [x] at f859e2b5 (exit codes): exhibit-camera 0, library 0, stays red 1, labels 0 (both sizes), tap-spacing 0,
-  exits 0, jitter 0. Preview look at f859e2b5: works on both sizes, but the phone framing was too wide → f6749f3d.
-- [ ] at f6749f3d: exhibit-camera, library, labels ×2; then full `pnpm run check`; `pnpm run test:procgen`
-- [x] **PR #736** opened (base main). CI running.
+- [x] solver + story camera + deep link + check wiring; framing (f6749f3d); solve order (873e1606); hat (c9883778)
+- [x] at c9883778, exit codes: tsc 0, typecheck:test 0, exhibit-camera 0 (339 ✓), library 0 (337 ✓),
+  labels 0 at 390×844 (1211 held frames) and 1280×800 (1213); reds: low 1 (314/23), none 1 (331/6), stays 1 (296/41).
+  Eyes (room-local): cushion 1 (2.86, 5.30, −6.59); cushion 3 (5.14, 5.30, −6.59), phone (4.80, 4.30, −6.84).
+- [ ] full `pnpm run check` (running), then `pnpm run test:procgen`
+- [x] **PR #736**; body updated (`.claude/scratch/pr-body-2.md` is its source).
 - [ ] CI green; look on the newest preview (`node .claude/scratch/look.mjs <preview-url> <out>` — cushion 1 gets up
   mid-reading, cushion 3 stays to the end); one frame sheet (`node .claude/scratch/sheet.mjs <spec.json> <out.png>`),
-  frames to the `qa-screenshots` branch under `pr736/`.
+  frames to the `qa-screenshots` branch under `pr736/` (plumbing with a temporary index; no checkout).
