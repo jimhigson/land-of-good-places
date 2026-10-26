@@ -346,6 +346,11 @@ export class StoryCamera {
     return this.director.report;
   }
 
+  /** A shot is being solved this frame — for the checks (the solve begins on the frame she sits). */
+  get solving(): boolean {
+    return this.director.solving;
+  }
+
   /** How many times no clear shot could be found — for the checks (the camera then stays where it is). */
   get unsolved(): number {
     return this.director.unsolved.length;
