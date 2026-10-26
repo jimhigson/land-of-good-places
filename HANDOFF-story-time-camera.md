@@ -48,6 +48,15 @@ cases (cushion 1 (2.86, 5.30, −6.59), cushion 3 (5.14, 5.30, −6.59), room-lo
 The hand's-breadth edge is kept clear of her body as well as the room (her shoulder brushed Fenn's outline by 6
 points from a 4.3 m eye) — so the shot sits at 5.3 m, 1.6 m behind her, pitch ~54°.
 
+## Framing (26 Oct, f6749f3d)
+
+The f859e2b5 preview, phone held upright: lens 135° tall, the owl a few pixels across. The exhibit's own framing
+is sized from its animals' box seen from above, and containment was asked of axis-aligned boxes round turned
+children (half again as wide as they are). Now with `ShotRules.contain` the zoom IS the containment fit, measured
+on each whole subject's spread (its drawn extremities), `STORY_FRAME_MARGIN` 0.2 (room for the bubble over its
+anchor). Prototype: laptop lens 62–66° (zoom 2.3–2.5), phone ~100° tall (zoom 2.0); subjects reach 80% of the
+frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` returns their framing as before).
+
 ## Local running
 
 - Seed 5's accepted restart is **1**: `LGP_PARK_RESTART=1` skips the 12-minute acceptance loop locally.
@@ -67,7 +76,10 @@ points from a 4.3 m eye) — so the shot sits at 5.3 m, 1.6 m behind her, pitch 
   - `story-camera-stays`: exit 1, 299 ✓ 38 ✗ — but only FOUND FROM THE DESK (36) and 2 occlusion lines: the kept
     focus is where the glide home ended, on her, so STORY CAMERA's home read green while she stood still. Fixed:
     the walk clause now asks the camera to follow her (orbit ≤ 0.3 m a second after she stops). Rerunning.
-- [ ] after f859e2b5: exhibit-camera, library, stays red, labels, tap-spacing, exits, jitter (chain running,
-  `/tmp/story-cam-logs/targeted-summary.log`); then full check; test:procgen
+- [x] at f859e2b5 (exit codes): exhibit-camera 0, library 0, stays red 1, labels 0 (both sizes), tap-spacing 0,
+  exits 0, jitter 0. Preview look at f859e2b5: works on both sizes, but the phone framing was too wide → f6749f3d.
+- [ ] at f6749f3d: exhibit-camera, library, labels ×2; then full `pnpm run check`; `pnpm run test:procgen`
 - [x] **PR #736** opened (base main). CI running.
-- [ ] CI green; look on the preview (`.claude/scratch/look.mjs <preview-url> <out>`), frame sheet
+- [ ] CI green; look on the newest preview (`node .claude/scratch/look.mjs <preview-url> <out>` — cushion 1 gets up
+  mid-reading, cushion 3 stays to the end); one frame sheet (`node .claude/scratch/sheet.mjs <spec.json> <out.png>`),
+  frames to the `qa-screenshots` branch under `pr736/`.
