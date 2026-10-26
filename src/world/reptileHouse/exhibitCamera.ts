@@ -201,6 +201,26 @@ export interface ShotRules {
    * in, nearest first. It decides nothing about what a shot must see.
    */
   readonly ideal?: { readonly swing?: number; readonly back?: number; readonly height?: number };
+  /**
+   * **Where the aim goes while the shot is held** ({@link ShotAim}). Asked
+   * for nothing, it is an exhibit's: the aim eases after the shot's own
+   * subjects as they move, at {@link LIVE_FOCUS_HALF_LIFE}.
+   */
+  readonly aim?: ShotAim;
+}
+
+/**
+ * **What a shot's aim follows once it is down, and how closely** — the eye
+ * never moves from the spot that was proven clear; only the point it looks
+ * at does. Each frame `subjects()` is asked: the bodies whose middle the aim
+ * eases towards, by half every `halfLife` seconds — or `null`, and the aim
+ * holds exactly where it is. Story time's (`library/storyCamera.ts`) is held
+ * still from the sit until the audience is in place, and then follows them:
+ * the camera breathes with the group.
+ */
+export interface ShotAim {
+  readonly halfLife: number;
+  readonly subjects: () => readonly Object3D[] | null;
 }
 
 /** Her own body's mark among a shot's occluders ({@link OccluderSet.owners}): not a subject, and not the room. */
@@ -1467,8 +1487,10 @@ export class ExhibitCamera {
   private readonly memory = new Map<string, { at: Vector3; eye: Vector3 }>();
   private warmQueue: WarmEntry[] = [];
   private warming: { id: string; at: Vector3; steps: Generator<void, ExhibitShot | null> } | null = null;
-  private pending: { id: string; subjects: readonly Object3D[]; steps: Generator<void, ExhibitShot | null> } | null = null;
+  private pending: { id: string; subjects: readonly Object3D[]; aim: ShotAim | null; steps: Generator<void, ExhibitShot | null> } | null = null;
   private subjects: readonly Object3D[] = [];
+  /** The held shot's own aim ({@link ShotRules.aim}), or null for an exhibit's. */
+  private aim: ShotAim | null = null;
   private readonly liveFocus = new Vector3();
   private lastDt = 0;
 
@@ -1523,6 +1545,7 @@ export class ExhibitCamera {
     this.pending = {
       id,
       subjects,
+      aim: rules.aim ?? null,
       steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred, herBodyBox(player.position, player.topHeight), rules),
     };
     this.anchor.copy(player.position);
@@ -1587,7 +1610,7 @@ export class ExhibitCamera {
         this.pending = null;
         if (step.value) {
           this.memory.set(pending.id, { at: player.position.clone(), eye: step.value.eye.clone() });
-          this.begin(step.value, pending.subjects, player);
+          this.begin(step.value, pending.subjects, player, pending.aim);
         }
         else this.failures.push(pending.id);
         return;
@@ -1597,7 +1620,7 @@ export class ExhibitCamera {
   }
 
   /** The solved shot takes the camera: the move starts from wherever it is now. */
-  private begin(shot: ExhibitShot, subjects: readonly Object3D[], player: ShotPlayer): void {
+  private begin(shot: ExhibitShot, subjects: readonly Object3D[], player: ShotPlayer, aim: ShotAim | null = null): void {
     if (this.phase === 'idle') {
       const camera = this.world.camera;
       this.zoomBefore = camera.targetZoom;
@@ -1609,6 +1632,7 @@ export class ExhibitCamera {
     }
     this.lastShot = shot;
     this.subjects = subjects;
+    this.aim = aim;
     this.liveFocus.copy(shot.focus);
     this.lastPlayer = player;
     this.to = { focus: shot.focus, yawDegrees: shot.yawDegrees, pitchDegrees: shot.pitchDegrees, distance: shot.distance, zoom: shot.zoom };
@@ -1710,11 +1734,23 @@ export class ExhibitCamera {
    * The shot as it stands this frame: the eye held on the spot that was
    * proven clear, the aim on the animals as they are *now* — a tortoise
    * plods, a croc drifts, a skink potters — so the reaction stays in the
-   * middle of the frame without the eye wandering anywhere unproven.
+   * middle of the frame without the eye wandering anywhere unproven. A shot
+   * with its own aim ({@link ShotRules.aim}) follows whoever that names, at
+   * its own half-life, or holds the aim still.
    */
   private liveShot(): Pose | null {
     const shot = this.lastShot;
     if (!shot || !this.to) return this.to;
+    const aim = this.aim;
+    if (aim) {
+      // The shot's own aim (`ShotRules.aim`): after whoever it names this frame, or held.
+      const followed = aim.subjects();
+      if (followed) {
+        const { box } = subjectOf(followed);
+        if (!box.isEmpty()) this.liveFocus.lerp(box.getCenter(new Vector3()), 1 - Math.pow(2, -this.lastDt / aim.halfLife));
+      }
+      return { focus: this.liveFocus, ...shotAngles(shot.eye, this.liveFocus), zoom: shot.zoom };
+    }
     const { box } = subjectOf(this.subjects);
     if (box.isEmpty()) return this.to;
     // Eased towards the animals rather than pinned to them: a wriggling head
