@@ -1,4 +1,4 @@
-import { Matrix4, Quaternion, Vector3, type Object3D } from 'three';
+import { Matrix4, Quaternion, Vector3, type Mesh, type Object3D } from 'three';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { cameraBreath } from '../../core/cameraBreath';
 import type { CollisionWorld } from '../Collision';
@@ -41,9 +41,14 @@ import type { StoryPhase } from './storyTime';
  * copied as they are and set down where story time puts them (a child on her
  * cushion, facing the chair, as `NpcCharacter.beginSeated` sits her — her
  * soles on the floor and her head where it is standing, the listening pose
- * hangs her legs from the cushion; the owl on her perch, as she lands). The
- * stand-ins are never drawn; the solve reads them once and lets them go. So
- * the eye and the framing are the reading's, from the first frame of the sit.
+ * hangs her legs from the cushion; the owl on her perch, as she lands) — and
+ * her own, as she will sit through it. Each is posed from rest, never as it
+ * happened to be (the listeners sway on the clock and nod as they walk), so
+ * the stage is the same whenever she sits, and so is the eye: it is a matter
+ * of her cushion, her screen and what she wears, never of the moment or of
+ * how fast the machine solves it. The stand-ins are never drawn; the solve
+ * reads them once and lets them go. So the eye and the framing are the
+ * reading's, from the first frame of the sit.
  *
  * ## No new camera
  *
@@ -112,8 +117,43 @@ export const LIBRARY_SHOT_ROOM: ShotRoom = {
  */
 export const STORY_FRAME_MARGIN = 0.2;
 
-/** The director's name for the shot — what its memory of a good eye is filed under. */
+/**
+ * The director's name for the shot, and the start of **what its memory of a
+ * good eye is filed under**: with her, as she will sit through it, and her
+ * screen's shape ({@link storyShotName}). The director tries the eye it
+ * remembers under a name first, and keeps it if it passes everything — so a
+ * name holds exactly what decides the eye, and a remembered one is the eye a
+ * fresh solve would choose, only found sooner. Under one name for every sit,
+ * an eye solved bare-headed would be taken again with a hat on, or on a phone
+ * turned the other way, whenever it still passed — another eye than she would
+ * have had sitting down fresh.
+ */
 export const STORY_SHOT_ID = 'story-time';
+
+/**
+ * {@link STORY_SHOT_ID}, filed under her stand-in — every part of her where it
+ * is and what is drawn there, which is her cushion, her pose and her look —
+ * and the screen's shape: two sits share a name only if the solve would see
+ * the same thing both times (the rest of the stage is the same at every sit).
+ */
+export function storyShotName(her: Object3D, aspect: number): string {
+  // FNV-1a over her parts' world matrices (to a tenth of a millimetre), what each one draws, and whether it is drawn.
+  let hash = 0x811c9dc5;
+  const mix = (text: string): void => {
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+  };
+  her.updateMatrixWorld(true);
+  her.traverse((node) => {
+    mix(node.matrixWorld.elements.map((e) => (Math.abs(e) < 5e-5 ? 0 : e).toFixed(4)).join(','));
+    const geometry = (node as Partial<Mesh>).geometry;
+    if (geometry) mix(geometry.uuid);
+    mix(node.visible ? '+' : '-');
+  });
+  return `${STORY_SHOT_ID}@${hash.toString(36)}/${aspect.toFixed(4)}`;
+}
 
 /**
  * How many of the owl's, her head's and each listener's head's own drawn
@@ -179,13 +219,27 @@ export function storySeats(library: Pick<StoryCameraLibrary, 'furniture' | 'chil
   });
 }
 
-/** The reading's stage, stood in for: the owl on her perch and each child on her cushion, never drawn ({@link storyStage}). */
+/** The reading's stage, stood in for: the owl on her perch, each child on her cushion and her on hers, never drawn ({@link storyStage}). */
 export interface StoryStage {
   readonly owl: Object3D;
   readonly owlHead: Object3D;
   readonly children: readonly { readonly root: Object3D; readonly head: Object3D }[];
   /** Where the owl's bubble will hang over her, on her perch. */
   readonly bubble: Vector3;
+  /** Her, as she will sit through it — what the solve reads her body as ({@link herStandIn}). */
+  readonly her: Object3D;
+}
+
+/** A child's model as `ridePose.ts` poses her, and her head's own height on her shoulders — `CharacterModel` is this shape. */
+export interface StoryListener {
+  readonly body: Object3D;
+  readonly head: Object3D;
+  readonly leftArm: Object3D;
+  readonly rightArm: Object3D;
+  readonly leftLeg: Object3D;
+  readonly rightLeg: Object3D;
+  /** Where her head sits on her shoulders at rest (`CharacterModel.headHeight`): her stride nods it up and down. */
+  readonly headHeight: number;
 }
 
 const UP = new Vector3(0, 1, 0); // flat-ok: the reading room is its own flat space at (-600, -600), off the sphere
@@ -216,10 +270,57 @@ function twin(live: Object3D, stand: Object3D, node: Object3D): Object3D {
 }
 
 /**
+ * **A stand-in posed as she will listen, whatever she was doing when she sat**:
+ * the stand-in's copy (`inStand`) of each of `model`'s parts, set from rest —
+ * her head back at its own height on her shoulders (her stride nods it,
+ * `Player.animate` and `NpcCharacter.animate`, and the listening pose leaves it
+ * where it was), then the listening pose at the start of its sway
+ * (`applyListeningPose` at 0; the real one sways on the game's clock, so a
+ * copy of it as it was would be a different copy every time she sat). Her
+ * root is left as placed, never righted through an Euler — the reason
+ * `NpcCharacter` writes a sitter's facing again after her pose.
+ */
+function poseListening(model: StoryListener, inStand: (node: Object3D) => Object3D): void {
+  inStand(model.head).position.y = model.headHeight;
+  applyListeningPose(
+    {
+      root: { rotation: { x: 0 } },
+      body: inStand(model.body),
+      head: inStand(model.head),
+      leftArm: inStand(model.leftArm),
+      rightArm: inStand(model.rightArm),
+      leftLeg: inStand(model.leftLeg),
+      rightLeg: inStand(model.rightLeg),
+    },
+    0,
+  );
+}
+
+/**
+ * **Her, as she will sit through it** — her own group, copied as it is this
+ * frame (her hat, her hair, her backpack: what she looks like), set where she
+ * sits, and posed as she listens ({@link poseListening}). The solve reads her
+ * body as something in the way of the eye — never her own head between it and
+ * the owl — and her real body sways on the clock, so it reads this copy
+ * instead. (26 Oct 2026: from cushion 3 on a phone, the same check once chose
+ * an eye a metre higher than it had before — she had sat at another moment of
+ * her sway.)
+ */
+export function herStandIn(player: Pick<StoryCameraPlayer, 'group' | 'model'>): Object3D {
+  const live = player.group;
+  live.updateWorldMatrix(true, true);
+  const stand = live.clone(true);
+  live.matrixWorld.decompose(stand.position, stand.quaternion, stand.scale);
+  poseListening(player.model, (node) => twin(live, stand, node));
+  stand.updateMatrixWorld(true);
+  return stand;
+}
+
+/**
  * **The stage as it will be when the owl reads** — built the moment she sits,
  * when nobody is there yet: each body her own model, copied as it is this
- * frame and then posed as she will be, so the stage is the same whatever
- * anyone happened to be doing when she sat.
+ * frame and then posed as she will be, from rest, so the stage is the same
+ * whatever anyone happened to be doing when she sat, and whenever that was.
  *
  * - The owl as `LibraryOwl` lands her on the story chair (`owlPerch`, in the
  *   room's frame) and as she reads there: her head straight ahead, her wings
@@ -227,11 +328,10 @@ function twin(live: Object3D, stand: Object3D, node: Object3D): Object3D {
  *   anchor over her head there, as `LibraryOwl` hangs it wherever she is.
  * - Each child as story time seats her (`NpcCharacter.beginSeated`: her
  *   cushion's middle in world metres, her soles on the floor, facing the
- *   chair) in the listening pose (`applyListeningPose`, at the middle of its
- *   sway; her root left as placed, never righted through an Euler — the
- *   reason `NpcCharacter` writes a sitter's facing again after her pose).
+ *   chair), listening ({@link poseListening}).
+ * - Her, on her own cushion, listening too ({@link herStandIn}).
  */
-export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>): StoryStage {
+export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>, player: Pick<StoryCameraPlayer, 'group' | 'model'>): StoryStage {
   const handle = library.owl.handle;
   const owlLive = handle.root;
   const perch = owlPerch();
@@ -250,22 +350,11 @@ export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>
     const live = model.root;
     const root = standIn(live, new Vector3(child.driver.seat.x, LIBRARY_FLOOR_Y, child.driver.seat.z), child.driver.seatFacing);
     const inChild = (node: Object3D): Object3D => twin(live, root, node);
-    applyListeningPose(
-      {
-        root: { rotation: { x: 0 } },
-        body: inChild(model.body),
-        head: inChild(model.head),
-        leftArm: inChild(model.leftArm),
-        rightArm: inChild(model.rightArm),
-        leftLeg: inChild(model.leftLeg),
-        rightLeg: inChild(model.rightLeg),
-      },
-      0,
-    );
+    poseListening(model, inChild);
     root.updateMatrixWorld(true);
     return { root, head: inChild(model.head) };
   });
-  return { owl, owlHead: inOwl(handle.head), children, bubble };
+  return { owl, owlHead: inOwl(handle.head), children, bubble, her: herStandIn(player) };
 }
 
 /**
@@ -296,6 +385,8 @@ export interface StoryCameraPlayer {
   readonly position: Vector3;
   readonly facing: number;
   readonly group: Object3D;
+  /** Her model's parts, for her stand-in ({@link herStandIn}). */
+  readonly model: StoryListener;
   /** Her height, hat and all (`Player.topHeight`). */
   readonly topHeight: number;
 }
@@ -362,6 +453,17 @@ export class StoryCamera {
   }
 
   /**
+   * The stage a shot is solved against, built the moment she sits
+   * ({@link storyStage}). A method, so that `check:library` can hand the solve
+   * the stage as it happened to be instead (`story-stage-as-it-was`, the
+   * stand-ins before 26 Oct 2026) and watch the clause that holds the stage
+   * and the eye the same at every sit go red.
+   */
+  stageFor(player: StoryCameraPlayer): StoryStage {
+    return storyStage(this.library, player);
+  }
+
+  /**
    * **One frame**: decides whether the shot is wanted, steps the director by
    * `dt`, and writes this frame's camera through it — returning the focus it
    * claims, or `null`. `Game.tick` folds the claim into its one `focusClaim`
@@ -380,7 +482,7 @@ export class StoryCamera {
     her.group = player.group;
     her.topHeight = player.topHeight;
     // Down the moment she sits — and again when a story begins while she still sits after the last one's shot went home.
-    if (seated && (!this.seated || (story && !this.story && !this.director.active && !this.director.solving))) this.start();
+    if (seated && (!this.seated || (story && !this.story && !this.director.active && !this.director.solving))) this.start(camera, player);
     // Up off her cushion — the chip, a jump, a tap — or out of the room: home at once.
     if (this.seated && !seated) this.director.cancel();
     // The story she sat through is over: the director eases home on its own, she still sitting.
@@ -391,11 +493,11 @@ export class StoryCamera {
     return this.director.apply(camera);
   }
 
-  /** The shot of the stage from where she sits — solved over the next few frames against its stand-ins. */
-  private start(): void {
+  /** The shot of the stage from where she sits — solved over the next few frames against its stand-ins, her own among them. */
+  private start(camera: IsoCamera, player: StoryCameraPlayer): void {
     const { owl, children } = this.library;
     this.storyEnded = false;
-    const stage = storyStage(this.library);
+    const stage = this.stageFor(player);
     this.lastStage = stage;
     const subjects: Object3D[] = [...asWhole([stage.owl], STORY_OWL_SEEN), ...asWhole([stage.owlHead], 1)];
     for (const child of stage.children) subjects.push(...asWhole([child.root], STORY_LISTENER_SEEN), ...asWhole([child.head], STORY_HEAD_SEEN));
@@ -409,6 +511,8 @@ export class StoryCamera {
     };
     // The real owl and children, wherever they are this frame, hide nothing: the stage is solved for where they will be.
     const cast = [...storySeats(this.library), owl.handle.root, ...children.map((child) => child.model.root)];
-    this.director.start(STORY_SHOT_ID, subjects, cast, this.her, rules);
+    // Her body, to the solve, is her stand-in: the real one sways (`herStandIn`).
+    const her = { ...this.her, group: stage.her };
+    this.director.start(storyShotName(stage.her, camera.camera.aspect), subjects, cast, her, rules);
   }
 }

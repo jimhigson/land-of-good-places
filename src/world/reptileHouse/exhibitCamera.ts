@@ -1175,8 +1175,10 @@ export function* solveExhibitShotSteps(
   const near = collectOccluders([world.hall, ...mutualRoots], ignore);
   const frozen = rules.spread ? subjects.map((subject) => (wholeShare(subject) === null ? [] : freeze(subject))) : [];
   const middlePoints = middles.targets.map((target) => target.point);
-  // And where she stood: `player` is her live position, and she may shuffle while the solve runs.
+  // And where she stood: `player` is her live position, and she may shuffle while the solve runs; and
+  // the rig the camera comes down from, round her at the zoom she has now.
   const feet = player.clone();
+  const rig = rigPose(feet, world.camera.targetZoom);
   if (stepwise) yield;
   if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY, frozen, middlePoints)));
   const framing = shotZoom(world.camera, box);
@@ -1213,7 +1215,6 @@ export function* solveExhibitShotSteps(
     return fit < CAMERA_ZOOM_MIN ? null : Math.min(CAMERA_ZOOM_MAX, fit);
   };
   const herBox = her ?? (body ? bodyBoxOf(body) : null);
-  const rig = rigPose(feet, world.camera.targetZoom);
 
   // "Behind her": along the line from the animals through her. Stood right
   // on top of the focus, her own back is the answer instead — and always,
