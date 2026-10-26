@@ -1,7 +1,6 @@
 import { Box3, InstancedMesh, Line3, Matrix4, Mesh, PerspectiveCamera, Raycaster, Sphere, Vector3, type BufferAttribute, type InterleavedBufferAttribute, type Material, type Object3D } from 'three';
 import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, PLAYER_RADIUS, cameraViewHalfHeight } from '../../core/constants';
 import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
-import type { CameraBreath } from '../../core/cameraBreath';
 import type { CollisionWorld } from '../Collision';
 import { REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z, REPTILE_WALL_HEIGHT } from './layout';
 import { REPTILE_INNER_X, REPTILE_INNER_Z } from './shell';
@@ -211,7 +210,21 @@ export interface ShotRules {
    * for nothing, the aim is an exhibit's: it eases after the shot's own
    * subjects as they move, at {@link LIVE_FOCUS_HALF_LIFE}.
    */
-  readonly breath?: (seconds: number, out: CameraBreath) => CameraBreath;
+  readonly breath?: (seconds: number, out: ShotBreath) => ShotBreath;
+}
+
+/**
+ * One moment of a shot's breath ({@link ShotRules.breath}): degrees turned and
+ * tilted about the eye, and metres reached along the view. The shape
+ * `core/cameraBreath.ts`'s `CameraBreath` has — written out here rather than
+ * imported, because this file is in the park source closure
+ * (`scripts/lib/park-source-hash.mjs` follows type imports too) and tuning
+ * the breath must never rebuild a park.
+ */
+export interface ShotBreath {
+  yawDegrees: number;
+  pitchDegrees: number;
+  reach: number;
 }
 
 /** Her own body's mark among a shot's occluders ({@link OccluderSet.owners}): not a subject, and not the room. */
@@ -569,10 +582,11 @@ const SPREAD_FROM = 2000;
  * a star is hidden, a whole subject's share ({@link ShotRules.spread}) or too
  * much of the crowd is for {@link CROWD_SEEN} to be reachable, else every
  * target's result. Equivalent to {@link sightlinesPass} over all of them,
- * without casting the rays that cannot change the answer — and a step at a
- * time, yielding every {@link SIGHTLINES_PER_STEP} sightlines.
+ * without casting the rays that cannot change the answer — and, for a
+ * `stepwise` solve ({@link solveExhibitShotSteps}), a step at a time,
+ * yielding every {@link SIGHTLINES_PER_STEP} sightlines.
  */
-function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, report?: SolveReport, order?: number[]): Generator<void, boolean[] | null> {
+function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, stepwise: boolean, report?: SolveReport, order?: number[]): Generator<void, boolean[] | null> {
   const seen: boolean[] = targets.map(() => false);
   let cast = 0;
   for (const [index, target] of targets.entries()) {
@@ -580,7 +594,7 @@ function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders:
     if (!robustlySeen(eye, target.point, occluders, report, target.owner)) return null;
     seen[index] = true;
     cast += 5;
-    if (cast >= SIGHTLINES_PER_STEP) {
+    if (stepwise && cast >= SIGHTLINES_PER_STEP) {
       cast = 0;
       yield;
     }
@@ -599,7 +613,7 @@ function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders:
     const blocker = firstBlocker(eye, target.point, occluders, target.owner);
     const edge = firstBlocker(eye, whole.edge, occluders, target.owner);
     cast += 2;
-    if (cast >= SIGHTLINES_PER_STEP) {
+    if (stepwise && cast >= SIGHTLINES_PER_STEP) {
       cast = 0;
       yield;
     }
@@ -1114,6 +1128,20 @@ export function* solveExhibitShotSteps(
   her?: Box3,
   rules: ShotRules = {},
 ): Generator<void, ExhibitShot | null> {
+  /**
+   * **Spread over frames, or not.** A solve with whole subjects to see (story
+   * time's, `ShotRules.spread`) is heavy — the spread sampled, a finer one to
+   * confirm on — and pauses every few sightlines so that no frame hitches. An
+   * exhibit's is solved as it always was: the scene read, the fan built and
+   * the first candidate judged in one step, pausing only between candidates.
+   * That schedule is what keeps an exhibit's eye the same on every machine:
+   * a background warm-up (`ExhibitCamera.warm`) then takes one frame, so it
+   * reads the animals at the same moment whatever the clock. (26 Oct 2026,
+   * review of #736: with story time's pauses in an exhibit's solve too, three
+   * of fifteen exhibits moved from main's eye — the skink by 0.35 m — and
+   * varied run to run with the real clock.)
+   */
+  const stepwise = (rules.spread ?? 0) > 0;
   const middles = subjectOf(subjects);
   const box = middles.box;
   // A subject seen as a whole is judged on its spread, not on a tube to its middle as well.
@@ -1149,7 +1177,7 @@ export function* solveExhibitShotSteps(
   const middlePoints = middles.targets.map((target) => target.point);
   // And where she stood: `player` is her live position, and she may shuffle while the solve runs.
   const feet = player.clone();
-  yield;
+  if (stepwise) yield;
   if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY, frozen, middlePoints)));
   const framing = shotZoom(world.camera, box);
   const contain = rules.contain;
@@ -1215,7 +1243,7 @@ export function* solveExhibitShotSteps(
       for (const height of EYE_HEIGHTS) {
         // A step at a time: each eye is framed through a lens or three, and there are hundreds.
         built += 1;
-        if (built % CANDIDATES_PER_STEP === 0) yield;
+        if (stepwise && built % CANDIDATES_PER_STEP === 0) yield;
         const out = start + back;
         const eye = new Vector3(origin.x + Math.sin(bearing) * out, room.floorY + height, origin.z + Math.cos(bearing) * out);
         if (!insideHall(eye, room)) {
@@ -1272,14 +1300,14 @@ export function* solveExhibitShotSteps(
       if (report) report.tooClose += 1;
       continue;
     }
-    const seen = yield* shotSeesSteps(eye, targets, occludersToward(occluders, eye, focus, sightReach), report, order);
+    const seen = yield* shotSeesSteps(eye, targets, occludersToward(occluders, eye, focus, sightReach), stepwise, report, order);
     if (!seen) {
       if (report) report.blocked += 1;
       continue;
     }
     // And the way there and back: the eye sweeps down from the rig, and a
     // shot whose own approach crosses a wall, the log or a vine is no shot.
-    if (!(yield* approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near, room))) {
+    if (!(yield* approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near, room, stepwise))) {
       if (report) report.approach += 1;
       continue;
     }
@@ -1288,7 +1316,7 @@ export function* solveExhibitShotSteps(
     if (rules.spread) {
       fine ??= [...judged(middles.targets), ...(yield* spreadTargets(subjects, rules.spread * SPREAD_CONFIRM, world.room.floorY, frozen, middlePoints))];
       fineOrder ??= fine.map((_, index) => index);
-      if (!(yield* shotSeesSteps(eye, fine, occludersToward(occluders, eye, focus, sightReach), report, fineOrder))) {
+      if (!(yield* shotSeesSteps(eye, fine, occludersToward(occluders, eye, focus, sightReach), stepwise, report, fineOrder))) {
         if (report) report.unconfirmed += 1;
         continue;
       }
@@ -1354,7 +1382,7 @@ export function eyeOfPose(pose: Pose, out = new Vector3()): Vector3 {
  * in the room's space and clear of everything drawn — sampled on the same
  * blend {@link ExhibitCamera} drives, so it is the path the camera takes.
  */
-function* approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom): Generator<void, boolean> {
+function* approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom, stepwise: boolean): Generator<void, boolean> {
   const scratch = { focus: new Vector3() };
   const eye = new Vector3();
   for (const [from, to] of [[rig, shot], [shot, rig]] as const) {
@@ -1362,8 +1390,8 @@ function* approachClear(rig: Pose, shot: Pose, near: OccluderSet, room: ShotRoom
       eyeOfPose(blendPose(from, to, smoothstep(i / APPROACH_SAMPLES), scratch), eye);
       if (!eyeInHallSpace(eye, room)) return false;
       if (eye.y < room.floorY + room.wallHeight + 3 && eyeTooClose(eye, near, APPROACH_CLEARANCE)) return false;
-      // A step at a time: every sample asks every drawn surface in the room.
-      if (i % APPROACH_SAMPLES_PER_STEP === 0) yield;
+      // A step at a time, for a stepwise solve: every sample asks every drawn surface in the room.
+      if (stepwise && i % APPROACH_SAMPLES_PER_STEP === 0) yield;
     }
   }
   return true;
@@ -1484,7 +1512,7 @@ export class ExhibitCamera {
   private breath: ShotRules['breath'] | null = null;
   /** Seconds since the shot was solved — the breath's own clock, so every shot breathes from the same start. */
   private breathAt = 0;
-  private readonly breathed: CameraBreath = { yawDegrees: 0, pitchDegrees: 0, reach: 0 };
+  private readonly breathed: ShotBreath = { yawDegrees: 0, pitchDegrees: 0, reach: 0 };
   private readonly breathFocus = new Vector3();
   private readonly liveFocus = new Vector3();
   private lastDt = 0;
