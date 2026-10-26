@@ -561,7 +561,7 @@ const SPREAD_FROM = 2000;
  * without casting the rays that cannot change the answer — and a step at a
  * time, yielding every {@link SIGHTLINES_PER_STEP} sightlines.
  */
-function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, report?: SolveReport): Generator<void, boolean[] | null> {
+function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, report?: SolveReport, order?: number[]): Generator<void, boolean[] | null> {
   const seen: boolean[] = targets.map(() => false);
   let cast = 0;
   for (const [index, target] of targets.entries()) {
@@ -578,10 +578,13 @@ function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders:
   // another subject may cover any of them: the room, or her own body, never.
   const points = new Map<number, number>();
   for (const { whole } of targets) if (whole) points.set(whole.subject, (points.get(whole.subject) ?? 0) + 1);
-  const misses = new Map<number, number>();
-  for (const [index, target] of targets.entries()) {
-    const whole = target.whole;
-    if (!whole) continue;
+  const misses = new Map<number, number[]>();
+  // In the order the solve keeps (see `TestOrder`): what turned the last eye down is asked first.
+  const sequence = order ?? targets.map((_, index) => index);
+  for (const [at, index] of sequence.entries()) {
+    const target = targets[index];
+    const whole = target?.whole;
+    if (!target || !whole) continue;
     const blocker = firstBlocker(eye, target.point, occluders, target.owner);
     const edge = firstBlocker(eye, whole.edge, occluders, target.owner);
     cast += 2;
@@ -592,14 +595,21 @@ function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders:
     for (const hit of [blocker, edge]) if (hit && report) report.blockers[hit.name] = (report.blockers[hit.name] ?? 0) + 1;
     // The room or her own body on the point itself, or a hand's breadth beside it (the corner of a
     // case grazing a child's back, her shoulder brushing a listener's outline as they sway): never.
-    if ((blocker && blocker.owner < 0) || (edge && edge.owner < 0)) return null;
+    if ((blocker && blocker.owner < 0) || (edge && edge.owner < 0)) {
+      if (order) firstFrom(order, [at]);
+      return null;
+    }
     if (blocker === null) {
       seen[index] = true;
       continue;
     }
-    const missed = (misses.get(whole.subject) ?? 0) + 1;
+    const missed = misses.get(whole.subject) ?? [];
+    missed.push(at);
     misses.set(whole.subject, missed);
-    if (missed > mayMissOf(points.get(whole.subject) ?? 0, whole.share)) return null;
+    if (missed.length > mayMissOf(points.get(whole.subject) ?? 0, whole.share)) {
+      if (order) firstFrom(order, missed);
+      return null;
+    }
   }
   const crowd = targets.filter((target) => target.crowd).length;
   const mayMiss = crowd - Math.ceil(CROWD_SEEN_TO_SOLVE * crowd);
@@ -648,6 +658,26 @@ export function sightlinesPass(targets: readonly ShotTarget[], seen: readonly bo
 /** How many of `points` a subject marked {@link asWhole} with `share` may have hidden. */
 function mayMissOf(points: number, share: number): number {
   return Math.floor(points * (1 - share) + 1e-9);
+}
+
+/**
+ * **What turned the last eye down is asked first of the next.** A solve tries
+ * its candidate eyes nearest-first, so neighbours fail for the same reason —
+ * her hair across the owl's wing, one listener's head over another's — and a
+ * candidate otherwise casts a hundred sightlines before it reaches the one
+ * that sinks it. `order` holds the targets' indices in the order they are
+ * asked; this moves the entries at `positions` (indices into `order`) to its
+ * front, in the order they were found. Whether an eye passes does not depend
+ * on the order — every sightline is asked of an eye that passes — so neither
+ * does which eye is chosen. Measured on the reading room, a phone held
+ * upright, cushion 3 (25 Oct 2026): the 113th candidate passed, after
+ * 1251 steps and 4.4 s of the owl's story.
+ */
+function firstFrom(order: number[], positions: readonly number[]): void {
+  const front = positions.map((position) => order[position]!);
+  const moved = new Set(positions);
+  const rest = order.filter((_, position) => !moved.has(position));
+  order.splice(0, order.length, ...front, ...rest);
 }
 
 function isSeeThrough(material: Material | Material[]): boolean {
@@ -1218,6 +1248,9 @@ export function* solveExhibitShotSteps(
   let best: { eye: Vector3; seen: boolean[]; cost: number; zoom: number } | null = null;
   /** The finer spread a passing candidate is confirmed on, sampled the first time one passes. */
   let fine: ShotTarget[] | null = null;
+  /** The order each spread's sightlines are asked in, kept from candidate to candidate ({@link firstFrom}). */
+  const order = targets.map((_, index) => index);
+  let fineOrder: number[] | null = null;
   let tried = 0;
   for (const { eye, cost, zoom } of candidates) {
     if (tried > 0) yield;
@@ -1226,7 +1259,7 @@ export function* solveExhibitShotSteps(
       if (report) report.tooClose += 1;
       continue;
     }
-    const seen = yield* shotSeesSteps(eye, targets, occludersToward(occluders, eye, focus, sightReach), report);
+    const seen = yield* shotSeesSteps(eye, targets, occludersToward(occluders, eye, focus, sightReach), report, order);
     if (!seen) {
       if (report) report.blocked += 1;
       continue;
@@ -1241,7 +1274,8 @@ export function* solveExhibitShotSteps(
     // can sit either side of the corner of a bookcase that a child's back is behind.
     if (rules.spread) {
       fine ??= [...judged(middles.targets), ...(yield* spreadTargets(subjects, rules.spread * SPREAD_CONFIRM, world.room.floorY, frozen, middlePoints))];
-      if (!(yield* shotSeesSteps(eye, fine, occludersToward(occluders, eye, focus, sightReach), report))) {
+      fineOrder ??= fine.map((_, index) => index);
+      if (!(yield* shotSeesSteps(eye, fine, occludersToward(occluders, eye, focus, sightReach), report, fineOrder))) {
         if (report) report.unconfirmed += 1;
         continue;
       }
