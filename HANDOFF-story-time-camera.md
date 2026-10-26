@@ -100,6 +100,34 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
    the Mac kept going into maintenance sleep. Run it with `.parks/` restored from CI's `parks-<hash>` artifact
    (`gh run download`), as CI does, under `caffeinate -s -i`.
 
+## Review and QA, 26 Oct evening (Overseer's list)
+
+1. **Exhibit eyes depended on timing (blocking).** Story time's yields had gone into every solve, so an
+   exhibit's solve spread over frames and read the animals at another moment. 2faca7c4: the yields only when
+   `ShotRules.spread` (story time); an exhibit is solved on main's schedule. Real clock, main (ee1ad33a, worktree
+   `.claude/worktrees/story-camera-main`) ×3 and head ×3: all 30 settled eyes identical, worst spread 0.0 cm
+   (`/tmp/story-cam-logs/cmp-*.log`, `node /tmp/story-cam-logs/cmp-eyes.mjs <logs>`). Under a clock-scale
+   preload (`/tmp/story-cam-logs/clock-scale.mjs`, `CLOCK_SCALE=4` = a machine 4× slower) main itself moves
+   frogJar 10.4 cm and lagoon 1.4 cm against its own 1× run, and head at 4× matches main at 4× within 1.0 cm —
+   main's own, pre-existing (multi-frame solves shift later presses' sim time).
+2. **Breath type in the park closure (minor).** `ShotBreath` written inline in exhibitCamera.ts; changing a breath
+   constant leaves the park hash unchanged (35b6fdd1… at 2faca7c4); control: an exhibitCamera.ts edit changes it.
+3. **Story shot machine-speed dependence (found checking it).** check:library at `CLOCK_SCALE=0.25`: phone,
+   cushion 3 chose (5.14, 5.30, −6.59) candidate 8 against 1×'s (4.80, 4.30, −6.84) candidate 15. Dumped the
+   solve's inputs at the sit (temporary patch, never committed): the room identical, the owl stand-in identical;
+   **her own body differed** (arm pivots, head — the listening sway on `Player.animate`'s clock) and, with no
+   story, a child stand-in's head height (the stride's nod). The faster run sat her 16 frames sooner.
+   Fix e4e52c8d: every stand-in posed from rest (`poseListening`: head at `headHeight`, listening pose at 0), her
+   own stand-in solved against (`herStandIn`), the remembered eye filed under her stand-in's print + aspect
+   (`storyShotName`), the rig's zoom read in the solve's first step (exhibits: same step as before).
+   Check ec701e71: "the same stage and the same eye as when she sat here before" (cushion 1 laptop told vs no
+   story; cushion 3 laptop from the sit vs sitting late); red `story-stage-as-it-was`.
+4. **QA: the owl flies through the lens.** Not to be fixed until Jim chooses (a) fade, (b) wait for her to land,
+   (c) another flight path. Measured by `lensPass` (check-library): nearest surface distance, near-plane cut,
+   screen covered (600 rays from the near plane, faces as drawn); control on each screen. The first instrument
+   (box of projected vertices) was wrong — any vertex behind the eye counted the whole screen — so its numbers
+   (4.5 s over half the screen from cushion 1) are void.
+
 ## Status
 
 - [x] solver + story camera + deep link + check wiring; framing (f6749f3d); solve order (873e1606); hat (c9883778)
