@@ -144,6 +144,8 @@ import './headless-canvas.mjs';
 import { Box3, Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Raycaster, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
+import type { WornHat } from '../src/entities/WornHat.ts';
+import { defaultCharacterChoice } from '../src/ui/CharacterCreation.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
@@ -5426,6 +5428,20 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
   if (mutating('no-story-camera')) note('the story camera NOT WIRED on purpose — this run must go red');
   if (mutating('story-camera-stays')) note("the story camera's focus KEPT after it lets go, on purpose — this run must go red");
   if (mutating('story-camera-low')) note('the story camera AIMED LOW, straight behind her at 2.5 m, on purpose — this run must go red');
+  // Dressed as the `/library?sit=` link dresses a profile with no save (`main.ts`: `defaultCharacterChoice()`):
+  // its hat on her head, drawn as `WornHat` draws one and counted in her height (`Player.topHeight`), so the
+  // solve and this clause's instrument both have it in front of them. Bare-headed, this clause once chose a
+  // different eye from cushion 3 than the game did, and never met the eyes the game turns down for her hat.
+  const dressedIn = defaultCharacterChoice().hat;
+  // The catalogue's own model for it, by id — exactly what `WornHat.sync` hangs on her head.
+  const hat = dressedIn ? (shopItem(dressedIn.id)?.model() ?? null) : null;
+  if (hat) {
+    player.model.hatAnchor.add(hat.root);
+    player.model.setHatWorn(true);
+    // `Player` reads only the height of what `WornHat` draws (`labelTopHeight`); the store is left alone.
+    player.wornHat = { hatHeight: hat.height } as unknown as WornHat;
+  }
+  note(`she wears ${dressedIn && hat ? `${dressedIn.id}, ${hat.height.toFixed(2)} m tall, as a profile with no save does — ${player.topHeight.toFixed(2)} m to its top` : 'no hat: the default character has none'}`);
   const seats = storySeats(library);
   /** How she gets up, or that she does not and the story ends under her. */
   type Up = 'chip' | 'jump' | 'standUp' | 'story ends';
@@ -5642,6 +5658,11 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     );
   }
   camera.resize(SCREEN.width, SCREEN.height);
+  if (hat) {
+    player.model.hatAnchor.remove(hat.root);
+    player.model.setHatWorn(false);
+    player.wornHat = null;
+  }
   // Back at the desk's front, as the clauses before this one leave her.
   if (!quietly(() => library.requestEnterDoor())) throw new Error('STORY CAMERA: /library-door refused her');
   child.run(0.3);
