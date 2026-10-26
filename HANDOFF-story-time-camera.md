@@ -117,16 +117,34 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
    solve's inputs at the sit (temporary patch, never committed): the room identical, the owl stand-in identical;
    **her own body differed** (arm pivots, head — the listening sway on `Player.animate`'s clock) and, with no
    story, a child stand-in's head height (the stride's nod). The faster run sat her 16 frames sooner.
-   Fix e4e52c8d: every stand-in posed from rest (`poseListening`: head at `headHeight`, listening pose at 0), her
-   own stand-in solved against (`herStandIn`), the remembered eye filed under her stand-in's print + aspect
-   (`storyShotName`), the rig's zoom read in the solve's first step (exhibits: same step as before).
+   Fix e4e52c8d + be937d5e: every stand-in posed from rest (`poseListening`: head at `headHeight`, listening pose
+   at 0); her own stand-in (`herStandIn`: a copy of her model root — not her group, whose name label bobs) is what
+   the solve reads as her body; the remembered eye filed under her stand-in's print + aspect (`storyShotName`);
+   the rig's zoom read in the solve's first step (an exhibit's first step already ran past it).
+   Result at be937d5e, check:library at 1×, 0.25× and 4×: exit 0, 365 ✓ each, **the same eye and zoom in all six
+   cases** — cushion 1 (2.86, 5.30, −6.59) zoom 2.55 laptop / 2.02 phone; cushion 3 (5.14, 5.30, −6.59) zoom 2.51
+   laptop / 1.97 phone (the phone's cushion-3 eye is now the laptop's, a metre higher than 1×'s old one). Only
+   when the camera lands moves (1.1 s / 1.5–1.7 s / 2.6–3.2 s after the sit), and the breath's phase with it.
    Check ec701e71: "the same stage and the same eye as when she sat here before" (cushion 1 laptop told vs no
-   story; cushion 3 laptop from the sit vs sitting late); red `story-stage-as-it-was`.
+   story; cushion 3 laptop from the sit vs sitting late). Red `story-stage-as-it-was` at be937d5e: exit 1,
+   363 ✓ 2 ✗ — `NOT her (from 'arm-pivot-l', by 0.1184); the eye 417.7 mm from that one, zoom 2.397511
+   (2.514339)` and `NOT Juno (from 'head', by 0.0073), Lark (0.0036), Fenn (0.0074), her (0.1276)`.
+   A sixth case, cushion 3 on a laptop from the sit, which the clause had only reached sitting late.
 4. **QA: the owl flies through the lens.** Not to be fixed until Jim chooses (a) fade, (b) wait for her to land,
    (c) another flight path. Measured by `lensPass` (check-library): nearest surface distance, near-plane cut,
-   screen covered (600 rays from the near plane, faces as drawn); control on each screen. The first instrument
-   (box of projected vertices) was wrong — any vertex behind the eye counted the whole screen — so its numbers
-   (4.5 s over half the screen from cushion 1) are void.
+   screen covered (600 rays from the near plane, faces as drawn); control on each screen (a half-screen sheet,
+   the same behind the eye, a ball round the eye one- and two-sided, a strip through the near plane). The first
+   instrument (box of projected vertices) was wrong — any vertex behind the eye counted the whole screen — so its
+   numbers (4.5 s over half the screen from cushion 1) are void; the control's first run also failed on float32
+   vertices at the room's (−600, −600) (61 µm), so its meshes are built in the lens's frame.
+   At be937d5e, all three clock speeds alike (cover ±2 points with the breath's phase): cushion 1 nearest 1.13 m
+   at 5.38 s, never within 1 m, at most 13–15% of the screen; cushion 3 nearest **0.07 m** at 5.37 s, within 1 m
+   0.23 s, ½ m 0.13 s, ¼ m 0.05 s; laptop: cut by the near plane 0.02 s, at most **61%** of the screen, over a
+   quarter 0.10 s, over half 0.05 s; phone: never cut, at most **49–50%**, over a quarter 0.17–0.18 s. The camera
+   is down before she passes on every clock speed.
+5. Also at be937d5e: check:labels 0 at 390×844 and 1280×800 (shot held on 1313 reading frames, bubble + chip on
+   all); check:exhibit-camera ×3 exit 0, 339 ✓ each, all 30 eyes identical to main's 3 runs (0.0 cm). Park hash at
+   be937d5e: 7d8226d4… (exhibitCamera.ts's rig line; cameraBreath.ts and storyCamera.ts are outside the closure).
 
 ## Status
 
