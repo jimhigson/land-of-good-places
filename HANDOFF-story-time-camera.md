@@ -38,6 +38,16 @@ heads), 1.6 m behind her, off her shoulder: owl 84–90% (head 100%), children 9
 in front of anyone. A layout change (cushions 4/5 apart, or the chair moved — HANDOFF-library-v2 "the cushion-1
 view") would let it come lower; that is Jim's call.
 
+## Determinism (25 Oct)
+
+Two runs of one scene once chose two eyes: the solve spreads over frames on a 4 ms wall-clock budget while the
+listeners sway. Fixed (f859e2b5): the solve's first step reads the whole scene — both occluder sets held where
+they are (`collectOccluders` copies each mesh's matrix) and every whole subject's meshes frozen (`freeze`); the
+spread is then sampled from the frozen copies across frames. The prototype run twice: the same eye in all four
+cases (cushion 1 (2.86, 5.30, −6.59), cushion 3 (5.14, 5.30, −6.59), room-local), the same visibility to the point.
+The hand's-breadth edge is kept clear of her body as well as the room (her shoulder brushed Fenn's outline by 6
+points from a 4.3 m eye) — so the shot sits at 5.3 m, 1.6 m behind her, pitch ~54°.
+
 ## Local running
 
 - Seed 5's accepted restart is **1**: `LGP_PARK_RESTART=1` skips the 12-minute acceptance loop locally.
@@ -57,6 +67,7 @@ view") would let it come lower; that is Jim's call.
   - `story-camera-stays`: exit 1, 299 ✓ 38 ✗ — but only FOUND FROM THE DESK (36) and 2 occlusion lines: the kept
     focus is where the glide home ended, on her, so STORY CAMERA's home read green while she stood still. Fixed:
     the walk clause now asks the camera to follow her (orbit ≤ 0.3 m a second after she stops). Rerunning.
-- [ ] check:labels, tap-spacing, exits, jitter; full check; test:procgen
+- [ ] after f859e2b5: exhibit-camera, library, stays red, labels, tap-spacing, exits, jitter (chain running,
+  `/tmp/story-cam-logs/targeted-summary.log`); then full check; test:procgen
 - [x] **PR #736** opened (base main). CI running.
 - [ ] CI green; look on the preview (`.claude/scratch/look.mjs <preview-url> <out>`), frame sheet

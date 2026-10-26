@@ -82,9 +82,12 @@ export const LIBRARY_SHOT_ROOM: ShotRoom = {
 /**
  * How far in from the screen's edges the whole audience and the owl's bubble's
  * anchor are held — a share of the half-frame: room round them for the bubble
- * itself, which is laid out over its anchor, and for the HUD in the corners.
+ * itself, which is laid out over its anchor (two lines of the TEXT RULE's
+ * size are about a sixth of a half-frame on a phone held upright or a
+ * laptop), and for the HUD in the corners. The shot is framed exactly that
+ * tight (`ShotRules.contain`).
  */
-export const STORY_FRAME_MARGIN = 0.12;
+export const STORY_FRAME_MARGIN = 0.2;
 
 /** The director's name for the shot — what its memory of a good eye is filed under. */
 export const STORY_SHOT_ID = 'story-time';

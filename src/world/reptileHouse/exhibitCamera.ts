@@ -172,13 +172,18 @@ export interface ShotRules {
    */
   readonly spread?: number;
   /**
-   * **The frame holds every subject whole** — every corner of every
-   * subject's box, and each of `points` (the owl's bubble's anchor: a bubble
+   * **The frame holds every subject whole** — every drawn extremity of every
+   * subject (its spread, or its box's corners when it has none), and each of
+   * `points` (the owl's bubble's anchor: a bubble
    * is drawn only while its anchor is in shot, #415), at least `margin` (a
    * share of the half-frame) in from the screen's edges, rather than only
    * their middle somewhere near the middle. A candidate eye from which that
    * takes a zoom further out than `CAMERA_ZOOM_MIN` is turned down; otherwise
-   * the shot frames no tighter than it allows.
+   * the shot frames exactly that — everything held, the margin round it, and
+   * no wider. (An exhibit's own framing is sized from its animals' box seen
+   * from above; for an audience five metres off, on a phone held upright, it
+   * came out at a lens a hundred and thirty-five degrees tall, the owl a few
+   * pixels across — seen on the PR preview, 25 Oct 2026.)
    */
   readonly contain?: { readonly points: readonly Vector3[]; readonly margin: number };
   /**
@@ -963,13 +968,13 @@ const SCRATCH_CORNER = new Vector3();
 const WORLD_UP = new Vector3(0, 1, 0); // flat-ok: a shot's room is its own flat space off the sphere (the reptile house at x 600, the library at x -600)
 
 /**
- * **The closest zoom from `eye`, looking at `focus`, at which every corner of
- * `boxes` and every one of `points` is in shot**, `margin` (a share of the
+ * **The closest zoom from `eye`, looking at `focus`, at which every one of
+ * `drawn` and every one of `points` is in shot**, `margin` (a share of the
  * half-frame) in from the screen's edges. Unclamped; 0 when one of them is not
  * in front of the eye at all.
  *
- * Two tests, because two things decide "in shot". A box — something drawn —
- * is in shot when it is inside the lens: the lens as `IsoCamera.applyFrustum`
+ * Two tests, because two things decide "in shot". A drawn point — a vertex of
+ * something drawn — is in shot when it is inside the lens: the lens as `IsoCamera.applyFrustum`
  * solves it for this eye (`fov = 2·atan(halfHeight / distance)`, `halfHeight =
  * cameraViewHalfHeight(aspect) / zoom`), turned as `lookAt` turns it. A point
  * is a **label's anchor**, and a label is drawn only while the camera's own
@@ -978,7 +983,7 @@ const WORLD_UP = new Vector3(0, 1, 0); // flat-ok: a shot's room is its own flat
  * focus* — stricter than the lens for an anchor beyond the focus, which is
  * where the owl reads from — so a point is held to that test.
  */
-export function containZoom(camera: IsoCamera, eye: Vector3, focus: Vector3, boxes: readonly Box3[], points: readonly Vector3[], margin: number): number {
+export function containZoom(camera: IsoCamera, eye: Vector3, focus: Vector3, drawn: readonly Vector3[], points: readonly Vector3[], margin: number): number {
   const aspect = camera.camera.aspect;
   const base = cameraViewHalfHeight(aspect);
   const forward = SCRATCH_FORWARD.copy(focus).sub(eye);
@@ -989,27 +994,24 @@ export function containZoom(camera: IsoCamera, eye: Vector3, focus: Vector3, box
   if (right.lengthSq() < 1e-9) return 0;
   right.normalize();
   const up = SCRATCH_UP.crossVectors(right, forward);
-  /** The tangent of the lens's half-height angle the boxes need, so far. */
+  /** The tangent of the lens's half-height angle the drawn points need, so far. */
   let need = 0;
-  /** The frame's half-height at the focus the points need, so far (metres). */
+  /** The frame's half-height at the focus the label anchors need, so far (metres). */
   let reach = 0;
-  for (const box of boxes) {
-    for (let i = 0; i < 8; i += 1) {
-      SCRATCH_CORNER.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z); // flat-ok: a shot's room is its own flat space off the sphere
-      const v = SCRATCH_CORNER.sub(eye);
-      const depth = v.dot(forward);
-      if (depth < camera.camera.near) return 0;
-      need = Math.max(need, Math.abs(v.dot(right)) / (depth * aspect), Math.abs(v.dot(up)) / depth);
-    }
+  for (const point of drawn) {
+    const v = SCRATCH_CORNER.copy(point).sub(eye);
+    const depth = v.dot(forward);
+    if (depth < camera.camera.near) return 0;
+    need = Math.max(need, Math.abs(v.dot(right)) / (depth * aspect), Math.abs(v.dot(up)) / depth);
   }
   for (const point of points) {
     const v = SCRATCH_CORNER.copy(point).sub(eye);
     if (v.dot(forward) < camera.camera.near) return 0;
     reach = Math.max(reach, Math.abs(v.dot(right)) / aspect, Math.abs(v.dot(up)));
   }
-  const byBoxes = need > 0 ? base / ((need / (1 - margin)) * distance) : Infinity;
-  const byPoints = reach > 0 ? (base * (1 - margin)) / reach : Infinity;
-  return Math.min(byBoxes, byPoints);
+  const byDrawn = need > 0 ? base / ((need / (1 - margin)) * distance) : Infinity;
+  const byLabels = reach > 0 ? (base * (1 - margin)) / reach : Infinity;
+  return Math.min(byDrawn, byLabels);
 }
 
 export function shotZoom(camera: IsoCamera, subject: Box3): number {
@@ -1108,16 +1110,36 @@ export function* solveExhibitShotSteps(
   if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY, frozen, middlePoints)));
   const framing = shotZoom(world.camera, box);
   const contain = rules.contain;
-  // The outer subjects' boxes: a part's (the owl's head) is inside its whole's.
-  const boxes = contain ? [...new Set(targets.map((target) => target.owner))].flatMap((owner) => (subjects[owner] ? [boxOf(subjects[owner], new Box3())] : [])) : [];
+  /**
+   * What the frame must hold of the subjects ({@link ShotRules.contain}): each outer subject seen as a
+   * whole by its own spread — its drawn extremities, sampled edges first — and any other by its box's
+   * corners. Never a rotated child's box: a box round a turned model is half again as wide as she is,
+   * and its near corners held the lens of a phone held upright a hundred and seventeen degrees tall.
+   */
+  const drawn: Vector3[] = [];
+  if (contain) {
+    const sampled = new Set<number>();
+    for (const target of targets) {
+      if (target.whole && target.owner === target.whole.subject) {
+        drawn.push(target.point);
+        sampled.add(target.owner);
+      }
+    }
+    for (const owner of new Set(middles.targets.map((target) => target.owner))) {
+      const subject = subjects[owner];
+      if (sampled.has(owner) || !subject) continue;
+      const corners = boxOf(subject, new Box3());
+      for (let i = 0; i < 8; i += 1) drawn.push(new Vector3(i & 1 ? corners.max.x : corners.min.x, i & 2 ? corners.max.y : corners.min.y, i & 4 ? corners.max.z : corners.min.z)); // flat-ok: a shot's room is its own flat space off the sphere
+    }
+  }
   /**
    * The zoom this eye frames the shot at — or null, when it cannot hold
    * everything {@link ShotRules.contain} asks for at any zoom the camera has.
    */
   const zoomFrom = (eye: Vector3): number | null => {
     if (!contain) return framing;
-    const fit = containZoom(world.camera, eye, focus, boxes, contain.points, contain.margin);
-    return fit < CAMERA_ZOOM_MIN ? null : Math.min(framing, fit);
+    const fit = containZoom(world.camera, eye, focus, drawn, contain.points, contain.margin);
+    return fit < CAMERA_ZOOM_MIN ? null : Math.min(CAMERA_ZOOM_MAX, fit);
   };
   const herBox = her ?? (body ? bodyBoxOf(body) : null);
   const rig = rigPose(player, world.camera.targetZoom);
