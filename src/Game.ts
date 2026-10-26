@@ -59,6 +59,8 @@ import { attractionOwnsTheScreen } from './core/attraction';
 import { BookReader } from './world/library/reader/BookReader';
 import { markBookRead } from './world/library/readBooks';
 import { BookGlance } from './world/library/bookGlance';
+import { StoryCamera } from './world/library/storyCamera';
+import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -211,6 +213,16 @@ export class Game {
    */
   private readonly bookGlance: BookGlance;
 
+  /**
+   * Story time from her cushion (`world/library/storyCamera.ts`): the moment
+   * the child sits on a story cushion, the camera comes down over her
+   * shoulder to the story's stage — the owl's chair and the children's
+   * cushions — breathing gently while it holds. The exhibit camera's director
+   * and solver, in the reading room; a claimant on the one `focusClaim` in
+   * `tick`, like the glance; built with the world.
+   */
+  private readonly storyCamera: StoryCamera;
+
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   private readonly uiRoot: HTMLElement;
@@ -278,6 +290,7 @@ export class Game {
     // …and the Library's reading room (#716).
     this.world.library.adoptRestoredPlayer();
     this.bookGlance = new BookGlance(this.world.library);
+    this.storyCamera = new StoryCamera(this.world.library, this.world.collision, this.camera, this.player);
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -1650,10 +1663,21 @@ export class Game {
    * reading room, at that room-local spot or just in from the door — from
    * anywhere, the room included (`Library.requestEnter`). `story` (the link's
    * `&story=now`, #718) asks for story time at once: it begins on her first
-   * frame inside.
+   * frame inside. `sit` (`&sit=1`, as typed) has her arrive sitting on that
+   * story cushion — one of `LIBRARY_PLAYER_SEATS`, by its number; any other
+   * says so and she stands — so `/library?sit=1&story=now` is story time from
+   * her cushion, the camera coming down over her shoulder the moment she
+   * sits (`world/library/storyCamera.ts`).
    */
-  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }, story = false): boolean {
-    const entered = this.world.library.requestEnter(at);
+  enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }, story = false, sit?: string): boolean {
+    const seat = sit === undefined ? undefined : LIBRARY_PLAYER_SEATS.find((id) => id === `cushion-${sit}`);
+    if (sit !== undefined && !seat) {
+      console.warn(
+        `Land of Good Places: /library sit=${sit} — her story cushions are ${LIBRARY_PLAYER_SEATS.map((id) => id.replace('cushion-', '')).join(' and ')} ` +
+          '(sit=1, sit=3). Standing, not sitting.',
+      );
+    }
+    const entered = this.world.library.requestEnter(at, seat);
     if (entered && story) this.world.library.requestStoryTime();
     return entered;
   }
@@ -1974,6 +1998,18 @@ export class Game {
     // reading room and they are in the hall and the park.
     const glanceClaim = this.bookGlance.apply(this.camera, this.player);
     if (glanceClaim) focusClaim = glanceClaim;
+
+    // Story time from her cushion: the moment she sits on a story cushion, the
+    // camera comes down behind her shoulder to the owl's chair and the
+    // children's cushions, holds (breathing) through the owl's flight, the
+    // gathering and the reading, and goes home when the story ends or she gets
+    // up (`world/library/storyCamera.ts` — the exhibit camera's director and
+    // solver). It writes its own pose and zoom and claims the
+    // focus like the others; it can never hold with the glance, which needs
+    // the owl at her desk, or the exhibit shot and the keychain rack, which are
+    // in the hall and the park.
+    const storyClaim = this.storyCamera.apply(this.camera, this.player, this.frameContext.dt);
+    if (storyClaim) focusClaim = storyClaim;
 
     // The keychain rack's zoomed picker (#331): the camera orbits the centre of
     // everything that must be in shot (`KeychainShop.viewFocus`) instead of the

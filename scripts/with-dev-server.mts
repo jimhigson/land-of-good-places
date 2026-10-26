@@ -36,6 +36,7 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** Not 5173 (Vite's default) and not any port a handoff has named. */
@@ -104,6 +105,37 @@ for (;;) {
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
 say(`serving ${BASE}`);
+
+/**
+ * **The canonical park, built before any check asks for it.** On a source the
+ * dev server has no park for yet, the first request for one runs the accept
+ * loop (`scripts/lib/dev-parks.mjs`) — minutes — and a check that times its
+ * pages from their first load spends its waits on that build instead: on
+ * 26 Oct 2026, run locally after a source change, `check:deep-links`'s first
+ * five links timed out at 120 s each while seeds 5 and 12 were built (611 s
+ * and 675 s), and every link after them passed. In CI `.parks/` is restored
+ * first and this is instant; on a cold tree it is the one wait, said out loud.
+ * Asked again on a headers timeout (Node's fetch gives up on headers after
+ * five minutes): the dev server builds a seed once, however often it is asked.
+ */
+const WARM_TIMEOUT_MS = 40 * 60_000;
+const warmStarted = Date.now();
+say(`warming park seed ${CANONICAL_PARK_SEED} — built on the first request since the source changed, which can take minutes`);
+for (;;) {
+  try {
+    const response = await fetch(`${BASE}/parks/${CANONICAL_PARK_SEED}.json`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    await response.arrayBuffer();
+    break;
+  } catch (error) {
+    const timedOut = String((error as { cause?: { code?: string } })?.cause?.code ?? '').includes('TIMEOUT');
+    if (!timedOut || Date.now() - warmStarted > WARM_TIMEOUT_MS) {
+      stopServer();
+      throw new Error(`park seed ${CANONICAL_PARK_SEED} did not come from ${BASE}/parks/${CANONICAL_PARK_SEED}.json: ${String(error)}`);
+    }
+  }
+}
+say(`park seed ${CANONICAL_PARK_SEED} ready, ${((Date.now() - warmStarted) / 1000).toFixed(1)} s after it was asked for`);
 
 let exitCode = 0;
 for (const command of commands) {
