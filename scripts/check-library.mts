@@ -30,6 +30,7 @@
  * LIBRARY_CHECK_MUTATE=story-camera-waits pnpm run check:library   # the camera only once the owl reads (before 26 Oct): STORY CAMERA's "down the moment she sits" must go red
  * LIBRARY_CHECK_MUTATE=story-breath-off pnpm run check:library     # the camera held dead still: STORY CAMERA's breathing floor must go red
  * LIBRARY_CHECK_MUTATE=story-breath-wild pnpm run check:library    # the breath ten times over: STORY CAMERA's breathing ceiling must go red
+ * LIBRARY_CHECK_MUTATE=story-stage-as-it-was pnpm run check:library  # the stand-ins as they happened to be (before 26 Oct): STORY CAMERA's "the same stage at every sit" must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -144,7 +145,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Box3, Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Raycaster, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Texture } from 'three';
+import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshToonMaterial, Raycaster, Sphere, SphereGeometry, Triangle, Vector2, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Side, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import type { WornHat } from '../src/entities/WornHat.ts';
@@ -163,7 +164,7 @@ import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, bookCollectionId, storyTimeMayRead
 import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
-import { LIBRARY_SHOT_ROOM, StoryCamera, storySeats } from '../src/world/library/storyCamera.ts';
+import { LIBRARY_SHOT_ROOM, StoryCamera, storySeats, type StoryStage } from '../src/world/library/storyCamera.ts';
 import { cameraBreath, type CameraBreath } from '../src/core/cameraBreath.ts';
 import { EXHIBIT_SHOT_EASE_CANCEL, EXHIBIT_SHOT_EASE_IN, EXHIBIT_SHOT_EASE_OUT, HER_SHARE_MAX, SHOT_FLOOR_GRAZE, eyeInHallSpace, herBodyBox, shotAngles } from '../src/world/reptileHouse/exhibitCamera.ts';
 import { FALLBACK_UNIT_PX } from '../src/core/uiScale.ts';
@@ -330,6 +331,7 @@ const MUTATIONS = [
   'story-camera-waits',
   'story-breath-off',
   'story-breath-wild',
+  'story-stage-as-it-was',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -5301,6 +5303,17 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
  *   real eye on the solved one, within {@link DOWN_ONCE_SOLVED} s (the ease, and a beat). How long the solve
  *   itself takes is a measure of the machine — its budget is milliseconds of each frame — so it is noted, never
  *   held to a number (on 26 Oct 2026 the same phone case came down 2.2 s after the sit here and 3.2 s on CI);
+ * - **the same stage and the same eye whenever she sits**: what the shot is solved against is posed from rest,
+ *   never as anyone happened to be — so sitting on the same cushion on the same screen again, at another moment
+ *   (before the owl called, once the reading had begun, with no story at all), every part of every stand-in, her
+ *   own included, is where it was to a tenth of a millimetre, and the eye and the zoom are the ones chosen
+ *   before. (26 Oct 2026: her own body swayed on the clock, and a run of this check that sat her a quarter of a
+ *   second sooner — a faster machine's run, its solves done in fewer frames — chose a phone's eye from cushion 3
+ *   a metre higher.)
+ * - **the owl's flight past the lens** (QA, 26 Oct 2026: from cushion 3 she flew through it) is measured from the
+ *   sit until the group settles, from both cushions on both screens — how near her surface comes to the eye
+ *   and for how long, the near plane cutting her open, and how much of the screen she covers, by
+ *   {@link lensPass}, whose control runs first on each screen — and noted, not yet held to anything;
  * - **the way down** stays in the room's space (over its open top or inside its walls, never through one), no
  *   drawn surface within {@link LENS_REACH} of the lens, and it is smooth: at most {@link TURN_PER_FRAME}° of
  *   turn and {@link FRAME_JUMP} of framing change a frame;
@@ -5341,7 +5354,9 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
  * kept after it lets go: home goes red), `story-camera-low` (an eye straight behind her at 2.5 m: the control —
  * the instrument must see the child on cushion 4 in front of the owl), `story-camera-waits` (the camera applied
  * only once the owl reads — its trigger before 26 Oct: down long after she sat, and never with no story),
- * `story-breath-off` (held dead still: under the floor) and `story-breath-wild` (the breath ten times over:
+ * `story-stage-as-it-was` (the stand-ins as they happened to be: her own swaying body, each listener's head
+ * where her stride had it — the same stage at every sit goes red), `story-breath-off` (held dead still: under
+ * the floor) and `story-breath-wild` (the breath ten times over:
  * over the ceiling).
  */
 /** Seconds from her sitting for the shot to be asked for: the frame she sits on, and the next. */
@@ -5471,6 +5486,209 @@ const screenShareOf = (box: Box3): number => {
   return ((clampN(maxX) - clampN(minX)) / 2) * ((clampN(maxY) - clampN(minY)) / 2);
 };
 
+/**
+ * **How near a drawn thing comes to the lens this frame, and how much of the screen it covers** — the
+ * instrument for the owl's flight past the lens (QA of #736, 26 Oct 2026: from cushion 3 she flew through it,
+ * over half a laptop's screen and two-thirds of a phone's for a moment). Of `meshes`, through the live camera:
+ *
+ * - `nearest`: the least distance from the eye to their surface — each triangle's own closest point, not
+ *   only its corners;
+ * - `cut`: one of their triangles crosses the lens's near plane inside the frame — she is drawn cut open;
+ * - `cover`: the share of the screen they cover — {@link LENS_GRID} rays through it, evenly over its width
+ *   and its height, each cast from the lens's near plane on at the meshes as the renderer draws their faces
+ *   (a back face only where the material is double-sided), so a wing across a corner covers that corner and
+ *   no more, and a body the near plane has cut open covers only what the cut leaves drawn.
+ *
+ * Its control ({@link lensControl}) runs first, every time.
+ */
+const LENS_GRID = 600;
+/**
+ * A story stage as text, a line for each stand-in — the owl, each child, then her ({@link StoryStage}) — of its
+ * every part's world matrix, to a tenth of a millimetre, and whether it is drawn: two stages are posed alike
+ * exactly when their prints are equal.
+ */
+const stagePrint = (stage: StoryStage): string[] =>
+  [stage.owl, ...stage.children.map((stood) => stood.root), stage.her].map((root) => {
+    root.updateMatrixWorld(true);
+    const parts: string[] = [];
+    root.traverse((node) => parts.push(`${node.name}:${node.matrixWorld.elements.map((e) => (Math.abs(e) < 5e-5 ? 0 : e).toFixed(4)).join(',')}:${node.visible ? '+' : '-'}`));
+    return parts.join(' ');
+  });
+interface LensPass {
+  readonly nearest: number;
+  readonly cut: boolean;
+  readonly cover: number;
+}
+/** `root`'s drawn meshes, as the renderer draws them this frame (`traverseVisible`, a material shown). */
+const lensMeshes = (root: Object3D): Mesh[] => {
+  const meshes: Mesh[] = [];
+  root.updateWorldMatrix(true, true);
+  root.traverseVisible((node) => {
+    if (!(node instanceof Mesh)) return;
+    const materials: Material[] = Array.isArray(node.material) ? node.material : [node.material];
+    if (materials.some((material) => material.visible)) meshes.push(node);
+  });
+  return meshes;
+};
+const passRay = new Raycaster();
+const lensAt = new Vector2();
+const lensTriangle = new Triangle();
+const lensCorners: readonly Vector3[] = [new Vector3(), new Vector3(), new Vector3()];
+const lensView: readonly Vector3[] = [new Vector3(), new Vector3(), new Vector3()];
+const lensClosest = new Vector3();
+const lensInstance = new Matrix4();
+const lensWorld = new Matrix4();
+const lensSphere = new Sphere();
+/** Does the segment (ax, ay)–(bx, by) reach into the rectangle |x| ≤ w, |y| ≤ h? (Liang–Barsky.) */
+const segmentInRect = (ax: number, ay: number, bx: number, by: number, w: number, h: number): boolean => {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  for (const [p, q] of [[-dx, ax + w], [dx, w - ax], [-dy, ay + h], [dy, h - ay]] as const) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) t0 = Math.max(t0, r);
+    else t1 = Math.min(t1, r);
+    if (t0 > t1) return false;
+  }
+  return true;
+};
+const lensPass = (meshes: readonly Mesh[]): LensPass => {
+  const lens = camera.camera;
+  lens.updateMatrixWorld();
+  const eye = new Vector3().setFromMatrixPosition(lens.matrixWorld);
+  // The near plane's half-size, from the projection the renderer draws with (zoom and all).
+  const halfWidth = lens.near / lens.projectionMatrix.elements[0]!;
+  const halfHeight = lens.near / lens.projectionMatrix.elements[5]!;
+  let nearest = Infinity;
+  let cut = false;
+  for (const mesh of meshes) {
+    const geometry = mesh.geometry;
+    const position = geometry.getAttribute('position') as BufferAttribute | undefined;
+    if (!position) continue;
+    const index = geometry.getIndex();
+    const count = index ? index.count : position.count;
+    if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+    const instances = mesh instanceof InstancedMesh ? mesh.count : 1;
+    for (let n = 0; n < instances; n += 1) {
+      if (mesh instanceof InstancedMesh) {
+        mesh.getMatrixAt(n, lensInstance);
+        lensWorld.multiplyMatrices(mesh.matrixWorld, lensInstance);
+      } else {
+        lensWorld.copy(mesh.matrixWorld);
+      }
+      // Nothing of this mesh can be nearer than the best so far, nor reach the near plane: pass it by.
+      lensSphere.copy(geometry.boundingSphere!).applyMatrix4(lensWorld);
+      const sphereDepth = -lensSphere.center.clone().applyMatrix4(lens.matrixWorldInverse).z;
+      if (lensSphere.center.distanceTo(eye) - lensSphere.radius > nearest && sphereDepth - lensSphere.radius > lens.near) continue;
+      for (let i = 0; i + 2 < count; i += 3) {
+        for (let k = 0; k < 3; k += 1) {
+          const corner = lensCorners[k]!.fromBufferAttribute(position, index ? index.getX(i + k) : i + k).applyMatrix4(lensWorld);
+          lensView[k]!.copy(corner).applyMatrix4(lens.matrixWorldInverse);
+        }
+        lensTriangle.set(lensCorners[0]!, lensCorners[1]!, lensCorners[2]!);
+        lensTriangle.closestPointToPoint(eye, lensClosest);
+        nearest = Math.min(nearest, lensClosest.distanceTo(eye));
+        if (cut) continue;
+        // Where the triangle crosses the near plane (depth = near), if it does: is that inside the frame?
+        const crossing: [number, number][] = [];
+        for (let k = 0; k < 3; k += 1) {
+          const from = lensView[k]!;
+          const to = lensView[(k + 1) % 3]!;
+          const d0 = -from.z - lens.near;
+          const d1 = -to.z - lens.near;
+          if ((d0 < 0 && d1 > 0) || (d0 > 0 && d1 < 0)) {
+            const t = d0 / (d0 - d1);
+            crossing.push([from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t]);
+          }
+        }
+        if (crossing.length === 2 && segmentInRect(crossing[0]![0], crossing[0]![1], crossing[1]![0], crossing[1]![1], halfWidth, halfHeight)) cut = true;
+      }
+    }
+  }
+  const columns = Math.max(1, Math.round(Math.sqrt(LENS_GRID * lens.aspect)));
+  const rows = Math.max(1, Math.round(LENS_GRID / columns));
+  const forward = new Vector3(0, 0, -1).transformDirection(lens.matrixWorld);
+  let covered = 0;
+  if (meshes.length > 0) {
+    for (let r = 0; r < rows; r += 1) {
+      for (let q = 0; q < columns; q += 1) {
+        lensAt.set(((q + 0.5) / columns) * 2 - 1, ((r + 0.5) / rows) * 2 - 1);
+        passRay.setFromCamera(lensAt, lens);
+        // From the near plane on, along this ray: what the renderer draws, and nothing it clips.
+        passRay.near = lens.near / passRay.ray.direction.dot(forward);
+        passRay.far = lens.far;
+        if (passRay.intersectObjects(meshes as Mesh[], false).length > 0) covered += 1;
+      }
+    }
+  }
+  return { nearest, cut, cover: covered / (columns * rows) };
+};
+/**
+ * **The instrument's control** — five things set in front of the live lens, built in its own frame, whose
+ * answers are known without it: a sheet two metres off over the screen's left half (just past the middle),
+ * covering exactly the rays left of its edge, two metres from the eye and not cut; the same sheet behind the
+ * eye, covering nothing; a ball round the eye, single-sided, so the renderer draws none of it from inside
+ * (nothing covered) and double-sided (all of it covered), never cut — its crossing of the near plane is
+ * outside the frame; and a strip under the eye through the near plane inside the frame, cut. Returns what
+ * it got wrong.
+ */
+const lensControl = (): string[] => {
+  const lens = camera.camera;
+  lens.updateMatrixWorld();
+  const tanX = 1 / lens.projectionMatrix.elements[0]!;
+  const tanY = 1 / lens.projectionMatrix.elements[5]!;
+  const toWorld = (x: number, y: number, z: number): Vector3 => new Vector3(x, y, z).applyMatrix4(lens.matrixWorld);
+  const sheet = (corners: readonly (readonly [number, number, number])[], side: Side): Mesh => {
+    const [a, b, c, d] = corners.map(([x, y, z]) => toWorld(x, y, z)) as [Vector3, Vector3, Vector3, Vector3];
+    const geometry = new BufferGeometry().setFromPoints([a, b, c, a, c, d]);
+    const mesh = new Mesh(geometry, new MeshBasicMaterial({ side }));
+    mesh.updateMatrixWorld(true);
+    return mesh;
+  };
+  const ball = (side: Side): Mesh => {
+    const mesh = new Mesh(new SphereGeometry(0.3, 24, 12), new MeshBasicMaterial({ side }));
+    mesh.position.setFromMatrixPosition(lens.matrixWorld);
+    mesh.updateMatrixWorld(true);
+    return mesh;
+  };
+  const D = 2;
+  const EDGE = 0.013; // the sheet's right edge, in the screen's own −1..1: between two columns of rays
+  const columns = Math.max(1, Math.round(Math.sqrt(LENS_GRID * lens.aspect)));
+  let leftOfEdge = 0;
+  for (let q = 0; q < columns; q += 1) if (((q + 0.5) / columns) * 2 - 1 < EDGE) leftOfEdge += 1;
+  const half = (z: number): readonly (readonly [number, number, number])[] => [
+    [-1.5 * D * tanX, -1.5 * D * tanY, z],
+    [EDGE * D * tanX, -1.5 * D * tanY, z],
+    [EDGE * D * tanX, 1.5 * D * tanY, z],
+    [-1.5 * D * tanX, 1.5 * D * tanY, z],
+  ];
+  const hw = lens.near * tanX;
+  const hh = lens.near * tanY;
+  const strip: readonly (readonly [number, number, number])[] = [
+    [-hw / 2, -hh / 2, -0.05],
+    [hw / 2, -hh / 2, -0.05],
+    [hw / 2, -hh / 2, -0.5],
+    [-hw / 2, -hh / 2, -0.5],
+  ];
+  const wrong: string[] = [];
+  const expect = (what: string, pass: LensPass, cover: number, nearest: readonly [number, number], cut: boolean): void => {
+    const ok = Math.abs(pass.cover - cover) < 1e-9 && pass.nearest >= nearest[0] && pass.nearest <= nearest[1] && pass.cut === cut;
+    if (!ok) wrong.push(`${what}: covered ${(pass.cover * 100).toFixed(1)}% (${(cover * 100).toFixed(1)}% wanted), nearest ${pass.nearest.toFixed(4)} m (${nearest[0].toFixed(4)}–${nearest[1].toFixed(4)}), cut ${pass.cut} (${cut})`);
+  };
+  expect('the sheet over the left half', lensPass([sheet(half(-D), DoubleSide)]), leftOfEdge / columns, [D - 1e-6, D + 1e-6], false);
+  expect('the sheet behind the eye', lensPass([sheet(half(D), DoubleSide)]), 0, [D - 1e-6, D + 1e-6], false);
+  expect('the single-sided ball round the eye', lensPass([ball(FrontSide)]), 0, [0.28, 0.3 + 1e-6], false);
+  expect('the double-sided ball round the eye', lensPass([ball(DoubleSide)]), 1, [0.28, 0.3 + 1e-6], false);
+  const stripNearest = Math.hypot(hh / 2, 0.05);
+  expect('the strip through the near plane', lensPass([sheet(strip, DoubleSide)]), lensPass([sheet(strip, DoubleSide)]).cover, [stripNearest - 1e-6, stripNearest + 1e-6], true);
+  return wrong;
+};
+
 console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over her shoulder to the owl and the children listening, from either cushion, on a laptop and a phone, and goes home when she gets up or the story ends:");
 {
   const owl = library.owl;
@@ -5481,6 +5699,18 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
   if (mutating('no-story-camera')) note('the story camera NOT WIRED on purpose — this run must go red');
   if (mutating('story-camera-stays')) note("the story camera's focus KEPT after it lets go, on purpose — this run must go red");
   if (mutating('story-camera-low')) note('the story camera AIMED LOW, straight behind her at 2.5 m, on purpose — this run must go red');
+  if (mutating('story-stage-as-it-was')) {
+    note("the story camera's stand-ins AS THEY HAPPENED TO BE, on purpose (her own swaying body; each listener's head where her stride had it) — this run must go red");
+    const built = story.stageFor.bind(story);
+    story.stageFor = (her) => {
+      const stage = built(her);
+      stage.children.forEach((stood, i) => {
+        stood.head.position.y = kids[i]!.model.head.position.y;
+        stood.root.updateMatrixWorld(true);
+      });
+      return { ...stage, her: her.group };
+    };
+  }
   // Dressed as the `/library?sit=` link dresses a profile with no save (`main.ts`: `defaultCharacterChoice()`):
   // its hat on her head, drawn as `WornHat` draws one and counted in her height (`Player.topHeight`), so the
   // solve and this clause's instrument both have it in front of them. Bare-headed, this clause once chose a
@@ -5500,6 +5730,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
   type Up = 'chip' | 'jump' | 'standUp' | 'story ends';
   const cases: { seat: (typeof LIBRARY_PLAYER_SEATS)[number]; screen: { width: number; height: number; what: string }; up: Up; sitsLate: boolean; story: boolean }[] = [
     { seat: LIBRARY_PLAYER_SEATS[0], screen: { width: 1280, height: 800, what: 'a laptop' }, up: 'chip', sitsLate: false, story: true },
+    { seat: LIBRARY_PLAYER_SEATS[1], screen: { width: 1280, height: 800, what: 'a laptop' }, up: 'chip', sitsLate: false, story: true },
     { seat: LIBRARY_PLAYER_SEATS[1], screen: { width: 1280, height: 800, what: 'a laptop' }, up: 'jump', sitsLate: true, story: true },
     { seat: LIBRARY_PLAYER_SEATS[0], screen: { width: 390, height: 844, what: 'a phone held upright' }, up: 'standUp', sitsLate: false, story: true },
     { seat: LIBRARY_PLAYER_SEATS[1], screen: { width: 390, height: 844, what: 'a phone held upright' }, up: 'story ends', sitsLate: false, story: true },
@@ -5513,8 +5744,15 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     ...Array.from({ length: 8 }, (_, i) => new Vector3(i & 1 ? chairBox.max.x : chairBox.min.x, i & 2 ? chairBox.max.y : chairBox.min.y, i & 4 ? chairBox.max.z : chairBox.min.z)), // flat-ok: a box's corners, in the reading room's own flat space
     chairBox.getCenter(new Vector3()),
   ];
+  /**
+   * **The same stage, and the same eye, whenever she sits** — what each cushion and screen was solved against
+   * the first time, each stand-in's every part as a world matrix ({@link stagePrint}), and the eye it chose: a
+   * later sit from the same cushion on the same screen must have both again, to the tenth of a millimetre.
+   */
+  const solvedBefore = new Map<string, { label: string; print: string[]; eye: Vector3; zoom: number }>();
+  const controlled = new Set<string>();
   for (const { seat, screen, up, sitsLate, story: told } of cases) {
-    const label = `${seat}, ${screen.what} (${screen.width}×${screen.height})${told ? '' : ', with no story'}`;
+    const label = `${seat}, ${screen.what} (${screen.width}×${screen.height})${sitsLate ? ', sitting down once the reading has begun' : ''}${told ? '' : ', with no story'}`;
     camera.resize(screen.width, screen.height);
     const view = { camera: camera.camera, width: screen.width, height: screen.height };
     const frame = (steer?: Steer): void => {
@@ -5531,6 +5769,41 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     };
     /** The most any fixed point is from where it was in `then`. */
     const moved = (now: readonly [number, number][], then: readonly [number, number][]): number => Math.max(...now.map((p, i) => Math.hypot(p[0] - then[i]![0], p[1] - then[i]![1])));
+    /**
+     * **The owl's flight past the lens** (QA of #736, 26 Oct 2026: from cushion 3 she flew straight through it),
+     * by {@link lensPass}, every frame from the sit until the group settles: noted, never asserted — what is to
+     * be done about it is Jim's to choose (fade her when she is close, wait for her to land, or fly her another
+     * way), and this is what whichever he picks will be held to.
+     */
+    const owlPass = { clock: 0, nearest: Infinity, nearestAt: Number.NaN, within1: 0, within05: 0, within025: 0, cut: 0, cover: 0, coverAt: Number.NaN, overQuarter: 0, overHalf: 0 };
+    const owlWatch = (): void => {
+      owlPass.clock += CHILD_DT;
+      const pass = lensPass(lensMeshes(owl.handle.root));
+      if (pass.nearest < owlPass.nearest) {
+        owlPass.nearest = pass.nearest;
+        owlPass.nearestAt = owlPass.clock;
+      }
+      if (pass.nearest < 1) owlPass.within1 += CHILD_DT;
+      if (pass.nearest < 0.5) owlPass.within05 += CHILD_DT;
+      if (pass.nearest < 0.25) owlPass.within025 += CHILD_DT;
+      if (pass.cut) owlPass.cut += CHILD_DT;
+      if (pass.cover > owlPass.cover) {
+        owlPass.cover = pass.cover;
+        owlPass.coverAt = owlPass.clock;
+      }
+      if (pass.cover > 0.25) owlPass.overQuarter += CHILD_DT;
+      if (pass.cover > 0.5) owlPass.overHalf += CHILD_DT;
+    };
+    // The instrument's control, once on each screen: the lens is this case's.
+    if (!controlled.has(`${screen.width}×${screen.height}`)) {
+      controlled.add(`${screen.width}×${screen.height}`);
+      const wrong = lensControl();
+      say(
+        wrong.length === 0,
+        `the owl-past-the-lens instrument's control on ${screen.what} (${screen.width}×${screen.height}): a sheet over the left half of the screen, the same sheet behind the eye, a ball round the eye one-sided and two-sided, and a strip through the near plane, each read as built` +
+          `${wrong.length ? ` — WRONG: ${wrong.join('; ')}` : ''}`,
+      );
+    }
     const cushion = libraryCushion(seat);
     // Out and in again, so each case starts from a fresh visit with story time idle (the door abandons any story).
     if (library.playerIsInside && !quietly(() => library.requestEnterDoor())) throw new Error(`STORY CAMERA ${label}: /library-door refused her`);
@@ -5596,6 +5869,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     while (!settled() && down < DOWN_GIVE_UP) {
       frame();
       watch();
+      owlWatch();
       down += CHILD_DT;
       if (Number.isNaN(askedAt) && (story.solving || story.state === 'in' || story.state === 'hold')) askedAt = down;
       if (Number.isNaN(landedAt) && (story.state === 'in' || story.state === 'hold')) landedAt = down;
@@ -5614,6 +5888,23 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
       `STORY CAMERA ${label}: eye at room (${(eye.x - OX).toFixed(2)}, ${(eye.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(eye.z - OZ).toFixed(2)}), ${back.toFixed(2)} m from her across the floor, ` + // flat-ok: room-local
         `yaw ${shot?.yawDegrees.toFixed(0) ?? '?'}° pitch ${shot?.pitchDegrees.toFixed(0) ?? '?'}° zoom ${shot?.zoom.toFixed(2) ?? '?'}; candidate ${shot?.tried ?? '?'}; unsolved so far ${story.unsolved}`,
     );
+    if (story.stage && shot) {
+      const where = `${seat}|${screen.width}×${screen.height}`;
+      const print = stagePrint(story.stage);
+      const first = solvedBefore.get(where);
+      if (!first) {
+        solvedBefore.set(where, { label, print, eye: shot.eye.clone(), zoom: shot.zoom });
+      } else {
+        const names = ['the owl', ...kids.map((kid) => kid.plan.name), 'her'];
+        const off = print.map((line, i) => (line === first.print[i] ? null : names[i] ?? `stand-in ${i}`)).filter((name): name is string => name !== null);
+        const eyeOff = shot.eye.distanceTo(first.eye);
+        say(
+          off.length === 0 && print.length === first.print.length && eyeOff < 1e-4 && Math.abs(shot.zoom - first.zoom) < 1e-6,
+          `  the same stage and the same eye as when she sat here before (${first.label}): every part of the owl, the ${kids.length} children and her stood in alike to a tenth of a millimetre` +
+            `${off.length ? ` — NOT ${off.join(', ')}` : ''}; the eye ${(eyeOff * 1000).toFixed(1)} mm from that one, zoom ${shot.zoom.toFixed(6)} (${first.zoom.toFixed(6)})`,
+        );
+      }
+    }
     say(
       faults.length === 0 && worstTurn <= TURN_PER_FRAME && worstJump <= FRAME_JUMP,
       `  the way down: in the room's space with nothing within ${LENS_REACH} m of the lens on every frame${faults.length ? ` — ${faults.length} faults, first: ${faults[0]}` : ''}; ` +
@@ -5640,12 +5931,21 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     while (told ? !groupSettled() && heldFor < GATHER_TIMEOUT + 20 : heldFor < 6) {
       frame();
       heldFor += CHILD_DT;
+      owlWatch();
       const now = onScreen();
       worstStep = Math.max(worstStep, moved(now, previous));
       previous = now;
       gathering.push(now);
     }
     const gatheringSway = swayOf(gathering);
+    if (told) {
+      note(
+        `STORY CAMERA ${label}: the owl's flight past the lens, from the sit until the group settled (${owlPass.clock.toFixed(1)} s; the camera down at ${down.toFixed(1)} s): ` +
+          `nearest ${owlPass.nearest.toFixed(2)} m from the eye, ${owlPass.nearestAt.toFixed(2)} s after the sit; within 1 m of it for ${owlPass.within1.toFixed(2)} s, ` +
+          `half a metre for ${owlPass.within05.toFixed(2)} s, a quarter for ${owlPass.within025.toFixed(2)} s; cut open by the lens's near plane (${camera.camera.near} m) for ${owlPass.cut.toFixed(2)} s; ` +
+          `she covered at most ${(owlPass.cover * 100).toFixed(0)}% of the screen${Number.isNaN(owlPass.coverAt) ? '' : ` (${owlPass.coverAt.toFixed(2)} s after the sit)`}, over a quarter of it for ${owlPass.overQuarter.toFixed(2)} s and over half for ${owlPass.overHalf.toFixed(2)} s`,
+      );
+    }
     const what = told ? (sitsLate ? 'before she sat' : 'through the gathering — the owl calling and flying over, the children walking in') : 'with no story';
     if (gathering.length * CHILD_DT >= BREATH_LEAST) {
       say(
