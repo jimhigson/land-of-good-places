@@ -579,7 +579,7 @@ function* shotSeesSteps(eye: Vector3, targets: readonly ShotTarget[], occluders:
   const points = new Map<number, number>();
   for (const { whole } of targets) if (whole) points.set(whole.subject, (points.get(whole.subject) ?? 0) + 1);
   const misses = new Map<number, number[]>();
-  // In the order the solve keeps (see `TestOrder`): what turned the last eye down is asked first.
+  // In the order the solve keeps ({@link firstFrom}): what turned the last eye down is asked first.
   const sequence = order ?? targets.map((_, index) => index);
   for (const [at, index] of sequence.entries()) {
     const target = targets[index];
@@ -670,7 +670,7 @@ function mayMissOf(points: number, share: number): number {
  * front, in the order they were found. Whether an eye passes does not depend
  * on the order — every sightline is asked of an eye that passes — so neither
  * does which eye is chosen. Measured on the reading room, a phone held
- * upright, cushion 3 (25 Oct 2026): the 113th candidate passed, after
+ * upright, cushion 3 (26 Oct 2026): the 113th candidate passed, after
  * 1251 steps and 4.4 s of the owl's story.
  */
 function firstFrom(order: number[], positions: readonly number[]): void {
@@ -1136,6 +1136,8 @@ export function* solveExhibitShotSteps(
   const near = collectOccluders([world.hall, ...mutualRoots], ignore);
   const frozen = rules.spread ? subjects.map((subject) => (wholeShare(subject) === null ? [] : freeze(subject))) : [];
   const middlePoints = middles.targets.map((target) => target.point);
+  // And where she stood: `player` is her live position, and she may shuffle while the solve runs.
+  const feet = player.clone();
   yield;
   if (rules.spread) targets.push(...(yield* spreadTargets(subjects, rules.spread, world.room.floorY, frozen, middlePoints)));
   const framing = shotZoom(world.camera, box);
@@ -1172,13 +1174,13 @@ export function* solveExhibitShotSteps(
     return fit < CAMERA_ZOOM_MIN ? null : Math.min(CAMERA_ZOOM_MAX, fit);
   };
   const herBox = her ?? (body ? bodyBoxOf(body) : null);
-  const rig = rigPose(player, world.camera.targetZoom);
+  const rig = rigPose(feet, world.camera.targetZoom);
 
   // "Behind her": along the line from the animals through her. Stood right
   // on top of the focus, her own back is the answer instead — and always,
   // over her shoulder (`ShotRules.overHerShoulder`), with the fan round her.
-  let behindX = player.x - focus.x;
-  let behindZ = player.z - focus.z;
+  let behindX = feet.x - focus.x;
+  let behindZ = feet.z - focus.z;
   const reach = Math.hypot(behindX, behindZ);
   if (reach < 0.5 || rules.overHerShoulder) {
     behindX = -Math.sin(facing);
@@ -1188,7 +1190,7 @@ export function* solveExhibitShotSteps(
     behindZ /= reach;
   }
   const behind = Math.atan2(behindX, behindZ);
-  const origin = rules.overHerShoulder ? player : focus;
+  const origin = rules.overHerShoulder ? feet : focus;
   const start = rules.overHerShoulder ? 0 : Math.max(reach, 0.5);
 
   // Every candidate, cheapest-to-reject tests first, then in order of how
