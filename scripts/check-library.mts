@@ -5332,7 +5332,7 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
  * motion thresholds are the screen's, in CSS pixels at the case's own size: half a pixel is a hairline nobody
  * sees move; the breathing as Jim first saw it (the first preview, 26 Oct, before it was named) moved fixed
  * scenery 0.7–2.8 px from its middle and never 0.4 px in a frame; six pixels is half a degree of a laptop's
- * lens, and a pixel a frame is sixty a second.
+ * lens; and a step of more than a hairline in one frame, among steps a tenth of that, reads as a twitch.
  *
  * Proved red by `LIBRARY_CHECK_MUTATE=no-story-camera` (the shot never comes), `story-camera-stays` (its focus
  * kept after it lets go: home goes red), `story-camera-low` (an eye straight behind her at 2.5 m: the control —
@@ -5349,7 +5349,7 @@ const STILL_PX = 0.5;
 /** The breathing: the least and the most fixed scenery moves from its own middle (pixels), and the most in one frame. */
 const BREATH_FLOOR_PX = 0.5;
 const BREATH_CEILING_PX = 6;
-const BREATH_STEP_PX = 1;
+const BREATH_STEP_PX = 0.5;
 /** Seconds the aim takes to settle from held to following before the breathing is measured. */
 const BREATH_SETTLE = 2;
 /** Seconds of the reading the breathing is watched over, after the three moments of the hold. */
@@ -5609,30 +5609,31 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
       `  the way down: in the room's space with nothing within ${LENS_REACH} m of the lens on every frame${faults.length ? ` — ${faults.length} faults, first: ${faults[0]}` : ''}; ` +
         `smooth, at most ${worstTurn.toFixed(2)}° of turn and ${(worstJump * 100).toFixed(1)}% of framing change in a frame (${TURN_PER_FRAME}° and ${FRAME_JUMP * 100}% allowed)`,
     );
-    // Held: until the owl reads with every child in place (the breathing begins), or — with no story — for three seconds.
+    // Held: until the owl reads from her perch with every child on her cushion — this clause's own reading of
+    // the room, never the camera's word for it — or, with no story, for three seconds.
+    const groupSettled = (): boolean => library.storyPhase === 'reading' && owl.perched && kids.every((kid) => kid.body.seated && !kid.body.hopping);
     const heldFrom = onScreen();
     let previous = heldFrom;
     let heldMoved = 0;
     let heldFrames = 0;
     let worstStep = 0;
     let heldFor = 0;
-    let readingFor = 0;
-    while (told ? !story.breathing && readingFor < 1.5 && heldFor < GATHER_TIMEOUT + 20 : heldFor < 3) {
+    while (told ? !groupSettled() && heldFor < GATHER_TIMEOUT + 20 : heldFor < 3) {
       frame();
       heldFor += CHILD_DT;
-      if (library.storyPhase === 'reading') readingFor += CHILD_DT;
       const now = onScreen();
-      if (story.breathing) break;
+      if (groupSettled()) break;
       heldMoved = Math.max(heldMoved, moved(now, heldFrom));
       worstStep = Math.max(worstStep, moved(now, previous));
       previous = now;
       heldFrames += 1;
     }
     say(
-      heldMoved <= STILL_PX && (told ? story.breathing : !story.breathing && story.state === 'hold'),
+      heldMoved <= STILL_PX && (told ? groupSettled() && story.breathing : !story.breathing && story.state === 'hold'),
       `  still ${told ? 'until the reading' : 'with no story'}: the story chair moved at most ${heldMoved.toFixed(3)} px on the screen over ${heldFrames} held frames (${heldFor.toFixed(1)} s` +
         `${told ? `, the owl ${sitsLate ? 'already reading' : 'calling, flying over and the children walking in'}` : ''}; ${STILL_PX} allowed)` +
-        `${told && !story.breathing ? ` — THE GROUP NEVER SETTLED (story time ${library.storyPhase})` : ''}${!told && story.breathing ? ' — BREATHING WITH NO STORY' : ''}`,
+        `${told && !groupSettled() ? ` — THE GROUP NEVER SETTLED (story time ${library.storyPhase})` : ''}${told && groupSettled() && !story.breathing ? ' — THE AIM NEVER BEGAN TO FOLLOW THEM' : ''}` +
+        `${!told && story.breathing ? ' — BREATHING WITH NO STORY' : ''}`,
     );
     if (!told) {
       // The stage, with nobody on it: the chair and the children's cushions, every drawn point in the frame.

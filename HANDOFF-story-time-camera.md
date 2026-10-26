@@ -76,6 +76,29 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
 - Dev park reuse after a camera-only edit: copy `.parks/dev/<old16>/5` to `.parks/dev/<new16>/5` (the park does
   not depend on the camera; saves a 15-minute rebuild). Never for CI.
 
+## Jim on the preview, 26 Oct
+
+1. "the camera needs to transition as soon as you sit, it is fine as it is" → down at the sit (a3d8df12): solved
+   against stand-ins for the reading's stage (`storyStage`: each child's and the owl's own model cloned, set where
+   story time puts them, posed listening / perched at rest). Stand-in boxes measured within 1–3 cm of the real
+   seated children and perched owl. No story: comes down to the same stage, holds still until she gets up.
+2. The "wobble" — Jim: "I like this effect … add it intentionally". Measured (dev = preview 347ba77, seed 5): the
+   aim follow (`liveShot`, LIVE_FOCUS_HALF_LIFE 0.35 s) after the group's bounding box; follow off → 0.00 px.
+   Settle ~3–13 px over the first 2 s of the hold, then a sway ±0.11–0.17° (fixed scenery 0.7–2.8 px from its
+   middle, ≤ 0.4 px a frame), period ~4.3–4.8 s (the children's listening sway 4.8 s/5.7 s + the owl's breath
+   3.7 s). Kept, named: `ShotRules.aim` + `STORY_AIM_FOLLOW_HALF_LIFE` (0.35); held still from the sit until the
+   owl reads with every child seated (following them during the gathering pans across the room).
+3. check:library STORY CAMERA: down ≤ 2.5 s after the sit; still ≤ 0.5 px until the group settles; breathing
+   0.5–6 px from its middle and ≤ 0.5 px a frame. Reds: story-camera-waits (down never within 2.5 s), story-aim-still
+   (0.00 px, under the floor), story-aim-pinned (0.87–1.06 px in a frame, 3 of 4 cases), story-aim-early (the chair
+   moves millions of px on screen during the gathering).
+4. Local full check on 347ba77c failed in check:deep-links: first five /library links timed out (120 s) while the
+   dev server built seeds 5 and 12 on demand (611 s, 675 s); every later link passed; alone with a warm cache it
+   passed. Fix: with-dev-server warms the canonical park first; the deep-links reachability probe pins its seed.
+5. Local test:procgen on 347ba77c failed: 12 seeds' beforeAll (the acceptance loop) hit the 1 h hook timeout while
+   the Mac kept going into maintenance sleep. Run it with `.parks/` restored from CI's `parks-<hash>` artifact
+   (`gh run download`), as CI does, under `caffeinate -s -i`.
+
 ## Status
 
 - [x] solver + story camera + deep link + check wiring; framing (f6749f3d); solve order (873e1606); hat (c9883778)

@@ -734,7 +734,9 @@ try {
   const browser = await chromium.launch({ channel: 'chromium', headless: true });
   try {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // At the pinned seed: a page with none draws one from the pool, and on a source the dev server has no
+    // park for yet that draw starts a build of some other seed (seed 12 on 26 Oct 2026, 675 s) beside ours.
+    await page.goto(at('/'), { waitUntil: 'domcontentloaded', timeout: 15000 });
   } finally {
     await browser.close().catch(() => {});
   }
