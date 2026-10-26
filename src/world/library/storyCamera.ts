@@ -1,5 +1,6 @@
 import { Matrix4, Quaternion, Vector3, type Object3D } from 'three';
 import type { IsoCamera } from '../../core/IsoCamera';
+import { cameraBreath } from '../../core/cameraBreath';
 import type { CollisionWorld } from '../Collision';
 import { ExhibitCamera, asWhole, type ExhibitShot, type ShotInput, type ShotRoom, type ShotRules, type SolveReport } from '../reptileHouse/exhibitCamera';
 import type { CharacterModel } from '../../entities/CharacterModel';
@@ -61,7 +62,12 @@ import type { StoryPhase } from './storyTime';
  * and the owl's bubble's anchor (a bubble is drawn only while its anchor is in
  * shot, #415), on whatever screen is there; the fan of eyes stands **round her,
  * from her back** — she faces the storyteller's chair, and the audience's
- * middle is off to one side of it; and **the aim** ({@link STORY_AIM_FOLLOW_HALF_LIFE}).
+ * middle is off to one side of it; and **the camera breathes** (`ShotRules.breath`,
+ * `core/cameraBreath.ts`): the eye held where it was proven clear, the aim
+ * swaying a fraction of a degree about the stage on a slow, gently irregular
+ * rhythm, the whole time the shot is down — Jim, 26 October 2026: *"I like this
+ * wobble and would like this small wobble to apply all of the time."* It owes
+ * nothing to who is moving: the owl flying over, the children walking in.
  *
  * ## It never takes the controls
  *
@@ -156,25 +162,6 @@ export const STORY_LISTENER_SEEN = 0.5;
  * quarters seen.
  */
 export const STORY_IDEAL = { height: 2 * KID_HEIGHT, back: 1.6, swing: 50 } as const;
-
-/**
- * **The camera breathes with the group** — a deliberate effect, Jim's on 26
- * October 2026: *"I like this effect … I would like this added
- * intentionally."* Once the owl reads and every child is sitting, the eye
- * stays exactly where it was proven clear and the aim eases after the middle
- * of the owl and the three listeners, by half every this many seconds — so as
- * they sway (a listener's head and hands on 4.8 s and 5.7 s cycles, each child
- * on her own phase, `ridePose.ts`'s listening pose; the owl's breath on 3.7 s,
- * `LibraryOwl`), the picture drifts gently with them, a slow sway of about
- * 4–5 s, a fraction of a degree, and the lens breathes with the eye-to-aim
- * distance (`IsoCamera`'s lens follows it). Measured on the first preview,
- * before it was named (26 Oct): ±0.11–0.17° of aim, fixed scenery 0.7–2.8 px
- * from its middle, never more than 0.4 px a frame. Until the reading (the owl
- * on the wing, the children walking in), the aim holds still: following
- * them then would pan across the room. `check:library`'s STORY CAMERA holds
- * the sway between a floor and a ceiling, measured on the screen.
- */
-export const STORY_AIM_FOLLOW_HALF_LIFE = 0.35;
 
 /**
  * **What the audience sits on, which hides nobody**: the owl's story chair,
@@ -299,7 +286,6 @@ export interface StoryCameraLibrary {
   readonly children: readonly {
     readonly model: CharacterModel;
     readonly plan: { readonly seat: string };
-    readonly body: { readonly seated: boolean; readonly hopping: boolean };
     readonly driver: { readonly seat: { readonly x: number; readonly z: number }; readonly seatFacing: number };
   }[];
   furniture(id: string): Object3D | undefined;
@@ -324,8 +310,6 @@ export class StoryCamera {
   private story = false;
   /** The story she sat through has ended since the shot began: it goes home, she still sitting. */
   private storyEnded = false;
-  /** The live owl and children, whose middle the aim follows once the owl reads ({@link STORY_AIM_FOLLOW_HALF_LIFE}). */
-  private live: Object3D[] = [];
   /** The stage the shot was last solved against — for the checks. */
   private lastStage: StoryStage | null = null;
   /**
@@ -372,11 +356,6 @@ export class StoryCamera {
     return this.lastStage;
   }
 
-  /** The aim is following the group this frame (the breathing, {@link STORY_AIM_FOLLOW_HALF_LIFE}) — for the checks. */
-  get breathing(): boolean {
-    return this.director.active && this.followed() !== null;
-  }
-
   /**
    * **One frame**: decides whether the shot is wanted, steps the director by
    * `dt`, and writes this frame's camera through it — returning the focus it
@@ -407,18 +386,6 @@ export class StoryCamera {
     return this.director.apply(camera);
   }
 
-  /**
-   * The bodies the aim follows this frame ({@link STORY_AIM_FOLLOW_HALF_LIFE}):
-   * the owl and the three children once she reads from her perch and every
-   * child is on her cushion; until then, nobody — the aim holds still.
-   */
-  private followed(): readonly Object3D[] | null {
-    const library = this.library;
-    if (library.storyPhase !== 'reading' || !library.owl.perched) return null;
-    if (!library.children.every((child) => child.body.seated && !child.body.hopping)) return null;
-    return this.live;
-  }
-
   /** The shot of the stage from where she sits — solved over the next few frames against its stand-ins. */
   private start(): void {
     const { owl, children } = this.library;
@@ -427,14 +394,13 @@ export class StoryCamera {
     this.lastStage = stage;
     const subjects: Object3D[] = [...asWhole([stage.owl], STORY_OWL_SEEN), ...asWhole([stage.owlHead], 1)];
     for (const child of stage.children) subjects.push(...asWhole([child.root], STORY_LISTENER_SEEN), ...asWhole([child.head], STORY_HEAD_SEEN));
-    this.live = [owl.handle.root, owl.handle.head, ...children.flatMap((child) => [child.model.root, child.model.head])];
     const rules: ShotRules = {
       mutual: true,
       spread: STORY_SPREAD,
       contain: { points: [stage.bubble], margin: STORY_FRAME_MARGIN },
       overHerShoulder: true,
       ideal: STORY_IDEAL,
-      aim: { halfLife: STORY_AIM_FOLLOW_HALF_LIFE, subjects: () => this.followed() },
+      breath: cameraBreath,
     };
     // The real owl and children, wherever they are this frame, hide nothing: the stage is solved for where they will be.
     const cast = [...storySeats(this.library), owl.handle.root, ...children.map((child) => child.model.root)];

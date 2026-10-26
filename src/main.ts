@@ -352,9 +352,9 @@ type DeepLink =
    * as the owl calls everyone to the rug.
    * `&sit=1` (or `3`) has her arrive **sitting** on that story cushion,
    * facing the chair; `at` is not needed then. `/library?sit=1&story=now` is
-   * story time from her cushion: the owl calls, flies, the children sit, and
-   * as the owl starts to read the camera comes down over her shoulder
-   * (`storyCamera.ts`). Carried as typed and read by `Game.enterLibrarySpawn`
+   * story time from her cushion: the camera comes down over her shoulder the
+   * moment she sits, and holds while the owl calls, flies, the children sit
+   * and the owl reads (`storyCamera.ts`). Carried as typed and read by `Game.enterLibrarySpawn`
    * against `layout.ts`'s `LIBRARY_PLAYER_SEATS`, the one list of her
    * cushions — which this entry chunk does not load (the world is a lazy
    * import, `loadGame`).

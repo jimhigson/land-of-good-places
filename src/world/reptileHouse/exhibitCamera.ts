@@ -1,6 +1,7 @@
 import { Box3, InstancedMesh, Line3, Matrix4, Mesh, PerspectiveCamera, Raycaster, Sphere, Vector3, type BufferAttribute, type InterleavedBufferAttribute, type Material, type Object3D } from 'three';
 import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, PLAYER_RADIUS, cameraViewHalfHeight } from '../../core/constants';
 import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
+import type { CameraBreath } from '../../core/cameraBreath';
 import type { CollisionWorld } from '../Collision';
 import { REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z, REPTILE_WALL_HEIGHT } from './layout';
 import { REPTILE_INNER_X, REPTILE_INNER_Z } from './shell';
@@ -202,25 +203,15 @@ export interface ShotRules {
    */
   readonly ideal?: { readonly swing?: number; readonly back?: number; readonly height?: number };
   /**
-   * **Where the aim goes while the shot is held** ({@link ShotAim}). Asked
-   * for nothing, it is an exhibit's: the aim eases after the shot's own
+   * **A held aim that breathes** (`core/cameraBreath.ts`): the aim stays on
+   * the focus the shot was solved for — it never follows the subjects — and
+   * is turned about the eye each frame by `breath(seconds)`, seconds since the
+   * shot was solved (and reached a little along the view, which the lens
+   * follows). The eye never moves from the spot that was proven clear. Asked
+   * for nothing, the aim is an exhibit's: it eases after the shot's own
    * subjects as they move, at {@link LIVE_FOCUS_HALF_LIFE}.
    */
-  readonly aim?: ShotAim;
-}
-
-/**
- * **What a shot's aim follows once it is down, and how closely** — the eye
- * never moves from the spot that was proven clear; only the point it looks
- * at does. Each frame `subjects()` is asked: the bodies whose middle the aim
- * eases towards, by half every `halfLife` seconds — or `null`, and the aim
- * holds exactly where it is. Story time's (`library/storyCamera.ts`) is held
- * still from the sit until the audience is in place, and then follows them:
- * the camera breathes with the group.
- */
-export interface ShotAim {
-  readonly halfLife: number;
-  readonly subjects: () => readonly Object3D[] | null;
+  readonly breath?: (seconds: number, out: CameraBreath) => CameraBreath;
 }
 
 /** Her own body's mark among a shot's occluders ({@link OccluderSet.owners}): not a subject, and not the room. */
@@ -1487,10 +1478,14 @@ export class ExhibitCamera {
   private readonly memory = new Map<string, { at: Vector3; eye: Vector3 }>();
   private warmQueue: WarmEntry[] = [];
   private warming: { id: string; at: Vector3; steps: Generator<void, ExhibitShot | null> } | null = null;
-  private pending: { id: string; subjects: readonly Object3D[]; aim: ShotAim | null; steps: Generator<void, ExhibitShot | null> } | null = null;
+  private pending: { id: string; subjects: readonly Object3D[]; breath: ShotRules['breath'] | null; steps: Generator<void, ExhibitShot | null> } | null = null;
   private subjects: readonly Object3D[] = [];
-  /** The held shot's own aim ({@link ShotRules.aim}), or null for an exhibit's. */
-  private aim: ShotAim | null = null;
+  /** The shot's breath ({@link ShotRules.breath}), or null for an exhibit's following aim. */
+  private breath: ShotRules['breath'] | null = null;
+  /** Seconds since the shot was solved — the breath's own clock, so every shot breathes from the same start. */
+  private breathAt = 0;
+  private readonly breathed: CameraBreath = { yawDegrees: 0, pitchDegrees: 0, reach: 0 };
+  private readonly breathFocus = new Vector3();
   private readonly liveFocus = new Vector3();
   private lastDt = 0;
 
@@ -1545,7 +1540,7 @@ export class ExhibitCamera {
     this.pending = {
       id,
       subjects,
-      aim: rules.aim ?? null,
+      breath: rules.breath ?? null,
       steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred, herBodyBox(player.position, player.topHeight), rules),
     };
     this.anchor.copy(player.position);
@@ -1610,7 +1605,7 @@ export class ExhibitCamera {
         this.pending = null;
         if (step.value) {
           this.memory.set(pending.id, { at: player.position.clone(), eye: step.value.eye.clone() });
-          this.begin(step.value, pending.subjects, player, pending.aim);
+          this.begin(step.value, pending.subjects, player, pending.breath);
         }
         else this.failures.push(pending.id);
         return;
@@ -1620,7 +1615,7 @@ export class ExhibitCamera {
   }
 
   /** The solved shot takes the camera: the move starts from wherever it is now. */
-  private begin(shot: ExhibitShot, subjects: readonly Object3D[], player: ShotPlayer, aim: ShotAim | null = null): void {
+  private begin(shot: ExhibitShot, subjects: readonly Object3D[], player: ShotPlayer, breath: ShotRules['breath'] | null = null): void {
     if (this.phase === 'idle') {
       const camera = this.world.camera;
       this.zoomBefore = camera.targetZoom;
@@ -1632,7 +1627,8 @@ export class ExhibitCamera {
     }
     this.lastShot = shot;
     this.subjects = subjects;
-    this.aim = aim;
+    this.breath = breath;
+    this.breathAt = 0;
     this.liveFocus.copy(shot.focus);
     this.lastPlayer = player;
     this.to = { focus: shot.focus, yawDegrees: shot.yawDegrees, pitchDegrees: shot.pitchDegrees, distance: shot.distance, zoom: shot.zoom };
@@ -1656,6 +1652,7 @@ export class ExhibitCamera {
   update(dt: number, input: ShotInput, player: ShotPlayer, inside: boolean, bubbleLeft: number): void {
     this.lastPlayer = player;
     this.lastDt = dt;
+    if (this.phase !== 'idle') this.breathAt += dt;
     if (this.pending) {
       const moved = Math.hypot(player.position.x - this.anchor.x, player.position.z - this.anchor.z) > EXHIBIT_SHOT_MOVE_CANCEL;
       if (!inside || player.riding || moved || input.manualMoveActive || input.justPressed('jump')) this.pending = null;
@@ -1735,21 +1732,23 @@ export class ExhibitCamera {
    * proven clear, the aim on the animals as they are *now* — a tortoise
    * plods, a croc drifts, a skink potters — so the reaction stays in the
    * middle of the frame without the eye wandering anywhere unproven. A shot
-   * with its own aim ({@link ShotRules.aim}) follows whoever that names, at
-   * its own half-life, or holds the aim still.
+   * that breathes ({@link ShotRules.breath}) holds its aim on the focus it was
+   * solved for instead, turned about the eye by this moment's breath.
    */
   private liveShot(): Pose | null {
     const shot = this.lastShot;
     if (!shot || !this.to) return this.to;
-    const aim = this.aim;
-    if (aim) {
-      // The shot's own aim (`ShotRules.aim`): after whoever it names this frame, or held.
-      const followed = aim.subjects();
-      if (followed) {
-        const { box } = subjectOf(followed);
-        if (!box.isEmpty()) this.liveFocus.lerp(box.getCenter(new Vector3()), 1 - Math.pow(2, -this.lastDt / aim.halfLife));
-      }
-      return { focus: this.liveFocus, ...shotAngles(shot.eye, this.liveFocus), zoom: shot.zoom };
+    if (this.breath) {
+      const breath = this.breath(this.breathAt, this.breathed);
+      const yawDegrees = shot.yawDegrees + breath.yawDegrees;
+      const pitchDegrees = shot.pitchDegrees + breath.pitchDegrees;
+      const distance = shot.distance + breath.reach;
+      // The eye where it was proven clear; the aim turned about it — `eyeOfPose` backwards.
+      const yaw = (yawDegrees * Math.PI) / 180;
+      const pitch = (pitchDegrees * Math.PI) / 180;
+      const across = Math.cos(pitch) * distance;
+      this.breathFocus.set(shot.eye.x - Math.sin(yaw) * across, shot.eye.y - Math.sin(pitch) * distance, shot.eye.z - Math.cos(yaw) * across);
+      return { focus: this.breathFocus, yawDegrees, pitchDegrees, distance, zoom: shot.zoom };
     }
     const { box } = subjectOf(this.subjects);
     if (box.isEmpty()) return this.to;

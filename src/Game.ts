@@ -214,11 +214,12 @@ export class Game {
   private readonly bookGlance: BookGlance;
 
   /**
-   * Story time from her cushion (`world/library/storyCamera.ts`): while the
-   * owl reads and the child sits on a story cushion, the camera comes down
-   * over her shoulder to the owl and the children listening. The exhibit
-   * camera's director and solver, in the reading room; a claimant on the one
-   * `focusClaim` in `tick`, like the glance; built with the world.
+   * Story time from her cushion (`world/library/storyCamera.ts`): the moment
+   * the child sits on a story cushion, the camera comes down over her
+   * shoulder to the story's stage — the owl's chair and the children's
+   * cushions — breathing gently while it holds. The exhibit camera's director
+   * and solver, in the reading room; a claimant on the one `focusClaim` in
+   * `tick`, like the glance; built with the world.
    */
   private readonly storyCamera: StoryCamera;
 
@@ -1665,8 +1666,8 @@ export class Game {
    * frame inside. `sit` (`&sit=1`, as typed) has her arrive sitting on that
    * story cushion — one of `LIBRARY_PLAYER_SEATS`, by its number; any other
    * says so and she stands — so `/library?sit=1&story=now` is story time from
-   * her cushion, and the camera coming down over her shoulder as the owl
-   * starts to read (`world/library/storyCamera.ts`).
+   * her cushion, the camera coming down over her shoulder the moment she
+   * sits (`world/library/storyCamera.ts`).
    */
   enterLibrarySpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }, story = false, sit?: string): boolean {
     const seat = sit === undefined ? undefined : LIBRARY_PLAYER_SEATS.find((id) => id === `cushion-${sit}`);
@@ -1998,11 +1999,12 @@ export class Game {
     const glanceClaim = this.bookGlance.apply(this.camera, this.player);
     if (glanceClaim) focusClaim = glanceClaim;
 
-    // Story time from her cushion: while the owl reads and she sits on a story
-    // cushion, the camera comes down behind her shoulder to the owl in her
-    // chair and the children listening, and goes home when the story ends or
-    // she gets up (`world/library/storyCamera.ts` — the exhibit camera's
-    // director and solver). It writes its own pose and zoom and claims the
+    // Story time from her cushion: the moment she sits on a story cushion, the
+    // camera comes down behind her shoulder to the owl's chair and the
+    // children's cushions, holds (breathing) through the owl's flight, the
+    // gathering and the reading, and goes home when the story ends or she gets
+    // up (`world/library/storyCamera.ts` — the exhibit camera's director and
+    // solver). It writes its own pose and zoom and claims the
     // focus like the others; it can never hold with the glance, which needs
     // the owl at her desk, or the exhibit shot and the keychain rack, which are
     // in the hall and the park.

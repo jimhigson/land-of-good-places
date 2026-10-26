@@ -28,9 +28,8 @@
  * LIBRARY_CHECK_MUTATE=story-camera-stays pnpm run check:library   # its focus kept after it lets go: STORY CAMERA's "home" must go red
  * LIBRARY_CHECK_MUTATE=story-camera-low pnpm run check:library     # an eye straight behind her at 2.5 m: STORY CAMERA's occlusion must go red (the control)
  * LIBRARY_CHECK_MUTATE=story-camera-waits pnpm run check:library   # the camera only once the owl reads (before 26 Oct): STORY CAMERA's "down the moment she sits" must go red
- * LIBRARY_CHECK_MUTATE=story-aim-still pnpm run check:library      # the aim never follows the group: STORY CAMERA's breathing floor must go red
- * LIBRARY_CHECK_MUTATE=story-aim-pinned pnpm run check:library     # the aim pinned to the group's middle, no easing: STORY CAMERA's breathing ceiling must go red
- * LIBRARY_CHECK_MUTATE=story-aim-early pnpm run check:library      # the aim following the group from the sit: STORY CAMERA's "still until the reading" must go red
+ * LIBRARY_CHECK_MUTATE=story-breath-off pnpm run check:library     # the camera held dead still: STORY CAMERA's breathing floor must go red
+ * LIBRARY_CHECK_MUTATE=story-breath-wild pnpm run check:library    # the breath ten times over: STORY CAMERA's breathing ceiling must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -165,6 +164,7 @@ import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
 import { LIBRARY_SHOT_ROOM, StoryCamera, storySeats } from '../src/world/library/storyCamera.ts';
+import { cameraBreath, type CameraBreath } from '../src/core/cameraBreath.ts';
 import { EXHIBIT_SHOT_EASE_CANCEL, EXHIBIT_SHOT_EASE_IN, EXHIBIT_SHOT_EASE_OUT, HER_SHARE_MAX, SHOT_FLOOR_GRAZE, eyeInHallSpace, herBodyBox, shotAngles } from '../src/world/reptileHouse/exhibitCamera.ts';
 import { FALLBACK_UNIT_PX } from '../src/core/uiScale.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
@@ -328,9 +328,8 @@ const MUTATIONS = [
   'story-camera-stays',
   'story-camera-low',
   'story-camera-waits',
-  'story-aim-still',
-  'story-aim-pinned',
-  'story-aim-early',
+  'story-breath-off',
+  'story-breath-wild',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -1857,8 +1856,8 @@ let glanceKept: Vector3 | null = null;
  * out (main before it); `story-camera-stays` keeps its last focus after it lets go; `story-camera-low`
  * overwrites its pose with an eye straight behind her at a child's height, the view through the child on
  * cushion 4 — the control on STORY CAMERA's occlusion instrument; `story-camera-waits` applies it only while
- * the owl reads (its trigger before 26 Oct 2026); `story-aim-pinned` takes the easing out of the aim's
- * follow (`story-aim-still` and `story-aim-early` are set on the camera when it is built, below).
+ * the owl reads (its trigger before 26 Oct 2026); `story-breath-off` and `story-breath-wild` take the
+ * shot's breath away or make it ten times over (`ShotRules.breath`, set on the director once the shot is solved).
  */
 let storyCamera: StoryCamera | null = null;
 let storyKept: Vector3 | null = null;
@@ -1873,10 +1872,17 @@ const glanceFrame = (player: Player): void => {
     else claim = glanceKept;
   }
   if (storyCamera && !mutating('no-story-camera') && !(mutating('story-camera-waits') && library.storyPhase !== 'reading')) {
-    if (mutating('story-aim-pinned')) {
-      // The aim pinned to the group's middle: its own half-life all but nothing (`ShotRules.aim`).
-      const aim = (storyCamera as unknown as { director: { aim: { halfLife: number } | null } }).director.aim;
-      if (aim) aim.halfLife = 1e-4;
+    if (mutating('story-breath-off') || mutating('story-breath-wild')) {
+      // The shot's breath (`ShotRules.breath`), as the director holds it once the shot is solved: gone, or ten times over.
+      const director = (storyCamera as unknown as { director: { breath: ((seconds: number, out: CameraBreath) => CameraBreath) | null } }).director;
+      if (director.breath) {
+        director.breath = mutating('story-breath-off')
+          ? (_seconds, out) => Object.assign(out, { yawDegrees: 0, pitchDegrees: 0, reach: 0 })
+          : (seconds, out) => {
+              cameraBreath(seconds, out);
+              return Object.assign(out, { yawDegrees: out.yawDegrees * 10, pitchDegrees: out.pitchDegrees * 10, reach: out.reach * 10 });
+            };
+      }
     }
     let story: Readonly<Vector3> | null = storyCamera.apply(camera, player, CHILD_DT);
     if (mutating('story-camera-stays')) {
@@ -1906,11 +1912,6 @@ const child: RealChild = (() => {
   scene.add(player.group);
   quietly(() => world.attachPlayer(player));
   storyCamera = new StoryCamera(library, world.collision, camera, player);
-  if (mutating('story-aim-still') || mutating('story-aim-early')) {
-    // Who the aim follows (`StoryCamera.followed`): nobody, ever — or the live group from the sit, the gathering and all.
-    const aimed = storyCamera as unknown as { followed: () => readonly Object3D[] | null; live: readonly Object3D[] };
-    aimed.followed = mutating('story-aim-still') ? () => null : () => aimed.live;
-  }
   const input = new InputSystem();
   const context = { dt: CHILD_DT, elapsed: 0, input, playerPosition: player.position, cameraForward: camera.forward, frame: 0 };
   const extra: { update(frame: FrameContext): void }[] = [];
@@ -5300,14 +5301,12 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
  * - **the way down** stays in the room's space (over its open top or inside its walls, never through one), no
  *   drawn surface within {@link LENS_REACH} of the lens, and it is smooth: at most {@link TURN_PER_FRAME}° of
  *   turn and {@link FRAME_JUMP} of framing change a frame;
- * - **still until the reading**: from its first held frame until the owl reads from her perch with every child
- *   on her cushion, nothing in the room moves on the screen — the story chair's corners and middle stay within
- *   {@link STILL_PX} of where they were — while the owl flies over and the children walk in (and, with no
- *   story, for as long as it is watched);
- * - **the camera breathes with the group** (`STORY_AIM_FOLLOW_HALF_LIFE`): once they are in place, the aim
- *   follows them as they sway — after {@link BREATH_SETTLE} s, the chair's points move from their own middles by
- *   at least {@link BREATH_FLOOR_PX} and at most {@link BREATH_CEILING_PX}, and never more than
- *   {@link BREATH_STEP_PX} in one frame across the whole hold, the change from held to following included;
+ * - **the camera breathes the whole time it is down** (`core/cameraBreath.ts`, Jim, 26 Oct: *"I like this wobble
+ *   and would like this small wobble to apply all of the time"*): from its first held frame, through the
+ *   gathering — the owl flying over, the children walking in, which it owes nothing to — and through the
+ *   reading (and with no story, while she sits): the story chair's corners and middle move from their own
+ *   middles by at least {@link BREATH_FLOOR_PX} and at most {@link BREATH_CEILING_PX}, in each part of the hold
+ *   on its own, and never more than {@link BREATH_STEP_PX} in one frame;
  * - **in shot**: every drawn point of the owl and of the three children projects inside the frame, and the
  *   owl's bubble's anchor is on the screen (`IsoCamera.isOnScreen`, the bubble's own test); with no story, every
  *   drawn point of the story chair and of the children's cushions — the stage;
@@ -5331,27 +5330,25 @@ console.log("\nFOUND FROM THE DESK — every book made the one the owl recommend
  * every child; from behind the audience at a child's height some of the owl is always behind a listener. The
  * motion thresholds are the screen's, in CSS pixels at the case's own size: half a pixel is a hairline nobody
  * sees move; the breathing as Jim first saw it (the first preview, 26 Oct, before it was named) moved fixed
- * scenery 0.7–2.8 px from its middle and never 0.4 px in a frame; six pixels is half a degree of a laptop's
- * lens; and a step of more than a hairline in one frame, among steps a tenth of that, reads as a twitch.
+ * scenery 0.7–2.8 px from its middle and never 0.4 px in a frame; under half a pixel from its middle it is
+ * still; six pixels is half a degree of a laptop's lens; and a step of more than a hairline in one frame, among
+ * steps a tenth of that, reads as a twitch.
  *
  * Proved red by `LIBRARY_CHECK_MUTATE=no-story-camera` (the shot never comes), `story-camera-stays` (its focus
  * kept after it lets go: home goes red), `story-camera-low` (an eye straight behind her at 2.5 m: the control —
  * the instrument must see the child on cushion 4 in front of the owl), `story-camera-waits` (the camera applied
  * only once the owl reads — its trigger before 26 Oct: down long after she sat, and never with no story),
- * `story-aim-still` (the aim never follows: no breathing, under the floor), `story-aim-pinned` (the aim pinned
- * to the group's middle, no easing: a jolt in a frame, over the ceiling) and `story-aim-early` (the aim
- * following the group from the sit: the gathering swings it across the room).
+ * `story-breath-off` (held dead still: under the floor) and `story-breath-wild` (the breath ten times over:
+ * over the ceiling).
  */
 /** Seconds from her sitting for the shot to have come down and settled: the solve, the ease, a beat. */
 const DOWN_AFTER_SIT = EXHIBIT_SHOT_EASE_IN + 1.5;
-/** Pixels the room may move on the screen while the shot is held still: a hairline. */
-const STILL_PX = 0.5;
 /** The breathing: the least and the most fixed scenery moves from its own middle (pixels), and the most in one frame. */
 const BREATH_FLOOR_PX = 0.5;
 const BREATH_CEILING_PX = 6;
 const BREATH_STEP_PX = 0.5;
-/** Seconds the aim takes to settle from held to following before the breathing is measured. */
-const BREATH_SETTLE = 2;
+/** Seconds of a part of the hold the breath is measured over at the least: most of one slow sway. */
+const BREATH_LEAST = 3;
 /** Seconds of the reading the breathing is watched over, after the three moments of the hold. */
 const BREATH_WATCH = 8;
 /** Seconds after she gets up for the camera to be home: the cancel ease and a beat. */
@@ -5609,32 +5606,44 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
       `  the way down: in the room's space with nothing within ${LENS_REACH} m of the lens on every frame${faults.length ? ` — ${faults.length} faults, first: ${faults[0]}` : ''}; ` +
         `smooth, at most ${worstTurn.toFixed(2)}° of turn and ${(worstJump * 100).toFixed(1)}% of framing change in a frame (${TURN_PER_FRAME}° and ${FRAME_JUMP * 100}% allowed)`,
     );
-    // Held: until the owl reads from her perch with every child on her cushion — this clause's own reading of
-    // the room, never the camera's word for it — or, with no story, for three seconds.
+    // Down: the fixed scenery on the screen every frame from here — through the gathering (the owl flying over,
+    // the children walking in) until the owl reads from her perch with every child on her cushion, this clause's
+    // own reading of the room; or, with no story, for six seconds.
     const groupSettled = (): boolean => library.storyPhase === 'reading' && owl.perched && kids.every((kid) => kid.body.seated && !kid.body.hopping);
-    const heldFrom = onScreen();
-    let previous = heldFrom;
-    let heldMoved = 0;
-    let heldFrames = 0;
+    /** Each fixed point's largest distance from its own middle over `frames`, in pixels. */
+    const swayOf = (frames: readonly [number, number][][]): number => {
+      let most = 0;
+      for (let k = 0; k < fixed.length && frames.length > 0; k += 1) {
+        const mx = frames.reduce((sum, at) => sum + at[k]![0], 0) / frames.length;
+        const my = frames.reduce((sum, at) => sum + at[k]![1], 0) / frames.length;
+        for (const at of frames) most = Math.max(most, Math.hypot(at[k]![0] - mx, at[k]![1] - my));
+      }
+      return most;
+    };
+    const gathering: [number, number][][] = [onScreen()];
+    let previous = gathering[0]!;
     let worstStep = 0;
     let heldFor = 0;
-    while (told ? !groupSettled() && heldFor < GATHER_TIMEOUT + 20 : heldFor < 3) {
+    while (told ? !groupSettled() && heldFor < GATHER_TIMEOUT + 20 : heldFor < 6) {
       frame();
       heldFor += CHILD_DT;
       const now = onScreen();
-      if (groupSettled()) break;
-      heldMoved = Math.max(heldMoved, moved(now, heldFrom));
       worstStep = Math.max(worstStep, moved(now, previous));
       previous = now;
-      heldFrames += 1;
+      gathering.push(now);
     }
-    say(
-      heldMoved <= STILL_PX && (told ? groupSettled() && story.breathing : !story.breathing && story.state === 'hold'),
-      `  still ${told ? 'until the reading' : 'with no story'}: the story chair moved at most ${heldMoved.toFixed(3)} px on the screen over ${heldFrames} held frames (${heldFor.toFixed(1)} s` +
-        `${told ? `, the owl ${sitsLate ? 'already reading' : 'calling, flying over and the children walking in'}` : ''}; ${STILL_PX} allowed)` +
-        `${told && !groupSettled() ? ` — THE GROUP NEVER SETTLED (story time ${library.storyPhase})` : ''}${told && groupSettled() && !story.breathing ? ' — THE AIM NEVER BEGAN TO FOLLOW THEM' : ''}` +
-        `${!told && story.breathing ? ' — BREATHING WITH NO STORY' : ''}`,
-    );
+    const gatheringSway = swayOf(gathering);
+    const what = told ? (sitsLate ? 'before she sat' : 'through the gathering — the owl calling and flying over, the children walking in') : 'with no story';
+    if (gathering.length * CHILD_DT >= BREATH_LEAST) {
+      say(
+        gatheringSway >= BREATH_FLOOR_PX && gatheringSway <= BREATH_CEILING_PX && worstStep <= BREATH_STEP_PX && story.state === 'hold',
+        `  the camera breathes ${what}: over ${(gathering.length * CHILD_DT).toFixed(1)} s the story chair swayed ${gatheringSway.toFixed(2)} px from its middle ` +
+          `(${BREATH_FLOOR_PX}–${BREATH_CEILING_PX} wanted), never more than ${worstStep.toFixed(3)} px in a frame (${BREATH_STEP_PX} allowed)` +
+          `${story.state === 'hold' ? '' : ` — THE SHOT IS ${story.state.toUpperCase()}`}${told && !groupSettled() ? ` — THE GROUP NEVER SETTLED (story time ${library.storyPhase})` : ''}`,
+      );
+    } else {
+      note(`STORY CAMERA ${label}: the gathering lasted ${(gathering.length * CHILD_DT).toFixed(1)} s from the shot's arrival (${what}); its breath is measured with the reading's`);
+    }
     if (!told) {
       // The stage, with nobody on it: the chair and the children's cushions, every drawn point in the frame.
       const stage = [chairPiece, ...kids.map((kid) => library.furniture(kid.plan.seat)).filter((piece): piece is Object3D => !!piece)];
@@ -5719,24 +5728,17 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
         `${bubbleFrames === 0 ? ' — THE OWL NEVER READ THROUGH THE HOLD: this asserts nothing about her bubble' : ''}`,
     );
     note(`STORY CAMERA ${label}: she covers ${(herShare * 100).toFixed(1)}% of the frame (the exhibit camera's own bound ${HER_SHARE_MAX * 100}%)`);
-    // The breathing: watched on through the reading, then each fixed point's sway about its own middle after the settle.
+    // The breathing: watched on through the reading, then each fixed point's sway about its own middle.
     for (let t = 0; t < BREATH_WATCH && library.storyPhase === 'reading'; t += CHILD_DT) {
       frame();
       breathe();
     }
-    const steady = breath.slice(Math.round(BREATH_SETTLE / CHILD_DT));
-    let sway = 0;
-    for (let k = 0; k < fixed.length && steady.length > 0; k += 1) {
-      const mx = steady.reduce((sum, at) => sum + at[k]![0], 0) / steady.length;
-      const my = steady.reduce((sum, at) => sum + at[k]![1], 0) / steady.length;
-      for (const at of steady) sway = Math.max(sway, Math.hypot(at[k]![0] - mx, at[k]![1] - my));
-    }
-    const settledBy = breath.length > Math.round(BREATH_SETTLE / CHILD_DT) ? moved(breath[Math.round(BREATH_SETTLE / CHILD_DT)]!, breath[0]!) : Number.NaN;
+    const readingSway = swayOf(breath);
     say(
-      steady.length >= 3 / CHILD_DT && sway >= BREATH_FLOOR_PX && sway <= BREATH_CEILING_PX && worstStep <= BREATH_STEP_PX,
-      `  the camera breathes with the group: over ${(steady.length * CHILD_DT).toFixed(1)} s of the reading after a ${BREATH_SETTLE} s settle (it settled ${settledBy.toFixed(2)} px), ` +
-        `the story chair swayed ${sway.toFixed(2)} px from its middle (${BREATH_FLOOR_PX}–${BREATH_CEILING_PX} wanted), and never more than ${worstStep.toFixed(3)} px in a frame across the whole hold, ` +
-        `held to following included (${BREATH_STEP_PX} allowed)${steady.length < 3 / CHILD_DT ? ` — ONLY ${(steady.length * CHILD_DT).toFixed(1)} s OF BREATHING TO MEASURE` : ''}`,
+      breath.length * CHILD_DT >= BREATH_LEAST && readingSway >= BREATH_FLOOR_PX && readingSway <= BREATH_CEILING_PX && worstStep <= BREATH_STEP_PX,
+      `  the camera breathes through the reading: over ${(breath.length * CHILD_DT).toFixed(1)} s the story chair swayed ${readingSway.toFixed(2)} px from its middle ` +
+        `(${BREATH_FLOOR_PX}–${BREATH_CEILING_PX} wanted), and never more than ${worstStep.toFixed(3)} px in a frame across the whole shot (${BREATH_STEP_PX} allowed)` +
+        `${breath.length * CHILD_DT < BREATH_LEAST ? ` — ONLY ${(breath.length * CHILD_DT).toFixed(1)} s OF READING TO MEASURE` : ''}`,
     );
     }
     // Home: up — the chip, a jump, the tap's road — or the story ends under her.

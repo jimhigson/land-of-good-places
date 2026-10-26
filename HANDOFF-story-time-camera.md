@@ -82,16 +82,17 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
    against stand-ins for the reading's stage (`storyStage`: each child's and the owl's own model cloned, set where
    story time puts them, posed listening / perched at rest). Stand-in boxes measured within 1–3 cm of the real
    seated children and perched owl. No story: comes down to the same stage, holds still until she gets up.
-2. The "wobble" — Jim: "I like this effect … add it intentionally". Measured (dev = preview 347ba77, seed 5): the
-   aim follow (`liveShot`, LIVE_FOCUS_HALF_LIFE 0.35 s) after the group's bounding box; follow off → 0.00 px.
-   Settle ~3–13 px over the first 2 s of the hold, then a sway ±0.11–0.17° (fixed scenery 0.7–2.8 px from its
-   middle, ≤ 0.4 px a frame), period ~4.3–4.8 s (the children's listening sway 4.8 s/5.7 s + the owl's breath
-   3.7 s). Kept, named: `ShotRules.aim` + `STORY_AIM_FOLLOW_HALF_LIFE` (0.35); held still from the sit until the
-   owl reads with every child seated (following them during the gathering pans across the room).
-3. check:library STORY CAMERA: down ≤ 2.5 s after the sit; still ≤ 0.5 px until the group settles; breathing
-   0.5–6 px from its middle and ≤ 0.5 px a frame. Reds: story-camera-waits (down never within 2.5 s), story-aim-still
-   (0.00 px, under the floor), story-aim-pinned (0.87–1.06 px in a frame, 3 of 4 cases), story-aim-early (the chair
-   moves millions of px on screen during the gathering).
+2. The "wobble" — measured (dev = preview 347ba77, seed 5): the aim follow (`liveShot`, LIVE_FOCUS_HALF_LIFE 0.35 s)
+   after the group's bounding box; follow off → 0.00 px. Settle ~3–13 px over the first 2 s of the hold, then a sway
+   ±0.11–0.17° (fixed scenery 0.7–2.8 px from its middle, ≤ 0.4 px a frame), period ~4.3–4.8 s (the children's
+   listening sway 4.8 s/5.7 s + the owl's breath 3.7 s). Jim: "I like this wobble and would like this small wobble
+   to apply all of the time" → a deliberate, standalone effect: `core/cameraBreath.ts` (`cameraBreath(seconds)`:
+   three sines at 4.8/5.7/3.7 s, ≤ 0.16° of turn, ≤ 0.10° of tilt, ±1.2 cm of reach for the lens's breath), applied
+   through `ShotRules.breath` (aim held on the solved focus, turned about the fixed eye) for the whole time the
+   shot is down. NOT applied to the main camera — the Overseer is asking Jim whether "all of the time" means that.
+3. check:library STORY CAMERA: down ≤ 2.5 s after the sit; the breath through the gathering, the reading and with
+   no story each 0.5–6 px from its middle (measured 0.65–1.85 px) and ≤ 0.5 px a frame (≤ 0.041). Reds:
+   story-camera-waits (never down within 2.5 s), story-breath-off (0.00 px ×8), story-breath-wild (6.56–18.83 px ×8).
 4. Local full check on 347ba77c failed in check:deep-links: first five /library links timed out (120 s) while the
    dev server built seeds 5 and 12 on demand (611 s, 675 s); every later link passed; alone with a warm cache it
    passed. Fix: with-dev-server warms the canonical park first; the deep-links reachability probe pins its seed.
