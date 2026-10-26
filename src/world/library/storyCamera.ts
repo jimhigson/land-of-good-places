@@ -232,6 +232,8 @@ export interface StoryStage {
 
 /** A child's model as `ridePose.ts` poses her, and her head's own height on her shoulders — `CharacterModel` is this shape. */
 export interface StoryListener {
+  /** The whole of her drawn body: hat, hair, backpack and all hang from it. */
+  readonly root: Object3D;
   readonly body: Object3D;
   readonly head: Object3D;
   readonly leftArm: Object3D;
@@ -297,17 +299,18 @@ function poseListening(model: StoryListener, inStand: (node: Object3D) => Object
 }
 
 /**
- * **Her, as she will sit through it** — her own group, copied as it is this
- * frame (her hat, her hair, her backpack: what she looks like), set where she
- * sits, and posed as she listens ({@link poseListening}). The solve reads her
- * body as something in the way of the eye — never her own head between it and
- * the owl — and her real body sways on the clock, so it reads this copy
- * instead. (26 Oct 2026: from cushion 3 on a phone, the same check once chose
- * an eye a metre higher than it had before — she had sat at another moment of
- * her sway.)
+ * **Her, as she will sit through it** — her drawn body (`model.root`: her hat,
+ * her hair, her backpack, what she looks like), copied as it is this frame,
+ * set where she sits, and posed as she listens ({@link poseListening}); not
+ * her name over her head, which bobs on the clock and hides nothing. The
+ * solve reads her body as something in the way of the eye — never her own
+ * head between it and the owl — and her real body sways on the clock, so it
+ * reads this copy instead. (26 Oct 2026: from cushion 3 on a phone, the same
+ * check once chose an eye a metre higher than it had before — she had sat at
+ * another moment of her sway.)
  */
-export function herStandIn(player: Pick<StoryCameraPlayer, 'group' | 'model'>): Object3D {
-  const live = player.group;
+export function herStandIn(player: Pick<StoryCameraPlayer, 'model'>): Object3D {
+  const live = player.model.root;
   live.updateWorldMatrix(true, true);
   const stand = live.clone(true);
   live.matrixWorld.decompose(stand.position, stand.quaternion, stand.scale);
@@ -331,7 +334,7 @@ export function herStandIn(player: Pick<StoryCameraPlayer, 'group' | 'model'>): 
  *   chair), listening ({@link poseListening}).
  * - Her, on her own cushion, listening too ({@link herStandIn}).
  */
-export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>, player: Pick<StoryCameraPlayer, 'group' | 'model'>): StoryStage {
+export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>, player: Pick<StoryCameraPlayer, 'model'>): StoryStage {
   const handle = library.owl.handle;
   const owlLive = handle.root;
   const perch = owlPerch();

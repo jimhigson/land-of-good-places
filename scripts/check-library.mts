@@ -5502,18 +5502,37 @@ const screenShareOf = (box: Box3): number => {
  * Its control ({@link lensControl}) runs first, every time.
  */
 const LENS_GRID = 600;
-/**
- * A story stage as text, a line for each stand-in — the owl, each child, then her ({@link StoryStage}) — of its
- * every part's world matrix, to a tenth of a millimetre, and whether it is drawn: two stages are posed alike
- * exactly when their prints are equal.
- */
-const stagePrint = (stage: StoryStage): string[] =>
+/** One part of a story stand-in, as it stands: its name, its world matrix, and whether it is drawn. */
+interface StagePart {
+  readonly name: string;
+  readonly elements: readonly number[];
+  readonly visible: boolean;
+}
+/** A story stage, a list of parts for each stand-in — the owl, each child, then her ({@link StoryStage}). */
+const stageParts = (stage: StoryStage): StagePart[][] =>
   [stage.owl, ...stage.children.map((stood) => stood.root), stage.her].map((root) => {
     root.updateMatrixWorld(true);
-    const parts: string[] = [];
-    root.traverse((node) => parts.push(`${node.name}:${node.matrixWorld.elements.map((e) => (Math.abs(e) < 5e-5 ? 0 : e).toFixed(4)).join(',')}:${node.visible ? '+' : '-'}`));
-    return parts.join(' ');
+    const parts: StagePart[] = [];
+    root.traverse((node) => parts.push({ name: node.name || node.type, elements: [...node.matrixWorld.elements], visible: node.visible }));
+    return parts;
   });
+/**
+ * How far one stand-in is from how it stood before: the most any element of any part's world matrix moved (a
+ * translation's in metres), and the first part that moved more than a tenth of a millimetre — or null when
+ * none did, every part shown or hidden as before.
+ */
+const standInMoved = (now: readonly StagePart[], then: readonly StagePart[]): { most: number; first: string } | null => {
+  if (now.length !== then.length) return { most: Infinity, first: `${now.length} parts against ${then.length}` };
+  let most = 0;
+  let first = '';
+  now.forEach((part, i) => {
+    const was = then[i]!;
+    const off = part.visible !== was.visible ? Infinity : Math.max(...part.elements.map((e, k) => Math.abs(e - was.elements[k]!)));
+    if (off > 1e-4 && !first) first = part.visible !== was.visible ? `'${part.name}' shown or hidden` : `'${part.name}'`;
+    most = Math.max(most, off);
+  });
+  return most > 1e-4 ? { most, first } : null;
+};
 interface LensPass {
   readonly nearest: number;
   readonly cut: boolean;
@@ -5642,20 +5661,19 @@ const lensControl = (): string[] => {
   lens.updateMatrixWorld();
   const tanX = 1 / lens.projectionMatrix.elements[0]!;
   const tanY = 1 / lens.projectionMatrix.elements[5]!;
-  const toWorld = (x: number, y: number, z: number): Vector3 => new Vector3(x, y, z).applyMatrix4(lens.matrixWorld);
+  // Each built in the lens's own frame and carried by its matrix: a vertex is stored in 32 bits, which at the
+  // reading room's (−600, −600) is 61 µm, and the control's answers are exact.
+  const inLens = (mesh: Mesh): Mesh => {
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(lens.matrixWorld);
+    mesh.matrixWorld.copy(lens.matrixWorld);
+    return mesh;
+  };
   const sheet = (corners: readonly (readonly [number, number, number])[], side: Side): Mesh => {
-    const [a, b, c, d] = corners.map(([x, y, z]) => toWorld(x, y, z)) as [Vector3, Vector3, Vector3, Vector3];
-    const geometry = new BufferGeometry().setFromPoints([a, b, c, a, c, d]);
-    const mesh = new Mesh(geometry, new MeshBasicMaterial({ side }));
-    mesh.updateMatrixWorld(true);
-    return mesh;
+    const [a, b, c, d] = corners.map(([x, y, z]) => new Vector3(x, y, z)) as [Vector3, Vector3, Vector3, Vector3];
+    return inLens(new Mesh(new BufferGeometry().setFromPoints([a, b, c, a, c, d]), new MeshBasicMaterial({ side })));
   };
-  const ball = (side: Side): Mesh => {
-    const mesh = new Mesh(new SphereGeometry(0.3, 24, 12), new MeshBasicMaterial({ side }));
-    mesh.position.setFromMatrixPosition(lens.matrixWorld);
-    mesh.updateMatrixWorld(true);
-    return mesh;
-  };
+  const ball = (side: Side): Mesh => inLens(new Mesh(new SphereGeometry(0.3, 24, 12), new MeshBasicMaterial({ side })));
   const D = 2;
   const EDGE = 0.013; // the sheet's right edge, in the screen's own −1..1: between two columns of rays
   const columns = Math.max(1, Math.round(Math.sqrt(LENS_GRID * lens.aspect)));
@@ -5680,12 +5698,14 @@ const lensControl = (): string[] => {
     const ok = Math.abs(pass.cover - cover) < 1e-9 && pass.nearest >= nearest[0] && pass.nearest <= nearest[1] && pass.cut === cut;
     if (!ok) wrong.push(`${what}: covered ${(pass.cover * 100).toFixed(1)}% (${(cover * 100).toFixed(1)}% wanted), nearest ${pass.nearest.toFixed(4)} m (${nearest[0].toFixed(4)}–${nearest[1].toFixed(4)}), cut ${pass.cut} (${cut})`);
   };
-  expect('the sheet over the left half', lensPass([sheet(half(-D), DoubleSide)]), leftOfEdge / columns, [D - 1e-6, D + 1e-6], false);
-  expect('the sheet behind the eye', lensPass([sheet(half(D), DoubleSide)]), 0, [D - 1e-6, D + 1e-6], false);
-  expect('the single-sided ball round the eye', lensPass([ball(FrontSide)]), 0, [0.28, 0.3 + 1e-6], false);
-  expect('the double-sided ball round the eye', lensPass([ball(DoubleSide)]), 1, [0.28, 0.3 + 1e-6], false);
+  const MM = 1e-4; // a tenth of a millimetre
+  expect('the sheet over the left half', lensPass([sheet(half(-D), DoubleSide)]), leftOfEdge / columns, [D - MM, D + MM], false);
+  expect('the sheet behind the eye', lensPass([sheet(half(D), DoubleSide)]), 0, [D - MM, D + MM], false);
+  expect('the single-sided ball round the eye', lensPass([ball(FrontSide)]), 0, [0.28, 0.3 + MM], false);
+  expect('the double-sided ball round the eye', lensPass([ball(DoubleSide)]), 1, [0.28, 0.3 + MM], false);
   const stripNearest = Math.hypot(hh / 2, 0.05);
-  expect('the strip through the near plane', lensPass([sheet(strip, DoubleSide)]), lensPass([sheet(strip, DoubleSide)]).cover, [stripNearest - 1e-6, stripNearest + 1e-6], true);
+  const strip1 = lensPass([sheet(strip, DoubleSide)]);
+  expect('the strip through the near plane', strip1, strip1.cover > 0 ? strip1.cover : 1e-9, [stripNearest - MM, stripNearest + MM], true);
   return wrong;
 };
 
@@ -5708,7 +5728,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
         stood.head.position.y = kids[i]!.model.head.position.y;
         stood.root.updateMatrixWorld(true);
       });
-      return { ...stage, her: her.group };
+      return { ...stage, her: her.model.root };
     };
   }
   // Dressed as the `/library?sit=` link dresses a profile with no save (`main.ts`: `defaultCharacterChoice()`):
@@ -5749,7 +5769,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
    * the first time, each stand-in's every part as a world matrix ({@link stagePrint}), and the eye it chose: a
    * later sit from the same cushion on the same screen must have both again, to the tenth of a millimetre.
    */
-  const solvedBefore = new Map<string, { label: string; print: string[]; eye: Vector3; zoom: number }>();
+  const solvedBefore = new Map<string, { label: string; parts: StagePart[][]; eye: Vector3; zoom: number }>();
   const controlled = new Set<string>();
   for (const { seat, screen, up, sitsLate, story: told } of cases) {
     const label = `${seat}, ${screen.what} (${screen.width}×${screen.height})${sitsLate ? ', sitting down once the reading has begun' : ''}${told ? '' : ', with no story'}`;
@@ -5890,16 +5910,21 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     );
     if (story.stage && shot) {
       const where = `${seat}|${screen.width}×${screen.height}`;
-      const print = stagePrint(story.stage);
+      const parts = stageParts(story.stage);
       const first = solvedBefore.get(where);
       if (!first) {
-        solvedBefore.set(where, { label, print, eye: shot.eye.clone(), zoom: shot.zoom });
+        solvedBefore.set(where, { label, parts, eye: shot.eye.clone(), zoom: shot.zoom });
       } else {
         const names = ['the owl', ...kids.map((kid) => kid.plan.name), 'her'];
-        const off = print.map((line, i) => (line === first.print[i] ? null : names[i] ?? `stand-in ${i}`)).filter((name): name is string => name !== null);
+        const off = parts
+          .map((standIn, i) => {
+            const moved = first.parts[i] ? standInMoved(standIn, first.parts[i]!) : { most: Infinity, first: 'missing before' };
+            return moved ? `${names[i] ?? `stand-in ${i}`} (from ${moved.first}, by ${moved.most.toFixed(4)})` : null;
+          })
+          .filter((name): name is string => name !== null);
         const eyeOff = shot.eye.distanceTo(first.eye);
         say(
-          off.length === 0 && print.length === first.print.length && eyeOff < 1e-4 && Math.abs(shot.zoom - first.zoom) < 1e-6,
+          off.length === 0 && parts.length === first.parts.length && eyeOff < 1e-4 && Math.abs(shot.zoom - first.zoom) < 1e-6,
           `  the same stage and the same eye as when she sat here before (${first.label}): every part of the owl, the ${kids.length} children and her stood in alike to a tenth of a millimetre` +
             `${off.length ? ` — NOT ${off.join(', ')}` : ''}; the eye ${(eyeOff * 1000).toFixed(1)} mm from that one, zoom ${shot.zoom.toFixed(6)} (${first.zoom.toFixed(6)})`,
         );
