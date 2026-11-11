@@ -1394,6 +1394,9 @@ export class Library implements GameSystem {
       standX: LIBRARY_ORIGIN_X + LIBRARY_DRAGON_STAND.x,
       standZ: LIBRARY_ORIGIN_Z + LIBRARY_DRAGON_STAND.z,
       standRadius: DRAGON_STAND_RADIUS,
+      // Reached from every side of the dragon, not only its stand (LibraryDen's DRAGON_REACH_RADIUS).
+      reachX: LIBRARY_ORIGIN_X + LIBRARY_DRAGON_NEST.x,
+      reachZ: LIBRARY_ORIGIN_Z + LIBRARY_DRAGON_NEST.z,
       verb: 'Say hi',
       highlight: highlightObject(this.den.dragon.root),
       actions: () => pressAction(LIBRARY_CHIPS.sayHi, () => this.den.sayHi(), '🐉'),

@@ -338,7 +338,8 @@ import {
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
 import { LIBRARY_CHIPS, LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
-import { PRIMARY_ACTION, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
+import { PRIMARY_ACTION, reachDistance, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
+import { ARRIVE_RADIUS } from '../src/entities/TapNavigator.ts';
 import { FLOOR_TOLERANCE, SEAT_TOLERANCE, seatedErrors } from './lib/seatedPose.mts';
 
 const OX = LIBRARY_ORIGIN_X;
@@ -7343,7 +7344,7 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   const sayHiUp = (): boolean => {
     const zone = zoneById(DRAGON_ZONE_ID);
     if (!zone || !chipOf(DRAGON_ZONE_ID)) return false;
-    return Math.hypot(player.position.x - zone.standX, player.position.z - zone.standZ) <= standRadiusOf(zone);
+    return reachDistance(zone, player.position.x, player.position.z) <= standRadiusOf(zone);
   };
   const doorwayChip = sayHiUp() ? 'up' : undefined;
   const outside = { x: nest.x + DRAGON_MEET_RADIUS + 0.1, z: nest.z };
@@ -7354,12 +7355,13 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   // And the geometry that makes it so for every spot, not just these two:
   // the chip's whole reach round its stand lies inside the meeting's circle.
   const zoneNow = zoneById(DRAGON_ZONE_ID);
-  const reachEdge = zoneNow
-    ? Math.hypot(zoneNow.standX - (OX + nest.x), zoneNow.standZ - (OZ + nest.z)) + standRadiusOf(zoneNow)
-    : Infinity;
+  const reachCentreOff = zoneNow ? reachDistance(zoneNow, OX + nest.x, OZ + nest.z) : Infinity;
+  const reachEdge = zoneNow ? reachCentreOff + standRadiusOf(zoneNow) : Infinity;
+  const standInReach = zoneNow ? reachDistance(zoneNow, zoneNow.standX, zoneNow.standZ) + ARRIVE_RADIUS <= standRadiusOf(zoneNow) : false;
   say(
-    reachEdge <= DRAGON_MEET_RADIUS + 1e-9,
-    `the chip's reach lies inside the meeting: its stand ${zoneNow ? Math.hypot(zoneNow.standX - (OX + nest.x), zoneNow.standZ - (OZ + nest.z)).toFixed(2) : '?'} m from the nest plus its ${zoneNow ? standRadiusOf(zoneNow).toFixed(2) : '?'} m reach is ${reachEdge.toFixed(2)} m, within the meeting's ${DRAGON_MEET_RADIUS.toFixed(2)} m`,
+    reachEdge <= DRAGON_MEET_RADIUS + 1e-9 && standInReach,
+    `the chip's reach lies inside the meeting: measured ${reachCentreOff.toFixed(2)} m from the nest's middle, ${zoneNow ? standRadiusOf(zoneNow).toFixed(2) : '?'} m round it, ` +
+      `so out to ${reachEdge.toFixed(2)} m, within the meeting's ${DRAGON_MEET_RADIUS.toFixed(2)} m; and a tapped walk to its stand lands in reach (${standInReach})`,
   );
   say(
     doorwayChip === undefined && outsideChip === undefined && !outsideMet && libraryDenContains(outside.x, outside.z),
@@ -7384,6 +7386,46 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
     `with the leaf open '${DRAGON_ZONE_ID}' offers '${sayHi?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.sayHi}'), verb '${dragonZone?.verb ?? '?'}', its stand ${dragonStandOff.toFixed(3)} m off the layout's, ` +
       `she ${dragonReach.toFixed(2)} m from it (reach ${dragonZone ? standRadiusOf(dragonZone) : '?'}), the rainbow ${dragonZone?.highlight?.object === den.dragon.root ? 'rings' : 'does NOT ring'} the dragon`,
   );
+
+  // ------------------------------------------------------------- Say hi on the keys, from every side.
+  // A child walks up to the dragon on the stick from every bearing the den
+  // has room for, until she is pressed against its nest or its body, and the
+  // chip must be up there — not only at its one stand (PR #739's QA round 2:
+  // on arrow keys it almost never came). Starts 3.4 m out, on the den's floor
+  // and clear of everything; a bearing with no such start is counted, not run.
+  {
+    const startOut = 3.4;
+    const approaches: string[] = [];
+    const missed: string[] = [];
+    let skipped = 0;
+    for (let k = 0; k < 16; k += 1) {
+      const angle = (k / 16) * 2 * Math.PI;
+      const from = { x: nest.x + Math.sin(angle) * startOut, z: nest.z + Math.cos(angle) * startOut };
+      if (!libraryDenContains(from.x, from.z) || !walkableAt(collision, OX + from.x, OZ + from.z, PLAYER_RADIUS, LIBRARY_FLOOR_Y)) {
+        skipped += 1;
+        continue;
+      }
+      child.stand(from.x, from.z);
+      child.step();
+      for (let i = 0; i < Math.round(2.5 / CHILD_DT); i += 1) {
+        const at = child.room();
+        child.step(child.towards(nest.x - at.x, nest.z - at.z, false));
+      }
+      for (let i = 0; i < 10; i += 1) child.step();
+      const at = child.room();
+      const off = Math.hypot(at.x - nest.x, at.z - nest.z);
+      const label = `${Math.round((k * 360) / 16)}° (stopped ${off.toFixed(2)} m from the nest's middle)`;
+      approaches.push(label);
+      if (!sayHiUp() || !den.metThisVisit) missed.push(`${label}: chip ${sayHiUp() ? 'up' : 'NOT up'}, met ${den.metThisVisit}`);
+    }
+    say(
+      approaches.length >= 5 && missed.length === 0,
+      `walked up to the dragon on the keys from ${approaches.length} bearings (${skipped} had no clear start in the den; at least 5 wanted), each until pressed against it: ` +
+        `"Say hi!" up and the dragon met at ${approaches.length - missed.length} of them${missed.length ? ` — NOT at ${missed.join('; ')}` : ''}`,
+    );
+    child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+    for (let i = 0; i < 10; i += 1) child.step();
+  }
 
   // ------------------------------------------------------------- Say hi, and the puff it brings.
   sayHi?.run();

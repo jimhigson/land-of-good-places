@@ -77,27 +77,40 @@ import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryPr
 /** The dragon's own seeded stream: its breath's phase, its tail's and its puffs' timing, its sprites' scatter. */
 export const LIBRARY_DRAGON_SEED = 0x0b00d1;
 
-/** Within this of the nest's middle (metres), in the den with the shelf open, she has met the dragon. */
-export const DRAGON_MEET_RADIUS =
-  Math.hypot(LIBRARY_DRAGON_STAND.x - LIBRARY_DRAGON_NEST.x, LIBRARY_DRAGON_STAND.z - LIBRARY_DRAGON_NEST.z) + ARRIVE_RADIUS;
+/**
+ * **"Say hi!" is offered within this of the nest's middle, from every side**
+ * (metres) — the zone's reach is measured from the nest (`reachX/reachZ`),
+ * not from its stand, so a child who walks up against the dragon on the keys
+ * from the east, the north or the west, or bumps its nest head-on, gets the
+ * chip. (Measured from the stand alone at 0.55 m, the chip almost never came
+ * on the keys: PR #739's QA round 2, 48 approaches.) The stand stays inside it
+ * with a tapped walk's arrival to spare ({@link ARRIVE_RADIUS}), asserted
+ * below, so a tap still lands her in reach.
+ */
+export const DRAGON_REACH_RADIUS = 3;
 
 /**
- * **Where "Say hi!" is offered from: this close to `LIBRARY_DRAGON_STAND`** —
- * a tapped walk's own arrival ({@link ARRIVE_RADIUS}), so a tap on the dragon
- * from across the den lands her within reach. And the meeting's radius
- * ({@link DRAGON_MEET_RADIUS}) is *made* from it: the stand's distance from
- * the nest plus this, so wherever the chip can be up she has already been met
- * — the chip and the meeting share one owner. (At a fixed 2.2 m reach from a
- * stand 2.0 m off the nest, the chip came up a step before the meeting, PR
- * #739's QA.)
+ * Within this of the nest's middle, in the den with the shelf open, she has
+ * met the dragon — **the chip's own reach, one owner**: wherever "Say hi!" can
+ * be up the hello has already come, never after it.
  */
-export const DRAGON_STAND_RADIUS = ARRIVE_RADIUS;
+export const DRAGON_MEET_RADIUS = DRAGON_REACH_RADIUS;
+
+/** The zone's reach, for `Library.ts`'s Say hi zone. */
+export const DRAGON_STAND_RADIUS = DRAGON_REACH_RADIUS;
+
+{
+  const stand = Math.hypot(LIBRARY_DRAGON_STAND.x - LIBRARY_DRAGON_NEST.x, LIBRARY_DRAGON_STAND.z - LIBRARY_DRAGON_NEST.z);
+  if (stand + ARRIVE_RADIUS > DRAGON_REACH_RADIUS) {
+    throw new Error(`LibraryDen: the dragon's stand is ${stand.toFixed(2)} m from the nest; with a tapped walk's ${ARRIVE_RADIUS} m arrival it can land her outside the chip's ${DRAGON_REACH_RADIUS} m reach`);
+  }
+}
 /**
  * **Whether she is close enough to meet the baby dragon** — asked by the
  * meeting ({@link LibraryDen.update}): in the den, the secret shelf landed
- * open, within {@link DRAGON_MEET_RADIUS} of the nest's middle — a radius made
- * from the "Say hi!" chip's own reach, so the chip is never up before the
- * meeting. `her` is room-local.
+ * open, within {@link DRAGON_MEET_RADIUS} of the nest's middle — the "Say
+ * hi!" chip's own reach, so the chip is never up before the meeting. `her` is
+ * room-local.
  */
 export function dragonCanMeet(her: LocalPoint | null, inDen: boolean, open: boolean): boolean {
   return her !== null && inDen && open && Math.hypot(her.x - LIBRARY_DRAGON_NEST.x, her.z - LIBRARY_DRAGON_NEST.z) <= DRAGON_MEET_RADIUS;
