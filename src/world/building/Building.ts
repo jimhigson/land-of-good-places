@@ -101,6 +101,8 @@ import {
   ENTRANCE_MIN_X,
   GROWN_UP_X,
   GROWN_UP_Z,
+  CASTLE_DOOR_ARRIVAL_IN,
+  CASTLE_DOOR_ARRIVAL_X,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
@@ -1481,7 +1483,7 @@ export class Building implements GameSystem {
    * there and her first sight of the market is the back of a wall.
    */
   private enterInterior(): void {
-    this.stepThroughDoor(CASTLE_MALL, 0, CASTLE_MALL.halfZ - 6.5, Math.PI);
+    this.stepThroughDoor(CASTLE_MALL, CASTLE_DOOR_ARRIVAL_X, CASTLE_MALL.halfZ - CASTLE_DOOR_ARRIVAL_IN, Math.PI);
   }
 
   /**
@@ -1657,8 +1659,8 @@ export class Building implements GameSystem {
       // screenshot rather than by trusting the link.
       this.stepThroughDoor(
         floor,
-        at ? at.x : 0,
-        at ? at.z : floor.halfZ - 6.5,
+        at ? at.x : CASTLE_DOOR_ARRIVAL_X,
+        at ? at.z : floor.halfZ - CASTLE_DOOR_ARRIVAL_IN,
         Math.PI,
       );
     });

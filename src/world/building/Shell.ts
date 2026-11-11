@@ -1753,6 +1753,8 @@ function buildEntranceSteps(): InstancedMesh {
  */
 export const INTERIOR_PORCH_ROOF_Y = 3.05;
 export const INTERIOR_PORCH_ROOF_THICKNESS = 0.32;
+/** How much of the porch roof is drawn: a tint, so the door shows through it. */
+export const INTERIOR_PORCH_ROOF_OPACITY = 0.28;
 
 /**
  * The way back out of the interior: a little porch outside its own south door,
@@ -1770,9 +1772,19 @@ function buildInteriorPorch(plan: ShellPlan, parent: Group): void {
   mat.position.y = -0.06;
   porch.add(mat);
 
-  const roof = castAndReceive(
-    new Mesh(new BoxGeometry(9, INTERIOR_PORCH_ROOF_THICKNESS, 4.2), softMaterial(PALETTE.markerPink, 0.7)),
-  );
+  // **See-through** (QA on #743): from the game's camera this roof stands
+  // between the room and its own front door, and hid the doorway — frame and
+  // all — so a child inside could not find the way out. Drawn as tinted
+  // glass, it still says "porch" and the door shows through it. No shadow:
+  // a pane this pale casting a solid one would darken the doorway it is
+  // there to show.
+  const roofMaterial = softMaterial(PALETTE.markerPink, 0.7);
+  roofMaterial.transparent = true;
+  roofMaterial.opacity = INTERIOR_PORCH_ROOF_OPACITY;
+  roofMaterial.depthWrite = false;
+  const roof = new Mesh(new BoxGeometry(9, INTERIOR_PORCH_ROOF_THICKNESS, 4.2), roofMaterial);
+  roof.castShadow = false;
+  roof.receiveShadow = false;
   roof.name = 'interior-porch-roof';
   roof.position.y = INTERIOR_PORCH_ROOF_Y;
   porch.add(roof);
