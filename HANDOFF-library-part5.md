@@ -8,6 +8,16 @@
   Conflicts kept both sides; den kit goes through main's shared `checkGlbKit` with `faces: null`
   (proved red: library kit given faces:null → 7 problems, exit 1). ASSET_MANIFEST §43 = den kit.
   check chains: main's shards unchanged; den adds only pack/blend/render:library-den.
+- [x] rD faces: pets.ts (PUFF_BALL_SQUASH on the patch, tummy lowered), reptiles.ts (frontOf, measured front),
+      test/library/faces-on-heads.test.ts red on old models (tortoise 8/10 hidden, puff 6/6) green now; Chicken moods restored.
+- [x] No shush in den (owl.update `unseen`); /library-den + unsavable den links (Game.ts).
+- [ ] Step-13 re-review (rC13) done 11 Nov by a reviewer subagent: approve-with-minors. To fix:
+      1 CREATURES 'drawn is solid' can pass with -Infinity (assert finite + sample counts);
+      2 creature collider tops measured at rest only (cat head lift / breath above top);
+      3 CREATURES CONTROL can't fail (stand in den outside meet radius instead);
+      4 posedFootprint tail copied in LibraryCat; 5 per-frame `her={x,z}` alloc Library.ts updateCreatures;
+      6 interactZones creatures array per call; 7 dragon head can't reach her stand (0.785 > 0.6 limit);
+      8 idle puffs while den unseen (optional).
 - [ ] check:library etc. need a park: use CI's `parks-<hash>` artifact (never solve locally — the Mac is shared).
 - [ ] fixes: rC12/rC13 review findings, Step 14 (/library-den, no shush in den, story time continues in den,
       KIDS avoid den), rD faces (puff face patch, tummy decal, tortoise face, Chicken moods), solidity proof.
