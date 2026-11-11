@@ -11,7 +11,10 @@
 - [x] rD faces: pets.ts (PUFF_BALL_SQUASH on the patch, tummy lowered), reptiles.ts (frontOf, measured front),
       test/library/faces-on-heads.test.ts red on old models (tortoise 8/10 hidden, puff 6/6) green now; Chicken moods restored.
 - [x] No shush in den (owl.update `unseen`); /library-den + unsavable den links (Game.ts).
-- [ ] Step-13 re-review (rC13) done 11 Nov by a reviewer subagent: approve-with-minors. To fix:
+- [x] Step-13 re-review fixes 1-7 done (8 left: idle puffs while unseen, harmless). Lanterns solid (banded body) + DEN DRAWN census/visibility.
+- [x] New check clauses (UNRUN until a park exists): THE DEN AT STORY TIME, KIDS den avoidance (+resident-in-den), CREATURES CONTROL 2,
+      tap-spacing open-shelf snapshot, check-labels cat/dragon, check-deep-links /library-den + cat stand. Parks dispatched: run 42997355247.
+- Step-13 re-review (rC13) findings, for the record:
       1 CREATURES 'drawn is solid' can pass with -Infinity (assert finite + sample counts);
       2 creature collider tops measured at rest only (cat head lift / breath above top);
       3 CREATURES CONTROL can't fail (stand in den outside meet radius instead);
