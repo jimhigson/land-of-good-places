@@ -101,3 +101,14 @@ Jim's decisions (all recorded as comments on #722; read them with `gh pr view 72
   test:procgen + build running → scratchpad gate-procgen.log / gate-build.log.
 - Next: CI green; preview plays with scratchpad plays/plays.mjs <previewRoot> <outDir> (playwright-core,
   chromium-1234 headless, fresh context each); open every frame; fill the PR body; report.
+
+### State, 11 Nov evening — PR #742
+- All findings fixed with reds (PR body table). CI green on f37ef604 (run 43072866417); preview
+  https://pr-742-f37ef60-land-of-good-places.blockstack.workers.dev played (frames: scratchpad plays/preview/).
+- Two CI lessons: (1) regrouping train meshes renames coplanar baseline keys — renamed 6 entries (b7e6fba0);
+  (2) slicing the tunnel vault across made 180 census targets (985 s, shard 3 out of clock) — reverted, offset
+  declared, clause 12 jumps cover it (f37ef604).
+- Then merged origin/main dd23766c (#736 story camera / IsoCamera sway, #738) with rerere off: no conflicts;
+  scripts object identical to main's (step sets parsed: union == main's, check:camera-breath present).
+  Re-gate after the merge: targeted check:solids (core, park), check:exits, then full check + test:procgen.
+- Issues: #740 fireplace, #741 seeds 6/9/11/15, #205 comment. Next: gh pr ready 742, review + QA.
