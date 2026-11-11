@@ -187,8 +187,21 @@ const WEDGE_SECONDS = 0.5;
  * rescue, which waits for her feet, never asked. A jump is airborne 0.78 s and
  * rises 1.28 m; a fall leaves the span at once; flying under the jet pack is
  * left alone.
+ *
+ * And only while something solid is pushing her about ({@link HOVER_PUSHED}):
+ * jumping under a station's canopy, each jump capped at a few centimetres,
+ * she is in the air most of every second and never leaves the span — and
+ * each landing is shorter than {@link HOVER_LANDED_SECONDS} — so the rescue
+ * fired on a child hopping on the spot, zeroed her jump and set her down
+ * (PR #722's review). Between two cars the resolver corrects her on nearly
+ * every frame of it; hopping under a roof, on none.
  */
 const HOVER_SECONDS = 1;
+/**
+ * **A hover is one she is pushed about in**: the resolver corrected her on at
+ * least this share of its airborne time (`resolveMovement`'s `corrected`).
+ */
+const HOVER_PUSHED = 0.5;
 /** How far, metres, up, down or across, a hover may wander and still be one. */
 const HOVER_SPAN = 0.5;
 /** On her feet this long at a stretch, she has landed: the hover is over. */
@@ -700,6 +713,8 @@ export class Player implements GameSystem {
   private wedgedFor = 0;
   /** A hover's time in the air so far, where it began, and how long she has stood since — see {@link HOVER_SECONDS}. */
   private hoverFor = 0;
+  /** Of {@link hoverFor}, how long something solid pushed her about — see {@link HOVER_PUSHED}. */
+  private hoverPushedFor = 0;
   private readonly hoverAt = new Vector3();
   private landedFor = 0;
   /**
@@ -1055,6 +1070,11 @@ export class Player implements GameSystem {
    */
   get feetSurface(): number {
     return this.groundHeight;
+  }
+
+  /** Is a stretch of `seconds` in the air within the span, `pushed` of it corrected by the resolver, a hover? See {@link HOVER_PUSHED}. */
+  private isHover(pushed: number, seconds: number): boolean {
+    return pushed >= HOVER_PUSHED * seconds;
   }
 
   /**
@@ -1859,18 +1879,29 @@ export class Player implements GameSystem {
       if (this.hoverFor === 0 || Math.hypot(p.x - this.hoverAt.x, p.z - this.hoverAt.z) > HOVER_SPAN || Math.abs(altitudeAt(p.x, p.y, p.z) - altitudeAt(this.hoverAt.x, this.hoverAt.y, this.hoverAt.z)) > HOVER_SPAN) {
         this.hoverAt.copy(p);
         this.hoverFor = dt;
+        this.hoverPushedFor = corrected ? dt : 0;
       } else {
         this.hoverFor += dt;
+        if (corrected) this.hoverPushedFor += dt;
       }
-      if (this.hoverFor >= HOVER_SECONDS) {
+      if (this.hoverFor >= HOVER_SECONDS && this.isHover(this.hoverPushedFor, this.hoverFor)) {
         this.hoverFor = 0;
+        this.hoverPushedFor = 0;
         this.wedgeRescues += 1;
         this.lastWedge = { x: p.x, y: p.y, z: p.z, depth: 0, afterLanding: this.sinceLanding };
         this.teleportTo(p.x, groundY, p.z);
+      } else if (this.hoverFor >= HOVER_SECONDS) {
+        // A second in the air with nothing pushing her: no hover. Judged
+        // afresh from here, so hopping on the spot never dilutes a real one.
+        this.hoverFor = 0;
+        this.hoverPushedFor = 0;
       }
     } else {
       this.landedFor += dt;
-      if (this.landedFor >= HOVER_LANDED_SECONDS || this.flying) this.hoverFor = 0;
+      if (this.landedFor >= HOVER_LANDED_SECONDS || this.flying) {
+        this.hoverFor = 0;
+        this.hoverPushedFor = 0;
+      }
     }
 
     // A little sparkle the moment the jump actually carries her over a wall's

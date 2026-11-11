@@ -189,6 +189,9 @@ import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeigh
  *   height kept — clause 13's jumping on it must find it leaving with her on
  *   its funnel's rim (2.26–2.38 m over the rails on seed 5: out of the old
  *   reach while she stands there, never mind jumps).
+ * - `hover-any-air` (park): the hover rescue as it was — any second in the
+ *   air within its span, nothing pushing her — clause 13's hopping under a
+ *   canopy must find a rescue.
  * - `put-down-ignores-train` (park): the put-down rule asked of the world
  *   without the train in it — clause 13 must find a put-down, or a rescue,
  *   leaving her inside it or wedged against it.
@@ -203,7 +206,7 @@ const PROOFS = [
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
   'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'platform-holds-train', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
   'pets-count-aboard', 'pets-stay-out', 'ghost-train', 'frozen-train', 'train-ignores-on-top', 'put-down-ignores-train', 'riders-sit-on-her',
-  'train-blind-mid-jump', 'train-band-two-metres',
+  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -2300,6 +2303,7 @@ if (inPart('park')) {
       };
     }
     if (PROVE === 'riders-sit-on-her') (train as unknown as { upOn(car: number): boolean }).upOn = () => false;
+    if (PROVE === 'hover-any-air') (Player.prototype as unknown as { isHover: () => boolean }).isHover = () => true;
     if (PROVE === 'train-blind-mid-jump' || PROVE === 'train-band-two-metres') {
       const looking = train as unknown as { nearLine(x: number, y: number, z: number): { at: number } | null; lookout(): Iterable<{ x: number; y: number; z: number; radius: number }> };
       const nearLine = looking.nearLine.bind(train);
@@ -2845,6 +2849,62 @@ if (inPart('park')) {
       }
       const drops = fromNose;
       say(dropsAsked === drops.length && badDrops.length === 0, `dropped into a slot beside it: ${dropsAsked} of ${drops.length} drops — the far side of every carriage and the gaps between its cars — each freed by the wedge rescue within 10 s, the train standing meanwhile${badDrops.length ? ` — ${badDrops.join('; ')}` : ''}`);
+    }
+    // --- hopping under a station's canopy: no rescue ---
+    // Under a canopy a jump is capped at a few centimetres: hopping on the
+    // spot, a jump each time she lands, she is in the air most of every second
+    // and never leaves the hover's span — and the hover rescue, which asked
+    // nothing else, zeroed her jump and set her down every second (PR #722's
+    // review). A hover is one the resolver pushes her about in; this is not.
+    {
+      const hops: string[] = [];
+      let askedHere = 0;
+      for (const stop of train.stations) {
+        // The lowest room over her anywhere on the platform she can stand —
+        // on it, or up on its bench — that she fits standing in: where a jump
+        // is capped hardest.
+        let found: { x: number; z: number; feet: number; room: number } | null = null;
+        for (let dx = -5; dx <= 5; dx += 0.2) {
+          for (let dz = -5; dz <= 5; dz += 0.2) {
+            const x = stop.standX + dx;
+            const z = stop.standZ + dz;
+            if (!stop.covers(x, z)) continue;
+            const floor = sample(x, z, 50);
+            const feet = standingHeight(floor, collision, x, z, floor + BUILDING_STEP_UP);
+            if (train.onTheLine(x, feet, z, PLAYER_RADIUS)) continue;
+            if (collision.deepestSolidOverlap(new Vector3(x, feet, z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT, feet) > 0.01) continue;
+            const room = collision.ceilingAt(x, z, feet + 0.05) - feet;
+            if (room > KID_HEIGHT + 0.02 && room < KID_HEIGHT + JUMP_APEX_HEIGHT - 0.3 && (!found || room < found.room)) found = { x, z, feet, room };
+          }
+        }
+        if (!found) {
+          note(`clause 13: ${stop.name} has nowhere on its platform where a canopy caps her jump`);
+          continue;
+        }
+        askedHere += 1;
+        player.position.set(found.x, found.feet + 0.02, found.z);
+        player.launch(0);
+        play(1);
+        const from = player.position.clone();
+        const rescuesBefore = player.wedgeRescues;
+        const hopping = { ...STILL_INPUT, justPressed: (key: string) => key === 'jump' && !player.isAirborne };
+        let jumps = 0;
+        let wasUp = false;
+        let rose = 0;
+        play(8, hopping, 1 / 60, () => {
+          if (player.isAirborne && !wasUp) jumps += 1;
+          wasUp = player.isAirborne;
+          rose = Math.max(rose, player.position.y - found.feet);
+        });
+        const rescues = player.wedgeRescues - rescuesBefore;
+        const moved = Math.hypot(player.position.x - from.x, player.position.z - from.z);
+        const line = `${stop.name} at (${found.x.toFixed(2)}, ${found.z.toFixed(2)}), ${(found.room - KID_HEIGHT).toFixed(2)} m over her head: ${jumps} hops, rising ${rose.toFixed(2)} m, ${rescues} rescue(s), moved ${moved.toFixed(2)} m`;
+        if (rescues > 0 || jumps < 10 || moved > 0.3) hops.push(line);
+        else hops.push(`ok: ${line}`);
+      }
+      const bad = hops.filter((line) => !line.startsWith('ok: '));
+      say(askedHere > 0 && bad.length === 0, `hopping under a canopy: at ${askedHere} station(s), a jump each time she lands for 8 s, capped by the canopy — no hover rescue, and she hops where she stood — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
+      awayWithHerLine();
     }
     note(`clause 13 walked her at the park's own train through Game's own wiring: ${pieces.length} moving bodies, every one of them the train's own`);
   }
