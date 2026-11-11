@@ -171,3 +171,13 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
   `Game.tick`; sphere clearance smoothstep(0.75, 3). check:library: `owl-no-fade` mutation; cover weighted by
   opacity (control: quarter-opaque sheet). First run at 0.25/1.5 m: phone cushion 1 14.7%, step 22.9% → widened.
 - Local: `LGP_PARK_FILE=.parks/5.json pnpm run check:library` hydrates the old-hash park (1:42).
+- Fade at 0.75/3 m: check:library exit 0, owl as drawn ≤ 6.9% (shape up to 61%), ≤ 13.8%/frame, never faded in the
+  hold; reds owl-no-fade (12.9/60.6/14.6/49.2% ×4), story-breath-off (0.00 px ×10), story-breath-wild (15–19 px) all exit 1.
+- check:labels: frame 4922 chip row 4.004 vs 3.950 px at the margin → blocker test within INSTRUMENT_PX (1); precedence red still 1.
+- check:keyring-view: analytic basis vs rig at rest via `camera.breath = STILL_BREATH`; breathing drift printed (5.5e-4).
+- Exhibit eyes: main ee1ad33a ×3 vs head ×3 = 30 eyes identical (0.00 cm; printed to 1 cm; control: +5 cm seen).
+- CI 42999900144 on 02aecdef: Checks + Procgen invariants success. Preview pr-736-02aecde looked at (both sizes):
+  frames on qa-screenshots/pr736-eng-11nov/. Park sway on the preview: ±1.5–2 css px, both sizes.
+- Local full check hit a port collision in with-dev-server (fixed 5947 shared by every worktree) → OS free port +
+  own-server liveness; red proved with an impostor server. Rerunning served-deep-links + shards 6–9 + test:procgen.
+- NOTE: the session scratchpad is shared with another agent — keep files under .claude/scratch here.
