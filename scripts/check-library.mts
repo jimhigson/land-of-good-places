@@ -28,8 +28,9 @@
  * LIBRARY_CHECK_MUTATE=story-camera-stays pnpm run check:library   # its focus kept after it lets go: STORY CAMERA's "home" must go red
  * LIBRARY_CHECK_MUTATE=story-camera-low pnpm run check:library     # an eye straight behind her at 2.5 m: STORY CAMERA's occlusion must go red (the control)
  * LIBRARY_CHECK_MUTATE=story-camera-waits pnpm run check:library   # the camera only once the owl reads (before 26 Oct): STORY CAMERA's "down the moment she sits" must go red
- * LIBRARY_CHECK_MUTATE=story-breath-off pnpm run check:library     # the camera held dead still: STORY CAMERA's breathing floor must go red
+ * LIBRARY_CHECK_MUTATE=story-breath-off pnpm run check:library     # the camera held dead still (`IsoCamera.breath` still): STORY CAMERA's breathing floor must go red
  * LIBRARY_CHECK_MUTATE=story-breath-wild pnpm run check:library    # the breath ten times over: STORY CAMERA's breathing ceiling must go red
+ * LIBRARY_CHECK_MUTATE=owl-no-fade pnpm run check:library          # the owl never fades at the lens (before 11 Nov): STORY CAMERA's "never over the screen" must go red
  * LIBRARY_CHECK_MUTATE=story-stage-as-it-was pnpm run check:library  # the stand-ins as they happened to be (before 26 Oct): STORY CAMERA's "the same stage at every sit" must go red
  * ```
  *
@@ -165,7 +166,8 @@ import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
 import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
 import { LIBRARY_SHOT_ROOM, StoryCamera, storySeats, type StoryStage } from '../src/world/library/storyCamera.ts';
-import { cameraBreath, type CameraBreath } from '../src/core/cameraBreath.ts';
+import { cameraBreath, STILL_BREATH } from '../src/core/cameraBreath.ts';
+import { OwlLensFade } from '../src/world/library/owlLensFade.ts';
 import { EXHIBIT_SHOT_EASE_CANCEL, EXHIBIT_SHOT_EASE_IN, EXHIBIT_SHOT_EASE_OUT, HER_SHARE_MAX, SHOT_FLOOR_GRAZE, eyeInHallSpace, herBodyBox, shotAngles } from '../src/world/reptileHouse/exhibitCamera.ts';
 import { FALLBACK_UNIT_PX } from '../src/core/uiScale.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
@@ -332,6 +334,7 @@ const MUTATIONS = [
   'story-breath-off',
   'story-breath-wild',
   'story-stage-as-it-was',
+  'owl-no-fade',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -1859,7 +1862,11 @@ let glanceKept: Vector3 | null = null;
  * overwrites its pose with an eye straight behind her at a child's height, the view through the child on
  * cushion 4 — the control on STORY CAMERA's occlusion instrument; `story-camera-waits` applies it only while
  * the owl reads (its trigger before 26 Oct 2026); `story-breath-off` and `story-breath-wild` take the
- * shot's breath away or make it ten times over (`ShotRules.breath`, set on the director once the shot is solved).
+ * camera's breath away or make it ten times over (`IsoCamera.breath`, the camera's own test hook — the shot's
+ * aim holds still and the park camera breathes it), from STORY CAMERA on.
+ *
+ * And the owl fades as she passes the lens (`owlLensFade.ts`), applied as `Game.tick` applies it — just for the
+ * drawing — wherever this check reads her as drawn (STORY CAMERA's `owlWatch`); `owl-no-fade` takes it away.
  */
 let storyCamera: StoryCamera | null = null;
 let storyKept: Vector3 | null = null;
@@ -1874,18 +1881,6 @@ const glanceFrame = (player: Player): void => {
     else claim = glanceKept;
   }
   if (storyCamera && !mutating('no-story-camera') && !(mutating('story-camera-waits') && library.storyPhase !== 'reading')) {
-    if (mutating('story-breath-off') || mutating('story-breath-wild')) {
-      // The shot's breath (`ShotRules.breath`), as the director holds it once the shot is solved: gone, or ten times over.
-      const director = (storyCamera as unknown as { director: { breath: ((seconds: number, out: CameraBreath) => CameraBreath) | null } }).director;
-      if (director.breath) {
-        director.breath = mutating('story-breath-off')
-          ? (_seconds, out) => Object.assign(out, { yawDegrees: 0, pitchDegrees: 0, reach: 0 })
-          : (seconds, out) => {
-              cameraBreath(seconds, out);
-              return Object.assign(out, { yawDegrees: out.yawDegrees * 10, pitchDegrees: out.pitchDegrees * 10, reach: out.reach * 10 });
-            };
-      }
-    }
     let story: Readonly<Vector3> | null = storyCamera.apply(camera, player, CHILD_DT);
     if (mutating('story-camera-stays')) {
       if (story) storyKept = story.clone();
@@ -5537,6 +5532,8 @@ interface LensPass {
   readonly nearest: number;
   readonly cut: boolean;
   readonly cover: number;
+  /** The share of the screen they cover as drawn: each covering ray weighted by how opaque the face it meets first is (a faded owl's own share). */
+  readonly seen: number;
 }
 /** `root`'s drawn meshes, as the renderer draws them this frame (`traverseVisible`, a material shown). */
 const lensMeshes = (root: Object3D): Mesh[] => {
@@ -5633,6 +5630,7 @@ const lensPass = (meshes: readonly Mesh[]): LensPass => {
   const rows = Math.max(1, Math.round(LENS_GRID / columns));
   const forward = new Vector3(0, 0, -1).transformDirection(lens.matrixWorld);
   let covered = 0;
+  let seen = 0;
   if (meshes.length > 0) {
     for (let r = 0; r < rows; r += 1) {
       for (let q = 0; q < columns; q += 1) {
@@ -5641,11 +5639,17 @@ const lensPass = (meshes: readonly Mesh[]): LensPass => {
         // From the near plane on, along this ray: what the renderer draws, and nothing it clips.
         passRay.near = lens.near / passRay.ray.direction.dot(forward);
         passRay.far = lens.far;
-        if (passRay.intersectObjects(meshes as Mesh[], false).length > 0) covered += 1;
+        const hit = passRay.intersectObjects(meshes as Mesh[], false)[0];
+        if (hit) {
+          covered += 1;
+          const drawn = hit.object as Mesh;
+          const material = (Array.isArray(drawn.material) ? drawn.material[hit.face?.materialIndex ?? 0] : drawn.material) as Material | undefined;
+          seen += material && material.transparent ? material.opacity : 1;
+        }
       }
     }
   }
-  return { nearest, cut, cover: covered / (columns * rows) };
+  return { nearest, cut, cover: covered / (columns * rows), seen: seen / (columns * rows) };
 };
 /**
  * **The instrument's control** — five things set in front of the live lens, built in its own frame, whose
@@ -5694,13 +5698,17 @@ const lensControl = (): string[] => {
     [-hw / 2, -hh / 2, -0.5],
   ];
   const wrong: string[] = [];
-  const expect = (what: string, pass: LensPass, cover: number, nearest: readonly [number, number], cut: boolean): void => {
-    const ok = Math.abs(pass.cover - cover) < 1e-9 && pass.nearest >= nearest[0] && pass.nearest <= nearest[1] && pass.cut === cut;
-    if (!ok) wrong.push(`${what}: covered ${(pass.cover * 100).toFixed(1)}% (${(cover * 100).toFixed(1)}% wanted), nearest ${pass.nearest.toFixed(4)} m (${nearest[0].toFixed(4)}–${nearest[1].toFixed(4)}), cut ${pass.cut} (${cut})`);
+  const expect = (what: string, pass: LensPass, cover: number, nearest: readonly [number, number], cut: boolean, seen = cover): void => {
+    const ok = Math.abs(pass.cover - cover) < 1e-9 && Math.abs(pass.seen - seen) < 1e-9 && pass.nearest >= nearest[0] && pass.nearest <= nearest[1] && pass.cut === cut;
+    if (!ok) wrong.push(`${what}: covered ${(pass.cover * 100).toFixed(1)}% (${(cover * 100).toFixed(1)}% wanted), seen ${(pass.seen * 100).toFixed(1)}% (${(seen * 100).toFixed(1)}%), nearest ${pass.nearest.toFixed(4)} m (${nearest[0].toFixed(4)}–${nearest[1].toFixed(4)}), cut ${pass.cut} (${cut})`);
   };
   const MM = 1e-4; // a tenth of a millimetre
   expect('the sheet over the left half', lensPass([sheet(half(-D), DoubleSide)]), leftOfEdge / columns, [D - MM, D + MM], false);
   expect('the sheet behind the eye', lensPass([sheet(half(D), DoubleSide)]), 0, [D - MM, D + MM], false);
+  const glass = sheet(half(-D), DoubleSide);
+  (glass.material as MeshBasicMaterial).transparent = true;
+  (glass.material as MeshBasicMaterial).opacity = 0.25;
+  expect('the same sheet a quarter opaque', lensPass([glass]), leftOfEdge / columns, [D - MM, D + MM], false, (0.25 * leftOfEdge) / columns);
   expect('the single-sided ball round the eye', lensPass([ball(FrontSide)]), 0, [0.28, 0.3 + MM], false);
   expect('the double-sided ball round the eye', lensPass([ball(DoubleSide)]), 1, [0.28, 0.3 + MM], false);
   const stripNearest = Math.hypot(hh / 2, 0.05);
@@ -5708,6 +5716,15 @@ const lensControl = (): string[] => {
   expect('the strip through the near plane', strip1, strip1.cover > 0 ? strip1.cover : 1e-9, [stripNearest - MM, stripNearest + MM], true);
   return wrong;
 };
+/**
+ * **The owl's fade at the lens** (`owlLensFade.ts`), applied as `Game.tick` applies it: just before her frame is
+ * read as drawn, from the drawing eye, and undone straight after. `owl-no-fade` takes it away.
+ */
+const owlFade = new OwlLensFade(library.owl);
+/** The most of the screen the faded owl may cover as drawn, on any frame: a corner glimpsed, never the screen. */
+const OWL_SEEN_COVER_MAX = 0.1;
+/** The most her fade may change in one 60 fps frame: a fade, never a blink. */
+const OWL_FADE_STEP = 0.2;
 
 console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over her shoulder to the owl and the children listening, from either cushion, on a laptop and a phone, and goes home when she gets up or the story ends:");
 {
@@ -5717,6 +5734,19 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
   const story = storyCamera;
   if (!story) throw new Error('STORY CAMERA: the story camera was never built');
   if (mutating('no-story-camera')) note('the story camera NOT WIRED on purpose — this run must go red');
+  if (mutating('story-breath-off')) {
+    note("the camera's breath STILL on purpose (`IsoCamera.breath`) — this run must go red");
+    camera.breath = STILL_BREATH;
+  }
+  if (mutating('story-breath-wild')) {
+    note("the camera's breath TEN TIMES OVER on purpose (`IsoCamera.breath`) — this run must go red");
+    camera.breath = (seconds, out) => {
+      cameraBreath(seconds, out);
+      return Object.assign(out, { yawDegrees: out.yawDegrees * 10, pitchDegrees: out.pitchDegrees * 10, reach: out.reach * 10 });
+    };
+  }
+  const fading = !mutating('owl-no-fade');
+  if (!fading) note('the owl NEVER FADES at the lens, on purpose — this run must go red');
   if (mutating('story-camera-stays')) note("the story camera's focus KEPT after it lets go, on purpose — this run must go red");
   if (mutating('story-camera-low')) note('the story camera AIMED LOW, straight behind her at 2.5 m, on purpose — this run must go red');
   if (mutating('story-stage-as-it-was')) {
@@ -5795,10 +5825,20 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
      * be done about it is Jim's to choose (fade her when she is close, wait for her to land, or fly her another
      * way), and this is what whichever he picks will be held to.
      */
-    const owlPass = { clock: 0, nearest: Infinity, nearestAt: Number.NaN, within1: 0, within05: 0, within025: 0, cut: 0, cover: 0, coverAt: Number.NaN, overQuarter: 0, overHalf: 0 };
+    const owlPass = { clock: 0, nearest: Infinity, nearestAt: Number.NaN, within1: 0, within05: 0, within025: 0, cut: 0, cover: 0, coverAt: Number.NaN, overQuarter: 0, overHalf: 0, seen: 0, seenAt: Number.NaN, faded: 0, least: 1, step: 0, alpha: 1 };
     const owlWatch = (): void => {
       owlPass.clock += CHILD_DT;
+      const alpha = fading ? owlFade.apply(camera.camera.getWorldPosition(new Vector3())) : 1;
       const pass = lensPass(lensMeshes(owl.handle.root));
+      if (fading) owlFade.restore();
+      owlPass.step = Math.max(owlPass.step, Math.abs(alpha - owlPass.alpha));
+      owlPass.alpha = alpha;
+      owlPass.least = Math.min(owlPass.least, alpha);
+      if (alpha < 1) owlPass.faded += CHILD_DT;
+      if (pass.seen > owlPass.seen) {
+        owlPass.seen = pass.seen;
+        owlPass.seenAt = owlPass.clock;
+      }
       if (pass.nearest < owlPass.nearest) {
         owlPass.nearest = pass.nearest;
         owlPass.nearestAt = owlPass.clock;
@@ -5968,7 +6008,14 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
         `STORY CAMERA ${label}: the owl's flight past the lens, from the sit until the group settled (${owlPass.clock.toFixed(1)} s; the camera down at ${down.toFixed(1)} s): ` +
           `nearest ${owlPass.nearest.toFixed(2)} m from the eye, ${owlPass.nearestAt.toFixed(2)} s after the sit; within 1 m of it for ${owlPass.within1.toFixed(2)} s, ` +
           `half a metre for ${owlPass.within05.toFixed(2)} s, a quarter for ${owlPass.within025.toFixed(2)} s; cut open by the lens's near plane (${camera.camera.near} m) for ${owlPass.cut.toFixed(2)} s; ` +
-          `she covered at most ${(owlPass.cover * 100).toFixed(0)}% of the screen${Number.isNaN(owlPass.coverAt) ? '' : ` (${owlPass.coverAt.toFixed(2)} s after the sit)`}, over a quarter of it for ${owlPass.overQuarter.toFixed(2)} s and over half for ${owlPass.overHalf.toFixed(2)} s`,
+          `her shape covered at most ${(owlPass.cover * 100).toFixed(0)}% of the screen${Number.isNaN(owlPass.coverAt) ? '' : ` (${owlPass.coverAt.toFixed(2)} s after the sit)`}, over a quarter of it for ${owlPass.overQuarter.toFixed(2)} s and over half for ${owlPass.overHalf.toFixed(2)} s`,
+      );
+      say(
+        owlPass.seen <= OWL_SEEN_COVER_MAX && owlPass.step <= OWL_FADE_STEP && owlPass.alpha === 1,
+        `  the owl never covers the screen as she flies past the lens: at most ${(owlPass.seen * 100).toFixed(1)}% of it as drawn` +
+          `${Number.isNaN(owlPass.seenAt) ? '' : ` (${owlPass.seenAt.toFixed(2)} s after the sit)`} (${OWL_SEEN_COVER_MAX * 100}% allowed; her shape's ${(owlPass.cover * 100).toFixed(0)}%); ` +
+          `faded for ${owlPass.faded.toFixed(2)} s, down to ${(owlPass.least * 100).toFixed(0)}%, at most ${(owlPass.step * 100).toFixed(1)}% a frame (${OWL_FADE_STEP * 100}% allowed), and whole again once settled (${(owlPass.alpha * 100).toFixed(0)}%)` +
+          `${fading ? '' : ' — THE FADE IS OFF'}`,
       );
     }
     const what = told ? (sitsLate ? 'before she sat' : 'through the gathering — the owl calling and flying over, the children walking in') : 'with no story';
@@ -6010,6 +6057,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     let anchorOff = 0;
     let chipOffered = 0;
     let herShare = 0;
+    let fadedReading = 0;
     for (let moment = 0; moment < 3; moment += 1) {
       const meshes = storyMeshes();
       subjects.forEach((subject, i) => {
@@ -6032,6 +6080,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
       for (let i = 0; i < 60; i += 1) {
         frame();
         breathe();
+        if (owlFade.alphaFor(camera.camera.getWorldPosition(new Vector3())) < 1) fadedReading += 1;
         if (owl.speaking && library.storyPhase === 'reading') {
           bubbleFrames += 1;
           if (owl.bubble.sprite.visible) bubbleDrawn += 1;
@@ -6065,6 +6114,7 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
       `  her page is drawn: the owl's bubble on ${bubbleDrawn} of the ${bubbleFrames} frames she read on, its anchor on the screen on ${bubbleFrames - anchorOff}; her cushion offered '${LIBRARY_CHIPS.getUp}' on ${chipOffered} of 180 frames` +
         `${bubbleFrames === 0 ? ' — THE OWL NEVER READ THROUGH THE HOLD: this asserts nothing about her bubble' : ''}`,
     );
+    say(fadedReading === 0, `  the owl whole through the hold: faded on ${fadedReading} of 180 frames (the fade is for her flight past the lens, never her reading)`);
     note(`STORY CAMERA ${label}: she covers ${(herShare * 100).toFixed(1)}% of the frame (the exhibit camera's own bound ${HER_SHARE_MAX * 100}%)`);
     // The breathing: watched on through the reading, then each fixed point's sway about its own middle.
     for (let t = 0; t < BREATH_WATCH && library.storyPhase === 'reading'; t += CHILD_DT) {
