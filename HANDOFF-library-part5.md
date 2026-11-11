@@ -145,3 +145,8 @@ without part 4.
 - Found in QA: the creatures' bubble was depth-cut by the den's wall/lintel (ends sliced at 390x844; half hidden after
   walking out) → overScenery like the owl's (27aa106b), LABELS.md row. Re-look on the newest preview.
 - Local: shards 1-5 green (incl. check:served-deep-links with /library-den), test:procgen 2170/2170 green (pre-pow tree).
+- **Local full gate on the final src tree (27aa106b's src; later commits are this file only)**: check:shard-1..9 each
+  exit 0 (shards 1-5 run3, 6-9 run2), check:labels exit 0 with the creature bubble over scenery, test:procgen
+  exit 0 — 49 files, 2170 tests passed.
+- Remaining after this: CI green on the head (parks stage B for seeds 10/14 takes ~1 h), a smoke on the newest preview
+  (the creature bubble at 390x844), mark the PR ready. Do not merge.
