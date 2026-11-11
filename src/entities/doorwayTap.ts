@@ -10,8 +10,9 @@
  * the band. So the doorway the frame invites her to tap stranded her. The
  * library only worked because its rug happened to sit right on the wall line.
  *
- * So a tap anywhere in an exit's opening — under the arch, or in the arm's
- * reach in front of it — is moved to a point on the far side of the band's
+ * So a tap anywhere in an exit's opening — under the arch, in the arm's
+ * reach in front of it, or on the floor just past it short of the band's far
+ * edge — is moved to a point on the far side of the band's
  * inner edge by more than an arrival's slack: any stop that counts as
  * arriving there is inside the band, so crossing into it is what the walk
  * ends with, and the room's own doorway trigger (`bandCrossed`) takes her
@@ -81,7 +82,12 @@ export function doorwayTapTarget(exits: readonly DoorwayExit[], x: number, y: nu
     const onFrame = y > placed.originY + o.floorY + 1 && onFramePlan(placed, x, z);
     if (!onFrame) {
       if (x < minX || x > maxX) continue;
-      if (inward > doorwayTapReach(placed) || inward < -Math.abs(placed.frame.lintelHalfZ)) continue;
+      // Outward, as far as the band's far edge: a tap on the floor just past
+      // the door (the castle's porch — its band starts 1.7 m out) is a tap
+      // on the way out too (QA round 2 on #743: taps 0.5-1.6 m out left her
+      // standing on the porch).
+      const farOut = (band.centreZ + out * band.halfAlong - wallZ) * out;
+      if (inward > doorwayTapReach(placed) || inward < -farOut) continue;
     }
     // Every exit band runs straight out through its wall (`yaw` 0): its inner
     // edge is the side nearer the room's middle.

@@ -511,6 +511,33 @@ for (const room of rooms) {
     }
     if (bad > 0) fail(`${name}: ${bad} of ${taps} taps in the doorway would not take her out — ${firstBad.join(' | ')}`);
     if (controlShort === 0) fail(`${name}: CONTROL — walking to the tapped floor itself would always end in the band; the clause measures nothing`);
+    // **A tap just outside the door, short of the band.** The castle's band
+    // starts 1.7 m out, over its porch, so a tap on the porch in front of the
+    // door left her standing there (QA round 2 on #743: taps 0.5, 1.0 and
+    // 1.6 m out failed, 2.2 m worked). Every tap on floor between the wall
+    // line and the band's far edge, across the doorway, must take her out —
+    // where that floor exists to be tapped.
+    let outside = 0;
+    let outsideBad = 0;
+    const outsideFirst: string[] = [];
+    {
+      const far = (band.centreZ + out * band.halfAlong - wallZ) * out;
+      for (let x = placed.originX + o.minX + 0.05; x <= placed.originX + o.maxX - 0.05 + 1e-9; x += 0.2) {
+        for (let past = 0.05; past <= far - 0.05 + 1e-9; past += 0.1) {
+          const tapZ = wallZ + out * past;
+          const ground = park.sample(x, tapZ, floor + 0.5);
+          if (Math.abs(ground - floor) > 0.3) continue; // no floor here to tap
+          outside += 1;
+          const target = doorwayTapTarget(exits, x, ground, tapZ);
+          const at = target ?? { x, z: tapZ };
+          if (distanceToBand(band, at.x, at.z - out * ARRIVE_RADIUS) > 0) {
+            outsideBad += 1;
+            if (outsideFirst.length < 3) outsideFirst.push(`tap ${(x - placed.originX).toFixed(2)}, ${past.toFixed(2)} m out: an arrival ${ARRIVE_RADIUS} m short of ${target ? 'the steered target' : 'the tapped floor'} is outside the band`);
+          }
+        }
+      }
+    }
+    if (outsideBad > 0) fail(`${name}: ${outsideBad} of ${outside} taps on the floor just outside the door would leave her short of the band — ${outsideFirst.join(' | ')}`);
     // A tap that lands on the frame itself — its tops are standable, so a
     // finger aimed at the opening often lands on the lintel or the crest
     // (QA's library tap landed on the open book, 1.08 m in) — goes out too.
@@ -542,7 +569,7 @@ for (const room of rooms) {
     }
     say(
       `${name}: ${taps - bad} of ${taps} taps across the doorway (to ${reach.toFixed(2)} m in) end in the band, on her floor, reached from the room ` +
-        `(aimed ${DOORWAY_TAP_PAST_EDGE.toFixed(2)} m past its inner edge), and ${onFrame} on the frame's own top; control: walking to the tapped floor itself stops short of the band on ${controlShort}`,
+        `(aimed ${DOORWAY_TAP_PAST_EDGE.toFixed(2)} m past its inner edge), with ${outside} on the floor outside short of the band's far edge and ${onFrame} on the frame's own top; control: walking to the tapped floor itself stops short of the band on ${controlShort}`,
     );
   }
 }
