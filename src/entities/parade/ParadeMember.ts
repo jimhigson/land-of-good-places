@@ -188,6 +188,14 @@ export class ParadeMember {
   private facing = 0;
   /** 0..1 through one stride. Advanced by distance covered, never by time. */
   private phase = 0;
+  /**
+   * Scales the follow spring's time, 1 normally. While she dashes (a tapped
+   * long journey, `entities/tapDash.ts`) `Parade` shortens it in proportion to
+   * her speed, so a follower trails her by about what it would at a sprint
+   * instead of by ~16 m at full dash — close behind on the trail she ran, not
+   * cutting the corners of a line it has fallen far behind on (#745).
+   */
+  followPace = 1;
   private gait = 0;
   private readonly cyclesPerMetre: number;
 
@@ -673,8 +681,8 @@ export class ParadeMember {
     const previousX = this.position.x;
     const previousZ = this.position.z;
 
-    smoothDamp(this.position, this.velocity, target, FOLLOW_SMOOTH, dt, 'x');
-    smoothDamp(this.position, this.velocity, target, FOLLOW_SMOOTH, dt, 'z');
+    smoothDamp(this.position, this.velocity, target, FOLLOW_SMOOTH * this.followPace, dt, 'x');
+    smoothDamp(this.position, this.velocity, target, FOLLOW_SMOOTH * this.followPace, dt, 'z');
     // Height is followed hard rather than sprung: a toy that lags in Y sinks
     // into the step it is climbing, and there is nothing cute about that.
     this.position.y += (target.y - this.position.y) * clamp01(dt * 14);

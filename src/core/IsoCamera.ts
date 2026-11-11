@@ -3,6 +3,8 @@ import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
   CAMERA_LOOK_AHEAD,
+  PLAYER_MAX_SPEED,
+  PLAYER_SPRINT_MULTIPLIER,
   CAMERA_LOOK_MAX_DISTANCE,
   CAMERA_LOOK_RETURN_DELAY,
   CAMERA_LOOK_RETURN_HALF_LIFE,
@@ -21,6 +23,29 @@ import type { FrameContext } from './types';
 import type { ParkBoundary } from '../world/boundary';
 import { eyeForFocus, isOutdoors } from '../world/up';
 import { altitudeAt, yAtAltitude } from '../world/terrain';
+
+/**
+ * **How far ahead of her the camera aims, in seconds of her own velocity.**
+ *
+ * At a walk or a sprint it is {@link CAMERA_LOOK_AHEAD}, unchanged: the focus
+ * then settles `(HL/ln 2 − LOOK_AHEAD)·v` behind her (`HL` the follow
+ * half-life), 0.5 m at a walk and 0.8 m at a sprint — a lag nobody sees.
+ *
+ * A tapped dash (`entities/tapDash.ts`) runs at up to ~85 m/s, where that same
+ * lag is **6 m** — and a portrait phone shows only `CAMERA_MIN_VIEW_WIDTH` /
+ * 2 = 5.5 m either side of the focus, so a long sideways dash put her at the
+ * edge of the screen (#745's review). So above a sprint the lead grows to the
+ * follow's own time constant, `HL/ln 2`, reached at twice a sprint: at that
+ * lead the exponential follow settles **exactly** on her — the error obeys
+ * `ė = −e/τ`, whatever her speed and however sharply she turns — so she stays
+ * in the middle of the screen at every speed. It blends in by speed, so there
+ * is no step in the framing as a dash starts or ends.
+ */
+export function cameraLead(speed: number): number {
+  const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
+  const dash = clamp((speed - sprint) / sprint, 0, 1);
+  return CAMERA_LOOK_AHEAD + (CAMERA_FOLLOW_HALF_LIFE / Math.LN2 - CAMERA_LOOK_AHEAD) * dash;
+}
 
 /**
  * The Theme Park camera.
@@ -809,7 +834,7 @@ export class IsoCamera {
         this.desiredFocus.z,
       );
     } else {
-      this.desiredFocus.copy(target).addScaledVector(velocity, CAMERA_LOOK_AHEAD);
+      this.desiredFocus.copy(target).addScaledVector(velocity, cameraLead(Math.hypot(velocity.x, velocity.z)));
       // Aim a little above the player's feet so they sit slightly low on screen,
       // leaving room to see what you are walking towards.
       //

@@ -1048,6 +1048,13 @@ const RESOLVE_REACH = 1;
 /** More grid cells than this round a gather, and the query scans every collider instead. */
 const GATHER_MAX_CELLS = 64;
 
+/** What {@link CollisionWorld.resolveMovement} reports about one movement. */
+export interface MovementResult {
+  clearedWall: boolean;
+  escorting: boolean;
+  corrected: boolean;
+}
+
 /** A world with no more colliders than this is scanned whole: gathering costs more than it saves there. */
 const GATHER_MIN_SOLIDS = 48;
 
@@ -2439,6 +2446,9 @@ export class CollisionWorld {
     return SUBSTEP_FOOTPRINT_FRACTION * (this.thinnestHalfWidth + moverRadius);
   }
 
+  /** {@link resolveMovement}'s answer, reused call to call. Read it at once; it is overwritten by the next call. */
+  private readonly movementResult: MovementResult = { clearedWall: false, escorting: false, corrected: false };
+
   /**
    * **Move, then resolve — in sub-steps short enough that nothing solid can be
    * stepped clean over.** This is what a mover's per-frame movement should go
@@ -2527,7 +2537,7 @@ export class CollisionWorld {
     stepCeiling?: StepCeiling,
     moverHeight = 0,
     feetY?: number,
-  ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
+  ): Readonly<MovementResult> {
     const distance = Math.hypot(deltaX, deltaZ);
     const limit = this.maxSafeStep(radius);
     const steps = distance > limit ? Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS) : 1;
@@ -2571,7 +2581,14 @@ export class CollisionWorld {
       escorting = escorting || result.escorting;
       corrected = corrected || result.corrected;
     }
-    return { clearedWall, escorting, corrected };
+    // Written into one object per world and handed back, never a fresh one:
+    // a tapped dash calls this once a stride, several times a frame, and every
+    // caller reads the three flags at once and keeps none of it (#745).
+    const out = this.movementResult;
+    out.clearedWall = clearedWall;
+    out.escorting = escorting;
+    out.corrected = corrected;
+    return out;
   }
 
   /**

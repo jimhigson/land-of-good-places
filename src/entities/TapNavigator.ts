@@ -298,6 +298,21 @@ export class TapNavigator implements GameSystem {
     this.marker.show(this.target.x, this.target.y, this.target.z, true);
   }
 
+  /**
+   * False on a stride whose marker animation nobody will see — set by
+   * `FrameStrides` while a dash cuts a frame into strides, so the marker is
+   * animated once a frame. The skipped strides' time is carried over.
+   */
+  drawThisUpdate = true;
+  private markerSeconds = 0;
+
+  private drawMarker(dt: number, elapsed: number, walking: boolean): void {
+    this.markerSeconds += dt;
+    if (!this.drawThisUpdate) return;
+    this.marker.update(this.markerSeconds, elapsed, walking);
+    this.markerSeconds = 0;
+  }
+
   /** True while the character is walking somewhere it was told to. */
   get isNavigating(): boolean {
     return this.active;
@@ -340,7 +355,7 @@ export class TapNavigator implements GameSystem {
     if (!this.active) {
       this.input.setNavigationMove(0, 0);
       this.endDash();
-      this.marker.update(dt, elapsed, false);
+      this.drawMarker(dt, elapsed, false);
       return;
     }
 
@@ -355,7 +370,7 @@ export class TapNavigator implements GameSystem {
     const levelGap = Math.abs(this.player.position.y - this.target.y);
     if (distance <= ARRIVE_RADIUS && (this.routeLength === 0 || levelGap <= MAX_LEVEL_GAP)) {
       this.arrive();
-      this.marker.update(dt, elapsed, false);
+      this.drawMarker(dt, elapsed, false);
       return;
     }
 
@@ -383,7 +398,7 @@ export class TapNavigator implements GameSystem {
         // seek looks like.
         this.cancel();
         this.input.setNavigationMove(0, 0);
-        this.marker.update(dt, elapsed, false);
+        this.drawMarker(dt, elapsed, false);
         return;
       }
     }
@@ -417,7 +432,7 @@ export class TapNavigator implements GameSystem {
     this.player.setTravelBoost(this.boost);
 
     this.marker.moveTo(this.target.x, this.target.y, this.target.z);
-    this.marker.update(dt, elapsed, true);
+    this.drawMarker(dt, elapsed, true);
   }
 
   dispose(): void {

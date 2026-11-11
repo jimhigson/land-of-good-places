@@ -3,7 +3,7 @@ import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import { SpaceManager } from '../SpaceManager';
-import { bandCrossed, type PortalBand } from '../tapSpacing';
+import { bandWalkedThrough, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { SPACE_LIBRARY, spaceAt } from '../spaces';
 import { pressAction, type InteractZone } from '../interact';
@@ -808,21 +808,20 @@ export class Library implements GameSystem {
   }
 
   private checkDoorways(player: Player): void {
-    const { x, z } = player.position;
-    const fromX = player.previousPosition.x;
-    const fromZ = player.previousPosition.z;
+    // The path she took this frame, stride by stride on a dash — see
+    // `tapSpacing.ts`'s `bandWalkedThrough`.
     if (!this.inside) {
       // The cooldown guards the band that just fired: she is put down on the
       // doormat, well outside the entry band, and must not be pulled straight
       // back in. Inside, the arrival is 1.8 m from the exit band, so the exit
       // is checked from the first frame (the Reptile House's solidity review).
       if (this.spaces.settling) return;
-      if (bandCrossed(libraryEntryBand(this.frame, this.plan), fromX, fromZ, x, z)) {
+      if (bandWalkedThrough(libraryEntryBand(this.frame, this.plan), player)) {
         this.spaces.changeTo(() => this.enterRoom());
       }
       return;
     }
-    if (bandCrossed(libraryExitBand(), fromX, fromZ, x, z)) {
+    if (bandWalkedThrough(libraryExitBand(), player)) {
       this.spaces.changeTo(() => this.standOutside(this.frame.yaw));
     }
   }

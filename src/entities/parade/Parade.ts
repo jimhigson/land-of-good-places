@@ -12,7 +12,7 @@ const SLIDE_BODY_BOX = new Box3();
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
 import type { CompanionRide, CompanionSeat, Player, RideHolder } from '../Player';
-import { BUILDING_STEP_UP } from '../../core/constants';
+import { BUILDING_STEP_UP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../../core/constants';
 import { CLEAR_TOLERANCE } from '../../world/dismount';
 import { PlayerTrail } from './trail';
 import { ParadeMember, type BedPhase, type PetTablePlace } from './ParadeMember';
@@ -769,8 +769,15 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       }
     }
 
+    // A dash keeps its followers close: the spring's time shrinks as she
+    // passes a sprint, so the lag stays a sprint's (see `followPace`).
+    const pace = Math.hypot(player.velocity.x, player.velocity.z);
+    const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
+    const followPace = pace > sprint ? sprint / pace : 1;
+
     for (const member of this.members) {
       member.setFlying(flying);
+      member.followPace = followPace;
       // A pet on its way to bed aims at its bed's own run-up spot instead of
       // at a trail sample. That is the *only* difference: the same spring,
       // the same easing, the same turn-to-face and the same walk cycle carry

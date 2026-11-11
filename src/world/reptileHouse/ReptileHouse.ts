@@ -4,7 +4,7 @@ import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import type { ShopStand } from '../building/shops/Shops';
 import { SpaceManager } from '../SpaceManager';
-import { bandCrossed, type PortalBand } from '../tapSpacing';
+import { bandWalkedThrough, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt, type SpaceId } from '../spaces';
 import type { OpenAreaPoint } from '../dismount';
@@ -494,9 +494,8 @@ export class ReptileHouse implements GameSystem {
   // ------------------------------------------------------------ private
 
   private checkDoorways(player: Player): void {
-    const { x, z } = player.position;
-    const fromX = player.previousPosition.x;
-    const fromZ = player.previousPosition.z;
+    // The path she took this frame, stride by stride on a dash — see
+    // `tapSpacing.ts`'s `bandWalkedThrough`.
     if (!this.inside) {
       // The cooldown guards the band that just fired: she is put down on the
       // doormat a stride outside the entry band, and must not be pulled
@@ -505,12 +504,12 @@ export class ReptileHouse implements GameSystem {
       // immediately pushes down used to walk off the plate and be popped back
       // to the arrival (the solidity review, 2 October 2026).
       if (this.spaces.settling) return;
-      if (bandCrossed(reptileEntryBand(this.frame), fromX, fromZ, x, z)) {
+      if (bandWalkedThrough(reptileEntryBand(this.frame), player)) {
         this.spaces.changeTo(() => this.enterHall());
       }
       return;
     }
-    if (bandCrossed(reptileExitBand(), fromX, fromZ, x, z)) {
+    if (bandWalkedThrough(reptileExitBand(), player)) {
       this.spaces.changeTo(() => this.leaveToOutside());
     }
   }

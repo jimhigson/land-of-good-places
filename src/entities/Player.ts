@@ -20,6 +20,7 @@ import { clamp01, damp, DEG, lerp, smoothstep, TAU, turnTowards } from '../core/
 // create a local binding, so this file imports what it uses like anybody else.
 import { applyRidePose, type RidePosture } from './ridePose';
 import { DASH_CADENCE_SPEED } from './tapDash';
+import { createFramePath, type FramePath } from './framePath';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
@@ -793,6 +794,51 @@ export class Player implements GameSystem {
   private dashLean = 0;
 
   /**
+   * False on a stride whose pose nobody will see. `FrameStrides` (the dash's
+   * stride loop) clears it for every stride of a frame but the last, so the
+   * pose is built once a frame however many strides the frame was cut into;
+   * the skipped strides' time is carried in {@link poseSeconds}. True for
+   * every ordinary frame.
+   */
+  poseThisUpdate = true;
+  /** Seconds of movement since the pose was last drawn. See {@link poseThisUpdate}. */
+  private poseSeconds = 0;
+
+  /**
+   * The path she took this frame, stride by stride — written by
+   * `FrameStrides` while a dash cuts a frame into strides, empty (`count` 0)
+   * otherwise. `tapSpacing.ts`'s `bandWalkedThrough` asks a doorway of these
+   * segments, so a crossing follows the strides she actually ran rather than
+   * one straight chord across a slow frame.
+   */
+  readonly framePath: FramePath = createFramePath();
+
+  // The movement sub-steps' shared state, and the callbacks that read it —
+  // bound once, here, so a stride allocates nothing. See `update`.
+  private moveFollowing = false;
+  private moveReference = 0;
+  private moveGroundY = 0;
+  private moveFromX = 0;
+  private moveFromZ = 0;
+  private levelGroundY = 0;
+  private readonly followSample = (at: Vector3): void => {
+    if (this.moveFollowing) this.moveReference = carryReference(this.moveFromX, this.moveFromZ, this.moveReference, at.x, at.z);
+    else {
+      // In the air her own height travels with her: see "a jump is a
+      // jump everywhere" in `update`.
+      at.y = carryReference(this.moveFromX, this.moveFromZ, at.y, at.x, at.z);
+      this.moveReference = at.y;
+    }
+    this.moveFromX = at.x;
+    this.moveFromZ = at.z;
+    this.moveGroundY = this.groundAt(at.x, at.z, this.moveReference);
+    if (this.moveFollowing) this.moveReference = this.moveGroundY;
+  };
+  private readonly stepCeilingHere = (x: number, z: number): number =>
+    solidStepCeiling(this.collision, x, z, carryReference(this.moveFromX, this.moveFromZ, this.moveReference, x, z));
+  private readonly levelWithGround = (x: number, z: number): boolean => this.levelWith(x, z, this.levelGroundY);
+
+  /**
    * Sets the dash multiplier for this frame. See {@link travelBoost}.
    *
    * **A dash that is taken away rather than run down stops at once.** The
@@ -1029,6 +1075,9 @@ export class Player implements GameSystem {
     this.jumpHeldFor = 0;
     // Whatever she was being walked out of, she is not in it any more.
     this.escorting = false;
+    // …nor in the air over anything, nor partway through a frame's strides.
+    this.hopClearance = 0;
+    this.framePath.count = 0;
     if (facing !== undefined) this.facingAngle = facing;
     this.group.position.copy(this.position);
     faceOnGround(this.group, this.facingAngle);
@@ -1581,11 +1630,17 @@ export class Player implements GameSystem {
     // direction; what spread is left is the damped height's lag over the
     // ground on a run downhill (see the take-off below), inside every guard's
     // margin.
+    // The sample state the sub-steps below share lives in fields, read by
+    // callbacks bound once at construction (`followSample`, `stepCeilingHere`):
+    // a closure per call was garbage once a stride, several strides a frame
+    // during a dash (#745). Same arithmetic, same order.
     const following = !this.airborne;
-    let reference = following ? this.groundHeight : this.position.y;
-    let groundY = reference;
-    let fromX = this.position.x;
-    let fromZ = this.position.z;
+    this.moveFollowing = following;
+    this.moveReference = following ? this.groundHeight : this.position.y;
+    this.moveGroundY = this.moveReference;
+    this.moveFromX = this.position.x;
+    this.moveFromZ = this.position.z;
+    const reference = this.moveReference;
     // --- stepping up onto a solid --------------------------------------------
     // A solid's top within one step of the surface she stands on is climbed
     // exactly as a deck of that height is — walking into a 0.44 m bench puts
@@ -1619,20 +1674,8 @@ export class Player implements GameSystem {
       PLAYER_RADIUS,
       this.hopClearance,
       dt,
-      (at) => {
-        if (following) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
-        else {
-          // In the air her own height travels with her: see "a jump is a
-          // jump everywhere" above.
-          at.y = carryReference(fromX, fromZ, at.y, at.x, at.z);
-          reference = at.y;
-        }
-        fromX = at.x;
-        fromZ = at.z;
-        groundY = this.groundAt(at.x, at.z, reference);
-        if (following) reference = groundY;
-      },
-      stepping ? (x, z) => solidStepCeiling(this.collision, x, z, carryReference(fromX, fromZ, reference, x, z)) : undefined,
+      this.followSample,
+      stepping ? this.stepCeilingHere : undefined,
       // Her whole body, feet to the top of her head: a solid that begins above
       // her (a canopy, the underside of a rail's deck) meets her only once her
       // head is up there with it.
@@ -1642,6 +1685,8 @@ export class Player implements GameSystem {
       // `feetY`: the foyer log's shuttle).
       following ? Math.max(this.position.y, this.groundHeight) : undefined,
     );
+
+    let groundY = this.moveGroundY;
 
     // An escort runs until the pushing stops, not until it goes quiet.
     //
@@ -1831,7 +1876,10 @@ export class Player implements GameSystem {
     // she is at the nearest place she fits (`nearestFit`): on her feet, on
     // her own floor's level, never over a drop or up onto a top.
     if (this.airborne) nearestFit(this.collision, this.position, this.position.y);
-    else if (nearestFit(this.collision, this.position, groundY, (x, z) => this.levelWith(x, z, groundY))) groundY = this.groundAt(this.position.x, this.position.z, groundY);
+    else {
+      this.levelGroundY = groundY;
+      if (nearestFit(this.collision, this.position, groundY, this.levelWithGround)) groundY = this.groundAt(this.position.x, this.position.z, groundY);
+    }
     this.hopClearance = hopHeight;
     // Next frame's sampling reference: the surface she is on, not the damped
     // height she is drawn at. See `groundHeight`.
@@ -1944,7 +1992,14 @@ export class Player implements GameSystem {
 
     this.spawnRunningDust();
 
-    this.animate(context, hopHeight);
+    // The pose is drawn once a frame, not once a stride: during a dash
+    // `FrameStrides` clears {@link poseThisUpdate} on every stride but the
+    // last, and the time those strides took is handed to the one that draws.
+    this.poseSeconds += dt;
+    if (this.poseThisUpdate) {
+      this.animate(context, hopHeight, this.poseSeconds);
+      this.poseSeconds = 0;
+    }
   }
 
   /** Renames the character and rebuilds the floating label. */
@@ -2302,7 +2357,8 @@ export class Player implements GameSystem {
     model.head.rotation.z = lerp(model.head.rotation.z, 0, weight);
   }
 
-  private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
+  private animate(context: FrameContext, hopHeight: number, dt: number = context.dt): void {
+    const { elapsed } = context;
     const model = this.model;
     // Applied at the very end of this method — see `railRaceDuck`.
     const gait = this.gait;
