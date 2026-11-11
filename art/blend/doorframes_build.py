@@ -86,7 +86,7 @@ CONTRACT = {
 # The castle's lintel fills the band between its posts' tops and its ceiling.
 CONTRACT["castle"]["L"] = round(CASTLE_CEILING - CEILING_GAP - CONTRACT["castle"]["H"], 4)
 #: The castle's gatehouse top over the lintel: width, depth, block height, merlon height.
-PARAPET_W, PARAPET_D, PARAPET_H, MERLON_H = 3.0, 0.6, 0.62, 0.42
+PARAPET_W, PARAPET_D, PARAPET_H, MERLON_H = 4.2, 0.6, 0.85, 0.55
 #: The top of the castle porch roof just outside the door — the line the
 #: parapet must clear to be seen. Read from `Shell.ts`, never typed.
 PORCH_ROOF_TOP = kit.ts_const("src/world/building/Shell.ts", "INTERIOR_PORCH_ROOF_Y") + kit.ts_const(
@@ -341,18 +341,19 @@ def build_castle(coll):
     # shield, the one part of the frame the camera always sees.
     parapet = kit.Part("doorframe-castle-crest-parapet")
     flat_box_at(parapet, PARAPET_W, PARAPET_D, PARAPET_H, radius=0.06)
-    merlons = 3
+    merlons = 4
     pitch = PARAPET_W / merlons
     for i in range(merlons):
         x = -PARAPET_W / 2 + pitch * (i + 0.5)
         box_at(parapet, pitch * 0.62, PARAPET_D * 0.9, MERLON_H, x=x, z0=PARAPET_H - 0.02, radius=0.06)
     parapet.emit(coll)
     shield = kit.Part("doorframe-castle-crest-shield")
-    sw, sh = 0.72, 0.62
+    sw, sh = 0.86, 0.72
     outline = [(-sw / 2, sh), (sw / 2, sh), (sw / 2, sh * 0.45), (0.0, 0.0), (-sw / 2, sh * 0.45)]
     verts, faces = kit.extrude_outline(outline, 0.16, centre=(0.0, sh * 0.55))
-    # On the parapet's camera face, proud of it; its back buried in the block.
-    shield.add(verts, faces, Matrix.Translation((0.0, -PARAPET_D / 2 - 0.04, (PARAPET_H - sh) / 2 + 0.02)))
+    # On the parapet's camera face, proud of it, its back buried in the block,
+    # and its top well under the block's (check:coplanar: never in one plane).
+    shield.add(verts, faces, Matrix.Translation((0.0, -PARAPET_D / 2 - 0.04, 0.04)))
     shield.emit(coll)
 
 
