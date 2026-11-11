@@ -1144,7 +1144,6 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
       `${shellOfDen.lanterns.length} lanterns hang with their lowest point ${lowest.toFixed(2)} m up, over her head at the top of her highest jump (${JUMP_APEX_HEIGHT.toFixed(2)} + ${KID_HEIGHT.toFixed(2)} = ${head.toFixed(2)} m); ` +
         `${lights} light(s) in the den (the room's pools are spent)`,
     );
-    const denMiddle = { x: (inner.west - (LIBRARY_HALF_X + LIBRARY_WALL_HALF)) / 2, z: (inner.north + inner.south) / 2 };
     shellOfDen.lanterns.forEach((lantern, index) => {
       const body = shellOfDen.lanternBodies[index];
       const drawn = new Box3().setFromObject(lantern, true);
@@ -1159,14 +1158,17 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
         Math.abs((drawn.min.x + drawn.max.x) / 2 - body.cx) + (drawn.max.x - drawn.min.x) / 2 - body.halfX,
         Math.abs((drawn.min.z + drawn.max.z) / 2 - body.cz) + (drawn.max.z - drawn.min.z) / 2 - body.halfZ,
       );
-      // A flier at the lantern's height, marched at it from the den's middle,
-      // stops at its front; the CONTROL, over its top by the jump grace, does
+      // A flier at the lantern's height, marched at it, stops at its front; the CONTROL, over its top by the jump grace, does
       // not — so the march can tell a lantern from none, and the body is a
       // band, not a pillar to the floor.
+      // Straight at its wall from 1.5 m out in front of it: the west wall's
+      // lanterns are marched west, the north wall's north.
       const centre = { x: (drawn.min.x + drawn.max.x) / 2 - OX, z: (drawn.min.z + drawn.max.z) / 2 - OZ };
-      const dx = centre.x - denMiddle.x;
-      const dz = centre.z - denMiddle.z;
-      const from = (feet: number): Vector3 => new Vector3(OX + denMiddle.x, LIBRARY_FLOOR_Y + feet, OZ + denMiddle.z);
+      const onWest = Math.abs(centre.x - inner.west) < Math.abs(centre.z - inner.north);
+      const dx = onWest ? -1 : 0;
+      const dz = onWest ? 0 : -1;
+      const from = (feet: number): Vector3 =>
+        new Vector3(OX + centre.x - dx * 1.5, LIBRARY_FLOOR_Y + feet, OZ + centre.z - dz * 1.5);
       /** How far her edge is from the lantern's drawn plan (negative: inside it). */
       const gapTo = (p: Vector3): number => {
         const qx = Math.max(drawn.min.x - p.x, 0, p.x - drawn.max.x);
@@ -1182,7 +1184,7 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
       say(
         out <= 0.001 && ends.every((gap) => gap >= -RESOLVER_SLACK) && control < -RESOLVER_SLACK,
         `lantern ${index + 1}: drawn inside its body (furthest out ${out.toFixed(3)} m, at most 0.001; band ${(body.baseHeight - LIBRARY_FLOOR_Y).toFixed(2)}..${(body.topHeight - LIBRARY_FLOOR_Y).toFixed(2)} m); ` +
-          `a flier at ${atHeight.toFixed(2)} m marched at it from the den's middle stops ${ends.map((gap) => gap.toFixed(3)).join(' and ')} m short of its drawn plan (5 cm and the sprint stride); ` +
+          `a flier at ${atHeight.toFixed(2)} m marched straight at it stops ${ends.map((gap) => gap.toFixed(3)).join(' and ')} m short of its drawn plan (5 cm and the sprint stride); ` +
           `CONTROL: over its top at ${overTop.toFixed(2)} m she passes over it (${control.toFixed(3)} m, inside its plan)`,
       );
     });
@@ -6804,15 +6806,21 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
     child.step();
     tookOff ||= player.isAirborne;
   }
-  // A sprint up and down the den, long enough for a run to count twice over.
-  const inner = LIBRARY_DEN_INNER;
-  const laneX = (inner.west - (LIBRARY_HALF_X + LIBRARY_WALL_HALF)) / 2;
-  child.stand(laneX, inner.north + PLAYER_RADIUS + 0.3, 180);
+  // A sprint round and round the open middle of the den — it is too small to
+  // sprint across for long — clear of the nest, the dragon and the open leaf.
+  const ring = { x: LIBRARY_DRAGON_STAND.x + 0.4, z: LIBRARY_DRAGON_STAND.z + 1.3, r: 1.0 };
+  child.stand(ring.x + ring.r, ring.z, 180);
   let runFor = 0;
   let longestRun = 0;
   let sprintLeftDen = false;
-  for (let i = 0; i < Math.round(1.2 / CHILD_DT); i += 1) {
-    child.step(child.towards(0, 1, true));
+  for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+    const at = child.room();
+    const rx = at.x - ring.x;
+    const rz = at.z - ring.z;
+    const out = Math.hypot(rx, rz) || 1;
+    // Round the ring (its tangent), pulled back onto it.
+    const pull = (out - ring.r) * 2;
+    child.step(child.towards(-rz / out - (rx / out) * pull, rx / out - (rz / out) * pull, true));
     sprintLeftDen ||= !inDen();
     runFor = player.isRunning ? runFor + CHILD_DT : 0;
     longestRun = Math.max(longestRun, runFor);
@@ -6830,6 +6838,8 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
   child.input.pressVirtual('jump');
   for (let i = 0; i < 40; i += 1) child.step();
   say(owl.shushes === beforeRoom + 1, `CONTROL: the same jump in the reading room at (0, 4) shushes her: ${owl.shushes - beforeRoom} shush(es), "${owl.lastSaid ?? ''}"`);
+  // Left as found: a fresh visit, the shelf shut and the den hidden again.
+  child.enter();
   child.run(0.5);
 }
 
