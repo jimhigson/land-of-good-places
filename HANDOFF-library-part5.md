@@ -1,3 +1,17 @@
+# HANDOFF — Library part 5 (RESUMED 11 Nov 2026 by an Opus 5.5 engineer)
+
+## Current state (11 Nov) — read this block first
+- Worktree `.claude/worktrees/library-v2b`, branch `feat/library-v2b`; the PR is opened from this branch to **main**.
+- #733, #734, #735 are on main; #736 is open (not merged in). Books are NOT re-merged (they came with main).
+- [x] merged origin/main (ee1ad33a) — clean.
+- [x] merged origin/feat/library-v2-den @ d209d0df (contains art/library-v2-den @ 0c0fecd0) — a9b79058.
+  Conflicts kept both sides; den kit goes through main's shared `checkGlbKit` with `faces: null`
+  (proved red: library kit given faces:null → 7 problems, exit 1). ASSET_MANIFEST §43 = den kit.
+  check chains: main's shards unchanged; den adds only pack/blend/render:library-den.
+- [ ] check:library etc. need a park: use CI's `parks-<hash>` artifact (never solve locally — the Mac is shared).
+- [ ] fixes: rC12/rC13 review findings, Step 14 (/library-den, no shush in den, story time continues in den,
+      KIDS avoid den), rD faces (puff face patch, tummy decal, tortoise face, Chicken moods), solidity proof.
+
 # HANDOFF — Library part 5: the secret den, the baby dragon, the sleeping cat and six chapter books (PAUSED 23 Oct 2026, ~11:45 BST)
 
 Read this first. It is the entry point for whoever resumes part 5.
