@@ -38,10 +38,13 @@ import { decal } from '../style/materials';
 
 /**
  * Two a stride at a sprint is roughly 5 a second, and a puff lives for
- * {@link LIFETIME} — so twelve is comfortably more than can ever be alive at
- * once, with room for the pool never to have to wrap in normal running.
+ * {@link LIFETIME} — so twelve was comfortably more than could ever be alive at
+ * once in normal running. A tapped dash (`entities/tapDash.ts`) runs the legs
+ * up to `DASH_CADENCE_SPEED`, about 6.3 strides a second, which is four puffs a
+ * stride for 0.55 s = 14 alive: sixteen keeps the trail behind a dash whole
+ * rather than recycling its tail.
  */
-const POOL_SIZE = 12;
+const POOL_SIZE = 16;
 
 /** Seconds. Short: dust behind a runner settles almost at once. */
 const LIFETIME = 0.55;

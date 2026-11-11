@@ -708,18 +708,32 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     this.peek.rebind();
   }
 
+  /**
+   * Drops a crumb where she stands now. Called once a frame from
+   * {@link update}, and by `Game.tick` after each stride of a tapped dash
+   * (`entities/tapDash.ts`) as well: a dash on a hitching phone covers more
+   * than `trail.ts`'s `TELEPORT_GAP` in one frame, and a trail fed only once a frame
+   * would call that a teleport — so the trail is fed at the stride, and stays
+   * the ground she actually ran over, corners and all.
+   *
+   * The trail is the one owner of "was she moved, or did she walk?" — see
+   * `PlayerTrail.push`. When she was moved, her companions were moved with
+   * her, and leaving them behind in the space she left is what sent five
+   * animals flying across the park and in through the hotel wall on every
+   * `/hotel-suite` deep link. See {@link catchUpAfterTeleport}.
+   */
+  followStride(): void {
+    const player = this.player;
+    if (this.trail.push(player.position.x, player.position.y, player.position.z)) {
+      this.catchUpAfterTeleport();
+    }
+  }
+
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     const player = this.player;
 
-    // The trail is the one owner of "was she moved, or did she walk?" — see
-    // `PlayerTrail.push`. When she was moved, her companions were moved with
-    // her, and leaving them behind in the space she left is what sent five
-    // animals flying across the park and in through the hotel wall on every
-    // `/hotel-suite` deep link. See {@link catchUpAfterTeleport}.
-    if (this.trail.push(player.position.x, player.position.y, player.position.z)) {
-      this.catchUpAfterTeleport();
-    }
+    this.followStride();
 
     // Copy the hop. Reading the player's own airborne edge rather than the jump
     // button means the trampoline and the slide's landing get a hop out of the

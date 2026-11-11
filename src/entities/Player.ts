@@ -19,6 +19,7 @@ import { clamp01, damp, DEG, lerp, smoothstep, TAU, turnTowards } from '../core/
 // The pose itself, for `animate` to apply. A `export … from` re-export does not
 // create a local binding, so this file imports what it uses like anybody else.
 import { applyRidePose, type RidePosture } from './ridePose';
+import { DASH_CADENCE_SPEED } from './tapDash';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
@@ -778,6 +779,45 @@ export class Player implements GameSystem {
   speedMultiplier = 1;
 
   /**
+   * How many times the walk a tapped journey is running at — 1 except during a
+   * dash (`entities/tapDash.ts`, the one owner of the curve). Written only by
+   * `TapNavigator`, through {@link setTravelBoost}, every frame it steers.
+   */
+  private travelBoost = 1;
+
+  /**
+   * How much of a dash is showing in her pose, 0..1 — damped from her speed
+   * above a sprint, so the extra lean comes on and goes off rather than
+   * snapping. See `animate`.
+   */
+  private dashLean = 0;
+
+  /**
+   * Sets the dash multiplier for this frame. See {@link travelBoost}.
+   *
+   * **A dash that is taken away rather than run down stops at once.** The
+   * navigator eases the boost down to 1 over the last couple of metres itself
+   * (`dashBoostNow`), so arriving changes nothing here. But a thumb on the
+   * stick, a key, a new short tap or a ride cancels it mid-flight, and
+   * decelerating from 40 m/s at the ordinary rate would carry her twenty
+   * metres in a skid the child did not ask for. So when a boost above the walk
+   * is replaced by none, her speed is clamped to the walk there and then, and
+   * whatever she pressed takes over at normal speed.
+   */
+  setTravelBoost(boost: number): void {
+    const next = boost > 1 ? boost : 1;
+    if (next === 1 && this.travelBoost > 1) {
+      const limit = PLAYER_MAX_SPEED * this.speedMultiplier;
+      const speed = Math.hypot(this.velocity.x, this.velocity.z);
+      if (speed > limit) {
+        this.velocity.x *= limit / speed;
+        this.velocity.z *= limit / speed;
+      }
+    }
+    this.travelBoost = next;
+  }
+
+  /**
    * True while some other system wants the face to read happy without
    * fighting the blink state machine in `animate()` — the fountain sets this
    * while the player is standing in its water.
@@ -1449,9 +1489,12 @@ export class Player implements GameSystem {
       .addScaledVector(this.camera.forward, input.moveY);
 
     const inputLength = this.moveDirection.length();
+    // A dash (`tapDash.ts`) is a multiple of the walk, and never slower than
+    // the sprint she would otherwise have: a double-tapped "run there" keeps
+    // its sprint on a journey too short to dash.
     const speedLimit =
       PLAYER_MAX_SPEED *
-      (input.isDown('sprint') ? PLAYER_SPRINT_MULTIPLIER : 1) *
+      Math.max(input.isDown('sprint') ? PLAYER_SPRINT_MULTIPLIER : 1, this.travelBoost) *
       this.speedMultiplier;
 
     if (inputLength > 1e-4) {
@@ -1461,7 +1504,12 @@ export class Player implements GameSystem {
     }
 
     // --- acceleration -------------------------------------------------------
-    const rate = inputLength > 1e-4 ? PLAYER_ACCELERATION : PLAYER_DECELERATION;
+    // Scaled by the square of the dash, so a dash turns in the same *distance*
+    // a walk does: the arc a change of direction swings through is speed ×
+    // (speed / rate), and keeping it a walk's arc is what keeps her on the
+    // route round a corner instead of swinging wide into whatever the route
+    // went round. It also makes the run-up to a dash as quick as a walk's.
+    const rate = (inputLength > 1e-4 ? PLAYER_ACCELERATION : PLAYER_DECELERATION) * this.travelBoost * this.travelBoost;
     approach(this.velocity, this.desiredVelocity, rate * dt);
 
     // --- horizontal movement + collision ------------------------------------
@@ -1884,8 +1932,15 @@ export class Player implements GameSystem {
 
     // --- animation ----------------------------------------------------------
     this.gait = damp(this.gait, clamp01(planarSpeed / PLAYER_MAX_SPEED), 0.07, dt);
-    this.walkPhase += planarSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
+    // The legs stop speeding up at `DASH_CADENCE_SPEED`; past it each stride
+    // covers more ground. Below it — every walk and sprint — this is the
+    // stride-locked cycle it always was.
+    this.walkPhase += Math.min(planarSpeed, DASH_CADENCE_SPEED) * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
     if (this.walkPhase > TAU) this.walkPhase -= TAU;
+    // How far past a sprint she is going, as a share of a sprint: 0 at a
+    // sprint and below, 1 at twice a sprint and above. Only a dash gets there.
+    const sprintSpeed = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
+    this.dashLean = damp(this.dashLean, clamp01((planarSpeed - sprintSpeed) / sprintSpeed), 0.08, dt);
 
     this.spawnRunningDust();
 
@@ -2265,7 +2320,10 @@ export class Player implements GameSystem {
     model.body.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
 
     // Lean into the run, and roll gently side to side.
-    model.body.rotation.x = lerp(0, -0.13, gait) + (this.airborne ? -0.1 : 0);
+    // A dash leans further in still, and swings everything wider: a child
+    // pelting flat out, not a walk played fast (`dashLean`).
+    const dash = this.dashLean;
+    model.body.rotation.x = lerp(0, -0.13, gait) - 0.22 * dash + (this.airborne ? -0.1 : 0);
     model.body.rotation.z = Math.sin(phase) * 0.045 * gait;
 
     // Head lags behind the body a touch — a tiny bit of secondary motion does
@@ -2275,14 +2333,14 @@ export class Player implements GameSystem {
     model.head.position.y = model.headHeight + Math.sin(phase * 2 + 1.2) * 0.012 * gait;
 
     // Arms and legs swing in opposition.
-    const swing = Math.sin(phase) * (0.95 * gait);
+    const swing = Math.sin(phase) * (0.95 * gait + 0.35 * dash);
     const armLift = this.airborne ? -0.9 : 0;
     model.leftArm.rotation.x = swing + armLift;
     model.rightArm.rotation.x = -swing + armLift;
     model.leftArm.rotation.z = 0.12 + gait * 0.08;
     model.rightArm.rotation.z = -0.12 - gait * 0.08;
 
-    const legSwing = Math.sin(phase) * (0.85 * gait);
+    const legSwing = Math.sin(phase) * (0.85 * gait + 0.3 * dash);
     model.leftLeg.rotation.x = -legSwing;
     model.rightLeg.rotation.x = legSwing;
 
