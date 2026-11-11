@@ -133,3 +133,15 @@ without part 4.
   libraryDenContains".
 - Lanterns: band 3.89..4.53 m; flier at 3.94 m stops 0.000 m short; control over the top passes (-0.415 m, inside plan).
 - The den's longest possible sprint is 0.32 s < SHUSH_RUN_SECONDS 0.35, so the no-shush clause rests on the jump.
+
+## 11 Nov afternoon
+- check:pow-operator caught `**` in secretShelf.ts → Math.pow (6849d16e). Every src commit re-keys the parks hash, so CI
+  rebuilds all 16 parks (~1.5 h; seeds 10 and 14 need stage B). Locally: CI's parks-<hash> artifact unzipped into .parks/
+  and its manifest/park files restamped to the local hash (restarts are identical on main, #736 and here) — a local
+  shortcut only; CI does it honestly.
+- Browser QA on the preview pr-739-207ba5e (headless Chrome, throwaway contexts, .claude/scratch/qa-den.mjs, keyboard
+  play; SwiftShader runs ~1 fps so holds are counted in frames): pull → leaf swings → walk in → "Say hi!" → "I love my
+  books!" → walk out; cat "Prrrr…"; Shush/Chicken/Footprints/Trilla High/RiPika's Balloon all show faces now.
+- Found in QA: the creatures' bubble was depth-cut by the den's wall/lintel (ends sliced at 390x844; half hidden after
+  walking out) → overScenery like the owl's (27aa106b), LABELS.md row. Re-look on the newest preview.
+- Local: shards 1-5 green (incl. check:served-deep-links with /library-den), test:procgen 2170/2170 green (pre-pow tree).
