@@ -33,6 +33,7 @@
  * LIBRARY_CHECK_MUTATE=wide-creature-tops pnpm run check:library  # the dragon's and the cat's tops made whole: a jump lands her on one, must go red
  * LIBRARY_CHECK_REMOVE='den wall (north)' pnpm run check:library  # the den's north wall's body out: THE DEN, DRAWN and DEN WALLS must go red
  * LIBRARY_CHECK_MUTATE=undrawn-den-wall pnpm run check:library  # the Artist's north wall taken out of the drawn den: THE DEN, DRAWN must go red
+ * LIBRARY_CHECK_MUTATE=resident-in-den pnpm run check:library  # a waypoint at the den's middle in a child's circuit: KIDS' den avoidance must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -164,6 +165,9 @@
  *     warm sprites, and the head turning to her side. The cat: Pet the cat!
  *     twitches her ears, lifts her face, makes her happy and then asleep,
  *     purrs, and a second press inside the guard changes nothing.
+ * 20. THE DEN AT STORY TIME (#719, the join) — a story called with her in the
+ *     den is read to its end and the clock counts there; a jump and a sprint
+ *     in the den never get a "Shhh!" (CONTROL: the same jump in the room does).
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -3576,6 +3580,32 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       legs.push({ who: plan.name, way: 'way back', from: to, to: from, ownSeat: plan.seat, until: 1 });
     }
   }
+  // `resident-in-den`: a waypoint at the den's middle, as if a child's route
+  // went in there — the den-avoidance clause below must go red naming it.
+  const denMiddle = { x: (LIBRARY_DEN_INNER.west - LIBRARY_INNER_X) / 2, z: (LIBRARY_DEN_INNER.north + LIBRARY_DEN_INNER.south) / 2 };
+  if (mutating('resident-in-den')) {
+    const first = plans[0];
+    const from = first ? libraryKidCircuit(first)[0] : undefined;
+    if (first && from) {
+      legs.push({ who: first.name, way: 'circuit', from, to: denMiddle, ownSeat: first.seat, until: 1 });
+      note(`INJECTED a waypoint at the den's middle ${label(denMiddle)} into ${first.name}'s circuit on purpose — this run must go red`);
+    }
+  }
+  /** How far room-local (x, z) is from the secret den — the region `libraryDenContains` owns — in plan; 0 inside it. */
+  const denBox = {
+    minX: LIBRARY_DEN_INNER.west - LIBRARY_WALL_HALF,
+    maxX: -LIBRARY_INNER_X,
+    minZ: LIBRARY_DEN_INNER.north - LIBRARY_WALL_HALF,
+    maxZ: LIBRARY_DEN_INNER.south + LIBRARY_WALL_HALF,
+  };
+  const fromDen = (x: number, z: number): number =>
+    Math.hypot(Math.max(denBox.minX - x, 0, x - denBox.maxX), Math.max(denBox.minZ - z, 0, z - denBox.maxZ));
+  // The control on that ruler: the den's middle is in it, and its own box agrees with the owner.
+  if (!libraryDenContains(denMiddle.x, denMiddle.z) || fromDen(denMiddle.x, denMiddle.z) !== 0 || libraryDenContains(denBox.maxX + 0.01, denMiddle.z)) {
+    throw new Error("KIDS: the den-avoidance ruler disagrees with libraryDenContains — fix the ruler before trusting the clause");
+  }
+  const DEN_KEEP = NPC_RADIUS + 0.2;
+  let nearestDen = { apart: Infinity, who: '' };
   let stations = 0;
   let blockedLegs = 0;
   let nearestPlayerSeat = { apart: Infinity, who: '' };
@@ -3593,6 +3623,8 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       const z = leg.from.z + (leg.to.z - leg.from.z) * t;
       stations += 1;
       if (!collision.isClearCircle(OX + x, OZ + z, SWEEP_RADIUS) && !blockedAt) blockedAt = { x, z };
+      const apartFromDen = fromDen(x, z);
+      if (apartFromDen < nearestDen.apart) nearestDen = { apart: apartFromDen, who: `${leg.who}'s ${leg.way} ${label(leg.from)} → ${label(leg.to)} at ${label({ x, z })}` };
       for (const id of LIBRARY_PLAYER_SEATS) {
         const seat = libraryCushion(id).at;
         const apart = Math.hypot(x - seat.x, z - seat.z);
@@ -3614,6 +3646,11 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     blockedLegs === 0 && stations > 0,
     `${legs.length} legs (${circuitLegs} circuit legs, the wraps included; ${rugLegs} to the rug, the last of each only to ${seatArrive.toFixed(2)} m from the seat; ${rugLegs} back) ` +
       `swept every ${SWEEP_STEP} m with a ${SWEEP_RADIUS.toFixed(2)} m body: ${stations} stations, ${blockedLegs} legs blocked`,
+  );
+  say(
+    stations > 0 && nearestDen.apart >= DEN_KEEP,
+    `the children keep out of the secret den: every one of ${legs.length} legs (circuits, ways to the rug and back) stays ${DEN_KEEP.toFixed(2)} m (NPC_RADIUS + 0.2) ` +
+      `from the region libraryDenContains owns — the leaf swings inside it — the nearest ${nearestDen.apart.toFixed(2)} m, ${nearestDen.who}`,
   );
   say(
     nearestPlayerSeat.apart >= PLAYER_SEPARATION - PLAYER_SEAT_BRUSH,
@@ -6701,6 +6738,99 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
       `the cat (${cat.catFootprint.x.toFixed(3)}, ${cat.catFootprint.z.toFixed(3)}) ${(2 * cat.catFootprint.halfLength).toFixed(3)} x ${(2 * cat.catFootprint.halfDepth).toFixed(3)}, top ${cat.catTop.toFixed(3)} (crest ${cat.catTopHalf.toFixed(3)}); ` +
       `${child.frames} frames stepped so far`,
   );
+}
+
+/**
+ * **THE DEN AT STORY TIME** (#719, the join; plan items 8 and 18) — the owl
+ * cannot see into the hidden room, and the library's clock does not stop at
+ * its doorway:
+ *
+ * 1. Story time carries on while she is in the den: a story called with her
+ *    standing there is read to its end (gathering → reading → dispersing →
+ *    idle, `told` one more, never aborted), she never leaves the den, and the
+ *    clock counts down there afterwards.
+ * 2. No "Shhh!" in the den: a jump and a sprint there, the owl at her desk and
+ *    her cooldown run out, never shush. CONTROL: the same jump back in the
+ *    room does.
+ *
+ * Proved red by hand: `Library.update` handing `false` for `unseen` (the
+ * den's jump shushes: "1 shush").
+ */
+console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in the den, and no "Shhh!" in there:');
+{
+  const story = library.storyTime;
+  if (!library.denOpen) library.openDenInstantly();
+  const inDen = (): boolean => libraryDenContains(child.room().x, child.room().z);
+  child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+  child.step();
+  // Story time: called now, read through, with her in the den the whole time.
+  untilQuiet(10);
+  story.holdClock(false);
+  const toldBefore = story.told;
+  library.requestStoryTime();
+  const phases: StoryPhase[] = [];
+  let leftDen = false;
+  let frames = 0;
+  const limit = Math.round(600 / CHILD_DT);
+  for (; frames < limit; frames += 1) {
+    child.step();
+    leftDen ||= !inDen();
+    if (phases[phases.length - 1] !== library.storyPhase) phases.push(library.storyPhase);
+    if (story.told > toldBefore && library.storyPhase === 'idle') break;
+  }
+  const readThrough = ['gathering', 'reading', 'dispersing'].every((phase) => phases.includes(phase as StoryPhase));
+  say(
+    story.told === toldBefore + 1 && readThrough && !leftDen,
+    `a story called with her in the den is read to its end: phases ${phases.join(' → ')} over ${(frames * CHILD_DT).toFixed(1)} s, ` +
+      `stories told ${toldBefore} → ${story.told}; she stayed in the den throughout (left it: ${leftDen})`,
+  );
+  const clockFrom = story.nextIn;
+  child.run(2);
+  const counted = clockFrom - story.nextIn;
+  say(
+    inDen() && library.storyPhase === 'idle' && Math.abs(counted - 2) <= 2 * CHILD_DT,
+    `and the clock counts in the den: ${counted.toFixed(2)} s off it over 2 s (in the den: ${inDen()})`,
+  );
+
+  // No shush in the den. The owl back at her desk, her cooldown run out.
+  for (let i = 0; i < Math.round(30 / CHILD_DT) && !owl.atDesk; i += 1) child.step();
+  child.run(SHUSH_COOLDOWN_SECONDS + 0.5);
+  untilQuiet(10);
+  const player = child.player;
+  const before = owl.shushes;
+  let tookOff = false;
+  child.input.pressVirtual('jump');
+  for (let i = 0; i < 40; i += 1) {
+    child.step();
+    tookOff ||= player.isAirborne;
+  }
+  // A sprint up and down the den, long enough for a run to count twice over.
+  const inner = LIBRARY_DEN_INNER;
+  const laneX = (inner.west - (LIBRARY_HALF_X + LIBRARY_WALL_HALF)) / 2;
+  child.stand(laneX, inner.north + PLAYER_RADIUS + 0.3, 180);
+  let runFor = 0;
+  let longestRun = 0;
+  let sprintLeftDen = false;
+  for (let i = 0; i < Math.round(1.2 / CHILD_DT); i += 1) {
+    child.step(child.towards(0, 1, true));
+    sprintLeftDen ||= !inDen();
+    runFor = player.isRunning ? runFor + CHILD_DT : 0;
+    longestRun = Math.max(longestRun, runFor);
+  }
+  say(
+    owl.atDesk && tookOff && longestRun >= 2 * SHUSH_RUN_SECONDS && !sprintLeftDen && owl.shushes === before,
+    `no "Shhh!" in the den: with the owl at her desk (${owl.atDesk}), a jump (took off: ${tookOff}) and a sprint running ${longestRun.toFixed(2)} s at a stretch ` +
+      `(a run of ${SHUSH_RUN_SECONDS} s shushes in the room; she stayed in the den: ${!sprintLeftDen}) — ${owl.shushes - before} shush(es)`,
+  );
+  // CONTROL: the same jump in the reading room shushes.
+  child.run(SHUSH_COOLDOWN_SECONDS + 0.5);
+  child.stand(0, 4, 270);
+  child.step();
+  const beforeRoom = owl.shushes;
+  child.input.pressVirtual('jump');
+  for (let i = 0; i < 40; i += 1) child.step();
+  say(owl.shushes === beforeRoom + 1, `CONTROL: the same jump in the reading room at (0, 4) shushes her: ${owl.shushes - beforeRoom} shush(es), "${owl.lastSaid ?? ''}"`);
+  child.run(0.5);
 }
 
 console.log('\nHOUSEKEEPING:');
