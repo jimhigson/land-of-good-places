@@ -123,7 +123,9 @@ function boundsOf(parts: readonly GlbPart[]): { minX: number; maxX: number; minY
     if (!box) continue;
     out.minX = Math.min(out.minX, box.min.x);
     out.maxX = Math.max(out.maxX, box.max.x);
+    // flat-ok: the kit part's own object-local geometry box
     out.minY = Math.min(out.minY, box.min.y);
+    // flat-ok: the kit part's own object-local geometry box
     out.maxY = Math.max(out.maxY, box.max.y);
     out.minZ = Math.min(out.minZ, box.min.z);
     out.maxZ = Math.max(out.maxZ, box.max.z);
@@ -266,7 +268,7 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
     mesh.position.set(middle, opening.floorY + k.seat + k.lintelHeight, opening.z);
     group.add(mesh);
     part.geometry.computeBoundingBox();
-    crestTop = Math.max(crestTop, part.geometry.boundingBox?.max.y ?? 0);
+    crestTop = Math.max(crestTop, part.geometry.boundingBox?.max.y ?? 0); // flat-ok: the crest part's own object-local geometry box
   }
 
   return {

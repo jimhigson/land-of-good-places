@@ -195,10 +195,12 @@ for (const room of rooms) {
       Math.abs(solid.maxZ - drawn.max.z),
     );
     if (off > TOL) fail(`${room.name}: post ${index}'s collider is ${off.toFixed(3)} m off its drawn footprint`);
+    // flat-ok: the interiors are flat plates at their own far origins, off the planet; a frame's drawn box is upright there
     if (Math.abs(drawn.min.y - floorY) > TOL) fail(`${room.name}: post ${index} stands at ${drawn.min.y.toFixed(3)}, the floor at ${floorY.toFixed(3)}`);
   }
   const lintel = union(frameMeshes(placed, 'lintel').map(drawnBounds));
   const lintelSolid = placed.solids.lintel;
+  // flat-ok: the interiors are flat plates at their own far origins, off the planet; a frame's drawn box is upright there
   if (Math.abs(lintelSolid.baseHeight - lintel.min.y) > TOL || Math.abs(lintelSolid.topHeight - lintel.max.y) > TOL) {
     fail(`${room.name}: the lintel's collider band ${lintelSolid.baseHeight.toFixed(3)}..${lintelSolid.topHeight.toFixed(3)} is not its drawn ${lintel.min.y.toFixed(3)}..${lintel.max.y.toFixed(3)}`);
   }
@@ -208,6 +210,7 @@ for (const room of rooms) {
   const clear = lintel.min.y - floorY;
   if (clear < TALLEST_CHILD_HEIGHT) fail(`${room.name}: the lintel is ${clear.toFixed(3)} m over the floor, under the tallest child (${TALLEST_CHILD_HEIGHT})`);
   const everything = union(frameMeshes(placed, '').map(drawnBounds));
+  // flat-ok: the interiors are flat plates at their own far origins, off the planet; a frame's drawn box is upright there
   if (frame.style === 'castle' && everything.max.y - floorY > CASTLE_CEILING_CLEAR) {
     fail(`castle: the frame reaches ${(everything.max.y - floorY).toFixed(3)} m, the ceiling is at ${CASTLE_CEILING_CLEAR}`);
   }
