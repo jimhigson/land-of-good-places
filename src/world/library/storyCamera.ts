@@ -1,6 +1,6 @@
 import { Matrix4, Quaternion, Vector3, type Mesh, type Object3D } from 'three';
 import type { IsoCamera } from '../../core/IsoCamera';
-import { cameraBreath } from '../../core/cameraBreath';
+import { STILL_BREATH } from '../../core/cameraBreath';
 import type { CollisionWorld } from '../Collision';
 import { ExhibitCamera, asWhole, type ExhibitShot, type ShotInput, type ShotRoom, type ShotRules, type SolveReport } from '../reptileHouse/exhibitCamera';
 import type { CharacterModel } from '../../entities/CharacterModel';
@@ -67,12 +67,16 @@ import type { StoryPhase } from './storyTime';
  * and the owl's bubble's anchor (a bubble is drawn only while its anchor is in
  * shot, #415), on whatever screen is there; the fan of eyes stands **round her,
  * from her back** — she faces the storyteller's chair, and the audience's
- * middle is off to one side of it; and **the camera breathes** (`ShotRules.breath`,
- * `core/cameraBreath.ts`): the eye held where it was proven clear, the aim
- * swaying a fraction of a degree about the stage on a slow, gently irregular
- * rhythm, the whole time the shot is down — Jim, 26 October 2026: *"I like this
- * wobble and would like this small wobble to apply all of the time."* It owes
- * nothing to who is moving: the owl flying over, the children walking in.
+ * middle is off to one side of it; and **the aim holds still** (`ShotRules.breath`
+ * = `STILL_BREATH`): the eye held where it was proven clear, the aim on the
+ * stage it was solved for, never chasing who moves. **The camera still breathes**
+ * — the park's own camera breathes all of the time (`IsoCamera.breath`,
+ * `core/cameraBreath.ts`; Jim, 26 October 2026: *"I like this wobble and would
+ * like this small wobble to apply all of the time"*, and 11 November: *"yes to
+ * camera sway everywhere"*), turned about the eye, so the shot sways a fraction
+ * of a degree about the stage exactly as the park does, and with no seam as it
+ * comes down or goes home. It owes nothing to who is moving: the owl flying
+ * over, the children walking in.
  *
  * ## It never takes the controls
  *
@@ -510,7 +514,8 @@ export class StoryCamera {
       contain: { points: [stage.bubble], margin: STORY_FRAME_MARGIN },
       overHerShoulder: true,
       ideal: STORY_IDEAL,
-      breath: cameraBreath,
+      // The aim held on the solved stage; the sway is the park camera's own (`IsoCamera.breath`).
+      breath: STILL_BREATH,
     };
     // The real owl and children, wherever they are this frame, hide nothing: the stage is solved for where they will be.
     const cast = [...storySeats(this.library), owl.handle.root, ...children.map((child) => child.model.root)];

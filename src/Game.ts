@@ -60,6 +60,7 @@ import { BookReader } from './world/library/reader/BookReader';
 import { markBookRead } from './world/library/readBooks';
 import { BookGlance } from './world/library/bookGlance';
 import { StoryCamera } from './world/library/storyCamera';
+import { OwlLensFade } from './world/library/owlLensFade';
 import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
 
 /**
@@ -222,6 +223,14 @@ export class Game {
    * `tick`, like the glance; built with the world.
    */
   private readonly storyCamera: StoryCamera;
+  /**
+   * The owl fades as she passes the lens (`world/library/owlLensFade.ts`):
+   * story time's held shot is in her flight path from cushion 3. Applied just
+   * before the frame is drawn, from the eye that draws it, and undone straight
+   * after — nothing else ever sees her faded.
+   */
+  private readonly owlFade: OwlLensFade;
+  private readonly drawnEye = new Vector3();
 
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
@@ -291,6 +300,7 @@ export class Game {
     this.world.library.adoptRestoredPlayer();
     this.bookGlance = new BookGlance(this.world.library);
     this.storyCamera = new StoryCamera(this.world.library, this.world.collision, this.camera, this.player);
+    this.owlFade = new OwlLensFade(this.world.library.owl);
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -2097,7 +2107,12 @@ export class Game {
       { camera: this.cameraOverride ?? this.camera.camera, width: this.engine.width, height: this.engine.height },
       tick.dt,
     );
+    // The owl fades while she is close to the lens that draws this frame, and
+    // only for the drawing (`world/library/owlLensFade.ts`).
+    (this.cameraOverride ?? this.camera.camera).getWorldPosition(this.drawnEye);
+    this.owlFade.apply(this.drawnEye);
     this.render();
+    this.owlFade.restore();
   }
 
   private updateHud(tick: LoopTick): void {

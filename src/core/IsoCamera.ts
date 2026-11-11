@@ -16,6 +16,7 @@ import {
 import { clamp, damp, DEG } from './mathUtils';
 import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
+import { cameraBreath, CAMERA_BREATH_REFERENCE_FOV, CAMERA_BREATH_REFERENCE_REACH, type CameraBreath } from './cameraBreath';
 import type { FrameContext } from './types';
 import type { ParkBoundary } from '../world/boundary';
 import { eyeForFocus, isOutdoors } from '../world/up';
@@ -189,6 +190,38 @@ export class IsoCamera {
   /** Scratch for the two screen-space axes read out of the camera's matrix. */
   private readonly screenRight = new Vector3();
   private readonly screenUp = new Vector3();
+
+  /**
+   * **The camera breathes, all of the time** (`core/cameraBreath.ts`). Jim,
+   * 11 November 2026: *"yes to camera sway everywhere"* — the slow sway he
+   * first liked in story time's held shot, on the park's own camera wherever
+   * it is: following her, held on a shot, anywhere.
+   *
+   * Applied last, in {@link applyTransform}: the view is turned about the eye
+   * (the eye itself never moves, so nothing a shot proved clear of the lens
+   * changes), and the lens breathes with it ({@link applyLens}). Sized on the
+   * **screen**, not in degrees: the breath's angles are the ones measured on a
+   * {@link CAMERA_BREATH_REFERENCE_FOV}° lens, scaled by how much of the frame a
+   * degree is on this lens (`tan` of the half-angle), so the park's own narrow
+   * 90 m lens sways fixed scenery the same few pixels story time's wide one
+   * does — a raw 0.16° on a 13° lens would be over a degree's worth of screen.
+   *
+   * Runs on game time ({@link update}'s `dt`), so a paused park (`/view`'s
+   * frozen clock, the pause menu) holds still with it, and a check stepping at
+   * a fixed `dt` sees the same breath every run.
+   *
+   * **The test hook.** A function of seconds, swappable: a check that needs a
+   * genuinely still camera sets {@link STILL_BREATH}, and a check's own
+   * mutation sets it still or wild to prove its floor and ceiling red
+   * (`check:camera-breath`, `check:library`'s STORY CAMERA). Nothing in the
+   * game assigns it.
+   */
+  breath: (seconds: number, out: CameraBreath) => CameraBreath = cameraBreath;
+  /** Seconds of game time this camera has breathed for — {@link breath}'s clock. */
+  private breathSeconds = 0;
+  private readonly breathed: CameraBreath = { yawDegrees: 0, pitchDegrees: 0, reach: 0 };
+  /** The lens before it breathes: {@link applyFrustum}'s answer, degrees of vertical field. */
+  private restFov = 50;
 
   private aspect = 1;
   /** CSS pixels — kept for {@link worldUnitsPerPixel}, screen-constant UI sizing. */
@@ -829,7 +862,13 @@ export class IsoCamera {
 
     this.updateLook(dt);
     this.updatePose(dt);
+    this.breathSeconds += dt;
     this.applyTransform();
+  }
+
+  /** How long this camera has breathed for, seconds of game time — the clock {@link breath} is read on. */
+  get breathTime(): number {
+    return this.breathSeconds;
   }
 
   /**
@@ -928,6 +967,14 @@ export class IsoCamera {
     eyeForFocus(this.viewFocus, this.rigOffset, this.camera.position, this.frameUp);
     this.camera.up.copy(this.frameUp);
     this.camera.lookAt(this.viewFocus);
+    // **The breath** ({@link breath}): turned about the eye, after the aim, so
+    // every reader below — the screen axes, the sky's anchor, a label's clamp,
+    // a check projecting a point — reads the view exactly as it is drawn.
+    const breath = this.breath(this.breathSeconds, this.breathed);
+    const onScreen = Math.tan((this.restFov * DEG) / 2) / Math.tan((CAMERA_BREATH_REFERENCE_FOV * DEG) / 2);
+    this.camera.rotateOnWorldAxis(this.frameUp, -breath.yawDegrees * DEG * onScreen);
+    this.camera.rotateX(breath.pitchDegrees * DEG * onScreen);
+    this.applyLens();
     this.camera.updateMatrixWorld();
 
     // The world origin in view space is `-cameraPosition` resolved against the
@@ -1033,7 +1080,22 @@ export class IsoCamera {
     // framings that ask for a specific one — still frames what it asked for at
     // the player's own distance. Things nearer than the focus grow and things
     // beyond it shrink, which is the whole of what changed.
-    this.camera.fov = (2 * Math.atan(halfHeight / this.eyeToFocusDistance) * 180) / Math.PI;
+    this.restFov = (2 * Math.atan(halfHeight / this.eyeToFocusDistance) * 180) / Math.PI;
+    this.applyLens();
+  }
+
+  /**
+   * **The lens, breathing** — {@link restFov} narrowed or widened by this
+   * moment's reach ({@link breath}): the aim nudged that far along the view, as
+   * a share of the {@link CAMERA_BREATH_REFERENCE_REACH} it was measured at, so
+   * it is the same share of the frame on every lens. Never more than a quarter
+   * of a percent of the frame.
+   */
+  private applyLens(): void {
+    const reach = this.breathed.reach / CAMERA_BREATH_REFERENCE_REACH;
+    const fov = (2 * Math.atan(Math.tan((this.restFov * DEG) / 2) / (1 + reach))) / DEG;
+    if (fov === this.camera.fov && this.camera.aspect === this.aspect) return;
+    this.camera.fov = fov;
     this.camera.aspect = this.aspect;
     this.camera.updateProjectionMatrix();
   }

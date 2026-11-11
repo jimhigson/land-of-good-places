@@ -16,9 +16,12 @@
  * centimetre along the view so the lens breathes with it (`IsoCamera`'s lens
  * follows the eye-to-aim distance).
  *
- * A pure function of time, for whatever holds a camera still: story time's
- * shot today (`library/storyCamera.ts`, through `ShotRules.breath`); the main
- * camera only if Jim asks for it there too.
+ * A pure function of time. **The park's own camera breathes with it all of the
+ * time** — Jim, 11 November 2026: *"yes to camera sway everywhere"* — applied
+ * by `IsoCamera` (its `breath`), last, about the eye, sized on the screen so
+ * the 90 m follow camera and story time's held shot sway the same few pixels.
+ * Story time's shot holds its aim still (`library/storyCamera.ts`, through
+ * `ShotRules.breath` = {@link STILL_BREATH}) and breathes with the rest.
  */
 
 /** One moment of the breath: how far the view is turned, tilted and reached, from where it would rest. */
@@ -43,6 +46,14 @@ export const CAMERA_BREATH_YAW = [0.08, 0.05, 0.03] as const;
 export const CAMERA_BREATH_PITCH = [0.03, 0.05, 0.02] as const;
 /** Metres of reach per rhythm — on the owl's breath only, the lens's slight breath (about ±0.1° of a 66° lens at 5 m). */
 export const CAMERA_BREATH_REACH = [0, 0, 0.012] as const;
+/**
+ * **The lens the angles above were measured on**, vertical degrees — story time's
+ * laptop lens (62–66°) on 26 Oct 2026. `IsoCamera` scales the turn and the tilt
+ * by `tan(fov / 2) / tan(this / 2)`: the same share of the frame on every lens.
+ */
+export const CAMERA_BREATH_REFERENCE_FOV = 66;
+/** **The stand-back the reach above was measured at**, metres: the reach is applied as a share of it, on every lens. */
+export const CAMERA_BREATH_REFERENCE_REACH = 5;
 /** Each rhythm's own start in each sway, radians: the turn and the tilt out of step, so the view traces a loop, never a line. */
 const YAW_PHASE = [0, 1.3, 2.1] as const;
 const PITCH_PHASE = [0.7, 2.4, 4] as const;
@@ -62,5 +73,17 @@ export function cameraBreath(seconds: number, out: CameraBreath = { yawDegrees: 
   out.yawDegrees = yaw;
   out.pitchDegrees = pitch;
   out.reach = reach;
+  return out;
+}
+
+/**
+ * **No breath at all** — a camera held dead still. For story time's shot,
+ * whose aim holds still while `IsoCamera` breathes it, and as the test hook
+ * (`IsoCamera.breath`) for a check that genuinely needs a still camera.
+ */
+export function STILL_BREATH(_seconds: number, out: CameraBreath = { yawDegrees: 0, pitchDegrees: 0, reach: 0 }): CameraBreath {
+  out.yawDegrees = 0;
+  out.pitchDegrees = 0;
+  out.reach = 0;
   return out;
 }
