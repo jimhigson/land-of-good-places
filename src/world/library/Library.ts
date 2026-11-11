@@ -1055,6 +1055,7 @@ export class Library implements GameSystem {
    */
   private sayCreature(item: string, text: string, at: { readonly x: number; readonly y: number; readonly z: number }): void {
     this.lastCreatureSaid = text;
+    this.owl.giveWayToAPress();
     this.creatureBubble.identity.item = item;
     this.creatureBubble.anchorAt(at.x, at.y, at.z);
     this.creatureBubble.setText(text);

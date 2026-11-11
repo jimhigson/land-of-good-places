@@ -773,6 +773,17 @@ export class LibraryOwl {
     this.say(lines, -1, false);
   }
 
+  /**
+   * **A press elsewhere in the room cuts her one-liner short** — the
+   * invitation, a shush — exactly as a press at her desk does; a script (the
+   * card, a story) is never interrupted. For the cat's and the dragon's
+   * answers (#719): on a phone her standing invitation, the incumbent label,
+   * otherwise held the cat's purr off the screen beside her desk (PR #739).
+   */
+  giveWayToAPress(): void {
+    if (this.speech?.interruptible) this.clearSpeech();
+  }
+
   /** Stops whatever she is saying. */
   hush(): void {
     this.clearSpeech();
