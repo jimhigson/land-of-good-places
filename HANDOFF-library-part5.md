@@ -160,3 +160,10 @@ without part 4.
   "no Say hi! before the meeting: at the doorway stand OFFERED; at (-20.30, -6.30) … OFFERED"; "hearts … top 2.46 m,
   under the bubble's tail tip at 1.71 m (-0.75 m clear)". Mid-story walk into the den: story camera lets go 0.45 s
   after she stands (limit 0.95), story ends with her in the den, 0 shushes.
+- Gating Say hi!'s actions made the dragon untappable from across the den (preview), so instead: DRAGON_STAND_RADIUS =
+  TapNavigator.ARRIVE_RADIUS (0.55) and DRAGON_MEET_RADIUS = |stand−nest| + that = 2.55 m (fcb749dc). check:library: the
+  chip's reach lies inside the meeting; none at the doorway nor 0.1 m past the meeting.
+- The cat's purr lost to the owl's standing invitation on a phone → LibraryOwl.giveWayToAPress() on any creature answer.
+  check:labels pets the cat before the card: purr drawn on 120 frames; RED with the call commented out: "FAIL C
+  precedence … the cat's purr was never drawn".
+- Local: check:library 465 ✓ exit 0, check:labels exit 0 on fcb749dc; full shards + procgen running (run5 logs).
