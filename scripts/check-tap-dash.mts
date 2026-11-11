@@ -475,6 +475,15 @@ async function child(seed: number): Promise<void> {
       strides.step(context, steer, player, null, record);
     }
     const restDistance = Math.hypot(target.x - player.position.x, target.z - player.position.z);
+    if (band && !bandFired && process.env['LGP_TAP_DASH_BAND']) {
+      let near = Infinity;
+      let at = '';
+      for (const p of trace) {
+        const d = Math.hypot(p.x - band.centreX, p.z - band.centreZ);
+        if (d < near) { near = d; at = `(${p.x.toFixed(2)}, ${p.z.toFixed(2)}) hop ${p.hop.toFixed(2)}`; }
+      }
+      process.stderr.write(`band miss: ${metres.toFixed(1)} m dt ${dt.toFixed(3)} band (${band.centreX.toFixed(2)}, ${band.centreZ.toFixed(2)}) yaw ${band.yaw.toFixed(2)} ${band.halfAlong.toFixed(2)}x${band.halfAcross.toFixed(2)}; nearest stride ${near.toFixed(2)} m at ${at}; arrived ${arrived}\n`);
+    }
     let tunnels = 0;
     let firstTunnel: string | null = null;
     let maxStride = 0;
@@ -760,7 +769,9 @@ async function parent(): Promise<void> {
       `seed ${seed}: on all ${strided.length} dashes cut into strides, every frame's previousPosition and stride path span the whole frame${listed(broken.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: ${j.dash.contractBroken} frame(s), first ${j.dash.firstContract}`))}`,
     );
     // **A door across the route, at full speed.**
-    const banded = report.journeys.filter((j) => j.dash.bandTested);
+    // Only on journeys she finishes: a route the walk itself gives up on (3 on
+    // seed 9, stuck 56 m from its middle) never reaches the band to cross.
+    const banded = report.journeys.filter((j) => j.dash.bandTested && j.dash.arrived);
     const missed = banded.filter((j) => !j.dash.bandFired);
     check(
       banded.length > 0 && missed.length === 0,
