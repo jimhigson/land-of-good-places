@@ -85,6 +85,7 @@ import {
   DASH_MAX_STRIDES,
 } from '../src/entities/tapDash.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../src/core/constants.ts';
+import { DASH_HITCH_FRAMES } from '../src/entities/frameStrides.ts';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../src/entities/TapNavigator.ts';
 import { bandWalkedThrough, type PortalBand } from '../src/world/tapSpacing.ts';
 
@@ -111,6 +112,10 @@ const PHONE = { width: 390, height: 844 };
 const CAMERA_DRIFT_LIMIT = 0.35;
 /** Routes at least this long have the on-screen camera clause asserted. */
 const CAMERA_ROUTE_METRES = 250;
+/** Routes at least this long have the pets clause asserted — where QA saw them left behind. */
+const PET_ROUTE_METRES = 90;
+/** How far her furthest pet may be when she arrives, in metres. On main they trail by at most 4.9 m. */
+const PET_ARRIVAL_LIMIT = 5;
 
 const run = promisify(execFile);
 const HERE = fileURLToPath(import.meta.url);
@@ -143,6 +148,11 @@ interface JourneyRun {
   readonly bandFired: boolean;
   /** Furthest she drifted from her resting place on a 390×844 screen, in NDC (1 = the screen's half). */
   readonly cameraWorst: number;
+  /** The furthest of her pets from her, in metres, the moment she arrives. */
+  readonly petsAtArrival: number;
+  readonly pets: number;
+  /** Metres she moved on the hitch frame, when the run had one. */
+  readonly hitchTravel: number;
 }
 
 interface JourneyReport {
@@ -162,6 +172,7 @@ interface SeedReport {
   readonly controlTunnels: number;
   readonly controlSamples: number;
   readonly interior: readonly JourneyReport[];
+  readonly hitch: { readonly metres: number; readonly cruise: number; readonly travel: number; readonly arrived: boolean };
 }
 
 async function child(seed: number): Promise<void> {
@@ -192,6 +203,10 @@ async function child(seed: number): Promise<void> {
   const { HOTEL_PLAY_RADIUS } = await import('../src/core/constants.ts');
   const { LOBBY } = await import('../src/world/hotel/layout.ts');
   const { JUMP_APEX_HEIGHT } = await import('../src/entities/Player.ts');
+  const { gameStore } = await import('../src/state/index.ts');
+  const { SAVE_VERSION } = await import('../src/state/save.ts');
+  const { shopItem } = await import('../src/world/building/shops/catalogue.ts');
+  const { Parade } = await import('../src/entities/parade/Parade.ts');
 
   const park = quietly(() => buildHeadlessPark());
   const world = park.world;
@@ -231,7 +246,23 @@ async function child(seed: number): Promise<void> {
     },
   };
   const navigator = quietly(() => new TapNavigator(player, camera, input as never, navGrid));
-  const strides = new FrameStrides();
+  let strides = new FrameStrides();
+
+  // **Her pets come with her** (#745's QA: on routes over ~90 m they were
+  // 40-120 m behind when she stopped). Two of them, bought as a child buys
+  // them, walking in her parade exactly as `Game` builds it — the same
+  // `NavGrid`, fed every stride by the game's own stride loop.
+  gameStore.hydrate({ v: SAVE_VERSION, at: 0, purchases: 0, game: {}, flags: {} });
+  gameStore.earn(1000);
+  for (const id of ['pet.bunny', 'pet.kitten']) {
+    const spec = shopItem(id);
+    if (!spec || gameStore.buy(spec).outcome !== 'kept') throw new Error(`check:tap-dash: could not buy ${id} — the pets clause would measure nobody`);
+  }
+  gameStore.setCarried(null);
+  const parade = quietly(() => new Parade(player as never, collision, camera));
+  park.scene.add(parade.group);
+  parade.setNavGrid(navGrid);
+  const followers = (parade as unknown as { members: { root: { position: InstanceType<typeof Vector3> } }[] }).members;
   const context = {
     dt: 1 / 60,
     elapsed: 0,
@@ -353,7 +384,11 @@ async function child(seed: number): Promise<void> {
    * it. So the navigator is cancelled, the boost dropped and she is put down
    * fresh before every run, whatever the last one did.
    */
-  const runJourney = (pair: Journey, dt: number, mode: Mode, steer = navigator) => {
+  const runJourney = (pair: Journey, dt: number, mode: Mode, steer = navigator, hitch = false) => {
+    // A fresh stride loop per run, settled at the run's own frame rate — a
+    // device steadily at 12 fps is not having a hitch every frame.
+    strides = new FrameStrides();
+    strides.settleAt(dt);
     navigator.cancel();
     steer.cancel();
     player.setTravelBoost = realBoost;
@@ -429,12 +464,21 @@ async function child(seed: number): Promise<void> {
     let contractBroken = 0;
     let firstContract: string | null = null;
     let bandFired = false;
+    let petsAtArrival = 0;
+    let hitchTravel = 0;
+    let firstFrame = true;
     while (steer.isNavigating && seconds < 90) {
-      context.elapsed += dt;
+      // The hitch: the first frame after the tap, as long as the clamp allows.
+      context.dt = hitch && firstFrame ? MAX_FRAME_DELTA : dt;
+      context.elapsed += context.dt;
       context.frame += 1;
       const beforeX = player.position.x;
       const beforeZ = player.position.z;
-      strides.step(context, steer, player, null, record);
+      strides.step(context, steer, player, parade, record);
+      parade.update(context);
+      if (hitch && firstFrame) hitchTravel = Math.hypot(player.position.x - beforeX, player.position.z - beforeZ);
+      firstFrame = false;
+      context.dt = dt;
       maxStrides = Math.max(maxStrides, strides.lastStrides);
       // **The frame's line, as every door reads it.** After a frame cut into
       // strides, `previousPosition` must be where the frame began and the
@@ -467,12 +511,16 @@ async function child(seed: number): Promise<void> {
       seconds += dt;
       if (!steer.isNavigating) {
         arrived = Math.hypot(target.x - player.position.x, target.z - player.position.z) <= ARRIVE_RADIUS + 1e-6;
+        for (const pet of followers) {
+          petsAtArrival = Math.max(petsAtArrival, Math.hypot(pet.root.position.x - player.position.x, pet.root.position.z - player.position.z));
+        }
       }
     }
     // Hands off: she comes to rest wherever she comes to rest.
     for (let i = 0; i < Math.ceil(1.5 / dt); i += 1) {
       context.elapsed += dt;
-      strides.step(context, steer, player, null, record);
+      strides.step(context, steer, player, parade, record);
+      parade.update(context);
     }
     const restDistance = Math.hypot(target.x - player.position.x, target.z - player.position.z);
     if (band && !bandFired && process.env['LGP_TAP_DASH_BAND']) {
@@ -519,6 +567,9 @@ async function child(seed: number): Promise<void> {
       bandTested: band !== null,
       bandFired,
       cameraWorst,
+      petsAtArrival,
+      pets: followers.length,
+      hitchTravel,
     };
     return { run, metres, cruise, samples: trace.length };
   };
@@ -539,6 +590,11 @@ async function child(seed: number): Promise<void> {
       });
     }
   }
+  // **A hitch does not pop her** (#745's QA): the longest route at 60 fps with
+  // the first frame after the tap as long as the clamp allows.
+  const hitchRun = runJourney(longest[0] as Pair, 1 / 60, 'dash', navigator, true);
+  const hitch = { metres: hitchRun.metres, cruise: hitchRun.cruise, travel: hitchRun.run.hitchTravel, arrived: hitchRun.run.arrived };
+
   // **Indoors** (#745's review): the park's journeys never leave the park, and
   // a hotel lobby or a castle deck is where a route can still be long enough
   // to dash. The lobby, with its own play bounds exactly as `Hotel.boundTo`
@@ -592,6 +648,7 @@ async function child(seed: number): Promise<void> {
     controlTunnels: control.run.tunnels,
     controlSamples: control.samples,
     interior,
+    hitch,
   };
   console.log(JSON.stringify(report));
 }
@@ -790,6 +847,20 @@ async function parent(): Promise<void> {
         `seed ${seed}: on ${filmed.length} dashes of ${CAMERA_ROUTE_METRES} m+ at ${PHONE.width}x${PHONE.height}, she never drifts more than ${CAMERA_DRIFT_LIMIT} of the half-screen from where she stands at rest (worst ${worst.toFixed(3)})${listed(drifted.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: ${j.dash.cameraWorst.toFixed(3)}`))}`,
       );
     }
+    // **Her pets arrive with her.**
+    const petRuns = report.journeys.filter((j) => j.metres >= PET_ROUTE_METRES && j.dash.arrived);
+    const strays = petRuns.filter((j) => j.dash.petsAtArrival > PET_ARRIVAL_LIMIT);
+    const furthest = petRuns.length === 0 ? 0 : Math.max(...petRuns.map((j) => j.dash.petsAtArrival));
+    check(
+      petRuns.length > 0 && petRuns.every((j) => j.dash.pets === 2) && strays.length === 0,
+      `seed ${seed}: on ${petRuns.length} dashes of ${PET_ROUTE_METRES} m+, both pets are within ${PET_ARRIVAL_LIMIT} m of her when she arrives (furthest ${furthest.toFixed(2)} m)${listed(strays.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: ${j.dash.petsAtArrival.toFixed(1)} m`))}`,
+    );
+    // **A hitch does not pop her.**
+    const allowed = (DASH_HITCH_FRAMES / 60) * dashCruiseSpeed(report.hitch.metres) + 0.05;
+    check(
+      report.hitch.arrived && report.hitch.travel <= allowed,
+      `seed ${seed}: a ${MAX_FRAME_DELTA.toFixed(3)} s hitch on the first frame of a ${report.hitch.metres.toFixed(1)} m dash at 60 fps moves her ${report.hitch.travel.toFixed(2)} m (≤ ${allowed.toFixed(2)} m, about one ordinary frame)`,
+    );
     // **Indoors.**
     for (const j of report.interior) {
       const label = `seed ${seed}: hotel lobby, ${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}`;

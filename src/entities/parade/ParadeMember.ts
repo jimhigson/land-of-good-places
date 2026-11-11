@@ -190,10 +190,10 @@ export class ParadeMember {
   private phase = 0;
   /**
    * Scales the follow spring's time, 1 normally. While she dashes (a tapped
-   * long journey, `entities/tapDash.ts`) `Parade` shortens it in proportion to
-   * her speed, so a follower trails her by about what it would at a sprint
-   * instead of by ~16 m at full dash — close behind on the trail she ran, not
-   * cutting the corners of a line it has fallen far behind on (#745).
+   * long journey, `entities/tapDash.ts`) `Parade` shortens it with the square
+   * of her speed, so at full dash a follower keeps to its own place on the
+   * trail she ran instead of falling ~16 m behind, off the line and onto a
+   * slow route (#745).
    */
   followPace = 1;
   private gait = 0;

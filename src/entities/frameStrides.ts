@@ -8,6 +8,8 @@ export interface StrideSteerer {
   update(context: FrameContext): void;
   /** False on a stride whose marker animation nobody will see. */
   drawThisUpdate: boolean;
+  /** True while a journey is running faster than a walk. */
+  readonly dashing: boolean;
 }
 
 /** What {@link FrameStrides} needs of the mover: `Player`. */
@@ -60,12 +62,31 @@ export interface StrideFollowers {
  * (`poseThisUpdate`, `drawThisUpdate`), so a dash costs the movement it needs
  * and none of the drawing it does not.
  */
+/**
+ * A frame longer than this many times the recent typical frame is a hitch, and
+ * a dash moves only this many typical frames' worth in it. See
+ * {@link FrameStrides.step}.
+ */
+export const DASH_HITCH_FRAMES = 1.25;
+
 export class FrameStrides {
+  /**
+   * The recent typical frame, in seconds — an average that a single long frame
+   * moves only a tenth of the way.
+   */
+  private typicalDt = 1 / 60;
   private readonly frameStart = new Vector3();
   private readonly strideStart = new Vector3();
 
   /** Strides the last {@link step} was cut into — 1 for an ordinary frame. */
   lastStrides = 1;
+  /** Seconds of movement the last {@link step} ran — less than the frame on a dash's hitch. */
+  lastMoveDt = 0;
+
+  /** Starts the typical frame at `dt`, as a device steadily running at it would have it. */
+  settleAt(dt: number): void {
+    this.typicalDt = dt;
+  }
 
   /**
    * Runs one frame. `afterStride` is for an instrument that wants to see every
@@ -79,24 +100,37 @@ export class FrameStrides {
     followers: StrideFollowers | null,
     afterStride?: () => void,
   ): void {
-    const strides = steerer.stridesFor(context.dt);
+    // **A hitch does not carry a dash** (#745's QA). The first tap of a session
+    // plans a lattice, and the frame after it is ~0.55 s, clamped to 1/12 s —
+    // which at full dash is a 7 m pop. So on a frame much longer than the
+    // recent ones, a dash moves only a typical frame's worth: the journey loses
+    // a few hundredths of a second and never jumps. A device that is steadily
+    // slow raises the typical frame with it and is not clamped at all. Walks
+    // and sprints are never touched.
+    const frameDt = context.dt;
+    const typical = this.typicalDt;
+    this.typicalDt += (frameDt - typical) * 0.1;
+    const moveDt = steerer.dashing ? Math.min(frameDt, typical * DASH_HITCH_FRAMES) : frameDt;
+    this.lastMoveDt = moveDt;
+    const strides = steerer.stridesFor(moveDt);
     this.lastStrides = Math.max(1, strides);
     const path = mover.framePath;
-    if (strides <= 1) {
+    if (strides <= 1 && moveDt === frameDt) {
       path.count = 0;
       steerer.update(context);
       mover.update(context);
       afterStride?.();
       return;
     }
-    const dt = context.dt;
+    const dt = frameDt;
     this.frameStart.copy(mover.position);
     path.count = 0;
     extendFramePath(path, mover.position.x, mover.position.z);
-    context.dt = dt / strides;
+    context.dt = moveDt / Math.max(1, strides);
     try {
-      for (let stride = 0; stride < strides; stride += 1) {
-        const last = stride === strides - 1;
+      const count = Math.max(1, strides);
+      for (let stride = 0; stride < count; stride += 1) {
+        const last = stride === count - 1;
         steerer.drawThisUpdate = last;
         mover.poseThisUpdate = last;
         this.strideStart.copy(mover.position);

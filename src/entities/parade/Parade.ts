@@ -769,11 +769,16 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       }
     }
 
-    // A dash keeps its followers close: the spring's time shrinks as she
-    // passes a sprint, so the lag stays a sprint's (see `followPace`).
+    // **A dash keeps its followers with her** (#745's QA: at the old spring
+    // they were 40-120 m behind when she stopped). Past a sprint the spring's
+    // time shrinks with the square of her speed, so by full dash each follower
+    // all but stands on its own place in the line — a point on the trail,
+    // which is ground she has just run over, collided stride by stride
+    // (`followStride`). It never leaves the line, so it never routes, cuts a
+    // corner or meets anything she did not; and it is there when she stops.
     const pace = Math.hypot(player.velocity.x, player.velocity.z);
     const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
-    const followPace = pace > sprint ? sprint / pace : 1;
+    const followPace = pace > sprint ? (sprint / pace) ** 2 : 1;
 
     for (const member of this.members) {
       member.setFlying(flying);
