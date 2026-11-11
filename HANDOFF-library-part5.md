@@ -150,3 +150,13 @@ without part 4.
   exit 0 — 49 files, 2170 tests passed.
 - Remaining after this: CI green on the head (parks stage B for seeds 10/14 takes ~1 h), a smoke on the newest preview
   (the creature bubble at 390x844), mark the PR ready. Do not merge.
+
+## 11 Nov evening — after #736 merged (Overseer's round)
+- Merged origin/main (dd23766c) with rerere off; conflicts in Game.ts (sit= + den unsavable), Library.ts, check-labels,
+  check-library resolved keeping both; shard step sets = parsed union (85 steps, check:camera-breath kept).
+- QA polish: cat hearts 0.5 and bubble over their whole rise (PUFF_RISE from spritePuffs); dragon glows at
+  DRAGON_SELF_LIGHT 0.45 of its own colour; dragonCanMeet owns meeting + Say hi! chip.
+- check:library green, 465+ ✓. RED by hand (Say hi! unconditional + CAT_BUBBLE_OVER 0.45, LGP_PARK_RESTART=1):
+  "no Say hi! before the meeting: at the doorway stand OFFERED; at (-20.30, -6.30) … OFFERED"; "hearts … top 2.46 m,
+  under the bubble's tail tip at 1.71 m (-0.75 m clear)". Mid-story walk into the den: story camera lets go 0.45 s
+  after she stands (limit 0.95), story ends with her in the den, 0 shushes.
