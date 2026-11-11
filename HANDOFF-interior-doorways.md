@@ -23,4 +23,14 @@ each room builds it on its own gap; `check:doorframes` walks lanes through each 
 ways (5 cm and PLAYER_LONGEST_STEP), with/without frame, control = narrowed frame.
 
 ## State
-- before shots: scratchpad (not committed); `scripts/qa-interior-doorways.mjs` takes them.
+- DONE: kit (build/export/pack/render, ASSET_MANIFEST 43), `doorFrames.ts`, wired in hotel
+  (Hotel.buildRoomShell, LOBBY), reptile (buildHallShell returns it), library (buildReadingRoomShell),
+  castle (BuildingShell.exitFrame drawn, Building registers solids). Each system exposes `exitDoorFrame`.
+- `check:doorframes` green + controls red + mutation red; `check:doorframes-glb` green; in shards 4 / 1.
+- check:coplanar flagged outline hull on stepped posts → outlines removed on hotel/castle posts.
+- check:exits OK. Next: coplanar/library/reptile/hotel/castle/solids, then full check + test:procgen, PR.
+- Local parks trick: CI parks artifact restamped to the tree's hash (scratchpad restamp.sh) — re-run
+  after EVERY src edit or the harness re-solves (minutes).
+- Shots: `scripts/qa-interior-doorways.mjs <base> <out> <tag>`; draft shots look right; castle frame
+  mostly hidden behind the existing porch roof (only lintel strip shows).
+- PR body draft: scratchpad/mine/pr-body.md.
