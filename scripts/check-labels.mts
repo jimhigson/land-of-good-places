@@ -667,6 +667,9 @@ let readingFrames = 0;
 let readingBubbleFrames = 0;
 let readingChipFrames = 0;
 let readingBothFrames = 0;
+/** The den's creatures (#719): the cat petted and the dragon said hi to, each answering in the creatures' bubble. */
+let catPetted = false;
+let dragonGreeted = false;
 /** The call, said from her desk before she flies: the frames she spoke it, and the frames her bubble was drawn. */
 let callSpeakingFrames = 0;
 let callBubbleFrames = 0;
@@ -739,6 +742,22 @@ let wingSpeakingFrames = 0;
   for (let i = 0; i < Math.round(30 / DT); i += 1) storyFrame();
   quietly(() => world.library.standUp());
   run(0.5);
+  // The den's creatures (#719): the cat by the desk, petted; then the secret
+  // shelf opened and the baby dragon said hi to — each answer in the
+  // creatures' bubble, laid out with everything else up in the room.
+  const creatureZone = (id: string): InteractZone | undefined => world.library.interactZones().find((zone) => zone.id === id);
+  const catZone = creatureZone('library-cat');
+  if (catZone) {
+    const before = world.library.lastCreatureLine;
+    catPetted = visit(catZone, true, 3) && world.library.lastCreatureLine !== before;
+  }
+  quietly(() => world.library.openDenInstantly());
+  run(1);
+  const dragonZone = creatureZone('library-dragon');
+  if (dragonZone) {
+    const before = world.library.lastCreatureLine;
+    dragonGreeted = visit(dragonZone, true, 3) && world.library.lastCreatureLine !== before;
+  }
 }
 
 // --- the verdict ---------------------------------------------------------------------------
@@ -760,7 +779,8 @@ process.stderr.write(
     `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
     `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
     `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them; ` +
-    `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it. ` +
+    `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it; ` +
+    `the cat ${catPetted ? 'petted' : 'NOT petted'} and the baby dragon ${dragonGreeted ? 'said hi to' : 'NOT said hi to'}. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -794,6 +814,8 @@ if (glanceChipFrames > 0) {
   );
 }
 if (!libraryRead) coverageGaps.push("no library shelf book's chip was ever up");
+if (!catPetted) coverageGaps.push('the library cat was never selected and petted (no answer in the creatures\' bubble)');
+if (!dragonGreeted) coverageGaps.push('the baby dragon in the den was never selected and said hi to (no answer in the creatures\' bubble)');
 if (!seatedForStory) coverageGaps.push('she never sat on a story cushion for story time');
 if (storyFrames === 0) coverageGaps.push('library story time never ran');
 if (readingFrames === 0) coverageGaps.push('library story time never reached its reading');
