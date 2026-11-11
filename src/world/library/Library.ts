@@ -840,7 +840,9 @@ export class Library implements GameSystem {
     // a story begun this frame flies this frame; then the owl (her words, her
     // shush, her life and the recommended book's glow), then the seat.
     this.storyTime.update(dt, this.inside);
-    if (this.inside) this.owl.update(dt, context.elapsed, player, this.spaces.isChanging, this.deps.camera);
+    // In the den the owl cannot see her, so no "Shhh!" there (plan item 8);
+    // story time goes on regardless — its clock counts in the room or the den.
+    if (this.inside) this.owl.update(dt, context.elapsed, player, this.spaces.isChanging, this.deps.camera, this.playerInDen(player));
     if (this.seatedOn !== null) this.updateSeated(player, context);
     if (this.inside) {
       this.updateSecretLeaf(player, dt, context.elapsed);
