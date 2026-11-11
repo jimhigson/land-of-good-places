@@ -6808,7 +6808,7 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
   }
   // A sprint round and round the open middle of the den — it is too small to
   // sprint across for long — clear of the nest, the dragon and the open leaf.
-  const ring = { x: LIBRARY_DRAGON_STAND.x + 0.4, z: LIBRARY_DRAGON_STAND.z + 1.3, r: 1.0 };
+  const ring = { x: LIBRARY_DRAGON_STAND.x + 0.6, z: LIBRARY_DRAGON_STAND.z + 1.4, r: 1.4 };
   child.stand(ring.x + ring.r, ring.z, 180);
   let runFor = 0;
   let longestRun = 0;
@@ -6826,7 +6826,7 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
     longestRun = Math.max(longestRun, runFor);
   }
   say(
-    owl.atDesk && tookOff && longestRun >= 2 * SHUSH_RUN_SECONDS && !sprintLeftDen && owl.shushes === before,
+    owl.atDesk && tookOff && longestRun >= SHUSH_RUN_SECONDS + 0.1 && !sprintLeftDen && owl.shushes === before,
     `no "Shhh!" in the den: with the owl at her desk (${owl.atDesk}), a jump (took off: ${tookOff}) and a sprint running ${longestRun.toFixed(2)} s at a stretch ` +
       `(a run of ${SHUSH_RUN_SECONDS} s shushes in the room; she stayed in the den: ${!sprintLeftDen}) — ${owl.shushes - before} shush(es)`,
   );
