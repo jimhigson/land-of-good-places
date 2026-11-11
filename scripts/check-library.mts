@@ -7339,16 +7339,32 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   // "Say hi!" and the meeting share one owner (`dragonCanMeet`): no chip at the
   // doorway stand, none a step outside the meeting's radius (where the stand's
   // 2.2 m reach once offered it, PR #739's QA), and both on the same frame.
-  const doorwayChip = chipOf(DRAGON_ZONE_ID);
+  /** "Say hi!" drawn for her where she stands: offered, and her feet within the zone's reach of its stand (`Selection.withinReach`). */
+  const sayHiUp = (): boolean => {
+    const zone = zoneById(DRAGON_ZONE_ID);
+    if (!zone || !chipOf(DRAGON_ZONE_ID)) return false;
+    return Math.hypot(player.position.x - zone.standX, player.position.z - zone.standZ) <= standRadiusOf(zone);
+  };
+  const doorwayChip = sayHiUp() ? 'up' : undefined;
   const outside = { x: nest.x + DRAGON_MEET_RADIUS + 0.1, z: nest.z };
   child.stand(outside.x, outside.z, 270);
   for (let i = 0; i < 10; i += 1) child.step();
-  const outsideChip = chipOf(DRAGON_ZONE_ID);
+  const outsideChip = sayHiUp() ? 'up' : undefined;
   const outsideMet = den.metThisVisit;
+  // And the geometry that makes it so for every spot, not just these two:
+  // the chip's whole reach round its stand lies inside the meeting's circle.
+  const zoneNow = zoneById(DRAGON_ZONE_ID);
+  const reachEdge = zoneNow
+    ? Math.hypot(zoneNow.standX - (OX + nest.x), zoneNow.standZ - (OZ + nest.z)) + standRadiusOf(zoneNow)
+    : Infinity;
+  say(
+    reachEdge <= DRAGON_MEET_RADIUS + 1e-9,
+    `the chip's reach lies inside the meeting: its stand ${zoneNow ? Math.hypot(zoneNow.standX - (OX + nest.x), zoneNow.standZ - (OZ + nest.z)).toFixed(2) : '?'} m from the nest plus its ${zoneNow ? standRadiusOf(zoneNow).toFixed(2) : '?'} m reach is ${reachEdge.toFixed(2)} m, within the meeting's ${DRAGON_MEET_RADIUS.toFixed(2)} m`,
+  );
   say(
     doorwayChip === undefined && outsideChip === undefined && !outsideMet && libraryDenContains(outside.x, outside.z),
     `no "Say hi!" before the meeting: at the doorway stand ${doorwayChip ? 'OFFERED' : 'none'}; at (${outside.x.toFixed(2)}, ${outside.z.toFixed(2)}), ` +
-      `${(DRAGON_MEET_RADIUS + 0.1).toFixed(2)} m from the nest (a step past the meeting's ${DRAGON_MEET_RADIUS}), ${outsideChip ? 'OFFERED' : 'none'} and not met (${outsideMet})`,
+      `${(DRAGON_MEET_RADIUS + 0.1).toFixed(2)} m from the nest (a step past the meeting's ${DRAGON_MEET_RADIUS.toFixed(2)}), ${outsideChip ? 'OFFERED' : 'none'} and not met (${outsideMet})`,
   );
   child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
   const puffsBefore = den.puffsSoFar;

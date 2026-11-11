@@ -14,7 +14,8 @@ import {
 } from '../../art/models/libraryCreatures';
 import { measureTop } from '../measuredTop';
 import { LIBRARY_LINES } from './libraryLines';
-import { LIBRARY_DRAGON_NEST, type LocalPoint } from './layout';
+import { ARRIVE_RADIUS } from '../../entities/TapNavigator';
+import { LIBRARY_DRAGON_NEST, LIBRARY_DRAGON_STAND, type LocalPoint } from './layout';
 import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
 
 /**
@@ -77,14 +78,26 @@ import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryPr
 export const LIBRARY_DRAGON_SEED = 0x0b00d1;
 
 /** Within this of the nest's middle (metres), in the den with the shelf open, she has met the dragon. */
-export const DRAGON_MEET_RADIUS = 2.2;
+export const DRAGON_MEET_RADIUS =
+  Math.hypot(LIBRARY_DRAGON_STAND.x - LIBRARY_DRAGON_NEST.x, LIBRARY_DRAGON_STAND.z - LIBRARY_DRAGON_NEST.z) + ARRIVE_RADIUS;
+
 /**
- * **Whether she is close enough to meet the baby dragon** — the one owner of
- * the question, asked by the meeting ({@link LibraryDen.update}) and by its
- * "Say hi!" chip (`Library.ts`), so the chip is never up a step before the
- * dragon has met her (PR #739's QA: it was, by the stand's 2.2 m reach): in
- * the den, the secret shelf landed open, within {@link DRAGON_MEET_RADIUS} of
- * the nest's middle. `her` is room-local.
+ * **Where "Say hi!" is offered from: this close to `LIBRARY_DRAGON_STAND`** —
+ * a tapped walk's own arrival ({@link ARRIVE_RADIUS}), so a tap on the dragon
+ * from across the den lands her within reach. And the meeting's radius
+ * ({@link DRAGON_MEET_RADIUS}) is *made* from it: the stand's distance from
+ * the nest plus this, so wherever the chip can be up she has already been met
+ * — the chip and the meeting share one owner. (At a fixed 2.2 m reach from a
+ * stand 2.0 m off the nest, the chip came up a step before the meeting, PR
+ * #739's QA.)
+ */
+export const DRAGON_STAND_RADIUS = ARRIVE_RADIUS;
+/**
+ * **Whether she is close enough to meet the baby dragon** — asked by the
+ * meeting ({@link LibraryDen.update}): in the den, the secret shelf landed
+ * open, within {@link DRAGON_MEET_RADIUS} of the nest's middle — a radius made
+ * from the "Say hi!" chip's own reach, so the chip is never up before the
+ * meeting. `her` is room-local.
  */
 export function dragonCanMeet(her: LocalPoint | null, inDen: boolean, open: boolean): boolean {
   return her !== null && inDen && open && Math.hypot(her.x - LIBRARY_DRAGON_NEST.x, her.z - LIBRARY_DRAGON_NEST.z) <= DRAGON_MEET_RADIUS;

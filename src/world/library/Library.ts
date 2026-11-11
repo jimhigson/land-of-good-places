@@ -39,7 +39,7 @@ import { libraryResidents, type LibraryResident } from './LibraryKids';
 import { StoryTime, type StoryListenerView, type StoryPhase } from './storyTime';
 import type { LibraryKidDriver } from './libraryKidDriver';
 import { SecretLeaf } from './secretShelf';
-import { DRAGON_ZONE_ID, dragonCanMeet, LibraryDen } from './LibraryDen';
+import { DRAGON_STAND_RADIUS, DRAGON_ZONE_ID, LibraryDen } from './LibraryDen';
 import { CAT_ZONE_ID, LibraryCat } from './LibraryCat';
 import {
   buildLibraryDenShell,
@@ -236,9 +236,8 @@ const PULL_STAND_RADIUS = 2;
 const CAT_PICK_RADIUS = 0.8;
 const CAT_STAND_RADIUS = 1.6;
 
-/** The baby dragon's zone (#719, its id `LibraryDen.ts`'s): its pick (the dragon on its nest is a metre and more across) and its reach from her stand. */
+/** The baby dragon's zone (#719, its id and its reach `LibraryDen.ts`'s): its pick (the dragon on its nest is a metre and more across). */
 const DRAGON_PICK_RADIUS = 1.0;
-const DRAGON_STAND_RADIUS = 2.2;
 
 /**
  * How far a story cushion's measured top may stand from `KID_HIP_HEIGHT` and
@@ -1019,16 +1018,6 @@ export class Library implements GameSystem {
    * one sees it otherwise, and it only ever meets her in there with the shelf
    * open. Then their one bubble's hold.
    */
-  /** Whether she stands where the baby dragon meets her — `dragonCanMeet`, asked of her feet now. */
-  private dragonWithinReach(): boolean {
-    const player = this.player;
-    if (!player) return false;
-    const her = this.herInRoom;
-    her.x = player.position.x - LIBRARY_ORIGIN_X;
-    her.z = player.position.z - LIBRARY_ORIGIN_Z;
-    return dragonCanMeet(her, this.playerInDen(player), this.secretShelf.open);
-  }
-
   /** Her feet, room-local — one record rewritten every frame, for the dragon. */
   private readonly herInRoom = { x: 0, z: 0 };
 
@@ -1407,10 +1396,7 @@ export class Library implements GameSystem {
       standRadius: DRAGON_STAND_RADIUS,
       verb: 'Say hi',
       highlight: highlightObject(this.den.dragon.root),
-      // Offered exactly where the meeting happens (`dragonCanMeet`, the one
-      // owner): a step further out the chip is gone, and a zone that offers
-      // nothing is unselectable (`world/Selection.ts`).
-      actions: () => (this.dragonWithinReach() ? pressAction(LIBRARY_CHIPS.sayHi, () => this.den.sayHi(), '🐉') : []),
+      actions: () => pressAction(LIBRARY_CHIPS.sayHi, () => this.den.sayHi(), '🐉'),
     };
   }
 
