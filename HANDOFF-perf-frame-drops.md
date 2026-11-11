@@ -22,3 +22,9 @@ write `docs/perf/FRAME-DROPS-2026-11.md`, PR "Frame drops: what causes them and 
 - Library story start: 483 ms JS + 141 ms + 150 ms shader link (desktop); 2.0 s twice on phone.
 - Reptile house: GPU-bound (36/38 drops main-thread idle).
 - Rail race: CPU 9.1 ms p50 > 8.3 budget -> 6.9% frames dropped; 1328 draws.
+
+## Done (11 Nov)
+- Doc: `docs/perf/FRAME-DROPS-2026-11.md`; harness: `docs/perf/frame-drops-2026-11-harness/`.
+- PR #746 "Frame drops: what causes them and the plan". Not merged (needs review; nothing visible).
+- Local gates on the PR head: `pnpm run check` exit 0, `pnpm run test:procgen` exit 0 (48 files, 2168 tests).
+- Preview servers (5741/5742) killed by PID; no browsers left open.
