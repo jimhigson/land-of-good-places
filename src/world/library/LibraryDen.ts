@@ -78,6 +78,18 @@ export const LIBRARY_DRAGON_SEED = 0x0b00d1;
 
 /** Within this of the nest's middle (metres), in the den with the shelf open, she has met the dragon. */
 export const DRAGON_MEET_RADIUS = 2.2;
+/**
+ * **Whether she is close enough to meet the baby dragon** — the one owner of
+ * the question, asked by the meeting ({@link LibraryDen.update}) and by its
+ * "Say hi!" chip (`Library.ts`), so the chip is never up a step before the
+ * dragon has met her (PR #739's QA: it was, by the stand's 2.2 m reach): in
+ * the den, the secret shelf landed open, within {@link DRAGON_MEET_RADIUS} of
+ * the nest's middle. `her` is room-local.
+ */
+export function dragonCanMeet(her: LocalPoint | null, inDen: boolean, open: boolean): boolean {
+  return her !== null && inDen && open && Math.hypot(her.x - LIBRARY_DRAGON_NEST.x, her.z - LIBRARY_DRAGON_NEST.z) <= DRAGON_MEET_RADIUS;
+}
+
 /** Within this, in the den, it turns its head to watch her and is happy to see her. */
 export const DRAGON_LOOK_RADIUS = 3;
 /**
@@ -306,7 +318,7 @@ export class LibraryDen {
     const spot = LIBRARY_DRAGON_NEST;
     const distance = her ? Math.hypot(her.x - spot.x, her.z - spot.z) : Infinity;
 
-    if (!this.met && inDen && open && distance <= DRAGON_MEET_RADIUS) this.meet();
+    if (!this.met && dragonCanMeet(her, inDen, open)) this.meet();
 
     // The idle puff, and the one showing.
     this.puffIn -= dt;

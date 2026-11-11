@@ -161,6 +161,16 @@ export function createLibraryOwl(): OwlHandle {
  */
 export const DRAGON_BELLY_REST_GLOW = 0.2;
 
+/**
+ * **The baby dragon glows softly all over**, at this much of its own colour:
+ * the den has no light pool of its own (the room's eight are spent), and lit
+ * only by the room's ambient the mint dragon read as a dark shape on the den's
+ * dark green wall — "hard to see" in PR #739's QA on a phone. A creature of
+ * magic that glows a little in the dark is in keeping (its belly already
+ * does); the face glows through its own texture, so its eyes stay ink.
+ */
+export const DRAGON_SELF_LIGHT = 0.45;
+
 export interface DragonHandle extends CreatureHandle {
   /** The `dragon-tail` mesh, at its pivot where it leaves the body: `rotation.y` flicks it. */
   readonly tail: Mesh;
@@ -221,19 +231,27 @@ export function createLibraryDragon(): DragonHandle {
   body.name = 'library.dragon.body';
   root.add(body);
   const belly = toonMaterial(colourOf('dragon-belly'), { emissive: PALETTE.fairyWarm, emissiveIntensity: DRAGON_BELLY_REST_GLOW });
-  body.add(libraryKitMesh('dragon-body'));
+  const glowing = (name: string): Mesh => {
+    const colour = colourOf(name);
+    return libraryKitMesh(name, toonMaterial(colour, { emissive: colour, emissiveIntensity: DRAGON_SELF_LIGHT }));
+  };
+  body.add(glowing('dragon-body'));
   body.add(libraryKitMesh('dragon-belly', belly));
   body.add(libraryKitMesh('dragon-spines'));
-  body.add(libraryKitMesh('dragon-wings'));
+  body.add(glowing('dragon-wings'));
   // The tail's node translation is its pivot (where it leaves the body), so
   // the mesh itself turns about it.
-  const tail = libraryKitMesh('dragon-tail');
+  const tail = glowing('dragon-tail');
   body.add(tail);
 
   const faces = dragonFaceTextures();
   const head = pivotGroup('library.dragon.head', 'dragon-head');
   body.add(head);
   const face = facedHead('dragon-head', faces.neutral);
+  // The head glows with the body, through its painted face (see DRAGON_SELF_LIGHT).
+  face.material.emissive.setHex(colourOf('dragon-head'));
+  face.material.emissiveMap = faces.neutral;
+  face.material.emissiveIntensity = DRAGON_SELF_LIGHT;
   hang(head, face.mesh);
   hang(head, libraryKitMesh('dragon-horns'));
 
@@ -247,6 +265,7 @@ export function createLibraryDragon(): DragonHandle {
     if (next === showing) return;
     showing = next;
     face.material.map = faces[next];
+    face.material.emissiveMap = faces[next];
   };
   return {
     root,

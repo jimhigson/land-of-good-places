@@ -2262,6 +2262,8 @@ let glanceKept: Vector3 | null = null;
  */
 let storyCamera: StoryCamera | null = null;
 let storyKept: Vector3 | null = null;
+/** Whether story time's camera claimed the frame on the last step — THE DEN AT STORY TIME reads it. */
+let storyClaimed = false;
 const glanceFrame = (player: Player): void => {
   if (mutating('no-glance')) {
     camera.clearFocusOverride();
@@ -2279,6 +2281,7 @@ const glanceFrame = (player: Player): void => {
       else story = storyKept;
     }
     if (story && mutating('story-camera-low')) story = lowShot(player);
+    storyClaimed = story !== null;
     if (story) claim = story;
   }
   if (claim) camera.setFocusOverride(claim);
@@ -7333,6 +7336,20 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
     `CONTROL 2: 60 frames in the open den at its doorway stand, ${doorwayDistance.toFixed(2)} m from the nest (the meeting's ${DRAGON_MEET_RADIUS}): ` +
       `the den is open (${library.denOpen}) and the dragon is not met (Dragon friend: ${dex().discovered}, met this visit: ${den.metThisVisit})`,
   );
+  // "Say hi!" and the meeting share one owner (`dragonCanMeet`): no chip at the
+  // doorway stand, none a step outside the meeting's radius (where the stand's
+  // 2.2 m reach once offered it, PR #739's QA), and both on the same frame.
+  const doorwayChip = chipOf(DRAGON_ZONE_ID);
+  const outside = { x: nest.x + DRAGON_MEET_RADIUS + 0.1, z: nest.z };
+  child.stand(outside.x, outside.z, 270);
+  for (let i = 0; i < 10; i += 1) child.step();
+  const outsideChip = chipOf(DRAGON_ZONE_ID);
+  const outsideMet = den.metThisVisit;
+  say(
+    doorwayChip === undefined && outsideChip === undefined && !outsideMet && libraryDenContains(outside.x, outside.z),
+    `no "Say hi!" before the meeting: at the doorway stand ${doorwayChip ? 'OFFERED' : 'none'}; at (${outside.x.toFixed(2)}, ${outside.z.toFixed(2)}), ` +
+      `${(DRAGON_MEET_RADIUS + 0.1).toFixed(2)} m from the nest (a step past the meeting's ${DRAGON_MEET_RADIUS}), ${outsideChip ? 'OFFERED' : 'none'} and not met (${outsideMet})`,
+  );
   child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
   const puffsBefore = den.puffsSoFar;
   child.step();
@@ -7654,6 +7671,8 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   let secondPressChanged = true;
   let worstCatDrawn = -Infinity;
   let catSamples = 0;
+  let heartTop = -Infinity;
+  let heartFrames = 0;
   for (let i = 0; i < Math.round(3.2 / CHILD_DT); i += 1) {
     if (i === Math.round(0.2 / CHILD_DT)) {
       const pets = cat.pets;
@@ -7670,6 +7689,11 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
     if (Math.abs(t - 1) < CHILD_DT / 2) happyAt1 = cat.cat.face === 'happy';
     if (Math.abs(t - 3) < CHILD_DT / 2) asleepBy3 = cat.cat.face === 'asleep';
     hearts = Math.max(hearts, spritesUp(library.roomRoot, PALETTE.markerPink));
+    for (const heart of cat.hearts.sprites) {
+      if (!heart.visible) continue;
+      heartTop = Math.max(heartTop, heart.position.y + heart.scale.y / 2);
+      heartFrames += 1;
+    }
     if (i % 3 === 0) {
       catSamples += 1;
       worstCatDrawn = Math.max(worstCatDrawn, furthestOut(cat.cat.root, cat.catFootprint));
@@ -7684,6 +7708,14 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   say(
     (lines.cat.purr as readonly string[]).includes(purred ?? '') && hearts >= 1,
     `she purrs '${purred}' (one of ${lines.cat.purr.map((line) => `'${line}'`).join(', ')}) and pink hearts rise (up to ${hearts} at once)`,
+  );
+  // Her hearts rise clear of her bubble: the bubble's tail tip (its anchor,
+  // `cat.bubbleAt`) over the top of every heart on every frame of their rise.
+  const tailTip = cat.bubbleAt.y;
+  say(
+    heartFrames > 0 && heartTop < tailTip,
+    `her hearts rise clear of her purr's bubble: the highest a heart's top reached over ${heartFrames} heart-frames is ${heartTop.toFixed(2)} m, ` +
+      `under the bubble's tail tip at ${tailTip.toFixed(2)} m (${(tailTip - heartTop).toFixed(2)} m clear)`,
   );
   say(!secondPressChanged, `a second press 0.2 s in, inside her ${PET_GUARD_SECONDS} s guard, changes nothing (no second pet, no second line)`);
   say(catSamples >= MIN_SAMPLES && worstCatDrawn <= DRAWN_INSIDE, `drawn is solid while she is petted: her furthest drawn point over ${catSamples} sampled frames (at least ${MIN_SAMPLES}) is ${worstCatDrawn.toFixed(4)} m outside her body (at most ${DRAWN_INSIDE})`);
@@ -7761,6 +7793,58 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
     inDen() && library.storyPhase === 'idle' && Math.abs(counted - 2) <= 2 * CHILD_DT,
     `and the clock counts in the den: ${counted.toFixed(2)} s off it over 2 s (in the den: ${inDen()})`,
   );
+
+  // Mid-story she gets up off her cushion and walks into the den: the story
+  // goes on to its end, story time's over-the-shoulder camera lets go the
+  // frame she stands, and the camera comes home to her in the den.
+  {
+    child.enter();
+    child.step();
+    untilQuiet(10);
+    for (let i = 0; i < Math.round(30 / CHILD_DT) && !owl.atDesk; i += 1) child.step();
+    const seat = LIBRARY_PLAYER_SEATS[0]!;
+    const toldBefore2 = story.told;
+    library.requestStoryTime();
+    quietly(() => library.requestEnter(undefined, seat));
+    camera.snapTo(child.player.position);
+    let heldWhileSat = false;
+    for (let i = 0; i < Math.round(120 / CHILD_DT) && library.storyPhase !== 'reading'; i += 1) {
+      child.step();
+    }
+    for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
+      child.step();
+      heldWhileSat ||= storyClaimed && library.playerIsSeated;
+    }
+    const readingWhenUp = library.storyPhase === 'reading';
+    library.standUp();
+    if (!library.denOpen) library.openDenInstantly();
+    child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z + 1, 0);
+    let claimedAfter = 0;
+    for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
+      child.step();
+      if (storyClaimed) claimedAfter += 1;
+    }
+    const home = Math.hypot(camera.focusPoint.x - child.player.position.x, camera.focusPoint.z - child.player.position.z);
+    const shushesBefore = owl.shushes;
+    const phases2: StoryPhase[] = [];
+    let leftDen2 = false;
+    for (let i = 0; i < Math.round(600 / CHILD_DT); i += 1) {
+      child.step();
+      leftDen2 ||= !inDen();
+      if (phases2[phases2.length - 1] !== library.storyPhase) phases2.push(library.storyPhase);
+      if (story.told > toldBefore2 && library.storyPhase === 'idle') break;
+    }
+    say(
+      heldWhileSat && readingWhenUp && claimedAfter === 0 && home < 1.5,
+      `sat on ${seat} at story time, story time's camera held the frame (${heldWhileSat}); she got up mid-reading (${readingWhenUp}) and walked into the den: ` +
+        `the story camera claimed ${claimedAfter} frames after (none wanted), and the camera came home to her, its focus ${home.toFixed(2)} m from her feet (under 1.5)`,
+    );
+    say(
+      story.told === toldBefore2 + 1 && !leftDen2 && owl.shushes === shushesBefore,
+      `and the story went on to its end with her in the den: ${phases2.join(' → ')}, stories told ${toldBefore2} → ${story.told}; ` +
+        `she stayed in the den (${!leftDen2}) and was shushed ${owl.shushes - shushesBefore} time(s)`,
+    );
+  }
 
   // No shush in the den. The owl back at her desk, her cooldown run out.
   for (let i = 0; i < Math.round(30 / CHILD_DT) && !owl.atDesk; i += 1) child.step();

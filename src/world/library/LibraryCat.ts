@@ -1,6 +1,6 @@
 import { Group } from 'three';
 import { Rng } from '../../core/mathUtils';
-import { SpritePuffs } from '../../art/effects/spritePuffs';
+import { PUFF_END_SCALE, PUFF_RISE, SpritePuffs } from '../../art/effects/spritePuffs';
 import { createLibraryBookPile, createLibraryCat, type BookPileHandle, type CatHandle } from '../../art/models/libraryCreatures';
 import { playPurr } from '../../ui/chime';
 import { measureTop } from '../measuredTop';
@@ -77,9 +77,18 @@ const CAT_BREATH_RATE = 1.1;
 const CAT_TAIL_SWAY = 0.08;
 const CAT_TAIL_RATE = 0.9;
 
-/** Her purr's bubble hangs this far over the tips of her ears; her hearts rise from this far over them. */
-const CAT_BUBBLE_OVER = 0.45;
+/** Her hearts rise from this far over the tips of her ears, this big (a sprite's scale, metres). */
 const CAT_HEARTS_OVER = 0.1;
+export const CAT_HEART_SCALE = 0.5;
+/**
+ * **Her purr's bubble hangs clear over her hearts' whole rise** — its tail's
+ * tip this far over the tips of her ears: the hearts' start, their rise, the
+ * top of the last one, and a hand's breadth. At 0.45 m the bubble sat on the
+ * rising hearts and its tail on her, so on a phone her whole answer was a
+ * bubble over a cat you could not see (PR #739's QA). Read from
+ * `spritePuffs.ts`, the owner of how a puff rises.
+ */
+export const CAT_BUBBLE_OVER = CAT_HEARTS_OVER + PUFF_RISE + (CAT_HEART_SCALE * PUFF_END_SCALE) / 2 + 0.15;
 
 /** Her Pet zone's id (`Library.ts` builds the zone) — the item her purr's bubble answers. */
 export const CAT_ZONE_ID = 'library-cat';
@@ -174,7 +183,7 @@ export class LibraryCat {
     this.pileCollider = props.box(CAT_PILE_SOLID, this.pileFootprint, this.pileTop, pileTop.topHalf);
     this.catCollider = props.box(CAT_SOLID, this.catFootprint, this.catTop, this.catTopHalf);
 
-    this.hearts = new SpritePuffs(roomRoot, CAT_HEART_POOL);
+    this.hearts = new SpritePuffs(roomRoot, CAT_HEART_POOL, undefined, CAT_HEART_SCALE);
   }
 
   // --------------------------------------------------------------- state
