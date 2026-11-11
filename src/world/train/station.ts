@@ -397,22 +397,23 @@ export class Station {
     benchBack.castShadow = false;
     this.group.add(benchBack);
 
-    // The bench is solid: a seat she steps up onto from the platform, and a
-    // back behind it to its own top. (It had no collider at all.)
+    // The bench is solid: **one solid, to the seat**, over the seat and its
+    // back together — the hotel sofa's rule (`hotel/dressing.ts`'s
+    // `sofaPlan`). Her body is `PLAYER_RADIUS` (0.62 m) round and the seat
+    // 0.52 m deep, so with the back solid to its own top there was nowhere on
+    // the seat her body fit: walking at it, the step-up met the back first and
+    // stopped her, and a hop under the canopy is capped (QA on PR #722: every
+    // other bench in the park she could stand on, these two not). So the back
+    // above the seat is open to her, as a sofa's is: she steps up onto the
+    // seat from the platform and stands on it, her knees at the back.
     {
       const yaw = Math.atan2(-this.sinYaw, this.cosYaw);
-      const seatAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_SEAT_IN), BENCH_ALONG);
+      const front = BENCH_SEAT_IN + BENCH_SEAT_DEPTH / 2;
+      const rear = BENCH_BACK_IN - BENCH_BACK_DEPTH / 2;
+      const seatAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - (front + rear) / 2), BENCH_ALONG);
       const seat = solidInFrame(this.standX, this.standZ, seatAt.x, seatAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_SEAT_Y + BENCH_SEAT_THICKNESS / 2);
-      const backAt = this.local(-trackSide * (PLATFORM_WIDTH / 2 - BENCH_BACK_IN), BENCH_ALONG);
-      const back = solidInFrame(this.standX, this.standZ, backAt.x, backAt.z, PLATFORM_HEIGHT, PLATFORM_HEIGHT + BENCH_BACK_Y + BENCH_BACK_HEIGHT / 2);
       collision.kinded('station bench', () => {
-        collision.addBox(seat.x, seat.z, BENCH_SEAT_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, seat.top, false, true);
-        // The backrest is a plank's edge, not a ledge: she bumps it and sits
-        // against it, and never stands on top of it (seed 15's census stood
-        // her there, 0.2 m inside the drawn canopy's frame).
-        collision.toppedNarrow(BENCH_BACK_DEPTH / 2, () =>
-          collision.addBox(back.x, back.z, BENCH_BACK_DEPTH / 2, BENCH_LENGTH / 2, yaw, 0, back.top, false, true),
-        );
+        collision.addBox(seat.x, seat.z, (front - rear) / 2, BENCH_LENGTH / 2, yaw, 0, seat.top, false, true);
       });
     }
 

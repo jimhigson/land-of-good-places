@@ -189,6 +189,9 @@ import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeigh
  *   height kept — clause 13's jumping on it must find it leaving with her on
  *   its funnel's rim (2.26–2.38 m over the rails on seed 5: out of the old
  *   reach while she stands there, never mind jumps).
+ * - `low-vault` (park): a solid ceiling under each tunnel's arch, 0.35 m under
+ *   the drawn soffit as the vault's foot once stood, low enough to reach —
+ *   clause 12's standing jumps must find a ceiling under the drawn soffit.
  * - `child-left-on-line` (park): the crowd never takes a child off the line
  *   (`NpcSystem.offTheLine` does nothing) — clause 8's child, let go, must
  *   find the train standing for them for good.
@@ -209,7 +212,7 @@ const PROOFS = [
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
   'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'platform-holds-train', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
   'pets-count-aboard', 'pets-stay-out', 'ghost-train', 'frozen-train', 'train-ignores-on-top', 'put-down-ignores-train', 'riders-sit-on-her',
-  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air', 'child-left-on-line',
+  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air', 'child-left-on-line', 'low-vault',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -420,6 +423,21 @@ const CANOPY_KINDS: Readonly<Record<string, string>> = {
       collision.kinded('bridge parapet', () =>
         collision.addWall(seg.ax, seg.az, seg.bx, seg.bz, wall.halfWidth, wall.topAt(seg.ax, seg.az), false, true, -Infinity, false, Number.NaN, wall.topAt(seg.bx, seg.bz)),
       );
+    }
+  }
+  if (PROVE === 'low-vault') {
+    // Under every bridge, over the line, a solid ceiling 0.35 m under where
+    // her head reaches at the top of a jump — the same 0.35 m the vault's foot
+    // once stood under the arch, brought down into her reach.
+    const route = world.train.route;
+    const p = new Vector3();
+    for (let d = 0; d < route.length; d += 0.5) {
+      route.pointAt(d, p);
+      for (const bridge of world.train.bridges) {
+        if (bridge.soffitYAt(p.x, p.z) === null) continue;
+        const base = sample(p.x, p.z, p.y + 0.5) + KID_HEIGHT + JUMP_APEX_HEIGHT - 0.35;
+        collision.kinded('proof: a low vault', () => collision.addBox(p.x, p.z, 1.6, 0.3, 0, 0, base + 0.5, false, true, base));
+      }
     }
   }
   if (PROVE === 'low-roof') stepNearGate('castle roof deck');
@@ -1816,6 +1834,69 @@ if (inPart('park')) {
     tunnels.length > 0 && failed.length === 0,
     `${tunnels.length} tunnel(s) under ${bridges.length} bridge(s), walked both ways along the line's middle: ${failed.length} stopped, wedged or through the soffit${failed.length ? ` — ${failed.slice(0, 6).join('; ')}` : ''}`,
   );
+  // **And a jump under the arch meets the arch** — standing jumps every half
+  // metre along each tunnel, at the line's middle and a metre either side:
+  // her head never rises through the drawn soffit, and where something caps
+  // her jump it is the drawn soffit, not a solid ceiling under it (walking
+  // never lifts her head to it, so an invisible ceiling went unseen: the
+  // vault's foot was the lowest soffit over the bridge's whole width, 0.35 m
+  // under the drawn arch over the line's middle — PR #722's review).
+  {
+    const apex = sampledApex(60);
+    const bad: string[] = [];
+    let jumps = 0;
+    let capped = 0;
+    let nearest = Infinity;
+    const side = new Vector3();
+    for (const tunnel of tunnels) {
+      for (let d = tunnel.from; d <= tunnel.to + 1e-9; d += 0.5) {
+        route.pointAt(route.wrap(d), at);
+        route.tangentAt(route.wrap(d), along);
+        side.set(along.z, 0, -along.x).normalize();
+        for (const offset of [-1, 0, 1]) {
+          const x = at.x + side.x * offset;
+          const z = at.z + side.z * offset;
+          const soffitHere = bridges.map((bridge) => bridge.soffitYAt(x, z)).find((y) => y !== null) ?? null;
+          if (soffitHere === null) continue;
+          // On the track bed under the arch — not the bridge's deck over it, the highest ground there.
+          const sim = new SimPlayer(collision, { ground: sample, hopProbe: playerHopProbe(collision) });
+          sim.placeOnGround(x, z);
+          const ground = sample(x, z, at.y + 0.5);
+          sim.position.y = ground;
+          sim.previousPosition.copy(sim.position);
+          (sim as unknown as { groundHeight: number; groundY: number }).groundHeight = ground;
+          (sim as unknown as { groundY: number }).groundY = ground;
+          if (wedgeDepth(collision, sim.position, ground) > WEDGE_DEPTH) continue;
+          jumps += 1;
+          sim.verticalVelocity = JUMP_SPEED;
+          sim.airborne = true;
+          let top = ground;
+          let headOver = -Infinity;
+          for (let f = 0; f < 120 && (f === 0 || sim.airborne); f += 1) {
+            sim.step(1 / 60, 0, 0, false);
+            top = Math.max(top, sim.position.y);
+            const soffit = bridges.map((bridge) => bridge.soffitYAt(sim.position.x, sim.position.z)).find((y) => y !== null) ?? null;
+            if (soffit !== null) headOver = Math.max(headOver, sim.position.y + KID_HEIGHT - soffit);
+          }
+          const rose = top - ground;
+          const link = `/spawn?pos=${x.toFixed(1)},${z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
+          nearest = Math.min(nearest, soffitHere - (ground + apex + KID_HEIGHT));
+          if (headOver > 0.02) bad.push(`at ${link}: her head ${headOver.toFixed(2)} m through the soffit`);
+          else if (rose < apex - 0.02) {
+            capped += 1;
+            // Capped: by the drawn arch, her head at it.
+            const under = soffitHere - (top + KID_HEIGHT);
+            if (under > 0.05) bad.push(`at ${link}: a ceiling ${under.toFixed(2)} m under the drawn soffit capped her jump at ${rose.toFixed(2)} m`);
+          }
+        }
+      }
+    }
+    say(
+      tunnels.length > 0 && jumps > 0 && bad.length === 0,
+      `standing jumps under every bridge (${jumps}, every 0.5 m along each tunnel, on the line's middle and a metre either side): her head never through the drawn soffit, and ${capped} capped — each by the drawn arch, never a solid under it${bad.length ? ` — ${bad.slice(0, 6).join('; ')}` : ''}`,
+    );
+    if (capped === 0 && jumps > 0) note(`clause 12: no standing jump under a bridge reached the drawn soffit here (her head at the top of a jump came no nearer than ${nearest.toFixed(2)} m under it), so the jumps assert only that nothing solid caps her under it`);
+  }
   if (tunnels.length === 0) note('clause 12: this park\'s line runs under no bridge, so the clause asserts nothing here');
 }
 
@@ -2932,6 +3013,67 @@ if (inPart('park')) {
       }
       const bad = hops.filter((line) => !line.startsWith('ok: '));
       say(askedHere > 0 && bad.length === 0, `hopping under a canopy: at ${askedHere} station(s), a jump each time she lands for 8 s, capped by the canopy — no hover rescue, and she hops where she stood — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
+      awayWithHerLine();
+    }
+    // --- up onto a station's bench ---
+    // Walking at its seat from the platform, she steps up onto it and stands
+    // there (QA on PR #722: the back, solid to its own top, met her step-up
+    // first and stopped her — her body is wider than the seat).
+    {
+      const benches: SolidView[] = [];
+      collision.forEachSolid((solid) => {
+        if (solid.kind === 'station bench') benches.push(solid);
+      });
+      const onBench: string[] = [];
+      let benchFails = 0;
+      for (const bench of benches) {
+        const station = train.stations.reduce((best, stop) => (Math.hypot(stop.standX - bench.centreX, stop.standZ - bench.centreZ) < Math.hypot(best.standX - bench.centreX, best.standZ - bench.centreZ) ? stop : best));
+        const platform = sample(station.standX, station.standZ, 50);
+        const upOn = (): boolean => !player.isAirborne && bench.depthAt(player.position.x, player.position.z) >= 0 && Math.abs(player.feetSurface - bench.topAt(player.position.x, player.position.z)) < 0.05;
+        // From the platform round it, every way she can walk at it from: a
+        // stride clear of it, on the platform's own level.
+        let tried = 0;
+        let stood = 0;
+        let last = '';
+        // Square at its front (towards the line), and a little either side of square.
+        route.tangentAt(station.distance, at);
+        const tx = at.x;
+        const tz = at.z;
+        route.pointAt(route.distanceNear(bench.centreX, bench.centreZ), at);
+        const front = Math.sign((at.x - bench.centreX) * tz - (at.z - bench.centreZ) * tx) || 1;
+        const nx = tz * front;
+        const nz = -tx * front;
+        for (let k = 0; k < 5; k += 1) {
+          const turn = ((k - 2) * Math.PI) / 12;
+          const ux = nx * Math.cos(turn) - nz * Math.sin(turn);
+          const uz = nx * Math.sin(turn) + nz * Math.cos(turn);
+          let out = 0;
+          for (let r = 0.3; r <= 2; r += 0.05) {
+            if (bench.depthAt(bench.centreX + ux * r, bench.centreZ + uz * r) < -(PLAYER_RADIUS + 0.3)) {
+              out = r;
+              break;
+            }
+          }
+          const fromX = bench.centreX + ux * out;
+          const fromZ = bench.centreZ + uz * out;
+          if (!out || !station.covers(fromX, fromZ) || Math.abs(sample(fromX, fromZ, 50) - platform) > 0.05 || !collision.isClearCircle(fromX, fromZ, PLAYER_RADIUS)) continue;
+          tried += 1;
+          player.teleportTo(fromX, sample(fromX, fromZ, 50), fromZ);
+          play(0.5);
+          // Until she is up on it (she would walk on across it and off its back).
+          let wasUp = false;
+          let rise = -Infinity;
+          play(2.5, walkAlong(camera, -ux, -uz), 1 / 60, () => {
+            rise = Math.max(rise, player.feetSurface - platform);
+            return (wasUp = upOn());
+          });
+          if (wasUp) stood += 1;
+          else last = `from (${fromX.toFixed(2)}, ${fromZ.toFixed(2)}) her feet rose ${rise.toFixed(2)} m over the platform, its seat ${(bench.topAt(bench.centreX, bench.centreZ) - platform).toFixed(2)}; she ended at (${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)})`;
+        }
+        if (tried === 0 || stood < tried) benchFails += 1;
+        onBench.push(`the bench at (${bench.centreX.toFixed(1)}, ${bench.centreZ.toFixed(1)}): ${stood} of ${tried} walks at its front from the platform stepped her up onto its seat${stood < tried && last ? ` — e.g. ${last}` : ''}`);
+      }
+      say(benches.length > 0 && benchFails === 0, `up onto a station's bench: walking at it from the platform, she steps up onto its seat and stands there — ${onBench.join('; ') || 'NO BENCH FOUND'}`);
       awayWithHerLine();
     }
     note(`clause 13 walked her at the park's own train through Game's own wiring: ${pieces.length} moving bodies, every one of them the train's own`);
