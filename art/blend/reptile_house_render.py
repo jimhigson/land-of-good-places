@@ -59,7 +59,7 @@ STANDIN_GROUND = 0xF4EEF9
 STANDIN_CHILD = 0xE86F9B
 """The scale figure, in a colour nothing in the kit is."""
 
-KID_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+KID_HEIGHT = ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
 
 
 def engineer_styles():

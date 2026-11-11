@@ -471,7 +471,7 @@ export const LIBRARY_DEN_DOOR_HALF = 2;
  * How far the den runs on north past its doorway's north edge: the far
  * corner the baby dragon's nest is tucked into ({@link LIBRARY_DRAGON_NEST}).
  */
-const DEN_NORTH_PAST_DOOR = 1.6;
+export const DEN_NORTH_PAST_DOOR = 1.6;
 
 /**
  * **The den's three inner wall faces**, room-local. The south face is flush
@@ -508,8 +508,16 @@ export function libraryDenContains(x: number, z: number): boolean {
 /** Just inside the den, through its doorway, looking in (#719) — where `/library-den` stands her. */
 export const LIBRARY_DEN_DOORWAY_STAND: StandSpot = { what: "inside the secret den's doorway", x: -19.6, z: -4.3, facing: 270, den: true };
 
-/** Beside the baby dragon's nest, facing it (#719) — where she stands to say hi. */
-export const LIBRARY_DRAGON_STAND: StandSpot = { what: 'beside the baby dragon', x: -21.3, z: -5.0, facing: 225, den: true };
+/**
+ * **Beside the baby dragon's nest, facing it** (#719) — where she stands to
+ * say hi, and where a tap on the dragon walks her. Due east of the nest, so
+ * she and the dragon stand side by side on screen: the camera looks into the
+ * room along (−1, −1), and the first spot, (−21.3, −5.0) straight in front of
+ * the dragon, was on that line — her body covered the dragon from the camera
+ * the whole time she talked to it (plan Step 13, looked at in Chrome). The
+ * dragon turns its head toward her here as far as it goes.
+ */
+export const LIBRARY_DRAGON_STAND: StandSpot = { what: 'beside the baby dragon', x: -20.6, z: -6.3, facing: 270, den: true };
 
 /** The baby dragon's nest of books (#719): in the den's far corner, facing the doorway and the camera. */
 export const LIBRARY_DRAGON_NEST: LocalPoint & { readonly facing: number } = { x: -22.6, z: -6.3, facing: 45 };
@@ -527,6 +535,26 @@ export const LIBRARY_SECRET_BOOK: { readonly shelf: number; readonly along: numb
 for (const spot of [LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DRAGON_STAND, { what: "the dragon's nest", ...LIBRARY_DRAGON_NEST }]) {
   if (!libraryDenContains(spot.x, spot.z)) throw new Error(`library layout: ${spot.what} at (${spot.x}, ${spot.z}) is not inside the secret den (libraryDenContains)`);
 }
+
+// ===========================================================================
+// The library cat (#719) — asleep on a pile of books by the desk
+// ===========================================================================
+
+/**
+ * **The library cat's pile of books** (#719): beside the desk, in the desk
+ * lamp's pool of light, on the camera's near side of the stacks and turned to
+ * face it — 1.7 m clear of the desk's east end and 3.1 m from the entrance
+ * hall's aisle, so nobody walking the room has to step round her. The pile
+ * and the cat asleep on it are one group (`LibraryCat.ts`).
+ */
+export const LIBRARY_CAT_PILE: LocalPoint & { readonly facing: number } = { x: 9.6, z: 7.2, facing: 45 };
+
+/**
+ * Where she stands to pet the cat (#719): 1.6 m in front of the pile, looking
+ * at it — re-measured against the pile's true size: 1.4 m (the first design's)
+ * put the pile's near corner inside this spot's keep-out.
+ */
+export const LIBRARY_CAT_STAND: StandSpot = { what: 'beside the library cat', x: 9.6, z: 8.8, facing: 180 };
 
 /**
  * **The readable books' slots** (#718): each names the case it stands in,
@@ -826,6 +854,7 @@ export function libraryStandSpots(): StandSpot[] {
     LIBRARY_SECRET_STAND,
     LIBRARY_DEN_DOORWAY_STAND,
     LIBRARY_DRAGON_STAND,
+    LIBRARY_CAT_STAND,
   ];
   for (const piece of LIBRARY_FURNITURE) {
     if (piece.kind !== 'armchair' && piece.kind !== 'storyChair') continue;
