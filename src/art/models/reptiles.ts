@@ -4,6 +4,7 @@ import {
   Group,
   Mesh,
   MeshToonMaterial,
+  Raycaster,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -47,7 +48,15 @@ const BLUSH = markShared(new SphereGeometry(1, 8, 6));
  * look alive" — and a soft blush below and outward. `size` is the eye's
  * half-height; everything else is a fraction of it (ART_DIRECTION §4).
  */
-export function geometryFace(parent: Group, x: number, y: number, z: number, size: number, blush = true): void {
+export function geometryFace(
+  parent: Group,
+  x: number,
+  y: number,
+  z: number,
+  size: number,
+  blush = true,
+  cheekZ = z - size * 0.1,
+): void {
   for (const side of [-1, 1] as const) {
     const eye = decal(new Mesh(EYE, toonMaterial(ART.ink)));
     eye.position.set(side * x, y, z);
@@ -63,11 +72,32 @@ export function geometryFace(parent: Group, x: number, y: number, z: number, siz
     parent.add(glint);
     if (blush) {
       const cheek = decal(new Mesh(BLUSH, toonMaterial(ART.blush)));
-      cheek.position.set(side * (x + size * 0.9), y - size * 0.9, z - size * 0.1);
+      cheek.position.set(side * (x + size * 0.9), y - size * 0.9, cheekZ);
       cheek.scale.set(size * 0.7, size * 0.45, size * 0.3);
       parent.add(cheek);
     }
   }
+}
+
+const FRONT_RAY = new Raycaster();
+const FRONT_FROM = new Vector3();
+const FRONT_BACK = new Vector3(0, 0, -1);
+
+/**
+ * **The front of `mesh`'s own geometry at local (x, y)**: the z where a ray
+ * coming straight back along −Z first meets it — so a face drawn on a head
+ * sits on that head's measured surface, whatever the Artist's mesh does.
+ * Throws if the ray misses: a face put where there is no head is a bug.
+ */
+function frontOf(mesh: Mesh, x: number, y: number): number {
+  const probe = new Mesh(mesh.geometry);
+  probe.updateMatrixWorld(true);
+  const box = mesh.geometry.boundingBox ?? (mesh.geometry.computeBoundingBox(), mesh.geometry.boundingBox);
+  FRONT_FROM.set(x, y, (box?.max.z ?? 0) + 1);
+  FRONT_RAY.set(FRONT_FROM, FRONT_BACK);
+  const hit = FRONT_RAY.intersectObject(probe, false)[0];
+  if (!hit) throw new Error(`frontOf: no surface of ${mesh.name} at (${x}, ${y})`);
+  return hit.point.z;
 }
 
 /** A w-mouth: two little arcs side by side, in ink. */
@@ -210,8 +240,26 @@ export function createTortoise(seed: number, scale = 1): TortoiseHandle {
   face.position.copy(headRest);
   head.add(face);
   face.position.set(0, 0, 0);
-  geometryFace(face, 0.075, 0.14, 0.4, 0.045, true);
-  wMouth(face, 0.03, 0.5, 0.025);
+  // Every part of Grandpa Tock's face sits on the head's own front surface,
+  // measured off the head mesh at that part's (x, y) — the face is the head's
+  // child at its origin, so head-local is face-local. A typed z (0.4) once put
+  // his eyes 0.077 m inside a head whose front is at 0.477, and only a cream
+  // disc and two blush slivers showed (the chapter books' review, Oct 2026).
+  const EYE_X = 0.075;
+  const EYE_Y = 0.14;
+  const EYE_SIZE = 0.045;
+  const MOUTH_Y = 0.03;
+  const MOUTH_SIZE = 0.025;
+  geometryFace(
+    face,
+    EYE_X,
+    EYE_Y,
+    frontOf(head, EYE_X, EYE_Y),
+    EYE_SIZE,
+    true,
+    frontOf(head, EYE_X + EYE_SIZE * 0.9, EYE_Y - EYE_SIZE * 0.9),
+  );
+  wMouth(face, MOUTH_Y, frontOf(head, MOUTH_SIZE, MOUTH_Y), MOUTH_SIZE);
 
   let stretch = 0;
   let blink = rng.range(3, 8);
