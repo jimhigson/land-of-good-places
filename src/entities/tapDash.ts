@@ -21,7 +21,7 @@ import { PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from 
  * speed(L) = ⎨
  *            ⎩ v·(1 − T₀/T∞) + L/T∞               L > v·T₀      (a dash)
  *
- * T₀ = DASH_WALK_SECONDS = 1.5 s     T∞ = DASH_MAX_SECONDS = 4 s
+ * T₀ = DASH_WALK_SECONDS = 1.5 s     T∞ = DASH_CRUISE_SECONDS = 3.5 s
  * ```
  *
  * - **Normal for anything under 1.5 s.** Up to `v·T₀` = 11.1 m nothing changes:
@@ -32,27 +32,31 @@ import { PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from 
  *   `v − v·T₀/T∞ + v·T₀/T∞ = v` exactly, so there is no step in speed between a
  *   journey just under the line and one just over it.
  * - **Travel time never goes down as the journey gets longer.**
- *   `t(L) = L / (a + L/T∞)` with `a = v·(1 − T₀/T∞) = 4.63 m/s > 0`, whose
+ *   `t(L) = L / (a + L/T∞)` with `a = v·(1 − T₀/T∞) = 4.23 m/s > 0`, whose
  *   derivative `a / (a + L/T∞)²` is positive everywhere — a further place is
  *   never reached sooner than a nearer one.
- * - **Capped at 4 s.** `t(L)` rises towards `T∞` and never reaches it: the
- *   longest journey in the park takes *about* four seconds and no journey,
- *   however long, takes four. Measured on the park (`check:tap-dash`) the
- *   longest real routes are 100-150 m, which the cruise covers in 3.4-3.6 s;
- *   the run-up and the braking into the marker add the rest.
+ * - **About 4 s at the most, door to door.** The cruise time `t(L)` rises
+ *   towards `T∞` = 3.5 s and never reaches it. On top of the cruise every
+ *   journey ends the way a walk always has — braking into the marker
+ *   ({@link DASH_BRAKE_SECONDS}) and the walk's own easing over the last
+ *   2.2 m — which costs a dash 0.1-0.7 s more, growing with its speed. So the
+ *   cruise's limit is set half a second under Jim's 4 s, and what the check
+ *   asserts is the door-to-door time a child actually waits, measured on the
+ *   park's longest real routes (240-290 m): see {@link DASH_MAX_SECONDS}.
  * - **At or above a sprint well past the line.** The dash reaches sprint
- *   speed (× {@link PLAYER_SPRINT_MULTIPLIER}, 11.1 m/s) at `L` = 25.9 m — a
- *   journey that would have been 3.5 s at a walk — and is faster than a sprint
+ *   speed (× {@link PLAYER_SPRINT_MULTIPLIER}, 11.1 m/s) at `L` = 24 m — a
+ *   journey that would have been 3.3 s at a walk — and is faster than a sprint
  *   for everything further. A double-tap "run there" still sprints, so a short
  *   double-tapped journey is never slower than it was.
  *
- * | journey at a walk | route | dash speed | travel |
+ * | journey at a walk | route | dash speed | cruise |
  * |---|---|---|---|
  * | ≤ 1.5 s | ≤ 11.1 m | 7.4 m/s (walk) | ≤ 1.5 s |
- * | 3.5 s | 25.9 m | 11.1 m/s (sprint) | 2.33 s |
- * | 6.8 s | 50 m | 17.1 m/s | 2.92 s |
- * | 13.5 s | 100 m | 29.6 m/s | 3.38 s |
- * | 20.3 s | 150 m | 42.1 m/s | 3.56 s |
+ * | 3.3 s | 24 m | 11.1 m/s (sprint) | 2.2 s |
+ * | 6.8 s | 50 m | 18.5 m/s | 2.7 s |
+ * | 13.5 s | 100 m | 32.8 m/s | 3.05 s |
+ * | 27 s | 200 m | 61.4 m/s | 3.26 s |
+ * | 38 s | 280 m | 84.2 m/s | 3.33 s |
  *
  * ## What it does not change
  *
@@ -69,8 +73,16 @@ import { PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from 
 export const DASH_WALK_SECONDS = 1.5;
 
 /**
- * The time no journey reaches: the asymptote of the curve. Jim's "max travel
- * time of about 4s".
+ * The cruise time no journey reaches: the asymptote of the curve. Half a second
+ * under {@link DASH_MAX_SECONDS}, which is what the end of a journey costs on
+ * top of its cruise — see "About 4 s at the most" above.
+ */
+export const DASH_CRUISE_SECONDS = 3.5;
+
+/**
+ * Jim's "max travel time of about 4s", door to door: what `check:tap-dash`
+ * holds every real journey on the park to (with a little slack for the frame
+ * clock). Not an input to the curve — {@link DASH_CRUISE_SECONDS} is.
  */
 export const DASH_MAX_SECONDS = 4;
 
@@ -78,8 +90,9 @@ export const DASH_MAX_SECONDS = 4;
  * How far out the dash starts easing off, in seconds of walking — so the last
  * {@link DASH_BRAKE_SECONDS} × walk speed (2.2 m) of every dash is the ordinary
  * walk into the marker, and every metre further the boost may be at most
- * `remaining / (v · this)`. An exponential brake: from a cruise of `B`× the walk
- * it costs `this · ln(B)` seconds, 0.5 s from the fastest dash in the park.
+ * `remaining / (v · this)`. An exponential brake: from a cruise of `B`× the
+ * walk it takes `this · ln(B)` seconds, about `this · (ln B − 1)` more than
+ * not braking at all — 0.45 s from the fastest dash in the park.
  *
  * 2.2 m is deliberately `TapNavigator`'s own slow radius, so the dash hands
  * over to the walk's own easing exactly where that easing starts and arrival is
@@ -104,11 +117,12 @@ export const DASH_STRIDE = 0.5;
 
 /**
  * Strides in one frame, at most. At the clamped frame (1/12 s) the fastest
- * dash in the park covers 3.5 m — seven strides. Sixteen covers a 200 m route
- * at the clamp; past that the stride grows rather than the work, and the
- * check asserts it never grows past {@link PLAYER_LONGEST_STEP}.
+ * dash in the park (a 290 m route, 87 m/s) covers 7.2 m — fifteen strides.
+ * Twenty-four covers a 470 m route at the clamp, beyond any park; past that
+ * the stride grows rather than the work, and the check asserts it never grows
+ * past {@link PLAYER_LONGEST_STEP} on any route the park has.
  */
-export const DASH_MAX_STRIDES = 16;
+export const DASH_MAX_STRIDES = 24;
 
 /**
  * The fastest the legs ever cycle, as a ground speed in m/s: 1.35 × a sprint,
@@ -124,7 +138,7 @@ export const DASH_THRESHOLD_METRES = PLAYER_MAX_SPEED * DASH_WALK_SECONDS;
 /** The cruising speed for a journey of `routeLength` metres. See the table above. */
 export function dashCruiseSpeed(routeLength: number): number {
   if (!(routeLength > DASH_THRESHOLD_METRES)) return PLAYER_MAX_SPEED;
-  return PLAYER_MAX_SPEED * (1 - DASH_WALK_SECONDS / DASH_MAX_SECONDS) + routeLength / DASH_MAX_SECONDS;
+  return PLAYER_MAX_SPEED * (1 - DASH_WALK_SECONDS / DASH_CRUISE_SECONDS) + routeLength / DASH_CRUISE_SECONDS;
 }
 
 /** {@link dashCruiseSpeed} as a multiple of the walk — what `Player` is handed. */
@@ -132,7 +146,7 @@ export function dashBoost(routeLength: number): number {
   return dashCruiseSpeed(routeLength) / PLAYER_MAX_SPEED;
 }
 
-/** The nominal travel time of a journey, at its cruise: `L / speed(L)`. */
+/** The cruise time of a journey: `L / speed(L)`. Door to door adds the run-in. */
 export function dashSeconds(routeLength: number): number {
   return routeLength / dashCruiseSpeed(routeLength);
 }
