@@ -7391,10 +7391,10 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   // A child walks up to the dragon on the stick from every bearing the den
   // has room for, until she is pressed against its nest or its body, and the
   // chip must be up there — not only at its one stand (PR #739's QA round 2:
-  // on arrow keys it almost never came). Starts 3.4 m out, on the den's floor
+  // on arrow keys it almost never came). Starts 2.6 m out, on the den's floor
   // and clear of everything; a bearing with no such start is counted, not run.
   {
-    const startOut = 3.4;
+    const startOut = 2.6;
     const approaches: string[] = [];
     const missed: string[] = [];
     let skipped = 0;
@@ -7419,8 +7419,8 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
       if (!sayHiUp() || !den.metThisVisit) missed.push(`${label}: chip ${sayHiUp() ? 'up' : 'NOT up'}, met ${den.metThisVisit}`);
     }
     say(
-      approaches.length >= 5 && missed.length === 0,
-      `walked up to the dragon on the keys from ${approaches.length} bearings (${skipped} had no clear start in the den; at least 5 wanted), each until pressed against it: ` +
+      approaches.length >= 6 && missed.length === 0,
+      `walked up to the dragon on the keys from ${approaches.length} bearings (${skipped} had no clear start in the den; at least 6 wanted), each until pressed against it: ` +
         `"Say hi!" up and the dragon met at ${approaches.length - missed.length} of them${missed.length ? ` — NOT at ${missed.join('; ')}` : ''}`,
     );
     child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
