@@ -449,8 +449,6 @@ function snapToWallTop(level: number, topY: number): number {
 const WALL_SEGMENT = 2.0;
 /** How finely the tunnel's masonry follows the arch: the vault's slices, and the side walls' pieces over the opening, metres. */
 const TUNNEL_CUT = 0.2;
-/** How many slices across the bridge's width the vault is cut into, each with its own lowest soffit — see the tunnel's collision. */
-const VAULT_ACROSS_CUTS = 6;
 /** How deep an abutment's inner face is modelled into the masonry behind it, metres. */
 const ABUTMENT_FACE = 0.3;
 
@@ -1213,16 +1211,16 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // into it; and each abutment is solid at its inner face, from the ground
   // up, so nothing gets into the masonry from the tunnel.
   const vaults: BridgeVault[] = [];
-  const acrossAt = (along: number, middle = 0): { cx: number; cz: number; yaw: number } => {
-    const c = frame.worldAt(along, middle, shift);
-    const a = frame.worldAt(along, middle + 1, shift);
+  const acrossAt = (along: number): { cx: number; cz: number; yaw: number } => {
+    const c = frame.worldAt(along, 0, shift);
+    const a = frame.worldAt(along, 1, shift);
     return { cx: c.x, cz: c.z, yaw: Math.atan2(a.z - c.z, a.x - c.x) };
   };
-  /** The lowest of `height` over a slice's footprint, `c0`–`c1` across: its two ends and middle, at both faces and between. */
-  const lowestOver = (a0: number, a1: number, height: (x: number, z: number, along: number) => number, c0 = -halfAcross, c1 = halfAcross): number => {
+  /** The lowest of `height` over a slice's footprint: its two ends and middle, at the axis and both faces. */
+  const lowestOver = (a0: number, a1: number, height: (x: number, z: number, along: number) => number): number => {
     let low = Infinity;
     for (const u of [a0, (a0 + a1) / 2, a1]) {
-      for (const across of [c0, (c0 + c1) / 2, c1]) {
+      for (const across of [-halfAcross, 0, halfAcross]) {
         const p = frame.worldAt(u, across, shift);
         low = Math.min(low, height(p.x, p.z, u));
       }
@@ -1230,22 +1228,13 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     return low;
   };
   const roadBed = (x: number, z: number, along: number): number => surfaceProfile(x, z, along) - BRIDGE_ROAD_BED_DROP;
-  // Sliced across the bridge too ({@link VAULT_ACROSS_CUTS}): taken over the
-  // whole width, the lowest of the soffit fell with the planet's curve to its
-  // faces, and over the line's middle the solid ceiling stood 0.35 m under the
-  // drawn arch (PR #722's review) — out of her reach, but an invisible ceiling.
-  const sliceAcross = (2 * halfAcross) / VAULT_ACROSS_CUTS;
   for (let a0 = -ARCH_SPAN_HALF; a0 < ARCH_SPAN_HALF - 1e-6; a0 += TUNNEL_CUT) {
     const a1 = Math.min(ARCH_SPAN_HALF, a0 + TUNNEL_CUT);
-    for (let j = 0; j < VAULT_ACROSS_CUTS; j += 1) {
-      const c0 = -halfAcross + j * sliceAcross;
-      const c1 = c0 + sliceAcross;
-      const at = acrossAt((a0 + a1) / 2, (c0 + c1) / 2);
-      const base = lowestOver(a0, a1, (x, z, u) => tangentY(x, z, soffitRiseAt(Math.abs(u))), c0, c1);
-      const top = lowestOver(a0, a1, roadBed, c0, c1);
-      if (!(top > base)) continue;
-      vaults.push({ kind: 'bridge arch', cx: at.cx, cz: at.cz, halfX: sliceAcross / 2, halfZ: (a1 - a0) / 2, yaw: at.yaw, top, base });
-    }
+    const at = acrossAt((a0 + a1) / 2);
+    const base = lowestOver(a0, a1, (x, z, u) => tangentY(x, z, soffitRiseAt(Math.abs(u))));
+    const top = lowestOver(a0, a1, roadBed);
+    if (!(top > base)) continue;
+    vaults.push({ kind: 'bridge arch', cx: at.cx, cz: at.cz, halfX: halfAcross, halfZ: (a1 - a0) / 2, yaw: at.yaw, top, base });
   }
   for (const side of [1, -1] as const) {
     const a0 = side * ARCH_SPAN_HALF;
