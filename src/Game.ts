@@ -1,4 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
+import { FrameStrides } from './entities/frameStrides';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
@@ -1737,57 +1738,8 @@ export class Game {
 
   // ------------------------------------------------------------------ frame
 
-  /** Where she was when this frame's strides began. See {@link stepPlayer}. */
-  private readonly frameStart = new Vector3();
-  /** Where she was when the current stride began. See {@link stepPlayer}. */
-  private readonly strideStart = new Vector3();
-
-  /**
-   * The navigator steers, then she moves: once a frame — or, while a tapped
-   * journey is dashing (`entities/tapDash.ts`), once per **stride**.
-   *
-   * A dash covers up to 3.5 m in a clamped frame, four times the
-   * `PLAYER_LONGEST_STEP` every collision, ground and step-up rule in the game
-   * is sized for. Rather than re-size any of them, the frame is cut into
-   * strides of at most `DASH_STRIDE` and each one is an ordinary navigator
-   * update and an ordinary `Player.update` at its share of `dt` — so a dash
-   * is collided, sampled, auto-hopped and steered exactly as a walk is, only
-   * more often. A walk or a sprint is one stride, unchanged.
-   *
-   * Two things the rest of the frame reads are put back the way one long step
-   * would leave them:
-   *
-   * - **`previousPosition` spans the whole frame**, so a doorway's or a
-   *   doormat's `bandCrossed` (run later, in `world.update`) asks what she
-   *   crossed this frame, not this stride. If a stride collapses it — a
-   *   put-down, a teleport — the frame's line starts again from there, as it
-   *   would have.
-   * - **The parade's trail is fed every stride** (`Parade.followStride`), so
-   *   the ground she ran over is the ground her animals follow, and a long
-   *   frame is not mistaken for a teleport.
-   */
-  private stepPlayer(): void {
-    const context = this.frameContext;
-    const strides = this.tapNavigator.stridesFor(context.dt);
-    if (strides <= 1) {
-      this.tapNavigator.update(context);
-      this.player.update(context);
-      return;
-    }
-    const dt = context.dt;
-    const player = this.player;
-    this.frameStart.copy(player.position);
-    context.dt = dt / strides;
-    for (let stride = 0; stride < strides; stride += 1) {
-      this.strideStart.copy(player.position);
-      this.tapNavigator.update(context);
-      player.update(context);
-      if (!player.previousPosition.equals(this.strideStart)) this.frameStart.copy(player.previousPosition);
-      this.parade.followStride();
-    }
-    context.dt = dt;
-    player.previousPosition.copy(this.frameStart);
-  }
+  /** See `entities/frameStrides.ts`: once a frame, or once a stride while dashing. */
+  private readonly strides = new FrameStrides();
 
   private tick(tick: LoopTick): void {
     this.input.update();
@@ -1900,7 +1852,9 @@ export class Game {
     // devices, and the navigator pushes it back on the character's behalf before
     // anybody reads it. Registered as an ordinary system it would be a frame
     // late — which, since the scan happens first, means never moving at all.
-    if (!paused) this.stepPlayer();
+    // A tapped dash (`entities/tapDash.ts`) is cut into strides here, each an
+    // ordinary navigator update and `player.update` — see `FrameStrides`.
+    if (!paused) this.strides.step(this.frameContext, this.tapNavigator, this.player, this.parade);
 
     // **The arrival camera — the three beats Jim asked for.** Jim, 3 September
     // 2026: *"when the bus arrives at the park, the camera needs to face the
