@@ -220,10 +220,12 @@ export function bandWalkedThrough(
   walker: {
     readonly position: { readonly x: number; readonly z: number };
     readonly previousPosition: { readonly x: number; readonly z: number };
-    readonly framePath: FramePath;
+    /** Absent on a walker that never strides (a check's stand-in body): the chord is its path. */
+    readonly framePath?: FramePath;
   },
 ): boolean {
   const { position, previousPosition, framePath } = walker;
+  if (!framePath) return bandCrossed(band, previousPosition.x, previousPosition.z, position.x, position.z);
   const points = framePath.count;
   const xz = framePath.xz;
   const current =
