@@ -85,7 +85,6 @@ import {
   DASH_MAX_STRIDES,
 } from '../src/entities/tapDash.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../src/core/constants.ts';
-import { DASH_HITCH_FRAMES } from '../src/entities/frameStrides.ts';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../src/entities/TapNavigator.ts';
 import { bandWalkedThrough, type PortalBand } from '../src/world/tapSpacing.ts';
 
@@ -116,6 +115,13 @@ const CAMERA_ROUTE_METRES = 250;
 const PET_ROUTE_METRES = 90;
 /** How far her furthest pet may be when she arrives, in metres. On main they trail by at most 4.9 m. */
 const PET_ARRIVAL_LIMIT = 5;
+/**
+ * The most a hitch frame may move a dash, in ordinary 60 fps frames of its
+ * cruise. The check's own number, not `frameStrides.ts`'s
+ * `DASH_HITCH_FRAMES`: a check that read its limit off the thing under test
+ * would pass whatever that thing was set to.
+ */
+const HITCH_FRAMES_ALLOWED = 1.5;
 
 const run = promisify(execFile);
 const HERE = fileURLToPath(import.meta.url);
@@ -863,7 +869,7 @@ async function parent(): Promise<void> {
       `seed ${seed}: on ${petRuns.length} dashes of ${PET_ROUTE_METRES} m+, both pets are within ${PET_ARRIVAL_LIMIT} m of her when she arrives (furthest ${furthest.toFixed(2)} m)${listed(strays.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: ${j.dash.petsAtArrival.toFixed(1)} m`))}`,
     );
     // **A hitch does not pop her.**
-    const allowed = (DASH_HITCH_FRAMES / 60) * dashCruiseSpeed(report.hitch.metres) + 0.05;
+    const allowed = (HITCH_FRAMES_ALLOWED / 60) * dashCruiseSpeed(report.hitch.metres) + 0.05;
     check(
       report.hitch.arrived && report.hitch.travel <= allowed,
       `seed ${seed}: a ${MAX_FRAME_DELTA.toFixed(3)} s hitch on the first frame of a ${report.hitch.metres.toFixed(1)} m dash at 60 fps moves her ${report.hitch.travel.toFixed(2)} m (≤ ${allowed.toFixed(2)} m, about one ordinary frame)`,
