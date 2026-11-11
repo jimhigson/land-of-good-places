@@ -1061,6 +1061,13 @@ def build_secret_shelf() -> None:
     −0.6..0: placed with its root on the hinge, ``rotation.y`` from 0 towards
     −π/2 swings it open out into the room (+Z), clear of the wall behind it.
     ``check_secret_shelf`` proves the shape is the shelf's, vertex for vertex.
+
+    **The game does not use this hinge** (#719, plan Decision 21): a
+    front-left hinge swings the case out into the reading room, through
+    whoever stands there. ``secretShelf.ts`` re-originates the leaf on its
+    **back-left** vertical edge, by the depth it measures off the built case,
+    and swings it +π/2 **into** the den, away from the room. The glb is
+    unchanged; only this note was stale.
     """
     a = register(Asset("secretShelf"))
     shelf_parts(a)
