@@ -1,4 +1,5 @@
 import { Group, Vector3, type Object3D } from 'three';
+import type { PlacedDoorFrame } from '../../art/models/doorFrames';
 import { clearsTop, type CollisionWorld, type WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -142,6 +143,8 @@ export class ReptileHouse implements GameSystem {
   readonly stands: readonly ShopStand[];
   /** The exterior shell's wall colliders, chords first, so a check can remove one and go red. */
   readonly shellSolids: readonly WallCollider[];
+  /** The doorway frame round the hall's way out (`doorFrames.ts`). */
+  readonly exitDoorFrame: PlacedDoorFrame;
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -190,7 +193,7 @@ export class ReptileHouse implements GameSystem {
     this.hallRoot.position.set(REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z);
     this.hallRoot.visible = false;
     this.hallRoot.add(new ReptileLighting(0, 0).group);
-    buildHallShell(this.hallRoot, collision, surfaces);
+    this.exitDoorFrame = buildHallShell(this.hallRoot, collision, surfaces);
     this.props = new ReptileProps(collision, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
     const atlas = new SignAtlas();
     this.hearts = new SpritePuffs(this.hallRoot, 12);

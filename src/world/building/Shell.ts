@@ -14,6 +14,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { buildDoorFrame, doorFramePostWidth, type DoorFrame } from '../../art/models/doorFrames';
 import { lazyArrayView } from '../../boot/lazyView';
 import {
   BUILDING_FLOOR_COUNT,
@@ -170,6 +171,13 @@ export class BuildingShell {
 
   readonly kind: ShellKind;
 
+  /**
+   * **The doorway frame round the ground floor's way out** (Jim, 11 Nov 2026),
+   * in the ground floor's own metres — stone, under the castle's ceiling. Its
+   * solids are `Building`'s to register, beside the walls. Null on the facade.
+   */
+  readonly exitFrame: DoorFrame | null = null;
+
   constructor(kind: ShellKind = 'interior') {
     this.kind = kind;
     const plan = planFor(kind);
@@ -225,7 +233,12 @@ export class BuildingShell {
     }
 
     const ground = this.floorGroups[0];
-    if (ground) buildInteriorPorch(plan, ground);
+    if (ground) {
+      buildInteriorPorch(plan, ground);
+      const frame = buildDoorFrame('castle', { minX: plan.doorMinX, maxX: plan.doorMaxX, z: plan.halfZ, floorY: 0 });
+      ground.add(frame.group);
+      this.exitFrame = frame;
+    }
   }
 }
 
@@ -289,6 +302,16 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
 
 // ------------------------------------------------------------------- walls
 
+/**
+ * The front door's gap as the wall is **drawn**: on the interior, widened by
+ * the doorway frame's post each side (the frame fills it); on the facade, the
+ * door itself.
+ */
+function framedDoorGap(plan: ShellPlan): [number, number] {
+  const post = plan.holes ? doorFramePostWidth('castle') : 0;
+  return [plan.doorMinX - post, plan.doorMaxX + post];
+}
+
 /** Plan rectangles for one storey's walls, doorways left out. */
 function wallShapes(plan: ShellPlan, deck: number): Shape[] {
   const shapes: Shape[] = [];
@@ -298,9 +321,11 @@ function wallShapes(plan: ShellPlan, deck: number): Shape[] {
   // North face: never interrupted.
   shapes.push(planRect(-ox, ox, -oz, -plan.halfZ + HALF_WALL));
 
-  // South face: the front door downstairs.
+  // South face: the front door downstairs — drawn back by the doorway
+  // frame's posts on the interior, which stand where the wall's ends were
+  // (`doorFrames.ts`). The collider is `Building`'s, and is not moved.
   const southGaps: [number, number][] = [];
-  if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
+  if (deck === 0) southGaps.push(framedDoorGap(plan));
   for (const [start, end] of segmentsMinusGaps(-ox, ox, southGaps)) {
     shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
   }
@@ -417,7 +442,7 @@ function buildWindows(plan: ShellPlan, deck: number): InstancedMesh[] {
   const oz = outerZ(plan);
 
   const southGaps: [number, number][] = [];
-  if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
+  if (deck === 0) southGaps.push(framedDoorGap(plan));
 
   for (const x of spread(plan.halfX, 3.4)) {
     slots.push({ x, z: -oz - outward, yaw: 0 });

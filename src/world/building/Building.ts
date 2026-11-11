@@ -1,4 +1,5 @@
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { registerDoorFrameSolids, type PlacedDoorFrame } from '../../art/models/doorFrames';
 import { castleFloorBounds } from './floorBounds';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
@@ -664,6 +665,8 @@ export class Building implements GameSystem {
   readonly interiorRoot = new Group();
 
   private readonly shell = new BuildingShell('interior');
+  /** The doorway frame round the ground floor's way out (`doorFrames.ts`). */
+  readonly exitDoorFrame: PlacedDoorFrame;
   private readonly facade = new BuildingShell('facade');
   /** The facade, the ginormous slide, and the grown-up while they ride it. */
   /**
@@ -906,6 +909,16 @@ export class Building implements GameSystem {
     // paying for itself — a wall on the mall can no longer be a wall in the
     // great hall.
     for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
+    // The ground floor's doorway frame (`doorFrames.ts`), solid beside the walls.
+    const exitFrame = this.shell.exitFrame;
+    if (!exitFrame) throw new Error('Building: the interior shell built no doorway frame');
+    this.exitDoorFrame = {
+      frame: exitFrame,
+      solids: registerDoorFrameSolids(collision, exitFrame, floorX(CASTLE_MALL, 0), floorZ(CASTLE_MALL, 0), BUILDING_BASE_Y),
+      originX: floorX(CASTLE_MALL, 0),
+      originZ: floorZ(CASTLE_MALL, 0),
+      originY: BUILDING_BASE_Y,
+    };
 
     // **And the banquet is solid** (#453). Jim, having walked the hall: *"you
     // can walk straight through the tables — they should be solid."*

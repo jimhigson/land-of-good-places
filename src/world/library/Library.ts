@@ -1,4 +1,5 @@
 import { Group, Vector3, type MeshToonMaterial, type Object3D } from 'three';
+import type { PlacedDoorFrame } from '../../art/models/doorFrames';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -232,6 +233,8 @@ export class Library implements GameSystem {
   readonly plan: LibraryExteriorPlan;
   /** The exterior's colliders, in registration order — so a check can open one and go red. */
   readonly shellSolids: LibraryShellSolids;
+  /** The doorway frame round the reading room's way out (`doorFrames.ts`). */
+  readonly exitDoorFrame: PlacedDoorFrame;
   /** How deep the plinth's skirt runs under its base, to meet the lowest ground round it. */
   readonly skirtDepth: number;
   /** "The Library", over the door. */
@@ -339,6 +342,7 @@ export class Library implements GameSystem {
     this.westWall = shell.westWall;
     this.westMaterial = shell.westMaterial;
     this.lintel = shell.lintel;
+    this.exitDoorFrame = { frame: shell.exitFrame, solids: shell.exitFrameSolids, originX: LIBRARY_ORIGIN_X, originZ: LIBRARY_ORIGIN_Z, originY: LIBRARY_FLOOR_Y };
     this.props = new LibraryProps(collision, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z);
     // The den (#719) before the furniture, its walls through the same props,
     // so every one is held clear of every stand spot like any bookcase.
