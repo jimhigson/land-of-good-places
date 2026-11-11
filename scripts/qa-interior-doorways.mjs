@@ -1,5 +1,7 @@
 /**
- * Scratch browser QA for the interior doorway frames — not part of the build.
+ * Browser QA for the interior doorway frames — not part of the build or the
+ * gate, kept beside the other `qa-*.mjs` shot scripts because it is how the
+ * before-and-after sheet on #743 was taken and how it is retaken.
  *
  *   node scripts/qa-interior-doorways.mjs <baseUrl> <outDir> [tag]
  *
@@ -16,10 +18,12 @@ const outDir = process.argv[3] ?? 'qa-out';
 const tag = process.argv[4] ?? 'shot';
 mkdirSync(outDir, { recursive: true });
 
-const CHROME =
-  process.env.QA_CHROME ??
-  `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/` +
-    'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+/**
+ * The browser: `QA_CHROME` if set, else whichever Chromium this checkout's own
+ * `playwright-core` installed (`pnpm exec playwright-core install chromium`),
+ * so the script runs on any machine rather than one cache path.
+ */
+const CHROME = process.env.QA_CHROME ?? chromium.executablePath();
 
 /** Straight into the park, past character creation and the cat bus. */
 const save = {
