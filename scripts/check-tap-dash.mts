@@ -281,6 +281,7 @@ async function child(seed: number): Promise<void> {
     const probe = new Vector3();
     for (let i = 0; i <= samples; i += 1) {
       const t = i / samples;
+      // flat-ok: a straight lerp between two of her own positions at most a stride (0.5 m) apart — her drawn point along the path, not a height compared across the planet
       probe.set(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
       // Lenient on height, strict on depth. Her feet are the higher of the
       // surface she stood on at either end and her own height there — in the
