@@ -265,7 +265,11 @@ for (const room of rooms) {
   const centreLanes = [...without].filter((lane) => / -?0\.0[0-4] @/.test(lane) || / 0\.00 @/.test(lane));
   if (without.size === 0 || centreLanes.length === 0) fail(`${room.name}: no lane through the doorway's middle gets through even without the frame — the walk measures nothing`);
   if (lost.length > 0) fail(`${room.name}: the frame blocks ${lost.length} lane(s) that got through without it: ${lost.slice(0, 6).join(', ')}`);
-  say(`  ${withFrame.size} of ${without.size} lane-walks that get through without the frame get through with it (lanes ${LANE_SPACING} m apart, both ways, at ${STRIDES.map((s) => s.toFixed(2)).join(' and ')} m)`);
+  const kept = without.size - lost.length;
+  say(
+    `  ${kept} of ${without.size} lane-walks that get through without the frame get through with it, ${withFrame.size - kept} more besides ` +
+      `(lanes ${LANE_SPACING} m apart across the gap, both ways, at ${STRIDES.map((s) => s.toFixed(2)).join(' and ')} m)`,
+  );
 
   // Control: a frame narrowed by 0.3 m a side in place of the real one.
   {

@@ -99,9 +99,8 @@ interface KitStyle {
   readonly posts: readonly GlbPart[];
   readonly lintels: readonly GlbPart[];
   readonly crests: readonly GlbPart[];
-  /** A post's footprint, every node of it: half-width across, half-depth. */
-  readonly postHalfX: number;
-  readonly postHalfZ: number;
+  /** A post's footprint, every node of it (moss and all), about its origin. */
+  readonly post: { readonly minX: number; readonly maxX: number; readonly minZ: number; readonly maxZ: number };
   /** Where the lintel sits: the post's own top, dressing aside. */
   readonly seat: number;
   /** One lintel tile: its width across, height and half-depth. */
@@ -155,8 +154,7 @@ function kit(style: DoorFrameStyle): KitStyle {
         posts,
         lintels,
         crests,
-        postHalfX: Math.max(-post.minX, post.maxX),
-        postHalfZ: Math.max(-post.minZ, post.maxZ),
+        post: { minX: post.minX, maxX: post.maxX, minZ: post.minZ, maxZ: post.maxZ },
         seat: stone.maxY,
         tileWidth: lintel.maxX - lintel.minX,
         lintelHeight: lintel.maxY,
@@ -175,7 +173,8 @@ function kit(style: DoorFrameStyle): KitStyle {
  * faces share a plane. Measured, the drawn post's whole footprint.
  */
 export function doorFramePostWidth(style: DoorFrameStyle): number {
-  return kit(style).postHalfX * 2;
+  const { post } = kit(style);
+  return post.maxX - post.minX;
 }
 
 /** Where a frame goes: the gap, in the room's own frame, on a wall running along X. */
@@ -229,23 +228,21 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
   const k = kit(style);
   const group = new Group();
   group.name = `doorframe.${style}`;
-  const w = k.postHalfX;
-  const posts = [
-    { centre: opening.minX - w },
-    { centre: opening.maxX + w },
-  ].map(({ centre }) => {
+  // Each post's inner face on its gap edge: the left post's +X face, the
+  // right post's −X face.
+  const posts = [opening.minX - k.post.maxX, opening.maxX - k.post.minX].map((centre) => {
     for (const part of k.posts) {
       const mesh = partMesh(part);
       mesh.position.set(centre, opening.floorY, opening.z);
       group.add(mesh);
     }
-    return { minX: centre - w, maxX: centre + w, minZ: opening.z - k.postHalfZ, maxZ: opening.z + k.postHalfZ };
+    return { minX: centre + k.post.minX, maxX: centre + k.post.maxX, minZ: opening.z + k.post.minZ, maxZ: opening.z + k.post.maxZ };
   });
 
   // The lintel spans post to post, outer face to outer face, in whole tiles
   // stretched a little to fit exactly.
-  const from = opening.minX - 2 * w;
-  const to = opening.maxX + 2 * w;
+  const from = posts[0]?.minX ?? opening.minX;
+  const to = posts[1]?.maxX ?? opening.maxX;
   const span = to - from;
   const count = Math.max(1, Math.round(span / k.tileWidth));
   const stretch = span / (count * k.tileWidth);
