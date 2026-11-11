@@ -191,7 +191,12 @@
     "build:parks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/build-parks.mts",
     "check:prebuilt-park": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-prebuilt-park.mts",
     "check:procgen-boundary": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-procgen-boundary.mts",
-    "check:client-no-solver": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-client-no-solver.mts"
+    "check:client-no-solver": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-client-no-solver.mts",
+    "pack:doorframes": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-doorframes-asset.mts",
+    "blend:doorframes": "blender --background --factory-startup --python-exit-code 1 --python art/blend/doorframes_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/doorframes_export.py && pnpm run pack:doorframes",
+    "render:doorframes": "blender --background --factory-startup --python-exit-code 1 --python art/blend/doorframes_render.py",
+    "check:doorframes-glb": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-doorframes-glb.mts",
+    "check:doorframes": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-doorframes.mts"
   },
   "dependencies": {
     "three": "^0.185.1",
