@@ -60,6 +60,8 @@ import {
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAYER_SEATS,
   LIBRARY_SECRET_STAND,
+  LIBRARY_CAT_STAND,
+  LIBRARY_DEN_DOORWAY_STAND,
   libraryCushion,
   libraryFacingStoryChair,
 } from '../src/world/library/layout.ts';
@@ -202,7 +204,14 @@ const FACING_TOLERANCE = 0.05;
  * way round the circle. A facing that equals the arrival's own (180) cannot
  * tell an honoured `facing=` from a dropped one, and the read says so.
  */
-function libraryCheck(path: string, spot: { readonly x: number; readonly z: number }, what: string, facing?: number): DeepLinkCheck {
+function libraryCheck(
+  path: string,
+  spot: { readonly x: number; readonly z: number },
+  what: string,
+  facing?: number,
+  /** With it, the secret shelf must be open (true) or shut (false) once she is there (#719). */
+  den?: boolean,
+): DeepLinkCheck {
   return {
     path,
     assert: async (page) => {
@@ -225,6 +234,7 @@ function libraryCheck(path: string, spot: { readonly x: number; readonly z: numb
           inside: g?.world?.library?.playerIsInside ?? null,
           playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
           facing: typeof g?.player?.facing === 'number' ? (g.player.facing as number) : null,
+          denOpen: typeof g?.world?.library?.denOpen === 'boolean' ? (g.world.library.denOpen as boolean) : null,
         };
       });
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
@@ -235,7 +245,11 @@ function libraryCheck(path: string, spot: { readonly x: number; readonly z: numb
       if (space !== SPACE_LIBRARY || off > CASTLE_TOLERANCE) {
         return { ok: false, detail: `asked for ${what}, room (${spot.x}, ${spot.z}) = world (${want.x}, ${want.z}); she is in '${space}' at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}), ${off.toFixed(1)} m off` };
       }
-      if (facing === undefined) return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}` };
+      const shelf = den === undefined ? '' : `, the secret shelf ${s.denOpen ? 'open' : 'shut'}`;
+      if (den !== undefined && s.denOpen !== den) {
+        return { ok: false, detail: `on ${what}, but the secret shelf is ${s.denOpen === null ? 'unreadable' : s.denOpen ? 'open' : 'shut'} where it should be ${den ? 'open' : 'shut'}` };
+      }
+      if (facing === undefined) return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}${shelf}` };
       const asked = (facing * Math.PI) / 180;
       if (s.facing === null) return { ok: false, detail: `on ${what}, but the player reported no facing to read` };
       const turn = Math.abs(Math.atan2(Math.sin(s.facing - asked), Math.cos(s.facing - asked)));
@@ -243,13 +257,16 @@ function libraryCheck(path: string, spot: { readonly x: number; readonly z: numb
       if (turn > FACING_TOLERANCE) {
         return { ok: false, detail: `on ${what}, ${off.toFixed(2)} m off, but facing ${s.facing.toFixed(3)} rad where the link asked ${asked.toFixed(3)} (${facing}°): ${turn.toFixed(3)} rad round` };
       }
-      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}, facing ${s.facing.toFixed(3)} rad (asked ${facing}°, ${turn.toFixed(3)} rad round)${blind}` };
+      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from ${what}${shelf}, facing ${s.facing.toFixed(3)} rad (asked ${facing}°, ${turn.toFixed(3)} rad round)${blind}` };
     },
   };
 }
 
 /** Where `/library?at=` is asked to stand: the secret shelf's stand spot, to the centimetre a URL carries. */
 const LIBRARY_AT = { x: Number(LIBRARY_SECRET_STAND.x.toFixed(2)), z: Number(LIBRARY_SECRET_STAND.z.toFixed(2)) };
+
+/** And in front of the library cat (#719). */
+const LIBRARY_CAT_AT = { x: Number(LIBRARY_CAT_STAND.x.toFixed(2)), z: Number(LIBRARY_CAT_STAND.z.toFixed(2)) };
 
 /** And at the desk's front, where she talks to the owl (#718) — the link the owl's preview is sent with. */
 const LIBRARY_DESK_AT = { x: Number(LIBRARY_DESK_STAND.x.toFixed(2)), z: Number(LIBRARY_DESK_STAND.z.toFixed(2)) };
@@ -276,7 +293,18 @@ const CHECKS: DeepLinkCheck[] = [
   // returning-save run is the case that must still move her: restored inside,
   // then asked for a spot in it.
   {
-    ...libraryCheck(`/library?at=${LIBRARY_AT.x},${LIBRARY_AT.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_AT, LIBRARY_SECRET_STAND.what, LIBRARY_SECRET_STAND.facing),
+    ...libraryCheck(`/library?at=${LIBRARY_AT.x},${LIBRARY_AT.z}&facing=${LIBRARY_SECRET_STAND.facing}`, LIBRARY_AT, LIBRARY_SECRET_STAND.what, LIBRARY_SECRET_STAND.facing, false),
+    primerPath: '/library',
+  },
+  // `/library-den` (#719): just inside the secret den's doorway, the shelf
+  // open because she is in the den — a ride-table link, `requestEnterDen`.
+  {
+    ...libraryCheck('/library-den', LIBRARY_DEN_DOORWAY_STAND, LIBRARY_DEN_DOORWAY_STAND.what, LIBRARY_DEN_DOORWAY_STAND.facing, true),
+    primerPath: '/library',
+  },
+  // In front of the library cat's pile, turned to her (#719).
+  {
+    ...libraryCheck(`/library?at=${LIBRARY_CAT_AT.x},${LIBRARY_CAT_AT.z}&facing=${LIBRARY_CAT_STAND.facing}`, LIBRARY_CAT_AT, LIBRARY_CAT_STAND.what, LIBRARY_CAT_STAND.facing),
     primerPath: '/library',
   },
   // At the desk's front, turned to the owl's desk (plan Step 4): the parsed
