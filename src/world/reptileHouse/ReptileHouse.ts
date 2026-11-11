@@ -35,7 +35,7 @@ import { ReptileLighting } from './lighting';
 import { SignAtlas } from './signs';
 import { ReptileProps } from './props';
 import { Exhibits } from './exhibits';
-import { ExhibitCamera } from './exhibitCamera';
+import { ExhibitCamera, REPTILE_HALL } from './exhibitCamera';
 import { Planting } from './planting';
 import { paintPaths } from './floorPaint';
 import { ReptileStall } from './stall';
@@ -217,7 +217,7 @@ export class ReptileHouse implements GameSystem {
     this.exhibits = new Exhibits(context);
     // The snake pools are animals, every one of them — a body is never an
     // obstacle to seeing an animal.
-    this.exhibitCamera = new ExhibitCamera({ hall: this.hallRoot, collision, camera: deps.camera, seeThrough: [...adults.meshes, ...babies.meshes] });
+    this.exhibitCamera = new ExhibitCamera({ hall: this.hallRoot, collision, camera: deps.camera, seeThrough: [...adults.meshes, ...babies.meshes], room: REPTILE_HALL });
     new Planting(context);
     paintPaths(context);
     this.stall = new ReptileStall(context);

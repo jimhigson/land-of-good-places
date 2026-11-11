@@ -35,11 +35,33 @@
  * and is this process's exit code.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-/** Not 5173 (Vite's default) and not any port a handoff has named. */
-const PORT = Number(process.env.SERVED_CHECKS_PORT ?? 5947);
+/**
+ * **A port nobody else is on — asked of the OS, never a fixed number.** It was a
+ * fixed 5947, and several agents run `pnpm run check` at once on one Mac: on
+ * 11 Nov 2026 this harness's own vite failed `--strictPort` on 5947 ("Port 5947
+ * is already in use"), the readiness probe below was answered by *another
+ * worktree's* server on that port, and `check:deep-links` ran against that
+ * server until it stopped — every later link ERR_CONNECTION_REFUSED, a red run
+ * about somebody else's game. The OS hands out a free port (bind to 0, read it,
+ * release it); `--strictPort` still makes the rare race on it loud.
+ * `SERVED_CHECKS_PORT` pins one by hand.
+ */
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      probe.close(() => (port ? resolve(port) : reject(new Error('no free port from the OS'))));
+    });
+  });
+const PORT = process.env.SERVED_CHECKS_PORT ? Number(process.env.SERVED_CHECKS_PORT) : await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
 /** A cold dev server answers in a second or two; this is only a backstop. */
 const READY_TIMEOUT_MS = 60_000;
@@ -103,7 +125,44 @@ for (;;) {
   }
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
+// And it must be OUR server that answered: a vite that lost `--strictPort` exits within a second of starting,
+// and the probe above can be answered meanwhile by whoever does hold the port.
+await new Promise((resolve) => setTimeout(resolve, 1500));
+if (!server || server.exitCode !== null) {
+  throw new Error(`the vite dev server this harness started is not running — whatever answered on ${BASE} is somebody else's`);
+}
 say(`serving ${BASE}`);
+
+/**
+ * **The canonical park, built before any check asks for it.** On a source the
+ * dev server has no park for yet, the first request for one runs the accept
+ * loop (`scripts/lib/dev-parks.mjs`) — minutes — and a check that times its
+ * pages from their first load spends its waits on that build instead: on
+ * 26 Oct 2026, run locally after a source change, `check:deep-links`'s first
+ * five links timed out at 120 s each while seeds 5 and 12 were built (611 s
+ * and 675 s), and every link after them passed. In CI `.parks/` is restored
+ * first and this is instant; on a cold tree it is the one wait, said out loud.
+ * Asked again on a headers timeout (Node's fetch gives up on headers after
+ * five minutes): the dev server builds a seed once, however often it is asked.
+ */
+const WARM_TIMEOUT_MS = 40 * 60_000;
+const warmStarted = Date.now();
+say(`warming park seed ${CANONICAL_PARK_SEED} — built on the first request since the source changed, which can take minutes`);
+for (;;) {
+  try {
+    const response = await fetch(`${BASE}/parks/${CANONICAL_PARK_SEED}.json`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    await response.arrayBuffer();
+    break;
+  } catch (error) {
+    const timedOut = String((error as { cause?: { code?: string } })?.cause?.code ?? '').includes('TIMEOUT');
+    if (!timedOut || Date.now() - warmStarted > WARM_TIMEOUT_MS) {
+      stopServer();
+      throw new Error(`park seed ${CANONICAL_PARK_SEED} did not come from ${BASE}/parks/${CANONICAL_PARK_SEED}.json: ${String(error)}`);
+    }
+  }
+}
+say(`park seed ${CANONICAL_PARK_SEED} ready, ${((Date.now() - warmStarted) / 1000).toFixed(1)} s after it was asked for`);
 
 let exitCode = 0;
 for (const command of commands) {
