@@ -59,8 +59,13 @@ export interface GlbKitCheck {
   readonly moduleName: string;
   /** The module's base64 constant. */
   readonly base64: string;
-  /** The module's typed face figures, keyed by node name. */
-  readonly faces: Readonly<Record<string, unknown>>;
+  /**
+   * The module's typed face figures, keyed by node name — or `null` for a kit
+   * with nothing painted on it (the doorway frames), which then must carry no
+   * texcoords and no face figures anywhere, and says on stderr that the face
+   * clauses cover nothing in it.
+   */
+  readonly faces: Readonly<Record<string, unknown>> | null;
   /** That constant's name, for messages: `LIBRARY_FACES`. */
   readonly facesName: string;
   /** The command that regenerates the module: `pnpm run pack:library`. */
@@ -197,7 +202,12 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
       if (rim) check(rim.every((c) => c > 0 && c < 0.5), `${name}: face_rim_uv ${JSON.stringify(rim)}`);
     }
   }
-  check(faced.length > 0, 'no node carries a face — the check of the painted faces covered nothing');
+  if (kit.faces === null) {
+    check(faced.length === 0, `${faced.length} node(s) carry a face, in a kit declared to have none: ${faced.join(', ')}`);
+    process.stderr.write(`  ${kit.label}: this kit declares no painted faces, so the face clauses below cover nothing in it\n`);
+  } else {
+    check(faced.length > 0, 'no node carries a face — the check of the painted faces covered nothing');
+  }
   notes.push(
     `  ${nodes.length} nodes, no material, no texture, names without full stops, translation-only`,
     `  ${faced.length} faced heads, found from the file: ${faced.join(', ')}`,
@@ -209,11 +219,11 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
     nodes.filter((node) => faced.includes(node.name ?? '')).map((node) => [node.name, node.extras]),
   );
   check(
-    canonical(kit.faces) === canonical(fileFaces),
+    canonical(kit.faces ?? {}) === canonical(fileFaces),
     `${kit.facesName} is not the .glb's face extras — run \`${kit.packScript}\`.\n` +
-      `      module: ${canonical(kit.faces)}\n      file:   ${canonical(fileFaces)}`,
+      `      module: ${canonical(kit.faces ?? {})}\n      file:   ${canonical(fileFaces)}`,
   );
-  notes.push(`  ${kit.facesName} equals the file's face extras for all ${Object.keys(kit.faces).length} heads`);
+  notes.push(`  ${kit.facesName} equals the file's face extras for all ${Object.keys(kit.faces ?? {}).length} heads`);
 
   // ------------------------------------------- 3. v climbs with height on every face
 
