@@ -79,3 +79,17 @@ Jim's decisions (all recorded as comments on #722; read them with `gh pr view 72
   (cat bus, coaster, little slides); station benches; RideHolder.companion required + check:exits list;
   clause 13 drops after the dwell + every car stood on; clause 12 standing jumps; issues for seeds 6/9/11/15
   and the two pre-existing QA finds.
+
+### Progress (11 Nov)
+- [x] 6bd…: train bodies from the drawn model (`trainBodies.ts`, terraced boxes, width rule) + lookout at
+      `Player.feetSurface` + band to the train's top. Clause 13 standing (every place at a platform) and jumping
+      (out on the loop, every top). Proofs train-blind-mid-jump, train-band-two-metres: red (jumping case).
+- [x] hover rescue needs the resolver (HOVER_PUSHED 0.5). Clause 13 "hopping under a canopy"; proof hover-any-air
+      red (Sunny Side 7 rescues). Gap drops (real hover) still freed = the control.
+- [x] clause 8 child let go; proof child-left-on-line red.
+- [~] companions: cat bus seat across the gangway (ARRIVAL_KID_COUNT 12-2), coaster back of the tub, every
+      slide 'carried by the ride'; RideHolder.companion required; check:exits NOT_RIDES list + proofs
+      seat-says-backpack, bus-in-backpack. (verifying)
+- [~] station bench = one solid to the seat (hotel sofa precedent); clause 13 "up onto a station's bench".
+- Scratch runners: scratchpad bin/park.sh <tag> [ENV=..] (check-solids park part, census skipped), bin/run.sh
+  <tag> <pnpm script> [ENV=..]; restamp after every src edit (bin/restamp.mjs).
