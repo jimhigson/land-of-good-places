@@ -35,11 +35,15 @@ export const DOORWAY_TAP_PAST_EDGE = ARRIVE_RADIUS + 0.3;
 
 /**
  * How far in from the wall line a tap still counts as "in the doorway": the
- * lintel's own depth and then her body, so a tap under the arch or on the
- * floor right in front of it does, and a tap further into the room does not.
+ * lintel's own depth and then two of her widths, so a tap under the arch or
+ * on the floor in front of it does, and a tap further into the room does
+ * not. Generous on purpose: a finger aimed at a doorway on a phone lands
+ * most of a metre either side of it (the real-tap probe's own aim, at the
+ * wall line, landed up to 0.84 m in), and a tap just short of the line that
+ * strands her under the arch is the bug this exists for.
  */
 export function doorwayTapReach(placed: PlacedDoorFrame): number {
-  return placed.frame.lintelHalfZ + PLAYER_RADIUS;
+  return placed.frame.lintelHalfZ + 2 * PLAYER_RADIUS;
 }
 
 /** Whether world (x, z) is over the frame's drawn plan: post to post, and as deep as its deepest part. */
