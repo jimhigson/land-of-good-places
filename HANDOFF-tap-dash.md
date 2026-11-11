@@ -27,3 +27,15 @@ on every push touching them. Local dev: main's parks artifact restamped into .pa
 - Note: under the CRUISE=5 mutation seed 0 flagged one airborne stride descending 0.3 m into a 0.44 m non-hoppable wall's
   far edge (escort pushed her on) — existing hop-landing behaviour, not dash-specific; shipping config clean.
 - [ ] full check, test:procgen, PR, CI, preview screenshots + frame sheet
+
+## Review + QA round (11 Nov, later)
+- Camera: `IsoCamera.cameraLead(speed, dt)` (frame-exact lead above a sprint) + stride-by-stride follow along
+  `Player.framePath`. 250 m+ dashes at 390x844 drift <= 0.18 NDC (red with old lead: 1.05).
+- Doors: `framePath.ts` + `tapSpacing.bandWalkedThrough` (Hotel/Library/ReptileHouse). Contract clause red under
+  deleting the previousPosition restore.
+- Pose + marker once per frame; resolveMovement result reused; Player callbacks bound once; trail ring buffer.
+- Pets: `followPace = (sprint/pace)^2` past a sprint -> 3.7 m at arrival (red at followPace=1: 52-163 m).
+- Hitch: FrameStrides clamps a dash's movement on a frame > 1.25x typical (red: 5.4-6.7 m jump).
+- Interior: two hotel-lobby journeys. Runs reset between journeys. Tunnel sweep honours solidStepCeiling.
+- Local gate on e0d3b177: check 0, test:procgen 0 (2168), build 0.
+- TODO: CI green, phone frame sheet of a 250 m+ dash on the newest preview (seed 0, start ~65.7,43.4).
