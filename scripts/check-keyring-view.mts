@@ -56,6 +56,7 @@ import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { STILL_BREATH } from '../src/core/cameraBreath.ts';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
 import { DEG } from '../src/core/mathUtils.ts';
 import { screenBasis3D, screenRightOf, screenUpOf, type ScreenBasis3D } from '../src/core/screenBasis.ts';
@@ -96,6 +97,11 @@ shop.openView();
 {
   const camera = new IsoCamera();
   camera.resize(PHONE_VIEWPORT.width, PHONE_VIEWPORT.height);
+  // **The rig at rest, by the camera's test hook** (`IsoCamera.breath`): this asks whether the analytic basis
+  // is the rig's own rotation, to floating point, and the camera breathes — turned about the eye by a few
+  // hundredths of a degree on purpose (`core/cameraBreath.ts`, Jim 11 Nov 2026), which is not the rig
+  // disagreeing. How far the breath turns these axes is measured and printed below, every run.
+  camera.breath = STILL_BREATH;
   camera.snapTo(new Vector3(shop.viewFocus.x, shop.viewFocus.y, shop.viewFocus.z));
   const driftOf = (analytic: ScreenBasis3D): number =>
     Math.max(
@@ -134,6 +140,27 @@ shop.openView();
         `from the focus can explain — the shop is framing about a camera the game does not render.`,
     );
   }
+  // The breathing camera, as the game draws it, against the same analytic basis: the breath's own turn, at its
+  // most over twenty seconds — a hairline against the framing margins below (it is the same few pixels anywhere).
+  const breathing = new IsoCamera();
+  breathing.resize(PHONE_VIEWPORT.width, PHONE_VIEWPORT.height);
+  breathing.snapTo(new Vector3(shop.viewFocus.x, shop.viewFocus.y, shop.viewFocus.z));
+  const analytic = screenBasis3DAt(shop.viewFocus, CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG);
+  let breathDrift = 0;
+  const still = new Vector3();
+  for (let t = 0; t < 20 * 60; t += 1) {
+    breathing.update({ dt: 1 / 60, elapsed: 0, frame: t, playerPosition: still, cameraForward: breathing.forward, input: { justPressed: () => false } } as unknown as Parameters<IsoCamera['update']>[0], new Vector3(shop.viewFocus.x, shop.viewFocus.y, shop.viewFocus.z), still);
+    breathDrift = Math.max(
+      breathDrift,
+      Math.abs(analytic.rightX - breathing.screenRightAxis.x),
+      Math.abs(analytic.rightY - breathing.screenRightAxis.y),
+      Math.abs(analytic.rightZ - breathing.screenRightAxis.z),
+      Math.abs(analytic.upX - breathing.screenUpAxis.x),
+      Math.abs(analytic.upY - breathing.screenUpAxis.y),
+      Math.abs(analytic.upZ - breathing.screenUpAxis.z),
+    );
+  }
+  notes.push(`screen basis while the camera breathes: up to ${breathDrift.toExponential(1)} from the rig at rest (the breath's own turn, measured over 20 s)`);
   notes.push(
     `screen basis: analytic and rendered agree to ${drift.toExponential(1)}; the shop's own ` +
       `${shopDrift.toExponential(1)} (anchor ${anchorToFocus.toFixed(2)} m off focus, allowed ` +
