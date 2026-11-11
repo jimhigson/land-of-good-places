@@ -17,14 +17,24 @@ debs="$HOME/.cache/chromium-debs"
 ATTEMPT_SECONDS="${CHROMIUM_ATTEMPT_SECONDS:-90}"
 
 # Runs "$@" under the attempt clock, and once more if that fails or times out.
-# GNU timeout signals the whole process group, which reaches the apt-get that
-# playwright-core starts under sudo.
+#
+# `--root` runs the clock itself as root. That is load-bearing for apt: measured
+# on a stalled mirror, a clock running as `runner` killed playwright-core but
+# not the root apt-get it had started under sudo, so the retry died at once on
+# "Unable to lock directory /var/lib/apt/lists/" with the first apt still
+# hanging. GNU timeout signals its whole process group, and as root that signal
+# reaches apt-get and its download workers.
 with_retry() {
+  local clock=(timeout --kill-after=10 "$ATTEMPT_SECONDS")
+  if [ "$1" = "--root" ]; then
+    clock=(sudo "${clock[@]}")
+    shift
+  fi
   local what="$1"
   shift
   for attempt in 1 2; do
     local started=$SECONDS status=0
-    timeout --kill-after=10 "$ATTEMPT_SECONDS" "$@" || status=$?
+    "${clock[@]}" "$@" || status=$?
     if [ "$status" -eq 0 ]; then
       echo "$what: attempt $attempt succeeded in $((SECONDS - started)) s"
       return 0
@@ -74,7 +84,9 @@ EOF
 # install fetched.
 sudo apt-get clean
 
-with_retry "system packages" pnpm exec playwright-core install-deps chromium
+# As root, by absolute path: sudo resets PATH, and playwright-core then runs
+# apt-get directly rather than through a sudo of its own.
+with_retry --root "system packages" "$(command -v node)" node_modules/playwright-core/cli.js install-deps chromium
 with_retry "browser install" pnpm exec playwright-core install chromium
 
 mkdir -p "$debs"
