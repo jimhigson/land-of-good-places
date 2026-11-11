@@ -200,21 +200,22 @@ for (const room of rooms) {
   }
   const lintel = union(frameMeshes(placed, 'lintel').map(drawnBounds));
   const lintelSolid = placed.solids.lintel;
-  // flat-ok: the interiors are flat plates at their own far origins, off the planet; a frame's drawn box is upright there
-  if (Math.abs(lintelSolid.baseHeight - lintel.min.y) > TOL || Math.abs(lintelSolid.topHeight - lintel.max.y) > TOL) {
-    fail(`${room.name}: the lintel's collider band ${lintelSolid.baseHeight.toFixed(3)}..${lintelSolid.topHeight.toFixed(3)} is not its drawn ${lintel.min.y.toFixed(3)}..${lintel.max.y.toFixed(3)}`);
+  // flat-ok: the interiors are flat plates at their own far origins, off the planet; the lintel's drawn box is upright there
+  const [lintelBottom, lintelTopDrawn] = [lintel.min.y, lintel.max.y];
+  if (Math.abs(lintelSolid.baseHeight - lintelBottom) > TOL || Math.abs(lintelSolid.topHeight - lintelTopDrawn) > TOL) {
+    fail(`${room.name}: the lintel's collider band ${lintelSolid.baseHeight.toFixed(3)}..${lintelSolid.topHeight.toFixed(3)} is not its drawn ${lintelBottom.toFixed(3)}..${lintelTopDrawn.toFixed(3)}`);
   }
   for (const box of placed.solids.posts) {
-    if (Math.abs(box.topHeight - lintel.max.y) > TOL) fail(`${room.name}: a post's collider tops out at ${box.topHeight.toFixed(3)}, the lintel over it at ${lintel.max.y.toFixed(3)}`);
+    if (Math.abs(box.topHeight - lintelTopDrawn) > TOL) fail(`${room.name}: a post's collider tops out at ${box.topHeight.toFixed(3)}, the lintel over it at ${lintelTopDrawn.toFixed(3)}`);
   }
-  const clear = lintel.min.y - floorY;
+  const clear = lintelBottom - floorY;
   if (clear < TALLEST_CHILD_HEIGHT) fail(`${room.name}: the lintel is ${clear.toFixed(3)} m over the floor, under the tallest child (${TALLEST_CHILD_HEIGHT})`);
   const everything = union(frameMeshes(placed, '').map(drawnBounds));
-  // flat-ok: the interiors are flat plates at their own far origins, off the planet; a frame's drawn box is upright there
-  if (frame.style === 'castle' && everything.max.y - floorY > CASTLE_CEILING_CLEAR) {
-    fail(`castle: the frame reaches ${(everything.max.y - floorY).toFixed(3)} m, the ceiling is at ${CASTLE_CEILING_CLEAR}`);
+  const frameTall = everything.max.y - floorY; // flat-ok: the interiors are flat plates at their own far origins, off the planet
+  if (frame.style === 'castle' && frameTall > CASTLE_CEILING_CLEAR) {
+    fail(`castle: the frame reaches ${frameTall.toFixed(3)} m, the ceiling is at ${CASTLE_CEILING_CLEAR}`);
   }
-  say(`  posts' colliders on their drawn footprints; lintel ${clear.toFixed(2)} m clear (tallest child ${TALLEST_CHILD_HEIGHT}), frame ${(everything.max.y - floorY).toFixed(2)} m tall`);
+  say(`  posts' colliders on their drawn footprints; lintel ${clear.toFixed(2)} m clear (tallest child ${TALLEST_CHILD_HEIGHT}), frame ${frameTall.toFixed(2)} m tall`);
 
   // ---------------------------------------------- 3. marched at, and stopped
   const march = (rect: { minX: number; maxX: number; minZ: number; maxZ: number }, bearing: number, stride: number): number => {
