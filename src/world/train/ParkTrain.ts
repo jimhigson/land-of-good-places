@@ -33,7 +33,8 @@ import {
   type Locomotive,
   type TrainCar,
 } from './trainModel';
-import { CARRIAGE_BODY_HALF_WIDTH, LOCO_BODY_TOP_Y } from './trainDimensions';
+import { CARRIAGE_BODY_HALF_WIDTH } from './trainDimensions';
+import { carPieces, highestTop, widestHalf, type CarPiece } from './trainBodies';
 import { playChuff, playStationBell, playTrainWhistle, setTrainAudioCarry } from './trainSounds';
 import { setTrainService, type TrainPassenger, type TrainService, type TrainStop } from './service';
 
@@ -117,7 +118,7 @@ const HARDEST_BRAKING = 9;
  * its body, so there it is narrower, and asked two ways:
  *
  * - **ahead of the train**, a body is in its way once it reaches the engine's
- *   widest — the cab's eaves ({@link PLATFORM_AHEAD}) — and a hand: she may
+ *   widest — the cab's eaves ({@link platformAhead}) — and a hand: she may
  *   wait on the platform, but not with her toes over the edge;
  * - **beside it, standing**, only a body over it — its middle inside where
  *   the carriages' sides pass ({@link PLATFORM_BESIDE}), which is a body up on
@@ -126,8 +127,15 @@ const HARDEST_BRAKING = 9;
  *   of the crowd idling at the platform's edge, does not hold it there.
  */
 const ON_THE_LINE = TRACK_CLEARANCE;
-/** Ahead of the train beside a platform: the cab's eaves (`ENGINE_PIECES`), and a hand. */
-const PLATFORM_AHEAD = CARRIAGE_BODY_HALF_WIDTH + 0.12 + 0.08;
+/** Ahead of the train beside a platform, a hand beyond the engine's widest (the cab's eaves): see {@link ParkTrain.platformAhead}. */
+const PLATFORM_HAND = 0.08;
+/**
+ * **How far over the train's highest top a body's feet may be and still be on
+ * the line**, metres: a body standing on its funnel's rim is on it, one on a
+ * bridge's deck over it is not (every soffit clears the train by
+ * `RIDER_HEADROOM`, 0.4 m, and more).
+ */
+const ON_TOP_SLACK = 0.05;
 /** Beside a standing train at a platform: a body's middle inside the carriages' sides — up on one. */
 const PLATFORM_BESIDE = CARRIAGE_BODY_HALF_WIDTH;
 /** How long the line must stay clear before the train toots for the next person on it. */
@@ -175,58 +183,8 @@ const AUDIBLE_RANGE = 42;
 /** Shared empty list: "nothing you can do with this train from here, just now". */
 const NO_ACTIONS: readonly ZoneAction[] = [];
 
-/**
- * **One solid piece of a car**, in the car's own frame: centred at `(x, z)`,
- * `halfX` across and `halfZ` along, its top `top` above the car's floor datum
- * (the rails' ground, where the car's root stands). `narrow` for a top no
- * child could stand on — a rim, a backrest, a round boiler — which she bumps,
- * jumps over or falls off, but never lands on.
- */
-interface CarPiece {
-  readonly x: number;
-  readonly z: number;
-  readonly halfX: number;
-  readonly halfZ: number;
-  readonly top: number;
-  readonly narrow: boolean;
-}
-
 /** How far below a car's datum its pieces begin: under the ground, so nobody stands beneath one. */
 const PIECE_BASE = -0.5;
-/** Half a narrow piece's depth: a backrest's, fattened from its drawn 0.1 m to the rim's 0.16 m so she meets it square. */
-const RIM_HALF = 0.08;
-
-/**
- * **The engine, as solid as it is drawn** (`createLocomotive`): the chassis, the
- * boiler and smokebox, the cab under its roof, the funnel, the dome and the
- * buffer beam. Only the cab's roof is a top she could stand on — the boiler is
- * round, and the rest are rims and posts.
- */
-const ENGINE_PIECES: readonly CarPiece[] = [
-  { x: 0, z: 0, halfX: CARRIAGE_BODY_HALF_WIDTH, halfZ: (LOCO_LENGTH - 0.2) / 2, top: CAR_FLOOR_Y, narrow: true },
-  { x: 0, z: (-0.55 + 2.1) / 2, halfX: 0.56, halfZ: (2.1 + 0.55) / 2, top: CAR_FLOOR_Y + 1.11, narrow: true },
-  { x: 0, z: -1.05, halfX: CARRIAGE_BODY_HALF_WIDTH + 0.12, halfZ: 0.75, top: CAR_FLOOR_Y + 1.27, narrow: false },
-  { x: 0, z: 1.25, halfX: 0.27, halfZ: 0.27, top: LOCO_BODY_TOP_Y, narrow: true },
-  { x: 0, z: 0.35, halfX: 0.22, halfZ: 0.22, top: CAR_FLOOR_Y + 1.23, narrow: true },
-  { x: 0, z: LOCO_LENGTH / 2 - 0.05, halfX: CARRIAGE_BODY_HALF_WIDTH + 0.1, halfZ: 0.09, top: CAR_FLOOR_Y + 0.1, narrow: true },
-];
-
-/**
- * **A carriage, as solid as it is drawn** (`createCarriage`): an open tub whose
- * top is its rim — the cream strip round its sides and ends — and its two
- * backrests standing up out of it. She stands on a carriage at its rim: the
- * seats are 6 cm under it, and the footwell between them and the gaps behind
- * the backrests are narrower than she is (0.54 m and 0.35 m against her
- * 1.24 m), so there is nowhere lower in a carriage for her to stand. Measured
- * on seed 5, rims of their own (0.16 m wide, too narrow to stand on) left her
- * four centimetres either side to land in, so every jump onto the carriage put
- * her on a rim and off again — a tub she could see the top of and never reach.
- */
-const CARRIAGE_PIECES: readonly CarPiece[] = [
-  { x: 0, z: 0, halfX: CARRIAGE_BODY_HALF_WIDTH, halfZ: CARRIAGE_LENGTH / 2, top: CAR_FLOOR_Y + 0.48, narrow: false },
-  { x: 0, z: 0.78, halfX: CARRIAGE_BODY_HALF_WIDTH - 0.09, halfZ: RIM_HALF, top: SEAT_Y + 0.34, narrow: true },
-  { x: 0, z: -0.78, halfX: CARRIAGE_BODY_HALF_WIDTH - 0.09, halfZ: RIM_HALF, top: SEAT_Y + 0.34, narrow: true },
-];
 
 /** A car's pieces in the collision world, and the pieces they are. */
 interface CarBody {
@@ -318,6 +276,15 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly aboard = new Map<NpcCharacter, number>();
   /** Every car's solid pieces — see {@link CarBody}; moved with the car every frame ({@link placeCars}). */
   private readonly bodies: CarBody[] = [];
+  /**
+   * **Ahead of the train beside a platform, how far off the line's middle a
+   * body is in its way**, metres: the engine's widest as drawn (the cab's
+   * eaves, `trainBodies.ts`) and a hand — she may wait on the platform, but
+   * not with her toes over the edge.
+   */
+  private platformAhead = 0;
+  /** The highest any of its cars stands, car-local metres: a body's feet up to this (and {@link ON_TOP_SLACK}) are on the train. */
+  private trainTop = 0;
   private readonly collision: CollisionWorld;
 
   /** Distance of the *locomotive's centre* along the route. */
@@ -521,16 +488,16 @@ export class ParkTrain implements GameSystem, TrainService {
     // carried, never collided, so nobody aboard is pushed by their own train.
     this.collision = collision;
     for (const car of this.cars) {
-      const pieces = car === this.locomotive ? ENGINE_PIECES : CARRIAGE_PIECES;
+      const pieces = carPieces(car.root);
       const kind = car === this.locomotive ? 'train engine' : 'train carriage';
       const boxes = pieces.map((piece) =>
-        collision.kinded(kind, () =>
-          piece.narrow
-            ? collision.toppedNarrow(RIM_HALF, () => collision.addMovingBox(0, 0, piece.halfX, piece.halfZ, 0, piece.top, PIECE_BASE))
-            : collision.addMovingBox(0, 0, piece.halfX, piece.halfZ, 0, piece.top, PIECE_BASE),
-        ),
+        // As wide as it is drawn: the width rule decides whether she can
+        // stand on it (`FOOT_HALF_WIDTH`), never a flag.
+        collision.kinded(kind, () => collision.toppedNarrow(piece.topHalf, () => collision.addMovingBox(0, 0, piece.halfX, piece.halfZ, 0, piece.top, PIECE_BASE))),
       );
       this.bodies.push({ car, pieces, boxes });
+      this.trainTop = Math.max(this.trainTop, highestTop(pieces));
+      if (car === this.locomotive) this.platformAhead = widestHalf(pieces) + PLATFORM_HAND;
     }
 
     this.placeCars();
@@ -594,7 +561,7 @@ export class ParkTrain implements GameSystem, TrainService {
   private lineAt(x: number, y: number, z: number, radius: number): number | null {
     const near = this.nearLine(x, y, z);
     if (!near) return null;
-    return near.lateral > (near.onPlatform ? PLATFORM_AHEAD : ON_THE_LINE) + radius ? null : near.at;
+    return near.lateral > (near.onPlatform ? this.platformAhead : ON_THE_LINE) + radius ? null : near.at;
   }
 
   private readonly nearScratch = { at: 0, lateral: 0, onPlatform: false };
@@ -611,7 +578,11 @@ export class ParkTrain implements GameSystem, TrainService {
       at = this.route.wrap(at + (x - this.point.x) * this.tangent.x + (z - this.point.z) * this.tangent.z);
     }
     this.route.pointAt(at, this.point);
-    if (y > this.point.y + 2 || y < this.point.y - 1.5) return null;
+    // Feet anywhere from the track bed up to the train's highest top — on
+    // the line, beside it, or up on the train — and never a bridge's deck.
+    // Asked of where a body *stands* (`lookout` gives her standing height):
+    // a jump on its roof is still her on its roof.
+    if (y > this.point.y + this.trainTop + ON_TOP_SLACK || y < this.point.y - 1.5) return null;
     const near = this.nearScratch;
     near.at = at;
     near.lateral = Math.hypot(x - this.point.x, z - this.point.z);
@@ -622,7 +593,9 @@ export class ParkTrain implements GameSystem, TrainService {
   /** Everybody the train looks out for: her, her line, and whoever else {@link keepClearOf} was given. */
   private *lookout(): Iterable<OnTheLine> {
     const player = this.player;
-    if (player && !player.riding) yield { x: player.position.x, y: player.position.y, z: player.position.z, radius: PLAYER_RADIUS };
+    // Where she stands, not where she is drawn: mid-jump on its roof she is
+    // on its roof (`Player.feetSurface`).
+    if (player && !player.riding) yield { x: player.position.x, y: player.feetSurface, z: player.position.z, radius: PLAYER_RADIUS };
     if (this.parade) for (const at of this.parade.standing()) yield { x: at.x, y: at.y, z: at.z, radius: PARADE_MEMBER_RADIUS };
     for (const source of this.clearOf) yield* source();
   }
@@ -662,7 +635,7 @@ export class ParkTrain implements GameSystem, TrainService {
       if (!near) continue;
       const at = near.at;
       const beside = this.route.forwardGap(this.route.wrap(nose - length), at) <= length + body.radius;
-      const reach = near.onPlatform ? (beside ? PLATFORM_BESIDE : PLATFORM_AHEAD + body.radius) : ON_THE_LINE + body.radius;
+      const reach = near.onPlatform ? (beside ? PLATFORM_BESIDE : this.platformAhead + body.radius) : ON_THE_LINE + body.radius;
       if (near.lateral > reach) continue;
       const ahead = this.route.forwardGap(nose, at);
       if (beside) return 0;

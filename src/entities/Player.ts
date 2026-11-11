@@ -1046,6 +1046,18 @@ export class Player implements GameSystem {
   }
 
   /**
+   * **The height of what is under her feet** — what she stands on, or, in
+   * the air, what she will come down on (`groundHeight`). Where she *stands*,
+   * for anything that asks that rather than where she is drawn: the train
+   * waits for a child standing on its roof whether or not she is mid-jump
+   * (`ParkTrain.lookout` — PR #722's review: a jump took her feet out of its
+   * reach, and it pulled away under her).
+   */
+  get feetSurface(): number {
+    return this.groundHeight;
+  }
+
+  /**
    * **Is she running?** — the one definition, read by everything that cares
    * about the difference between a run and a walk.
    *
