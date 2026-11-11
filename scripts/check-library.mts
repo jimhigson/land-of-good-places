@@ -7819,11 +7819,14 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
     library.standUp();
     if (!library.denOpen) library.openDenInstantly();
     child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z + 1, 0);
-    let claimedAfter = 0;
-    for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
+    // It eases home after she stands (the director's own cancel ease), and
+    // is gone within HOME_WITHIN_CANCEL — STORY CAMERA's own limit.
+    let lastClaim = -1;
+    for (let i = 0; i < Math.round((HOME_WITHIN_CANCEL + 1) / CHILD_DT); i += 1) {
       child.step();
-      if (storyClaimed) claimedAfter += 1;
+      if (storyClaimed) lastClaim = i + 1;
     }
+    const claimedFor = lastClaim * CHILD_DT;
     const home = Math.hypot(camera.focusPoint.x - child.player.position.x, camera.focusPoint.z - child.player.position.z);
     const shushesBefore = owl.shushes;
     const phases2: StoryPhase[] = [];
@@ -7835,9 +7838,9 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
       if (story.told > toldBefore2 && library.storyPhase === 'idle') break;
     }
     say(
-      heldWhileSat && readingWhenUp && claimedAfter === 0 && home < 1.5,
+      heldWhileSat && readingWhenUp && claimedFor <= HOME_WITHIN_CANCEL && home < 1.5,
       `sat on ${seat} at story time, story time's camera held the frame (${heldWhileSat}); she got up mid-reading (${readingWhenUp}) and walked into the den: ` +
-        `the story camera claimed ${claimedAfter} frames after (none wanted), and the camera came home to her, its focus ${home.toFixed(2)} m from her feet (under 1.5)`,
+        `the story camera let go ${Math.max(0, claimedFor).toFixed(2)} s after she stood (within STORY CAMERA's ${HOME_WITHIN_CANCEL.toFixed(2)} s), and the camera came home to her, its focus ${home.toFixed(2)} m from her feet (under 1.5)`,
     );
     say(
       story.told === toldBefore2 + 1 && !leftDen2 && owl.shushes === shushesBefore,
