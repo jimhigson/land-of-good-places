@@ -350,7 +350,12 @@ export class Library implements GameSystem {
    * whose item is the zone just answered (`library-dragon`, `library-cat`),
    * so it outranks that zone's own chip while it is up.
    */
-  readonly creatureBubble = new SpeechBubble({ id: 'library-creature-says', item: '', kind: 'actionFeedback' }, PALETTE.markerLemon);
+  // Drawn over the scenery (LABELS.md, "Drawn over the scenery"): the dragon
+  // talks from the den's corner behind the faded west wall and the lintel,
+  // and depth-tested its bubble was cut by them — its ends sliced off at
+  // 390x844, and half of it hidden by the wall once she stepped back out
+  // (headless Chrome on the PR preview, 11 Nov 2026).
+  readonly creatureBubble = new SpeechBubble({ id: 'library-creature-says', item: '', kind: 'actionFeedback' }, PALETTE.markerLemon, { overScenery: true });
   /** How long the creature's line stays up (`lineSeconds`, the one rule every speaker holds a line by). */
   private creatureLineFor = 0;
   /** The last line the creature bubble was asked to say — kept after the bubble goes, for the checks. */
