@@ -198,6 +198,7 @@ async function child(seed: number): Promise<void> {
   const { terrainHeight } = await import('../src/world/terrain.ts');
   const { PLAYER_RADIUS } = await import('../src/core/constants.ts');
   const { KID_HEIGHT } = await import('../src/art/models/kidHeight.ts');
+  const { solidStepCeiling } = await import('../src/world/standing.ts');
   const { NavGrid } = await import('../src/world/NavGrid.ts');
   const { circleBoundary } = await import('../src/world/boundary.ts');
   const { HOTEL_PLAY_RADIUS } = await import('../src/core/constants.ts');
@@ -351,9 +352,15 @@ async function child(seed: number): Promise<void> {
       // above the ground. A step-up or a hop is never mistaken for a tunnel;
       // a point well inside the shape itself, below its top, always is.
       const feet = Math.max(a.ground, b.ground, probe.y);
-      const depth = collision.deepestSolidOverlap(probe, 0.01, Math.max(a.hop, b.hop), undefined, KID_HEIGHT, feet) - 0.01;
+      // A top within a step of her feet is a step she may walk up onto and
+      // over — a bench, a knee-high fence — by the game's own rule
+      // (`solidStepCeiling`, what `Player` hands `resolveMovement` when she
+      // walks into one), so it is no tunnel. Found on seed 0: a dash crossed a
+      // 0.58 m fence at a joint by stepping over it, as a walk into it would.
+      const depth =
+        collision.deepestSolidOverlap(probe, 0.01, Math.max(a.hop, b.hop), (x, z) => solidStepCeiling(collision, x, z, feet), KID_HEIGHT, feet) - 0.01;
       if (depth > TUNNEL_DEPTH) {
-        return `centre ${depth.toFixed(2)} m inside ${collision.describeNear(probe.x, probe.z, 0.05)[0] ?? 'a solid'} at (${probe.x.toFixed(2)}, ${probe.z.toFixed(2)})`;
+        return `centre ${depth.toFixed(2)} m inside ${collision.describeNear(probe.x, probe.z, 0.05).join(' | ') || 'a solid'} at (${probe.x.toFixed(2)}, ${probe.z.toFixed(2)})`;
       }
     }
     return null;
