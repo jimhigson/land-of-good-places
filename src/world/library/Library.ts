@@ -769,11 +769,14 @@ export class Library implements GameSystem {
    */
   interactZones(): InteractZone[] {
     if (!this.inside) return [this.exteriorEntranceZone()];
-    const creatures = this.secretShelf.open ? [this.catZone, this.dragonZone] : [this.catZone];
-    const standing = this.player?.riding
-      ? []
-      : [...(this.owl.atDesk ? [this.owlZone] : []), ...this.bookZones, this.pullZone, ...creatures];
-    return [...standing, ...this.sitZones()];
+    const zones: InteractZone[] = [];
+    if (!this.player?.riding) {
+      if (this.owl.atDesk) zones.push(this.owlZone);
+      zones.push(...this.bookZones, this.pullZone, this.catZone);
+      if (this.secretShelf.open) zones.push(this.dragonZone);
+    }
+    zones.push(...this.sitZones());
+    return zones;
   }
 
   /**
@@ -979,10 +982,15 @@ export class Library implements GameSystem {
    * one sees it otherwise, and it only ever meets her in there with the shelf
    * open. Then their one bubble's hold.
    */
+  /** Her feet, room-local — one record rewritten every frame, for the dragon. */
+  private readonly herInRoom = { x: 0, z: 0 };
+
   private updateCreatures(player: Player, dt: number, elapsed: number): void {
     this.cat.update(dt, elapsed);
     if (this.denRoot.visible) {
-      const her = { x: player.position.x - LIBRARY_ORIGIN_X, z: player.position.z - LIBRARY_ORIGIN_Z };
+      const her = this.herInRoom;
+      her.x = player.position.x - LIBRARY_ORIGIN_X;
+      her.z = player.position.z - LIBRARY_ORIGIN_Z;
       this.den.update(dt, elapsed, her, this.playerInDen(player), this.secretShelf.open);
     }
     if (this.creatureLineFor > 0) {

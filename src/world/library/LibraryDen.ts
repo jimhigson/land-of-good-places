@@ -80,8 +80,14 @@ export const LIBRARY_DRAGON_SEED = 0x0b00d1;
 export const DRAGON_MEET_RADIUS = 2.2;
 /** Within this, in the den, it turns its head to watch her and is happy to see her. */
 export const DRAGON_LOOK_RADIUS = 3;
-/** How far its head turns either way (radians), and the half-life it turns with. */
-export const DRAGON_HEAD_TURN_LIMIT = 0.6;
+/**
+ * How far its head turns either way (radians), and the half-life it turns
+ * with. Far enough to look straight at her on its stand: the nest faces 45°
+ * and `LIBRARY_DRAGON_STAND` is due east of it, a turn of π/4 (0.785) — at
+ * 0.6 it looked 11° past her shoulder the whole time she said hi (the Step-13
+ * re-review). The pose sweep measures its body across the whole range.
+ */
+export const DRAGON_HEAD_TURN_LIMIT = 0.8;
 const DRAGON_HEAD_HALF_LIFE = 0.12;
 /** The small nod while it watches her: this much (radians), at this rate (radians a second). */
 export const DRAGON_NOD = 0.05;
