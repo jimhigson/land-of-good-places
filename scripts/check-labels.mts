@@ -382,6 +382,8 @@ const coverage = {
   scenes: new Map<string, number>(),
 };
 
+/** Pixels: how far this check's own measure of a drawn label may be from the manager's (the instrument's control), and so its precision. */
+const INSTRUMENT_PX = 1;
 let frame = 0;
 let scene_ = '';
 const rects = new Map<ManagedLabel, ScreenRect>();
@@ -407,7 +409,7 @@ function audit(): void {
         Math.abs(theirs.bottom - rect.bottom),
       );
       coverage.instrumentChecks += 1;
-      if (!(off <= 1)) {
+      if (!(off <= INSTRUMENT_PX)) {
         fail('instrument', `${name(label)} measured ${fmtRect(rect)} here and ${fmtRect(theirs)} by the manager, frame ${frame} (${scene_})`);
       }
     } else if (state.wanted) {
@@ -479,7 +481,11 @@ function audit(): void {
       const track = tracks.get(label);
       const mine = rects.get(label)!;
       const room = track?.drawn ? LABEL_MARGIN_PX : LABEL_MARGIN_PX + LABEL_ENTRY_CUSHION_PX;
-      const blocker = drawn.find((other) => prec(other) >= prec(label) && rectsTouch(mine, rects.get(other)!, room));
+      // Within this instrument's own precision ({@link INSTRUMENT_PX}) of the margin counts as in the way: the chip
+      // row is a layout model here, a twentieth of a pixel off the manager's, and the camera breathes (Jim, 11 Nov
+      // 2026), so a neighbour sitting on the margin's edge is found there — frame 4922 of the castle shops on
+      // 11 Nov: the chip row 4.004 px below Theo's name here, 3.950 px to the manager, which rightly held it back.
+      const blocker = drawn.find((other) => prec(other) >= prec(label) && rectsTouch(mine, rects.get(other)!, room + INSTRUMENT_PX));
       if (blocker) {
         coverage.overlapsPrevented += 1;
         if (track) track.lastBlocked = frame;
