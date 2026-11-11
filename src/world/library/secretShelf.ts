@@ -261,14 +261,14 @@ export class SecretLeaf {
    */
   update(dt: number, elapsed: number): void {
     const shut = this.state === 'shut';
-    this.twinkleMaterial.opacity = shut ? Math.max(0, Math.sin((elapsed * 2 * Math.PI) / TWINKLE_PERIOD)) ** 8 : 0;
+    this.twinkleMaterial.opacity = shut ? Math.pow(Math.max(0, Math.sin((elapsed * 2 * Math.PI) / TWINKLE_PERIOD)), 8) : 0;
     this.twinkle.visible = this.twinkleMaterial.opacity > 0.001;
     this.starMaterial.emissiveIntensity = this.starRest + STAR_WINK_GLOW * this.twinkleMaterial.opacity;
     if (this.state === 'swinging') {
       this.tau += dt;
       this.slide = SLIDE * Math.min(1, this.tau / SLIDE_SECONDS);
       const u = Math.min(1, Math.max(0, (this.tau - SLIDE_SECONDS) / SWING_SECONDS));
-      this.setAngle(SWING_END * (1 - (1 - u) ** 3));
+      this.setAngle(SWING_END * (1 - Math.pow(1 - u, 3)));
       if (u >= 1) this.land(true);
     } else if (this.slide > 0) {
       this.slide = damp(this.slide, 0, BOOK_HOME_HALF_LIFE, dt);
