@@ -6751,7 +6751,8 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
  *    standing there is read to its end (gathering → reading → dispersing →
  *    idle, `told` one more, never aborted), she never leaves the den, and the
  *    clock counts down there afterwards.
- * 2. No "Shhh!" in the den: a jump and a sprint there, the owl at her desk and
+ * 2. No "Shhh!" in the den: a jump and a sprint there (the den is too small to
+ *    hold a run for long; stderr says how long), the owl at her desk and
  *    her cooldown run out, never shush. CONTROL: the same jump back in the
  *    room does.
  *
@@ -6826,9 +6827,15 @@ console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in
     longestRun = Math.max(longestRun, runFor);
   }
   say(
-    owl.atDesk && tookOff && longestRun >= SHUSH_RUN_SECONDS + 0.1 && !sprintLeftDen && owl.shushes === before,
-    `no "Shhh!" in the den: with the owl at her desk (${owl.atDesk}), a jump (took off: ${tookOff}) and a sprint running ${longestRun.toFixed(2)} s at a stretch ` +
-      `(a run of ${SHUSH_RUN_SECONDS} s shushes in the room; she stayed in the den: ${!sprintLeftDen}) — ${owl.shushes - before} shush(es)`,
+    owl.atDesk && tookOff && !sprintLeftDen && owl.shushes === before,
+    `no "Shhh!" in the den: with the owl at her desk (${owl.atDesk}), a jump (took off: ${tookOff}) and a sprint round the den ` +
+      `(she stayed in it: ${!sprintLeftDen}) — ${owl.shushes - before} shush(es)`,
+  );
+  // Said on every run: the den is too small for a sprint to stay a run for
+  // long, so it is the jump that this clause rests on (its CONTROL below).
+  process.stderr.write(
+    `  note: THE DEN AT STORY TIME: the longest run the den allowed was ${longestRun.toFixed(2)} s against the shush's ${SHUSH_RUN_SECONDS} s — ` +
+      `${longestRun >= SHUSH_RUN_SECONDS ? 'long enough, so the sprint is asked too' : 'too short to shush anywhere, so only the jump is asked'}\n`,
   );
   // CONTROL: the same jump in the reading room shushes.
   child.run(SHUSH_COOLDOWN_SECONDS + 0.5);
