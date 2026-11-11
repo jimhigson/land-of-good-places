@@ -176,7 +176,8 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { BackSide, Box3, Color, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshToonMaterial, Raycaster, Sprite, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type SpriteMaterial, type Texture } from 'three';
+import { Box3, Color, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshToonMaterial, Raycaster, Sprite, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type SpriteMaterial, type Texture } from 'three';
+import { isOutlineMesh } from '../src/art/style/materials.ts';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
 import { LIBRARY_DEN_LANTERN_NODES, LIBRARY_DEN_ROOM_NODES, libraryDenPart } from '../src/art/models/libraryDenKit.ts';
@@ -927,23 +928,25 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
     note("TOOK the Artist's drawn north wall out of the den, its body left, on purpose — this run must go red");
   }
   library.roomRoot.updateMatrixWorld(true);
-  const isOutline = (mesh: Mesh): boolean => mesh.material instanceof MeshBasicMaterial && mesh.material.side === BackSide;
   // Every mesh drawn for the den is the kit's own.
   const kitNodes = new Set<string>([...LIBRARY_DEN_ROOM_NODES, ...LIBRARY_DEN_LANTERN_NODES]);
   let kitMeshes = 0;
   let outlines = 0;
   const strangers: string[] = [];
   const drawnOf = new Map<string, Mesh>();
+  /** How many times each kit node is drawn — the room's once each, the lantern's once per lantern. */
+  const timesDrawn = new Map<string, number>();
   for (const root of [model.root, model.lintel]) {
     root.traverse((part) => {
       if (!(part instanceof Mesh)) return;
       if (part === shellOfDen.books) return;
-      if (isOutline(part)) {
+      if (isOutlineMesh(part)) {
         outlines += 1;
         return;
       }
       if (kitNodes.has(part.name) && part.geometry === libraryDenPart(part.name).geometry) {
         kitMeshes += 1;
+        timesDrawn.set(part.name, (timesDrawn.get(part.name) ?? 0) + 1);
         if (!drawnOf.has(part.name)) drawnOf.set(part.name, part);
         return;
       }
@@ -955,6 +958,39 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
     `the den is drawn from the Artist's kit: ${kitMeshes} meshes, each a libraryDen.glb node's own geometry (${LIBRARY_DEN_ROOM_NODES.length} room nodes, ${shellOfDen.lanterns.length} lanterns), ` +
       `${outlines} ink outline(s), the niche books, and ${strangers.length} anything else${strangers.length > 0 ? ` (${strangers.slice(0, 4).join(', ')})` : ''}; ` +
       `the lintel hangs in the west wall's group (${model.lintel.parent === library.westWall})`,
+  );
+
+  // Every room node drawn exactly once, and both lantern nodes once per
+  // lantern — counted off the drawn den, never the constant lists.
+  const roomCounts = LIBRARY_DEN_ROOM_NODES.map((name) => `${name} ${timesDrawn.get(name) ?? 0}`);
+  const roomWrong = LIBRARY_DEN_ROOM_NODES.filter((name) => timesDrawn.get(name) !== 1);
+  const lanternCounts = LIBRARY_DEN_LANTERN_NODES.map((name) => `${name} ${timesDrawn.get(name) ?? 0}`);
+  const lanternWrong = LIBRARY_DEN_LANTERN_NODES.filter((name) => timesDrawn.get(name) !== shellOfDen.lanterns.length);
+  say(
+    roomWrong.length === 0 && lanternWrong.length === 0 && shellOfDen.lanterns.length === 2,
+    `every node of the den kit is drawn as often as it should be, counted off the drawn den: room nodes once each (${roomCounts.join(', ')}), ` +
+      `lantern nodes once per lantern for ${shellOfDen.lanterns.length} lanterns (${lanternCounts.join(', ')})` +
+      (roomWrong.length + lanternWrong.length > 0 ? ` — WRONG: ${[...roomWrong, ...lanternWrong].join(', ')}` : ''),
+  );
+  // Seen: visible all the way up to the den's root (the lintel to the west
+  // wall's group, which it hangs in), and the south wall the one wall hidden
+  // — the camera's near side — so a swapped hide goes red either way.
+  const shownUpTo = (mesh: Mesh | undefined, top: Object3D): boolean => {
+    if (!mesh) return false;
+    for (let at: Object3D | null = mesh; at && at !== top.parent; at = at.parent) if (!at.visible) return false;
+    return true;
+  };
+  const seen = [
+    { node: 'den-wallWest', top: model.root },
+    { node: 'den-wallNorth', top: model.root },
+    { node: 'den-floor', top: model.root },
+    { node: 'den-lintel', top: library.westWall },
+  ].map(({ node, top }) => ({ node, shown: shownUpTo(drawnOf.get(node), top) }));
+  const southHidden = drawnOf.get('den-wallSouth') !== undefined && !shownUpTo(drawnOf.get('den-wallSouth'), model.root);
+  say(
+    seen.every((one) => one.shown) && southHidden,
+    `the den is seen: ${seen.map((one) => `${one.node} ${one.shown ? 'visible' : 'HIDDEN'}`).join(', ')} up their parent chains; ` +
+      `den-wallSouth ${southHidden ? 'hidden' : 'NOT hidden'} (the camera's near side, the one wall the game hides)`,
   );
 
   /** A mesh's own geometry, room-local — its outline and children left out. */
@@ -1088,7 +1124,9 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
       `${books.count} books line the den's niches (at least 300 wanted), ${inOpen} standing in the open den: the nearest any comes to its wall's drawn face is ${(-nearest).toFixed(3)} m behind it`,
     );
   }
-  // The lanterns: over her head at the top of her highest jump; and nothing in the den is a light.
+  // The lanterns: over her head at the top of her highest jump, so only a
+  // flier meets one — and each is solid where it is drawn, from its lowest
+  // point to its top (anything drawn is solid); nothing in the den is a light.
   {
     const head = JUMP_APEX_HEIGHT + KID_HEIGHT;
     // flat-ok: heights over the reading room's own flat floor, off the sphere
@@ -1099,9 +1137,51 @@ console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body
     });
     say(
       shellOfDen.lanterns.length === 2 && lowest > head && lights === 0,
-      `${shellOfDen.lanterns.length} lanterns hang with their lowest point ${lowest.toFixed(2)} m up, over her head at the top of her highest jump (${JUMP_APEX_HEIGHT.toFixed(2)} + ${KID_HEIGHT.toFixed(2)} = ${head.toFixed(2)} m): ` +
-        `out of every reach, so drawn with no body; ${lights} light(s) in the den (the room's pools are spent)`,
+      `${shellOfDen.lanterns.length} lanterns hang with their lowest point ${lowest.toFixed(2)} m up, over her head at the top of her highest jump (${JUMP_APEX_HEIGHT.toFixed(2)} + ${KID_HEIGHT.toFixed(2)} = ${head.toFixed(2)} m); ` +
+        `${lights} light(s) in the den (the room's pools are spent)`,
     );
+    const denMiddle = { x: (inner.west - (LIBRARY_HALF_X + LIBRARY_WALL_HALF)) / 2, z: (inner.north + inner.south) / 2 };
+    shellOfDen.lanterns.forEach((lantern, index) => {
+      const body = shellOfDen.lanternBodies[index];
+      const drawn = new Box3().setFromObject(lantern, true);
+      if (!body) {
+        say(false, `lantern ${index + 1} has no body — drawn, and a flier passes through it`);
+        return;
+      }
+      // Its drawn box (outline and all) inside its body.
+      const out = Math.max(
+        body.baseHeight - drawn.min.y, // flat-ok: absolute heights in the library's flat space, both sides alike
+        drawn.max.y - body.topHeight, // flat-ok: as above
+        Math.abs((drawn.min.x + drawn.max.x) / 2 - body.cx) + (drawn.max.x - drawn.min.x) / 2 - body.halfX,
+        Math.abs((drawn.min.z + drawn.max.z) / 2 - body.cz) + (drawn.max.z - drawn.min.z) / 2 - body.halfZ,
+      );
+      // A flier at the lantern's height, marched at it from the den's middle,
+      // stops at its front; the CONTROL, over its top by the jump grace, does
+      // not — so the march can tell a lantern from none, and the body is a
+      // band, not a pillar to the floor.
+      const centre = { x: (drawn.min.x + drawn.max.x) / 2 - OX, z: (drawn.min.z + drawn.max.z) / 2 - OZ };
+      const dx = centre.x - denMiddle.x;
+      const dz = centre.z - denMiddle.z;
+      const from = (feet: number): Vector3 => new Vector3(OX + denMiddle.x, LIBRARY_FLOOR_Y + feet, OZ + denMiddle.z);
+      /** How far her edge is from the lantern's drawn plan (negative: inside it). */
+      const gapTo = (p: Vector3): number => {
+        const qx = Math.max(drawn.min.x - p.x, 0, p.x - drawn.max.x);
+        const qz = Math.max(drawn.min.z - p.z, 0, p.z - drawn.max.z);
+        return Math.hypot(qx, qz) - PLAYER_RADIUS;
+      };
+      // flat-ok: the lantern's own drawn heights over the reading room's flat floor
+      const atHeight = drawn.min.y - LIBRARY_FLOOR_Y + 0.05;
+      // flat-ok: as above
+      const overTop = drawn.max.y - LIBRARY_FLOOR_Y + JUMP_CLEARANCE_GRACE + 0.05;
+      const ends = [0.05, PLAYER_LONGEST_STEP].map((step) => gapTo(marchAt(from(atHeight), dx, dz, step, atHeight)));
+      const control = gapTo(marchAt(from(overTop), dx, dz, 0.05, overTop));
+      say(
+        out <= 0.001 && ends.every((gap) => gap >= -RESOLVER_SLACK) && control < -RESOLVER_SLACK,
+        `lantern ${index + 1}: drawn inside its body (furthest out ${out.toFixed(3)} m, at most 0.001; band ${(body.baseHeight - LIBRARY_FLOOR_Y).toFixed(2)}..${(body.topHeight - LIBRARY_FLOOR_Y).toFixed(2)} m); ` +
+          `a flier at ${atHeight.toFixed(2)} m marched at it from the den's middle stops ${ends.map((gap) => gap.toFixed(3)).join(' and ')} m short of its drawn plan (5 cm and the sprint stride); ` +
+          `CONTROL: over its top at ${overTop.toFixed(2)} m she passes over it (${control.toFixed(3)} m, inside its plan)`,
+      );
+    });
   }
   note(`THE DEN, DRAWN: ${stations} face stations on 3 walls; the walls' bodies are the layout's (libraryDenPlacement holds the kit to it within 5 mm as it loads)`);
 }
@@ -5684,12 +5764,11 @@ console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swi
     leaf.leaf.updateMatrixWorld(true);
     const toLeaf = new Matrix4().copy(leaf.leaf.matrixWorld).invert();
     /** An ink outline — an inverted hull, drawn back-faced — is a line round a shape, not the shape. */
-    const isOutline = (mesh: Mesh): boolean => mesh.material instanceof MeshBasicMaterial && mesh.material.side === BackSide;
     /** The leaf-frame box round an object's drawn bodies, its ink outlines left out. */
     const boxInLeaf = (object: Object3D): Box3 => {
       const box = new Box3();
       object.traverse((part) => {
-        if (!(part instanceof Mesh) || part instanceof InstancedMesh || isOutline(part)) return;
+        if (!(part instanceof Mesh) || part instanceof InstancedMesh || isOutlineMesh(part)) return;
         part.geometry.computeBoundingBox();
         box.union(part.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(toLeaf, part.matrixWorld)));
       });

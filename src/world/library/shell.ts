@@ -1,5 +1,5 @@
-import { BoxGeometry, Group, Matrix4, Mesh, Quaternion, Vector3, type InstancedMesh, type MeshToonMaterial } from 'three';
-import { JUMP_CLEARANCE_GRACE, type CollisionWorld, type WallCollider } from '../Collision';
+import { Box3, BoxGeometry, Group, Matrix4, Mesh, Quaternion, Vector3, type InstancedMesh, type MeshToonMaterial } from 'three';
+import { JUMP_CLEARANCE_GRACE, type BoxCollider, type CollisionWorld, type WallCollider } from '../Collision';
 import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { Plate } from '../hotel/place';
 import { segmentsMinusGaps, cornerClosedSpans } from '../wallRuns';
@@ -800,6 +800,14 @@ export interface LibraryDenShell {
   readonly books: InstancedMesh;
   /** The two lanterns, each `library.denLantern` ({@link libraryDenLanternSpots}). */
   readonly lanterns: readonly Group[];
+  /**
+   * **Each lantern's body** — its own drawn box (outline included), banded from
+   * its lowest drawn point to its top, as the lintel is: out of a walker's and
+   * a jumper's reach, so it only ever meets a jet-pack flier, who now bumps a
+   * lantern rather than flying through it (anything drawn is solid). Raw, for
+   * the lintel's reason.
+   */
+  readonly lanternBodies: readonly BoxCollider[];
 }
 
 /**
@@ -893,7 +901,26 @@ export function buildLibraryDenShell(denRoot: Group, props: LibraryProps, collis
       LIBRARY_FLOOR_Y + shelfTop - JUMP_CLEARANCE_GRACE - LINTEL_OVERLAP,
     ),
   );
-  return { model, walls: [west, north, south], lintel, books, lanterns };
+  const drawn = new Box3();
+  const lanternBodies = lanterns.map((lantern) => {
+    lantern.updateWorldMatrix(true, true);
+    drawn.setFromObject(lantern, true);
+    return collision.kinded('library den lantern', () =>
+      collision.addBox(
+        (drawn.min.x + drawn.max.x) / 2,
+        (drawn.min.z + drawn.max.z) / 2,
+        (drawn.max.x - drawn.min.x) / 2,
+        (drawn.max.z - drawn.min.z) / 2,
+        0,
+        0,
+        drawn.max.y, // flat-ok: the lantern's own drawn top, in the library's flat space
+        false,
+        true,
+        drawn.min.y, // flat-ok: its own lowest drawn point
+      ),
+    );
+  });
+  return { model, walls: [west, north, south], lintel, books, lanterns, lanternBodies };
 }
 
 /**
