@@ -189,6 +189,9 @@ import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeigh
  *   height kept — clause 13's jumping on it must find it leaving with her on
  *   its funnel's rim (2.26–2.38 m over the rails on seed 5: out of the old
  *   reach while she stands there, never mind jumps).
+ * - `child-left-on-line` (park): the crowd never takes a child off the line
+ *   (`NpcSystem.offTheLine` does nothing) — clause 8's child, let go, must
+ *   find the train standing for them for good.
  * - `hover-any-air` (park): the hover rescue as it was — any second in the
  *   air within its span, nothing pushing her — clause 13's hopping under a
  *   canopy must find a rescue.
@@ -206,7 +209,7 @@ const PROOFS = [
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
   'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'platform-holds-train', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
   'pets-count-aboard', 'pets-stay-out', 'ghost-train', 'frozen-train', 'train-ignores-on-top', 'put-down-ignores-train', 'riders-sit-on-her',
-  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air',
+  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air', 'child-left-on-line',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -1914,6 +1917,7 @@ if (inPart('park')) {
     };
   }
   if (PROVE === 'train-ignores-npcs') world.npcs.onTheLine = function* () {};
+  if (PROVE === 'child-left-on-line') (world.npcs as unknown as { offTheLine: () => void }).offTheLine = () => {};
   if (PROVE === 'pets-count-aboard') {
     // Her companion counted as standing while it rides beside her.
     (Parade.prototype as unknown as { standing: () => Iterable<Readonly<Vector3>> }).standing = function* (this: { members: { root: { visible: boolean; position: Vector3 } }[] }) {
@@ -2200,6 +2204,23 @@ if (inPart('park')) {
       },
     );
     say(nearest >= MARGIN && stood > 3, `a child of the crowd: 20 m ahead of it, through World's own wiring, the train stops ${nearest.toFixed(2)} m short of them (${MARGIN.toFixed(2)} asked), standing ${stood.toFixed(1)} s`);
+    // **Then let go of them**: nobody puts a child back on the line, and the
+    // crowd must get them off it (`NpcSystem.offTheLine`, the only thing that
+    // does) — or the train stands there for ever, and with her aboard on the
+    // loop there is no "Get off" until it comes to a station (PR #722's
+    // review: this case once held the child there every frame and never asked
+    // whether the train went on).
+    const spot = route.distanceNear(at.x, at.z);
+    let passedIn = -1;
+    let t = 0;
+    play(30, STILL_INPUT, 1 / 30, () => {
+      t += 1 / 30;
+      const ahead = route.forwardGap(spot, train.noseDistance());
+      if (ahead > 2 && ahead < route.length / 2) passedIn = t;
+      return passedIn >= 0;
+    });
+    const kidLine = train.downOnTheLine(kid.position.x, kid.position.y, kid.position.z, NPC_RADIUS);
+    say(passedIn >= 0 && passedIn < 20, `a child of the crowd, let go: the crowd gets them off the line and the train goes on past where they stood — ${passedIn >= 0 ? `in ${passedIn.toFixed(1)} s` : `it never did in 30 s (the child at (${kid.position.x.toFixed(2)}, ${kid.position.y.toFixed(2)}, ${kid.position.z.toFixed(2)}), ${kidLine ? 'still down on the line' : 'off the line'}; the train moving ${train.runningSpeed.toFixed(2)}; on the line: ${onTheLineNow()})`}`);
     kid.position.set(ENTRANCE_PLAYER_X + 3, terrainHeight(ENTRANCE_PLAYER_X + 3, ENTRANCE_PLAYER_Z), ENTRANCE_PLAYER_Z);
   }
 
@@ -2716,12 +2737,19 @@ if (inPart('park')) {
         let slidPast = 0;
         let wedged = 0;
         let lastNose = train.noseDistance();
+        let throughAt = '';
+        let wentOver = false;
         play(6, walkAlong(camera, at.x - coming.standX, at.z - coming.standZ), 1 / 60, () => {
           deepest = Math.max(deepest, insideTrain(player.position));
           const her = route.distanceNear(player.position.x, player.position.z);
           const span = LOCO_LENGTH + 3 * CARRIAGE_LENGTH + 3 * CAR_GAP;
           const alongside = route.forwardGap(route.wrap(train.noseDistance() - span), her) <= span;
-          if (alongside && downOnTrack(player.position) && sideOf(player.position, coming) < 0) through = true;
+          // Up on it on the way (a step from this platform) is over it, not through it.
+          if (pieces.some((piece) => piece.standsAt(player.position.x, player.position.z) && player.position.y >= piece.topAt(player.position.x, player.position.z) - 0.1)) wentOver = true;
+          if (!wentOver && alongside && downOnTrack(player.position) && sideOf(player.position, coming) < 0 && !through) {
+            through = true;
+            throughAt = `at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), ${lineGap(player.position).toFixed(2)} m off its middle, ${route.forwardGap(her, train.noseDistance()).toFixed(2)} m behind its nose, its speed ${train.runningSpeed.toFixed(2)}`;
+          }
           wedged = Math.max(wedged, wedgedNow());
           const moved = route.forwardGap(lastNose, train.noseDistance());
           lastNose = train.noseDistance();
@@ -2732,7 +2760,7 @@ if (inPart('park')) {
         // into anything (never wedged): a train pulling in slides past a child
         // at its side, it does not carry her.
         const CONTACT = (PLAYER_MAX_SPEED + 4) / 60;
-        say(movingBy && deepest <= CONTACT && !through, `walking into it moving: from ${coming.name} as its carriages come by her${movingBy ? '' : ' (it never came by moving — NOTHING ASKED)'}, she is never inside it beyond contact (${deepest.toFixed(2)} m at the deepest, ${CONTACT.toFixed(2)} allowed) and never through it (pressed to it ${wedged.toFixed(2)} m at the most); it slid ${slidPast.toFixed(2)} m past her side`);
+        say(movingBy && deepest <= CONTACT && !through, `walking into it moving: from ${coming.name} as its carriages come by her${movingBy ? '' : ' (it never came by moving — NOTHING ASKED)'}, she is never inside it beyond contact (${deepest.toFixed(2)} m at the deepest, ${CONTACT.toFixed(2)} allowed) and never through it (pressed to it ${wedged.toFixed(2)} m at the most); it slid ${slidPast.toFixed(2)} m past her side${wentOver ? ', and she stepped up onto it' : ''}${through ? ` — THROUGH it ${throughAt}` : ''}`);
         // Back on the platform where its chip stands her, and she waits there
         // for it to come round: standing still, the crowd walking up to its
         // waiting spots goes round her (`NpcSystem.separateFromPlayer`) — it
