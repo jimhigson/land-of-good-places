@@ -136,19 +136,10 @@ export class LibraryCat {
     const pileTop = measureTop(this.pile.root);
     const catTop = measureTop(this.cat.root);
     this.pileTop = pileTop.top;
-    this.catTop = this.pileTop + catTop.top;
     this.catTopHalf = catTop.topHalf;
-    const plan = this.pile.plan;
     const yaw = (spot.facing * Math.PI) / 180;
-    const cx = (plan.minX + plan.maxX) / 2;
-    const cz = (plan.minZ + plan.maxZ) / 2;
-    this.pileFootprint = {
-      x: spot.x + cx * Math.cos(yaw) + cz * Math.sin(yaw),
-      z: spot.z - cx * Math.sin(yaw) + cz * Math.cos(yaw),
-      facing: spot.facing,
-      halfLength: (plan.maxX - plan.minX) / 2,
-      halfDepth: (plan.maxZ - plan.minZ) / 2,
-    };
+    // The pile has one pose; measured by the same owner as every posed body.
+    this.pileFootprint = posedFootprint(this.pile.root, [], spot, spot.facing);
     // Her body covers her in every pose she is drawn in: her breath drawn in
     // (its widest), her ears anywhere across their twitch, her head anywhere
     // from down to lifted, her tail anywhere across its sway.
@@ -166,7 +157,10 @@ export class LibraryCat {
         }
       }
     }
-    this.catFootprint = posedFootprint(this.cat.root, poses, spot, spot.facing);
+    const posed = posedFootprint(this.cat.root, poses, spot, spot.facing);
+    this.catFootprint = posed;
+    // Her top over every pose too: her head lifted carries her ears higher than at rest.
+    this.catTop = this.pileTop + Math.max(catTop.top, posed.top);
     this.restPose();
 
     this.group.name = 'library.catAndPile';

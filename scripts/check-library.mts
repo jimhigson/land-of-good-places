@@ -6236,22 +6236,33 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   };
   /** Every drawn point of a model this frame, room-local, outlines included. */
   const drawn = (root: Object3D, visit: (point: Vector3) => void): void => visiblePoints(root, visit, library.roomRoot);
-  /** How far the furthest drawn point of `root` stands outside `box` — negative: every one is inside, by that much. */
+  /**
+   * How far the furthest drawn point of `root` stands outside `box` — negative:
+   * every one is inside, by that much. **+Infinity when nothing was drawn to
+   * measure** (a hidden root, a detached model): an empty sample must fail,
+   * never pass as "nothing outside" (the Step-13 re-review).
+   */
   const furthestOut = (root: Object3D, box: BoxFootprint): number => {
     let worst = -Infinity;
+    let points = 0;
     drawn(root, (point) => {
+      points += 1;
       worst = Math.max(worst, outsideBox(box, point.x, point.z));
     });
-    return worst;
+    return points > 0 ? worst : Infinity;
   };
-  /** The furthest a drawn point of `root` reaches from `at` in plan. */
+  /** The furthest a drawn point of `root` reaches from `at` in plan — +Infinity when nothing was drawn to measure. */
   const reachFrom = (root: Object3D, at: LocalPoint): number => {
     let reach = 0;
+    let points = 0;
     drawn(root, (point) => {
+      points += 1;
       reach = Math.max(reach, Math.hypot(point.x - at.x, point.z - at.z));
     });
-    return reach;
+    return points > 0 ? reach : Infinity;
   };
+  /** Sampled frames each "drawn is solid" clause must have measured, at the least. */
+  const MIN_SAMPLES = 10;
   /** A model's drawn plan this frame, as a box turned to `facing` about `at` — measured off its vertices, never its collider. */
   const drawnBox = (root: Object3D, at: LocalPoint, facing: number): BoxFootprint => {
     const yaw = (facing * Math.PI) / 180;
@@ -6303,6 +6314,18 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   say(
     !dex().discovered && !library.denOpen && unoffered && library.lastCreatureLine === lineBefore && !den.metThisVisit,
     `CONTROL: 60 frames at the arrival with the leaf shut, the baby dragon is not met (Dragon friend: ${dex().discovered}), says nothing new, and its Say hi zone is ${unoffered ? 'not offered' : 'OFFERED'}`,
+  );
+  // CONTROL 2, one variable from the meeting: the den open and she in it, at
+  // its doorway stand — outside the meeting's radius. Not met, so the
+  // meeting below is the radius's doing, not the den's being open.
+  library.openDenInstantly();
+  child.stand(LIBRARY_DEN_DOORWAY_STAND.x, LIBRARY_DEN_DOORWAY_STAND.z, LIBRARY_DEN_DOORWAY_STAND.facing);
+  for (let i = 0; i < 60; i += 1) child.step();
+  const doorwayDistance = Math.hypot(LIBRARY_DEN_DOORWAY_STAND.x - nest.x, LIBRARY_DEN_DOORWAY_STAND.z - nest.z);
+  say(
+    library.denOpen && doorwayDistance > DRAGON_MEET_RADIUS && !dex().discovered && !den.metThisVisit,
+    `CONTROL 2: 60 frames in the open den at its doorway stand, ${doorwayDistance.toFixed(2)} m from the nest (the meeting's ${DRAGON_MEET_RADIUS}): ` +
+      `the den is open (${library.denOpen}) and the dragon is not met (Dragon friend: ${dex().discovered}, met this visit: ${den.metThisVisit})`,
   );
   child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
   const puffsBefore = den.puffsSoFar;
@@ -6416,7 +6439,7 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
   const pileOut = furthestOut(cat.pile.root, cat.pileFootprint);
   const catOut = furthestOut(cat.cat.root, cat.catFootprint);
   say(
-    worstDragonDrawn <= DRAWN_INSIDE && nestReach <= den.nestRadius + DRAWN_INSIDE && pileOut <= DRAWN_INSIDE && catOut <= DRAWN_INSIDE,
+    dragonSamples >= MIN_SAMPLES && worstDragonDrawn <= DRAWN_INSIDE && nestReach <= den.nestRadius + DRAWN_INSIDE && pileOut <= DRAWN_INSIDE && catOut <= DRAWN_INSIDE,
     `drawn is solid: the dragon's furthest drawn point over ${dragonSamples} sampled frames of its life (turning, flicking, breathing, puffing) is ${worstDragonDrawn.toFixed(4)} m outside its body; ` +
       `the nest reaches ${nestReach.toFixed(3)} m (its disc ${den.nestRadius.toFixed(3)}); the pile ${pileOut.toFixed(4)} and the cat ${catOut.toFixed(4)} m outside theirs (at most ${DRAWN_INSIDE})`,
   );
@@ -6657,7 +6680,7 @@ console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile
     `she purrs '${purred}' (one of ${lines.cat.purr.map((line) => `'${line}'`).join(', ')}) and pink hearts rise (up to ${hearts} at once)`,
   );
   say(!secondPressChanged, `a second press 0.2 s in, inside her ${PET_GUARD_SECONDS} s guard, changes nothing (no second pet, no second line)`);
-  say(worstCatDrawn <= DRAWN_INSIDE, `drawn is solid while she is petted: her furthest drawn point over ${catSamples} sampled frames is ${worstCatDrawn.toFixed(4)} m outside her body (at most ${DRAWN_INSIDE})`);
+  say(catSamples >= MIN_SAMPLES && worstCatDrawn <= DRAWN_INSIDE, `drawn is solid while she is petted: her furthest drawn point over ${catSamples} sampled frames (at least ${MIN_SAMPLES}) is ${worstCatDrawn.toFixed(4)} m outside her body (at most ${DRAWN_INSIDE})`);
 
   // ------------------------------------------------------------- A visit later: hello again.
   say(library.requestEnterDoor(), 'out through /library-door');

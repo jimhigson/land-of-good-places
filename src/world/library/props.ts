@@ -339,8 +339,16 @@ export class LibraryProps {
  * Measure before the model is hung under anything hidden: `visiblePoints`
  * skips a mesh with a hidden ancestor, and a footprint of nothing is thrown.
  */
-export function posedFootprint(root: Object3D, poses: readonly (() => void)[], at: LocalPoint, facing: number): BoxFootprint {
+/**
+ * A {@link posedFootprint}'s plan, and the highest any pose draws — in the
+ * measured root's own frame — so a body's top covers a lifted head or an ear
+ * as well as its plan does (the Step-13 re-review: tops were measured at rest).
+ */
+export type PosedFootprint = BoxFootprint & { readonly top: number };
+
+export function posedFootprint(root: Object3D, poses: readonly (() => void)[], at: LocalPoint, facing: number): PosedFootprint {
   let minX = Infinity;
+  let maxY = -Infinity;
   let maxX = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
@@ -351,6 +359,7 @@ export function posedFootprint(root: Object3D, poses: readonly (() => void)[], a
       if (point.x > maxX) maxX = point.x;
       if (point.z < minZ) minZ = point.z;
       if (point.z > maxZ) maxZ = point.z;
+      if (point.y > maxY) maxY = point.y;
     });
   }
   if (!Number.isFinite(minX)) throw new Error(`posedFootprint: '${root.name}' draws nothing to measure (is it under something hidden?)`);
@@ -363,6 +372,7 @@ export function posedFootprint(root: Object3D, poses: readonly (() => void)[], a
     facing,
     halfLength: (maxX - minX) / 2,
     halfDepth: (maxZ - minZ) / 2,
+    top: maxY,
   };
 }
 

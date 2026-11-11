@@ -189,7 +189,6 @@ export class LibraryDen {
     const dragonTop = measureTop(this.dragon.root);
     this.nestRadius = this.nest.radius;
     this.nestTop = nestTop.top;
-    this.dragonTop = this.nest.padTop + dragonTop.top;
     this.dragonTopHalf = dragonTop.topHalf;
 
     // The dragon's body covers it in every pose it is drawn in: the head
@@ -210,7 +209,10 @@ export class LibraryDen {
         }
       }
     }
-    this.dragonFootprint = posedFootprint(this.dragon.root, poses, spot, spot.facing);
+    const posed = posedFootprint(this.dragon.root, poses, spot, spot.facing);
+    this.dragonFootprint = posed;
+    // Its top over every pose too: a horn on a nodding head stands higher than at rest.
+    this.dragonTop = this.nest.padTop + Math.max(dragonTop.top, posed.top);
     head.rotation.set(0, 0, 0);
     tail.rotation.y = this.tailRest;
     body.scale.set(1, 1, 1);
