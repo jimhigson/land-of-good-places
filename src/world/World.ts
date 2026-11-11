@@ -1,4 +1,9 @@
 import type { Object3D, Scene } from 'three';
+import type { DoorwayExit } from '../entities/doorwayTap';
+import { LOBBY, hotelDoorBands } from './hotel/layout';
+import { reptileExitBand } from './reptileHouse/shell';
+import { libraryExitBand } from './library/shell';
+import { castleExitBand } from './building/Building';
 import type { Parade } from '../entities/parade/Parade';
 import { LabelManager } from '../ui/LabelManager';
 import { CollisionWorld } from './Collision';
@@ -121,6 +126,22 @@ export class World implements GameSystem {
   readonly reptileHouse: ReptileHouse;
   /** The Library (#714/#716): a pillared building whose door leads to a dim one-floor reading room. */
   readonly library: Library;
+
+  /**
+   * **Every interior's way out to the park**: its doorway frame and its
+   * trigger band, each asked of its own room — what a tap in a doorway is
+   * steered through (`entities/doorwayTap.ts`) and `check:doorframes` walks.
+   */
+  get doorwayExits(): readonly DoorwayExit[] {
+    const lobbyExit = hotelDoorBands(LOBBY).find((band) => band.kind === 'exit');
+    if (!lobbyExit) throw new Error('World: the hotel lobby has no exit band');
+    return [
+      { placed: this.hotel.exitDoorFrame, band: lobbyExit },
+      { placed: this.reptileHouse.exitDoorFrame, band: reptileExitBand() },
+      { placed: this.library.exitDoorFrame, band: libraryExitBand() },
+      { placed: this.building.exitDoorFrame, band: castleExitBand() },
+    ];
+  }
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;

@@ -144,6 +144,12 @@ export class TapNavigator implements GameSystem {
   readonly name = 'tapNavigator';
 
   private readonly marker = new TapMarker();
+  /**
+   * Where a tap at (x, z) should really walk her, when that is not where the
+   * finger landed — today only "on through an interior's way out"
+   * (`entities/doorwayTap.ts`), installed by `Game`. Null for an ordinary tap.
+   */
+  throughDoorway: ((x: number, z: number) => { readonly x: number; readonly z: number } | null) | null = null;
   private readonly raycaster = new Raycaster();
   private readonly ndc = new Vector2();
   private readonly hit = new Vector3();
@@ -241,6 +247,11 @@ export class TapNavigator implements GameSystem {
     // something selects it without walking anywhere (`Game`'s tap handler). So
     // by the time this runs, the tap is a place, and a place is walked to.
     this.target.copy(this.hit);
+    // A tap in an interior's way out walks her on through it
+    // (`entities/doorwayTap.ts`): the trigger band, not the tapped floor, is
+    // where the walk has to end.
+    const through = this.throughDoorway?.(this.hit.x, this.hit.z) ?? null;
+    if (through) this.target.set(through.x, this.hit.y, through.z);
 
     this.active = true;
     this.running = point.doubleTap;

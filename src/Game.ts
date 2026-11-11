@@ -1,4 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
+import { doorwayTapTarget } from './entities/doorwayTap';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
@@ -453,6 +454,8 @@ export class Game {
       () => this.world.building.visibleSurfaceCeiling,
     );
     this.engine.scene.add(this.tapNavigator.group);
+    // A tap in an interior's way out walks her on through it (QA on #743).
+    this.tapNavigator.throughDoorway = (x, z) => doorwayTapTarget(this.world.doorwayExits, x, z);
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {

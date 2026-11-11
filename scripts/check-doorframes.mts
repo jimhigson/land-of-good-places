@@ -44,7 +44,13 @@
  *    36, 48, 36 and 90 of 156 jumps changed. Control, every run: a lintel
  *    slung 0.15 m under that head must change some.
  *
- * Coverage — rooms, lanes, marches, jumps — is written to stderr on every run.
+ * 6. **A tap in the doorway takes her out.** Taps all over each opening are
+ *    steered past the exit band's inner edge (`entities/doorwayTap.ts`): on her
+ *    floor, every arrival inside the band, reached by a clear walk; a tap off
+ *    the opening is left alone. Control: walking to the tapped floor itself
+ *    (what stranded her under the hotel's arch in QA) must stop short.
+ *
+ * Coverage — rooms, lanes, marches, jumps, taps — is written to stderr on every run.
  */
 import './headless-canvas.mjs';
 import { Box3, Mesh, Vector3 } from 'three';
@@ -58,7 +64,9 @@ import { castleExitBand } from '../src/world/building/Building.ts';
 import { DOOR_HALF, LOBBY, hotelDoorBands } from '../src/world/hotel/layout.ts';
 import { reptileDoorGap, reptileExitBand } from '../src/world/reptileHouse/shell.ts';
 import { libraryDoorGap, libraryExitBand } from '../src/world/library/shell.ts';
-import type { PortalBand } from '../src/world/tapSpacing.ts';
+import { distanceToBand, type PortalBand } from '../src/world/tapSpacing.ts';
+import { DOORWAY_TAP_PAST_EDGE, doorwayTapReach, doorwayTapTarget } from '../src/entities/doorwayTap.ts';
+import { ARRIVE_RADIUS } from '../src/entities/TapNavigator.ts';
 import type { BoxCollider, CollisionWorld } from '../src/world/Collision.ts';
 
 const failures: string[] = [];
@@ -441,6 +449,82 @@ for (const room of rooms) {
       `(head ${HEAD_AT_APEX.toFixed(2)} m at the apex, lintel from ${(placed.solids.lintel.baseHeight - floor).toFixed(2)} m); ` +
       `control: a lintel 0.15 m under that head changes ${control.changed.length}`,
   );
+}
+
+// ---------------------------------------------- 6. a tap in the doorway takes her out
+//
+// QA on #743: a tap in the hotel's or the Reptile House's doorway walked her
+// under the arch and stopped her there — `TapNavigator` calls her arrived
+// within ARRIVE_RADIUS of the tapped floor, and the exit band's inner edge
+// is 0.6 m in from the wall. `doorwayTapTarget` moves such a tap past that
+// edge; this holds it, for taps all over each opening, to: the target is on
+// floor she can stand on; every stop that counts as arriving there is inside
+// the band (so the walk ends by crossing into it); a straight walk in from
+// the room gets there; and a tap off the opening is left alone. The real
+// finger is `scripts/qa-doorway-tap.mjs`.
+{
+  const exits = world.doorwayExits;
+  if (exits.length !== rooms.length) fail(`World.doorwayExits lists ${exits.length} ways out, this check ${rooms.length}`);
+  for (const { placed, band } of exits) {
+    const name = rooms.find((r) => r.placed === placed)?.name ?? placed.frame.style;
+    const o = placed.frame.opening;
+    const wallZ = placed.originZ + o.z;
+    const out = Math.sign(o.z) || 1;
+    const floor = placed.originY + o.floorY;
+    const reach = doorwayTapReach(placed);
+    let taps = 0;
+    let bad = 0;
+    let controlShort = 0;
+    const firstBad: string[] = [];
+    for (let x = placed.originX + o.minX + 0.05; x <= placed.originX + o.maxX - 0.05 + 1e-9; x += 0.2) {
+      for (let inward = -placed.frame.lintelHalfZ; inward <= reach + 1e-9; inward += 0.1) {
+        const tapZ = wallZ - out * inward;
+        const target = doorwayTapTarget(exits, x, tapZ);
+        taps += 1;
+        const why: string[] = [];
+        if (!target) why.push('no target');
+        else {
+          const shortest = { x: target.x, z: target.z - out * ARRIVE_RADIUS };
+          if (distanceToBand(band, shortest.x, shortest.z) > 0) why.push(`a stop ${ARRIVE_RADIUS} m short (${(shortest.z - wallZ).toFixed(2)} m off the wall) is outside the band`);
+          const ground = park.sample(target.x, target.z, floor + 0.5);
+          if (Math.abs(ground - floor) > 0.05) why.push(`the target's floor is at ${(ground - floor).toFixed(2)} m, not the room's`);
+          const at = new Vector3(target.x, floor, wallZ - out * WALK_DEPTH);
+          for (let i = 0; i < 200 && Math.hypot(target.x - at.x, target.z - at.z) > ARRIVE_RADIUS; i += 1) {
+            const dz = target.z - at.z;
+            const step = Math.sign(dz) * Math.min(0.2, Math.abs(dz));
+            collision.resolveMovement(at, 0, step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA, undefined, undefined, TALLEST_CHILD_HEIGHT, floor);
+            at.y = floor;
+          }
+          // Arriving, or being stopped anywhere inside the band on the way, both
+          // take her out: the room's trigger is entering the band.
+          if (Math.hypot(target.x - at.x, target.z - at.z) > ARRIVE_RADIUS && distanceToBand(band, at.x, at.z) > 0) {
+            why.push(`a walk from the room stops ${Math.hypot(target.x - at.x, target.z - at.z).toFixed(2)} m short of it, outside the band`);
+          }
+        }
+        // The control, the old behaviour: walk to the tapped floor itself.
+        if (distanceToBand(band, x, tapZ - out * ARRIVE_RADIUS) > 0) controlShort += 1;
+        if (why.length > 0) {
+          bad += 1;
+          if (firstBad.length < 3) firstBad.push(`tap ${(x - placed.originX).toFixed(2)}, ${inward.toFixed(2)} m in: ${why.join('; ')}`);
+        }
+      }
+    }
+    if (bad > 0) fail(`${name}: ${bad} of ${taps} taps in the doorway would not take her out — ${firstBad.join(' | ')}`);
+    if (controlShort === 0) fail(`${name}: CONTROL — walking to the tapped floor itself would always end in the band; the clause measures nothing`);
+    // A tap off the opening is an ordinary tap.
+    const offs = [
+      [placed.originX + o.minX - 0.3, wallZ - out * 0.3],
+      [placed.originX + o.maxX + 0.3, wallZ - out * 0.3],
+      [placed.originX + (o.minX + o.maxX) / 2, wallZ - out * (reach + 0.3)],
+    ] as const;
+    for (const [x, z] of offs) {
+      if (doorwayTapTarget(exits, x, z)) fail(`${name}: a tap off the opening at ${(x - placed.originX).toFixed(2)}, ${((wallZ - z) * out).toFixed(2)} m in is steered out of the room`);
+    }
+    say(
+      `${name}: ${taps - bad} of ${taps} taps across the doorway (to ${reach.toFixed(2)} m in) end in the band, on her floor, reached from the room ` +
+        `(aimed ${DOORWAY_TAP_PAST_EDGE.toFixed(2)} m past its inner edge); control: walking to the tapped floor itself stops short of the band on ${controlShort}`,
+    );
+  }
 }
 
 say(`\n${rooms.length} interiors with a way out to the park, each with its frame: ${rooms.map((r) => r.name).join(', ')}`);
