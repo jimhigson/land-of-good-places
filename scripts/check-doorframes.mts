@@ -479,7 +479,7 @@ for (const room of rooms) {
     for (let x = placed.originX + o.minX + 0.05; x <= placed.originX + o.maxX - 0.05 + 1e-9; x += 0.2) {
       for (let inward = -placed.frame.lintelHalfZ; inward <= reach + 1e-9; inward += 0.1) {
         const tapZ = wallZ - out * inward;
-        const target = doorwayTapTarget(exits, x, tapZ);
+        const target = doorwayTapTarget(exits, x, floor, tapZ);
         taps += 1;
         const why: string[] = [];
         if (!target) why.push('no target');
@@ -511,6 +511,26 @@ for (const room of rooms) {
     }
     if (bad > 0) fail(`${name}: ${bad} of ${taps} taps in the doorway would not take her out — ${firstBad.join(' | ')}`);
     if (controlShort === 0) fail(`${name}: CONTROL — walking to the tapped floor itself would always end in the band; the clause measures nothing`);
+    // A tap that lands on the frame itself — its tops are standable, so a
+    // finger aimed at the opening often lands on the lintel or the crest
+    // (QA's library tap landed on the open book, 1.08 m in) — goes out too.
+    let onFrame = 0;
+    const left = placed.frame.posts[0];
+    const right = placed.frame.posts[1];
+    if (left && right) {
+      const lintelTop = floor + placed.frame.lintelTop;
+      // Just inside each edge of the frame's plan, and across its middle.
+      const zs = [placed.frame.crest.minZ + 0.01, o.z - placed.frame.lintelHalfZ + 0.01, o.z, o.z + placed.frame.lintelHalfZ - 0.01, placed.frame.crest.maxZ - 0.01];
+      for (let lx = left.minX + 0.01; lx <= right.maxX - 0.01 + 1e-9; lx += 0.25) {
+        for (const lz of zs) {
+          const target = doorwayTapTarget(exits, placed.originX + lx, lintelTop, placed.originZ + lz);
+          onFrame += 1;
+          if (!target || distanceToBand(band, target.x, target.z - out * ARRIVE_RADIUS) > 0) {
+            fail(`${name}: a tap on the frame's top at ${lx.toFixed(2)}, ${(o.z - lz).toFixed(2)} m in does not take her out`);
+          }
+        }
+      }
+    }
     // A tap off the opening is an ordinary tap.
     const offs = [
       [placed.originX + o.minX - 0.3, wallZ - out * 0.3],
@@ -518,11 +538,11 @@ for (const room of rooms) {
       [placed.originX + (o.minX + o.maxX) / 2, wallZ - out * (reach + 0.3)],
     ] as const;
     for (const [x, z] of offs) {
-      if (doorwayTapTarget(exits, x, z)) fail(`${name}: a tap off the opening at ${(x - placed.originX).toFixed(2)}, ${((wallZ - z) * out).toFixed(2)} m in is steered out of the room`);
+      if (doorwayTapTarget(exits, x, floor, z)) fail(`${name}: a tap off the opening at ${(x - placed.originX).toFixed(2)}, ${((wallZ - z) * out).toFixed(2)} m in is steered out of the room`);
     }
     say(
       `${name}: ${taps - bad} of ${taps} taps across the doorway (to ${reach.toFixed(2)} m in) end in the band, on her floor, reached from the room ` +
-        `(aimed ${DOORWAY_TAP_PAST_EDGE.toFixed(2)} m past its inner edge); control: walking to the tapped floor itself stops short of the band on ${controlShort}`,
+        `(aimed ${DOORWAY_TAP_PAST_EDGE.toFixed(2)} m past its inner edge), and ${onFrame} on the frame's own top; control: walking to the tapped floor itself stops short of the band on ${controlShort}`,
     );
   }
 }

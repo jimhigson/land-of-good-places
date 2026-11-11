@@ -42,21 +42,43 @@ export function doorwayTapReach(placed: PlacedDoorFrame): number {
   return placed.frame.lintelHalfZ + PLAYER_RADIUS;
 }
 
+/** Whether world (x, z) is over the frame's drawn plan: post to post, and as deep as its deepest part. */
+function onFramePlan(placed: PlacedDoorFrame, x: number, z: number): boolean {
+  const { frame } = placed;
+  const left = frame.posts[0];
+  const right = frame.posts[1];
+  if (!left || !right) return false;
+  const minZ = Math.min(left.minZ, frame.opening.z - frame.lintelHalfZ, frame.crest.minZ);
+  const maxZ = Math.max(left.maxZ, frame.opening.z + frame.lintelHalfZ, frame.crest.maxZ);
+  const lx = x - placed.originX;
+  const lz = z - placed.originZ;
+  const e = 1e-6;
+  return lx >= left.minX - e && lx <= right.maxX + e && lz >= minZ - e && lz <= maxZ + e;
+}
+
 /**
- * Where a tap at world (x, z) should walk her, if it landed in one of
+ * Where a tap at world (x, y, z) should walk her, if it landed in one of
  * `exits`' openings — on through the band — or null for an ordinary tap.
  */
-export function doorwayTapTarget(exits: readonly DoorwayExit[], x: number, z: number): { x: number; z: number } | null {
+export function doorwayTapTarget(exits: readonly DoorwayExit[], x: number, y: number, z: number): { x: number; z: number } | null {
   for (const { placed, band } of exits) {
     const o = placed.frame.opening;
     const minX = placed.originX + o.minX;
     const maxX = placed.originX + o.maxX;
-    if (x < minX || x > maxX) continue;
     const wallZ = placed.originZ + o.z;
     // Out is away from the room's own middle, through its wall.
     const out = Math.sign(o.z) || 1;
     const inward = (wallZ - z) * out;
-    if (inward > doorwayTapReach(placed) || inward < -Math.abs(placed.frame.lintelHalfZ)) continue;
+    // **A tap on the frame itself** is a tap on the doorway too. The frame's
+    // tops are standable (every solid is, since 17 Oct 2026), so a finger
+    // aimed at the opening often lands on the lintel or the crest, high
+    // over the floor and up to a crest's depth off the wall line — QA's
+    // library tap landed 1.08 m in, on the open book.
+    const onFrame = y > placed.originY + o.floorY + 1 && onFramePlan(placed, x, z);
+    if (!onFrame) {
+      if (x < minX || x > maxX) continue;
+      if (inward > doorwayTapReach(placed) || inward < -Math.abs(placed.frame.lintelHalfZ)) continue;
+    }
     // Every exit band runs straight out through its wall (`yaw` 0): its inner
     // edge is the side nearer the room's middle.
     const innerEdge = band.centreZ - out * band.halfAlong;

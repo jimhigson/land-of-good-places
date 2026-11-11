@@ -455,7 +455,7 @@ export class Game {
     );
     this.engine.scene.add(this.tapNavigator.group);
     // A tap in an interior's way out walks her on through it (QA on #743).
-    this.tapNavigator.throughDoorway = (x, z) => doorwayTapTarget(this.world.doorwayExits, x, z);
+    this.tapNavigator.throughDoorway = (x, y, z) => doorwayTapTarget(this.world.doorwayExits, x, y, z);
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {

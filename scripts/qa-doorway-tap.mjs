@@ -69,7 +69,7 @@ for (const room of rooms) {
       [room.frame, where === 'wall line' ? 0 : 0.5],
     );
     await page.touchscreen.tap(target.sx, target.sy);
-    await page.waitForTimeout(12000);
+    await page.waitForTimeout(20000);
     const after = await page.evaluate(() => [window.game.player.position.x, window.game.player.position.z]);
     const moved = Math.hypot(after[0] - target.from[0], after[1] - target.from[1]);
     const out = moved > 50;
