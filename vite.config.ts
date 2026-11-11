@@ -243,8 +243,13 @@ export default defineConfig({
         // offline without solving.
         globPatterns: ['**/*.{js,css,html,svg,ico}', 'parks/*.json'],
         // Raised from workbox's 2 MiB default so that a future asset cannot
-        // silently drop out of the precache and break offline play.
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // silently drop out of the precache and break offline play. Raised
+        // again to 6 MiB on 11 Nov 2026: the main `Game` chunk carries every
+        // inlined authored kit, and the doorway frames' 159 KB took it from
+        // ~4.05 MB to 4.2 MB, past 4 MiB — the build then fails, loudly,
+        // which is this limit doing its job; the chunk is downloaded whole
+        // either way, so the limit is about never dropping it, not its size.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
         // Both **false**, the opposite of the old `autoUpdate` setup: this is
