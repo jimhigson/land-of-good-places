@@ -680,3 +680,49 @@ no material.
   the module is the file, the export's rules hold, texcoords appear exactly where
   face figures do, `STORY_FACES` is exactly the file's extras, `v` climbs with
   height on both faces, and both readers agree on every node.
+
+### 43 — Doorway frames round every interior's way out (`src/art/models/doorFrames.ts`)
+
+Jim, 11 November 2026: *"in the game when in interior spaces the exit to
+outside is usually a door in a hidden wall, with no visual indicator where the
+door is ... model a doorway (no door, just a frame) appropriate stylistically
+to each setting."* Four frames, one per interior with a way out to the park:
+`hotel` (the lobby: painted cream trim, plinths and capitals, a panelled
+lintel, a pink fan bonnet with a gold star), `library` (stacked chunky books,
+a lintel of upright spines, an open book on top), `reptile` (mossy stacked
+sandstone, a fat green snake for the lintel with its head resting on the
+front, looking out, tongue and all), `castle` (ashlar quoins, stone blocks and
+a keystone, under the ground floor's ceiling).
+
+`art/blend/doorframes_build.py` → `art/blend/doorframes.blend` →
+`doorframes_export.py` → `src/art/assets/doorframes.glb` →
+`scripts/pack-doorframes-asset.mts` → `doorframesGlb.ts`; `pnpm run
+blend:doorframes` runs all three, `pnpm run render:doorframes` writes
+`art/renders/doorframes/<style>.png` (assembled as the game assembles it, a
+tallest-child post in the opening, colours read from the loader). Budget
+400 KB, 122 KB on the day. Shape only.
+
+- **Parts, not doors.** Nodes are `doorframe-<style>-post|lintel|crest[-variant]`,
+  each with its origin at its role's base centre. The kit knows **no opening**:
+  each room hands `buildDoorFrame` its own gap from its own owner
+  (`DOOR_HALF`, `reptileDoorGap()`, `libraryDoorGap()`,
+  `INTERIOR_DOOR_MIN_X..MAX_X`); the loader stands a post either side with its
+  inner face on the gap edge, tiles the lintel post to post (whole tiles,
+  stretched a little to fit) and sets the crest in the middle. Every figure
+  about the frame — post footprint (moss included), post height, tile width and
+  height — is measured off the geometry; the build's `CONTRACT` owns them and
+  asserts them against the emitted vertices.
+- **Heights from the game**: every lintel's underside is at least
+  `TALLEST_CHILD_HEIGHT` + 5 cm (read from `kid.ts`), and the castle's whole
+  frame fits under `BUILDING_FLOOR_HEIGHT − BUILDING_SLAB` (read from
+  `constants.ts`).
+- **No shared planes**: posts are deeper than every room's wall, lintels never
+  as deep as their posts, and each room draws its wall back from the gap by
+  the post's measured width (`drawnClearOfFrame`) so the post's outer face
+  meets the wall's end face back to back.
+- **Solid**: `registerDoorFrameSolids` — each post a box on its drawn
+  footprint to the lintel's top, the lintel a box banded from its underside
+  (a walker and a jump pass under). `pnpm run check:doorframes` measures all
+  of it on the built park, marches at every post, and walks lanes through every
+  opening both ways with and without the frame, with a narrowed-frame control;
+  `pnpm run check:doorframes-glb` runs the shared GLB-kit questions.
