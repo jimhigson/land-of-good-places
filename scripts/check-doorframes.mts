@@ -18,8 +18,12 @@
  * 2. **Solid where it is drawn.** Each post's collider is its drawn footprint,
  *    measured off the meshes in the scene (never the figures that placed
  *    them), to the lintel's top; the lintel's is banded from its drawn
- *    underside to its drawn top. A hatted child walks under every lintel, and
- *    the castle's frame fits under its ceiling.
+ *    underside to its drawn top, and every crest's over its drawn box. Every
+ *    lintel's underside is over her head at the top of a jump (KID_HEIGHT +
+ *    JUMP_SPEED² / 2g), so nothing in the frame is in reach but its posts. The
+ *    castle's gatehouse top stands past the room's 3.30 m ceiling on purpose,
+ *    in the wall's line where there is none, and clears the porch roof
+ *    outside, which hides everything lower from the camera.
  * 3. **Marched at, and stopped.** A player-sized body is marched at every
  *    post from sixteen bearings, at 5 cm and at `PLAYER_LONGEST_STEP`, and
  *    never ends inside the drawn post. Control: the same march with that
@@ -32,17 +36,25 @@
  *    narrowed by 0.3 m a side, registered in place of the real one, must lose
  *    lanes — or the instrument cannot see a narrowing at all.
  *
- * Coverage — rooms, lanes, marches — is written to stderr on every run.
+ * 5. **A jump through goes through.** On three lanes, both ways, taking off
+ *    from 2.5 m before the wall line to 0.5 m past it, at 60 and 30 frames a
+ *    second, a run-and-jump moved exactly as `Player` moves her in the air
+ *    must end where the same jump ends with the frame's solids out. Proved red
+ *    on the first lintels (3.25 m, the castle's 3.02 m, against a 3.40 m head):
+ *    36, 48, 36 and 90 of 156 jumps changed. Control, every run: a lintel
+ *    slung 0.15 m under that head must change some.
+ *
+ * Coverage — rooms, lanes, marches, jumps — is written to stderr on every run.
  */
 import './headless-canvas.mjs';
 import { Box3, Mesh, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
-import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { GRAVITY, JUMP_SPEED, MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { INTERIOR_DOOR_MAX_X, INTERIOR_DOOR_MIN_X } from '../src/world/building/layout.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { buildDoorFrame, registerDoorFrameSolids, type PlacedDoorFrame } from '../src/art/models/doorFrames.ts';
 import { castleExitBand } from '../src/world/building/Building.ts';
-import { CASTLE_CEILING_CLEAR } from '../src/world/building/castleFabric.ts';
 import { DOOR_HALF, LOBBY, hotelDoorBands } from '../src/world/hotel/layout.ts';
 import { reptileDoorGap, reptileExitBand } from '../src/world/reptileHouse/shell.ts';
 import { libraryDoorGap, libraryExitBand } from '../src/world/library/shell.ts';
@@ -82,6 +94,9 @@ const rooms: Room[] = [
 ];
 
 const TOL = 0.01;
+
+/** Her head at the top of a jump: `Player` moves a KID_HEIGHT body in the air, feet on the arc. */
+const HEAD_AT_APEX = KID_HEIGHT + (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 
 /** A mesh's own drawn bounds in the world — its geometry only, never its outline hull. */
 function drawnBounds(mesh: Mesh): Box3 {
@@ -212,9 +227,7 @@ for (const room of rooms) {
   if (clear < TALLEST_CHILD_HEIGHT) fail(`${room.name}: the lintel is ${clear.toFixed(3)} m over the floor, under the tallest child (${TALLEST_CHILD_HEIGHT})`);
   const everything = union(frameMeshes(placed, '').map(drawnBounds));
   const frameTall = everything.max.y - floorY; // flat-ok: the interiors are flat plates at their own far origins, off the planet
-  if (frame.style === 'castle' && lintelTopDrawn - floorY > CASTLE_CEILING_CLEAR) {
-    fail(`castle: the lintel reaches ${(lintelTopDrawn - floorY).toFixed(3)} m, the ceiling is at ${CASTLE_CEILING_CLEAR}`);
-  }
+  if (clear < HEAD_AT_APEX) fail(`${room.name}: the lintel's underside is ${clear.toFixed(3)} m over the floor, under her head at the top of a jump (${HEAD_AT_APEX.toFixed(3)} m)`);
   // The crest's collider is its drawn box.
   {
     const drawn = union(frameMeshes(placed, 'crest').map(drawnBounds));
@@ -318,6 +331,116 @@ for (const room of rooms) {
     if (lostNarrow === 0) fail(`${room.name}: CONTROL — a frame 0.6 m narrower lost no lanes; the walk cannot see a narrowed opening`);
     say(`  control: a frame 0.3 m narrower a side loses ${lostNarrow} of ${without.size} lane-walks — red, as it must be`);
   }
+}
+
+
+// ---------------------------------------------- 5. a jump through goes through
+//
+// Player's airborne movement: `moverHeight` is KID_HEIGHT and the feet ride
+// the jump's arc (no `feetY`), so at the apex her head is KID_HEIGHT +
+// JUMP_SPEED² / 2g over the floor — the band a lintel must stay above. The
+// PR #743 review found 63 of 312 jumps stopped dead in mid-air at lintels
+// whose undersides were 3.25 m (3.02 m in the castle) against a 3.40 m head.
+const JUMP_DTS = [1 / 60, 1 / 30] as const;
+
+/** Runs at the doorway, hops at `jumpAt` (world z), and reports where she ended and where (if anywhere) she was stopped dead. */
+function jumpRun(placed: PlacedDoorFrame, x: number, dir: number, jumpAt: number, dt: number): { endZ: number; stoppedAt: number } {
+  const wallZ = placed.originZ + placed.frame.opening.z;
+  const floor = placed.originY + placed.frame.opening.floorY;
+  const at = new Vector3(x, floor, wallZ - dir * WALK_DEPTH);
+  let vy = 0;
+  let air = false;
+  let jumped = false;
+  let stoppedAt = Number.NaN;
+  for (let i = 0; i < Math.ceil((2 * WALK_DEPTH + 2) / (PLAYER_MAX_SPEED * dt)); i += 1) {
+    if (!jumped && dir * (at.z - jumpAt) >= 0) {
+      jumped = true;
+      air = true;
+      vy = JUMP_SPEED;
+    }
+    let y = floor;
+    if (air) {
+      vy -= GRAVITY * dt;
+      y = Math.max(floor, at.y + vy * dt);
+      if (y <= floor) {
+        air = false;
+        vy = 0;
+      }
+    }
+    const before = at.z;
+    at.y = y;
+    collision.resolveMovement(at, 0, dir * PLAYER_MAX_SPEED * dt, PLAYER_RADIUS, 0, dt, undefined, undefined, KID_HEIGHT, air ? undefined : floor);
+    at.y = y;
+    if (Math.abs(at.z - before) < 1e-4 && Number.isNaN(stoppedAt)) stoppedAt = at.z - wallZ;
+    if (dir * (at.z - (wallZ + dir * WALK_DEPTH)) >= 0) break;
+  }
+  return { endZ: at.z - wallZ, stoppedAt };
+}
+
+/** Every jump lane × direction × take-off × frame rate whose run differs from the same run with the frame's solids out. */
+function jumpsChanged(room: Room, solids: readonly BoxCollider[]): { changed: string[]; runs: number } {
+  const { placed } = room;
+  const wallZ = placed.originZ + placed.frame.opening.z;
+  const centre = placed.originX + (room.gap[0] + room.gap[1]) / 2;
+  const changed: string[] = [];
+  let runs = 0;
+  for (const offset of [-0.4, 0, 0.4]) {
+    for (const dir of [1, -1]) {
+      for (let before = -0.5; before <= 2.5 + 1e-9; before += 0.25) {
+        for (const dt of JUMP_DTS) {
+          const jumpAt = wallZ - dir * before;
+          for (const solid of solids) collision.removeBox(solid);
+          const free = jumpRun(placed, centre + offset, dir, jumpAt, dt);
+          for (const solid of solids) collision.restoreBox(solid);
+          const framed = jumpRun(placed, centre + offset, dir, jumpAt, dt);
+          runs += 1;
+          const differs =
+            Math.abs(free.endZ - framed.endZ) > 0.02 ||
+            Number.isNaN(free.stoppedAt) !== Number.isNaN(framed.stoppedAt) ||
+            Math.abs(free.stoppedAt - framed.stoppedAt) > 0.02;
+          if (differs) {
+            changed.push(
+              `${dir > 0 ? 'out' : 'in'} lane ${offset} jumping ${before.toFixed(2)} m before the wall at 1/${Math.round(1 / dt)} s: ` +
+                `ended ${framed.endZ.toFixed(2)} m past the wall line${Number.isNaN(framed.stoppedAt) ? '' : `, stopped dead ${framed.stoppedAt.toFixed(2)} m from it`} ` +
+                `(without the frame: ended ${free.endZ.toFixed(2)}${Number.isNaN(free.stoppedAt) ? ', never stopped' : `, stopped ${free.stoppedAt.toFixed(2)}`})`,
+            );
+          }
+        }
+      }
+    }
+  }
+  return { changed, runs };
+}
+
+for (const room of rooms) {
+  const { placed } = room;
+  const { changed, runs } = jumpsChanged(room, solidsOf(placed));
+  if (changed.length > 0) fail(`${room.name}: the frame changes ${changed.length} of ${runs} jumps through the doorway — ${changed.slice(0, 4).join('; ')}`);
+  // Control: a lintel slung under her head at the apex, in place of the real
+  // one, must stop jumps — or the instrument cannot see a low lintel at all.
+  const floor = placed.originY + placed.frame.opening.floorY;
+  for (const solid of solidsOf(placed)) collision.removeBox(solid);
+  const low = collision.addBox(
+    placed.originX + (placed.frame.opening.minX + placed.frame.opening.maxX) / 2,
+    placed.originZ + placed.frame.opening.z,
+    (placed.frame.opening.maxX - placed.frame.opening.minX) / 2,
+    placed.frame.lintelHalfZ,
+    0,
+    0,
+    floor + HEAD_AT_APEX + 0.3,
+    false,
+    true,
+    floor + HEAD_AT_APEX - 0.15,
+  );
+  const control = jumpsChanged(room, [low]);
+  collision.removeBox(low);
+  for (const solid of solidsOf(placed)) collision.restoreBox(solid);
+  if (control.changed.length === 0) fail(`${room.name}: CONTROL — a lintel 0.15 m under her head at the apex stopped no jump; the jump lane cannot see a low lintel`);
+  say(
+    `${room.name}: ${runs - changed.length} of ${runs} jumps through the doorway go exactly as they do with no frame ` +
+      `(head ${HEAD_AT_APEX.toFixed(2)} m at the apex, lintel from ${(placed.solids.lintel.baseHeight - floor).toFixed(2)} m); ` +
+      `control: a lintel 0.15 m under that head changes ${control.changed.length}`,
+  );
 }
 
 say(`\n${rooms.length} interiors with a way out to the park, each with its frame: ${rooms.map((r) => r.name).join(', ')}`);

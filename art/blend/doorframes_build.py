@@ -17,8 +17,8 @@ Four styles, one per interior with a way out to the park:
 * ``reptile`` — the Reptile House: mossy stacked stones, a lintel that is a
   fat snake's body, and the snake's head resting on the front, looking out.
 * ``castle``  — the castle's ground floor: ashlar quoins, a lintel of stone
-  blocks and a keystone under the castle's own ceiling, and a crenellated
-  gatehouse top with a shield standing over it, above the porch roof.
+  blocks and a keystone over a jumping head in the wall's line, and a
+  crenellated gatehouse top with a shield standing over it, above the porch roof.
 
 **The kit knows no opening.** Every doorway's width belongs to its room's own
 owner (``hotel/layout.ts``'s ``DOOR_HALF``, ``reptileDoorGap()``,
@@ -40,11 +40,12 @@ already knows and nothing carries a pivot.
 Shape only: no colour, no material (the loader paints each node). Blender −Y
 is the game's +Z — the way out, towards the camera.
 
-The heights are the one thing the game is held to from here: every post must
-stand at least ``TALLEST_CHILD_HEIGHT`` + 5 cm (the hatted child walks under
-every lintel), and the castle's whole frame must fit under its ceiling
-(``BUILDING_FLOOR_HEIGHT − BUILDING_SLAB``). Both are read from the game's own
-modules (``blendkit.ts_const``), never typed.
+The heights are the one thing the game is held to from here: every lintel's
+underside stands over her head at the top of a jump (``KID_HEIGHT`` +
+``JUMP_SPEED``² / 2 ``GRAVITY``, plus 10 cm), so a hop through a doorway goes
+straight through; the castle's posts stay under its wall's top, and its
+gatehouse top clears the porch roof. All are read from the game's own modules
+(``blendkit.ts_const``), never typed.
 """
 
 import math
@@ -62,13 +63,20 @@ import blendkit as kit  # noqa: E402
 BLEND = os.path.join(kit.REPO, "art", "blend", "doorframes.blend")
 
 TALLEST_CHILD_HEIGHT = kit.ts_const("src/art/models/kid.ts", "TALLEST_CHILD_HEIGHT")
-CASTLE_CEILING = kit.ts_const("src/core/constants.ts", "BUILDING_FLOOR_HEIGHT") - kit.ts_const(
-    "src/core/constants.ts", "BUILDING_SLAB"
-)
-#: How far over the tallest hatted child every lintel's underside stands.
-HEADROOM = 0.05
-#: How far under the castle's ceiling its frame's top stops, so the two never share a plane.
-CEILING_GAP = 0.02
+#: **Her head at the top of a jump** — what every lintel's underside must
+#: clear. In the air `Player` moves a `KID_HEIGHT` body whose feet ride the
+#: jump's arc, so the head peaks at KID_HEIGHT + JUMP_SPEED² / 2g (3.40 m). The
+#: first frames stood their lintels at 3.25 m (3.02 m in the castle) and the
+#: PR #743 review found jumps through every doorway stopped dead in mid-air.
+JUMP_HEAD = kit.ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT") + kit.ts_const(
+    "src/core/constants.ts", "JUMP_SPEED"
+) ** 2 / (2 * kit.ts_const("src/core/constants.ts", "GRAVITY"))
+#: How far over that head every lintel's underside stands.
+JUMP_HEADROOM = 0.10
+#: Every post's height — the lintel's underside — read off the jump, never typed.
+POST_H = math.ceil((JUMP_HEAD + JUMP_HEADROOM) * 1000) / 1000
+#: The castle's drawn wall top: its posts stand in the wall's line and stay under it.
+CASTLE_WALL_TOP = kit.ts_const("src/core/constants.ts", "BUILDING_FLOOR_HEIGHT")
 
 # -----------------------------------------------------------------------------
 # The contract: every figure the game measures, owned here once.
@@ -78,13 +86,16 @@ CEILING_GAP = 0.02
 # of a post lies in a wall face's plane.
 # -----------------------------------------------------------------------------
 CONTRACT = {
-    "hotel": {"W": 0.44, "D": 0.80, "H": 3.25, "T": 0.90, "L": 0.42, "DL": 0.90},
-    "library": {"W": 0.56, "D": 0.80, "H": 3.25, "T": 1.00, "L": 0.56, "DL": 0.86},
-    "reptile": {"W": 0.60, "D": 0.82, "H": 3.25, "T": 0.80, "L": 0.56, "DL": 0.86},
-    "castle": {"W": 0.62, "D": 0.80, "H": TALLEST_CHILD_HEIGHT + HEADROOM, "T": 0.80, "L": 0.0, "DL": 0.88},
+    "hotel": {"W": 0.44, "D": 0.80, "H": POST_H, "T": 0.90, "L": 0.42, "DL": 0.90},
+    "library": {"W": 0.56, "D": 0.80, "H": POST_H, "T": 1.00, "L": 0.56, "DL": 0.86},
+    "reptile": {"W": 0.60, "D": 0.82, "H": POST_H, "T": 0.80, "L": 0.56, "DL": 0.86},
+    # The castle's lintel used to squeeze under the 3.30 m ceiling, which put
+    # it under a jumping head. It now stands over the jump like every other
+    # lintel — in the wall's line, where there is no ceiling, its posts under
+    # the wall's top and the lintel and gatehouse rising past it — and leaves
+    # the ceiling band inside to the portcullis.
+    "castle": {"W": 0.62, "D": 0.80, "H": POST_H, "T": 0.80, "L": 0.30, "DL": 0.88},
 }
-# The castle's lintel fills the band between its posts' tops and its ceiling.
-CONTRACT["castle"]["L"] = round(CASTLE_CEILING - CEILING_GAP - CONTRACT["castle"]["H"], 4)
 #: The castle's gatehouse top over the lintel: width, depth, block height, merlon height.
 PARAPET_W, PARAPET_D, PARAPET_H, MERLON_H = 4.2, 0.6, 0.85, 0.55
 #: The top of the castle porch roof just outside the door — the line the
@@ -322,8 +333,8 @@ def build_castle(coll):
     lintel.emit(coll)
 
     # The keystone: a wedge wider at the top, standing proud of the lintel
-    # towards the camera — within the lintel's own band, because there is no
-    # room above it under the ceiling.
+    # towards the camera, within the lintel's own band; the gatehouse top
+    # stands on the lintel over it.
     crest = kit.Part("doorframe-castle-crest")
     top_w, bottom_w = 0.62, 0.42
     outline = [(-bottom_w / 2, 0.0), (bottom_w / 2, 0.0), (top_w / 2, L), (-top_w / 2, L)]
@@ -399,8 +410,8 @@ def check_contract():
         assert abs(size.y - c["D"]) < tol, f"{style} post is {size.y:.3f} m deep, contract {c['D']}"
         assert abs(lo.z) < tol, f"{style} post's foot is at {lo.z:+.3f}, not on the floor"
         assert abs(hi.z - c["H"]) < tol, f"{style} post is {hi.z:.3f} m tall, contract {c['H']}"
-        assert c["H"] >= TALLEST_CHILD_HEIGHT + HEADROOM - 1e-6, (
-            f"{style}: its lintel's underside ({c['H']:.3f} m) is under the tallest child ({TALLEST_CHILD_HEIGHT}) + {HEADROOM}"
+        assert c["H"] > TALLEST_CHILD_HEIGHT, (
+            f"{style}: its lintel's underside ({c['H']:.3f} m) is under the tallest child ({TALLEST_CHILD_HEIGHT})"
         )
         assert abs(lo.x + hi.x) < tol and abs(lo.y + hi.y) < tol, f"{style} post is not centred on its origin"
         lo, hi = union_bounds(lintels)
@@ -412,12 +423,12 @@ def check_contract():
         assert abs(size.y - c["D"]) > 0.02, f"{style} lintel ({size.y:.3f} m deep) is as deep as its post ({c['D']})"
         lo, hi = union_bounds(crests)
         assert abs(lo.x + hi.x) < 0.02, f"{style} crest is not centred across"
-    # The castle's posts, lintel and keystone fit under its ceiling; the
-    # gatehouse top stands in the gap over the door and clears the porch roof.
+    # Every lintel's underside clears a jumping head; the castle's posts stay
+    # under its wall's top; its gatehouse top clears the porch roof.
     c = CONTRACT["castle"]
-    _, hi = union_bounds([by_name["doorframe-castle-crest"]])
-    top = c["H"] + c["L"] + hi.z
-    assert top <= CASTLE_CEILING - CEILING_GAP + 1e-6, f"castle keystone tops out at {top:.3f}, ceiling {CASTLE_CEILING}"
+    for style, cs in CONTRACT.items():
+        assert cs["H"] >= JUMP_HEAD + JUMP_HEADROOM - 1e-6, f"{style}: lintel at {cs['H']:.3f}, a jumping head reaches {JUMP_HEAD:.3f}"
+    assert c["H"] < CASTLE_WALL_TOP, f"castle posts ({c['H']:.3f}) stand past the wall's top ({CASTLE_WALL_TOP})"
     lo, _ = union_bounds([by_name["doorframe-castle-crest-parapet"]])
     assert c["H"] + c["L"] + lo.z > PORCH_ROOF_TOP, "the castle's gatehouse top starts under the porch roof's top"
     for obj in by_name.values():

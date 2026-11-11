@@ -31,7 +31,8 @@
  * {@link registerDoorFrameSolids} gives each post a box over its drawn
  * footprint (moss and all) to the lintel's top, which is what stands over it,
  * and the lintel a box **banded** from its underside to its top, so only a
- * flier ever meets it — a walker and a jump pass under (`Collision.ts`'s
+ * flier ever meets it — a walker and a jump pass under, because every
+ * lintel's underside is built over her head at a jump's apex (`Collision.ts`'s
  * `baseHeight`). Nothing about the frame is in the route lattice: the posts
  * stand where each wall's own collider already was, and a banded box is never
  * stamped.
@@ -310,8 +311,10 @@ export interface DoorFrameSolids {
  * frame's local metres to the world (the room's origin, `originY` its height). Each post a crisp box
  * over its drawn footprint to the lintel's top, which is what stands over it;
  * the lintel a box over the opening **banded** from its underside — inert to
- * anyone on the floor, a walk or a jump (`baseHeight`) — and the crest a box
- * banded over its own drawn box.
+ * a walk and to a jump, because the kit stands every lintel's underside over
+ * her head at the top of one (`doorframes_build.py`'s `JUMP_HEAD`;
+ * `check:doorframes` §5 runs the jumps) — and the crest a box banded over its
+ * own drawn box.
  */
 export function registerDoorFrameSolids(collision: CollisionWorld, frame: DoorFrame, originX: number, originZ: number, originY = 0): DoorFrameSolids {
   const floor = originY + frame.opening.floorY;
