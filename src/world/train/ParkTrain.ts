@@ -90,7 +90,7 @@ const ACCELERATION = 1.7;
 const BRAKING = 2.4;
 
 /** Seconds spent at each station with the doors open. */
-const DWELL_SECONDS = 8;
+export const DWELL_SECONDS = 8;
 
 /**
  * **How far short of anyone on the line the train's nose stands**, metres —

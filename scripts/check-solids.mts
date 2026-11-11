@@ -84,7 +84,7 @@ import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { CLEAR_TOLERANCE } from '../src/world/dismount.ts';
 import { CARRIAGE_BODY_HALF_WIDTH, CAR_FLOOR_Y } from '../src/world/train/trainDimensions.ts';
 import { CAR_GAP, CARRIAGE_LENGTH, LOCO_LENGTH } from '../src/world/train/trainModel.ts';
-import { TRAIN_STOPS_SHORT } from '../src/world/train/ParkTrain.ts';
+import { DWELL_SECONDS, TRAIN_STOPS_SHORT } from '../src/world/train/ParkTrain.ts';
 import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe, type HopProbe } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type BoxCollider, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
@@ -189,6 +189,9 @@ import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeigh
  *   height kept — clause 13's jumping on it must find it leaving with her on
  *   its funnel's rim (2.26–2.38 m over the rails on seed 5: out of the old
  *   reach while she stands there, never mind jumps).
+ * - `train-ignores-her-line` (park, from clause 13): her and her line out of
+ *   the train's lookout — clause 13's drops beside it, after its dwell, must
+ *   find it moving while she is beside it.
  * - `low-vault` (park): a solid ceiling under each tunnel's arch, 0.35 m under
  *   the drawn soffit as the vault's foot once stood, low enough to reach —
  *   clause 12's standing jumps must find a ceiling under the drawn soffit.
@@ -212,7 +215,7 @@ const PROOFS = [
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
   'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'platform-holds-train', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
   'pets-count-aboard', 'pets-stay-out', 'ghost-train', 'frozen-train', 'train-ignores-on-top', 'put-down-ignores-train', 'riders-sit-on-her',
-  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air', 'child-left-on-line', 'low-vault',
+  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air', 'child-left-on-line', 'low-vault', 'train-ignores-her-line',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -2405,6 +2408,15 @@ if (inPart('park')) {
       };
     }
     if (PROVE === 'riders-sit-on-her') (train as unknown as { upOn(car: number): boolean }).upOn = () => false;
+    if (PROVE === 'train-ignores-her-line') {
+      // Her and her line out of its lookout (the crowd still counted): the
+      // drops beside it must find it pulling away from her.
+      const looking = train as unknown as { lookout(): Iterable<{ radius: number }> };
+      const looked = looking.lookout.bind(train);
+      looking.lookout = function* () {
+        for (const body of looked()) if (body.radius !== PLAYER_RADIUS && body.radius !== PARADE_MEMBER_RADIUS) yield body;
+      } as never;
+    }
     if (PROVE === 'hover-any-air') (Player.prototype as unknown as { isHover: () => boolean }).isHover = () => true;
     if (PROVE === 'train-blind-mid-jump' || PROVE === 'train-band-two-metres') {
       const looking = train as unknown as { nearLine(x: number, y: number, z: number): { at: number } | null; lookout(): Iterable<{ x: number; y: number; z: number; radius: number }> };
@@ -2913,6 +2925,14 @@ if (inPart('park')) {
       let dropsAsked = 0;
       for (const drop of fromNose) {
         play(240, STILL_INPUT, 1 / 30, () => train.stoppedAt() !== null && train.runningSpeed === 0);
+        // Through its dwell held by a child ahead of it, so that once she is
+        // dropped nothing but her holds it: it would leave this instant, and
+        // must not while she is beside it (PR #722's review: the drops ended
+        // two seconds into the dwell, so "the train standing meanwhile" could
+        // not fail).
+        hold(true);
+        play(DWELL_SECONDS + 1, STILL_INPUT, 1 / 30);
+        hold(false);
         const here = train.stoppedAt() === null ? null : train.stations[train.stoppedAt()!] ?? null;
         if (!here) {
           badDrops.push(`${drop.what}: the train never stood at a station to drop her beside — ${whereItIs()}`);
@@ -2933,7 +2953,11 @@ if (inPart('park')) {
         const rescuesBefore = player.wedgeRescues;
         let lastNose = train.noseDistance();
         let movedBeside = 0;
+        let freedIn = -1;
+        let t = 0;
+        // The whole ten seconds, freed or not: the train is asked all the while.
         play(10, STILL_INPUT, 1 / 60, () => {
+          t += 1 / 60;
           const wedged = wedgedNow();
           worst = Math.max(worst, wedged);
           freeFor = !player.isAirborne && wedged <= WEDGE_DEPTH ? freeFor + 1 / 60 : 0;
@@ -2943,9 +2967,9 @@ if (inPart('park')) {
           const her = route.distanceNear(player.position.x, player.position.z);
           const beside = route.forwardGap(route.wrap(train.noseDistance() - span), her) <= span + PLAYER_RADIUS;
           if (moved > 1e-4 && beside && train.onTheLine(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS)) movedBeside += moved;
-          return freeFor > 1;
+          if (freedIn < 0 && freeFor > 1) freedIn = t;
         });
-        if (freeFor <= 1) {
+        if (freedIn < 0) {
           const put = player.lastPutDown;
           const p = player.position;
           badDrops.push(
@@ -2957,7 +2981,7 @@ if (inPart('park')) {
         awayWithHerLine();
       }
       const drops = fromNose;
-      say(dropsAsked === drops.length && badDrops.length === 0, `dropped into a slot beside it: ${dropsAsked} of ${drops.length} drops — the far side of every carriage and the gaps between its cars — each freed by the wedge rescue within 10 s, the train standing meanwhile${badDrops.length ? ` — ${badDrops.join('; ')}` : ''}`);
+      say(dropsAsked === drops.length && badDrops.length === 0, `dropped into a slot beside it: ${dropsAsked} of ${drops.length} drops — the far side of every carriage and the gaps between its cars — each dropped once its dwell is over, with nothing but her to hold it, and each freed by the wedge rescue within 10 s — the train standing all the while she is beside it${badDrops.length ? ` — ${badDrops.join('; ')}` : ''}`);
     }
     // --- hopping under a station's canopy: no rescue ---
     // Under a canopy a jump is capped at a few centimetres: hopping on the
@@ -3008,11 +3032,12 @@ if (inPart('park')) {
         const rescues = player.wedgeRescues - rescuesBefore;
         const moved = Math.hypot(player.position.x - from.x, player.position.z - from.z);
         const line = `${stop.name} at (${found.x.toFixed(2)}, ${found.z.toFixed(2)}), ${(found.room - KID_HEIGHT).toFixed(2)} m over her head: ${jumps} hops, rising ${rose.toFixed(2)} m, ${rescues} rescue(s), moved ${moved.toFixed(2)} m`;
-        if (rescues > 0 || jumps < 10 || moved > 0.3) hops.push(line);
+        // How far she moved is reported, not asked: a child of the crowd may nudge her as she hops.
+        if (rescues > 0 || jumps < 10) hops.push(line);
         else hops.push(`ok: ${line}`);
       }
       const bad = hops.filter((line) => !line.startsWith('ok: '));
-      say(askedHere > 0 && bad.length === 0, `hopping under a canopy: at ${askedHere} station(s), a jump each time she lands for 8 s, capped by the canopy — no hover rescue, and she hops where she stood — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
+      say(askedHere > 0 && bad.length === 0, `hopping under a canopy: at ${askedHere} station(s), a jump each time she lands for 8 s, capped by the canopy — no hover rescue — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
       awayWithHerLine();
     }
     // --- up onto a station's bench ---

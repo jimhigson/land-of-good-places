@@ -431,6 +431,13 @@ world.attachPlayer(player as never);
 // Her pets' parade, built and wired as `Game` does: one parade, introduced to
 // the park in `Game`'s one call (`World.attachParade`), routed by her own
 // router (below, once it exists).
+// `bus-in-backpack` (see the header): the cat bus's own word changed before
+// her line first meets it, since she is aboard it before this check's first frame.
+if (process.env['EXITS_PROVE'] === 'bus-in-backpack') {
+  const holder = (world.entrance.arrival as unknown as { holder: { companion: unknown } } | null)?.holder;
+  if (!holder) throw new Error('bus-in-backpack: no cat bus to change');
+  holder.companion = 'in her backpack';
+}
 const parade = new Parade(player as never, collision, camera);
 scene.add(parade.group);
 world.attachParade(parade);
@@ -438,12 +445,12 @@ world.attachParade(parade);
 const PROVE = process.env['EXITS_PROVE'] ?? '';
 const PROOFS = ['pets-stay-out', 'pets-stay-in', 'pets-count-aboard', 'seat-says-backpack', 'bus-in-backpack'];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`EXITS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
-if (PROVE === 'seat-says-backpack' || PROVE === 'bus-in-backpack') {
+if (PROVE === 'seat-says-backpack') {
   // A holder's own word changed, the way a forgotten declaration once read:
-  // the breakfast chair saying the backpack, or the cat bus as it was.
+  // the breakfast chair saying the backpack.
   // On her own, as the placement recorder above wraps it: the instance's own `beginRide`.
   const begin = player.beginRide.bind(player);
-  const changed = PROVE === 'seat-says-backpack' ? 'a breakfast chair' : 'the cat bus';
+  const changed = 'a breakfast chair';
   const swapped = new Map<RideHolder, RideHolder>();
   player.beginRide = (holder: RideHolder): void => {
     if (holder.holding !== changed) return begin(holder);
