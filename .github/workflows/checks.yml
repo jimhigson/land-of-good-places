@@ -95,6 +95,13 @@ jobs:
         # `check:served-menu-reach` after it (PR #721).
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
+      # When this job started, for the watchdog: its budget is the job's cap
+      # less what the steps before it already spent, so a slow Chromium
+      # install shortens the watchdog's clock instead of letting
+      # `timeout-minutes` win the race and turn the job grey.
+      - name: Start the job's clock
+        run: echo "CHECK_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -125,8 +132,14 @@ jobs:
       # Installed on every shard rather than the ones holding those steps
       # today: tying it to shard numbers would be a second definition of where
       # a step lives, kept in step by hand.
+      #
+      # **From a cache, and on its own clock** (#737): a stalled apt mirror
+      # once held shard 7 here for the whole 30-minute cap. The action says
+      # how; this step's `timeout-minutes` is the backstop over its retries,
+      # and the watchdog below deducts whatever this step spent.
       - name: Install Chromium
-        run: pnpm exec playwright-core install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        timeout-minutes: 7
 
       # One shard of the gate, **under a watchdog, not directly.** The
       # watchdog runs `pnpm run check:shard-N` under a clock set inside this
