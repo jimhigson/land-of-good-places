@@ -9,7 +9,8 @@
  * Needs a **dev** build (it reads `window.game`, which only a dev build sets)
  * to find where each doorway is on screen; the tap itself is a real touch
  * event on a 390×844 touch screen. For each interior, from its own deep link,
- * it taps the middle of the opening on the wall line, then reports whether
+ * it taps the middle of the opening on the wall line, half a metre in, and on
+ * the floor just outside (on the castle's porch, out to 1.6 m), then reports whether
  * she left the room within a few seconds, with a screenshot.
  */
 import { chromium } from 'playwright-core';
@@ -48,7 +49,11 @@ const browser = await chromium.launch({
 });
 let failed = 0;
 for (const room of rooms) {
-  for (const where of ['wall line', '0.5 m inside']) {
+  // Positive is metres in from the wall line, negative out past it: the
+  // castle's porch runs well past its door, the other rooms' floor 0.6 m.
+  const spots = [['wall line', 0], ['0.5 m inside', 0.5], ['0.3 m outside', -0.3]];
+  if (room.name === 'castle') spots.push(['1.0 m outside', -1.0], ['1.6 m outside', -1.6]);
+  for (const [where, inset] of spots) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, serviceWorkers: 'block' });
     await context.addInitScript((file) => window.localStorage.setItem('lgp:save', JSON.stringify(file)), save);
     const page = await context.newPage();
@@ -68,7 +73,7 @@ for (const room of rooms) {
         const r = game.renderer?.domElement?.getBoundingClientRect?.() ?? document.querySelector('canvas').getBoundingClientRect();
         return { sx: r.left + ((v.x + 1) / 2) * r.width, sy: r.top + ((1 - v.y) / 2) * r.height, from: [game.player.position.x, game.player.position.z] };
       },
-      [room.frame, where === 'wall line' ? 0 : 0.5],
+      [room.frame, inset],
     );
     let target = await locate();
     for (let i = 0; i < 30; i += 1) {
