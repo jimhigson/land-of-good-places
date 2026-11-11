@@ -120,8 +120,20 @@ const cap = capSeconds(workflow, jobId);
  */
 const scaledMargin = Math.max(60, Math.min(DEFAULT_MARGIN_SECONDS, cap * 0.1));
 const margin = Number(process.env.CHECK_WATCHDOG_MARGIN_SECONDS ?? scaledMargin);
+/**
+ * What the job's earlier steps already spent of the cap.
+ *
+ * The margin covers checkout and install at their usual ~20 s. It does not
+ * cover a Chromium install that had to retry (#737): that can take minutes, and
+ * without this the watchdog would still plan for the full `cap - margin` and
+ * lose the race to `timeout-minutes` — the grey job it exists to prevent. So a
+ * job that records its start (`CHECK_JOB_STARTED_AT`, epoch seconds, set by its
+ * first step) has that time deducted. Absent, nothing is deducted, as before.
+ */
+const jobStartedAt = Number(process.env.CHECK_JOB_STARTED_AT);
+const spentBefore = Number.isFinite(jobStartedAt) && jobStartedAt > 0 ? Math.max(0, Date.now() / 1000 - jobStartedAt) : 0;
 /** Overridable only so the watchdog can be proved to fire — see the PR body. */
-const budget = Number(process.env.CHECK_WATCHDOG_BUDGET_SECONDS ?? cap - margin);
+const budget = Number(process.env.CHECK_WATCHDOG_BUDGET_SECONDS ?? Math.floor(cap - margin - spentBefore));
 
 if (!Number.isFinite(budget) || budget <= 0) {
   throw new Error(`nonsensical watchdog budget: ${budget}s (cap ${cap}s, margin ${margin}s)`);
@@ -148,7 +160,9 @@ const elapsed = (): number => (Date.now() - started) / 1000;
 say(
   `watchdog[${script}] — budget ${formatDuration(budget)} against ` +
     `${workflowPath}'s ${formatDuration(cap)} cap ` +
-    `(${formatDuration(margin)} left for the runner).`,
+    `(${formatDuration(margin)} left for the runner` +
+    (spentBefore > 0 ? `, ${formatDuration(Math.round(spentBefore))} already spent by earlier steps` : '') +
+    ').',
 );
 
 /**

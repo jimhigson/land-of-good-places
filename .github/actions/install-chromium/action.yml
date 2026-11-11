@@ -1,0 +1,59 @@
+name: Install Chromium
+description: >-
+  Installs the Chromium that `playwright-core` drives, and the system packages
+  it needs, from a cache when it can — so most runs never touch apt — and, when
+  it cannot, under a per-attempt clock with one retry, so a stalled Ubuntu
+  mirror fails fast instead of hanging the job to its `timeout-minutes` (#737).
+# **Call this with a `timeout-minutes:` on the calling step.** A composite
+# action's own steps cannot carry one, so the clock that bounds the whole of
+# this lives on the step that `uses:` it. `install.sh` sets the per-attempt
+# clocks inside it; that step-level cap is the backstop over both attempts.
+#
+# Why cache the .debs rather than just retry: on PR #736 shard 7 sat in
+# `apt-get` for the whole 30-minute cap, and a retry only bounds that, it does
+# not avoid it. The runner image already carries every library Chromium links
+# against; what `install-deps` adds is fonts and a handful of upgrades — the
+# same ~26 MB of packages on every run of one image. So those exact packages
+# are cached, keyed on the runner image, and on a hit they go in with `dpkg`
+# from disk: no `apt-get update`, no mirror, nothing to stall on.
+runs:
+  using: composite
+  steps:
+    - name: Chromium cache key
+      id: key
+      shell: bash
+      # The packages apt chooses depend on what the image already has, so the
+      # image version is in the key; the browser build depends on the
+      # playwright-core version actually installed, not the range in
+      # package.json.
+      run: |
+        version=$(node -p "require('./node_modules/playwright-core/package.json').version")
+        echo "key=chromium-${ImageOS:-unknown}-${ImageVersion:-unknown}-playwright-core-${version}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Chromium and its system packages
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cache/ms-playwright
+          ~/.cache/chromium-debs
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Install Chromium and its system packages
+      shell: bash
+      env:
+        CHROMIUM_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: bash "$GITHUB_ACTION_PATH/install.sh"
+
+    # Saved only after a successful install (a failed step above stops the
+    # action), and only on a miss. Parallel shards that all missed race to save
+    # the same key; the losers log "Unable to reserve cache" as a warning and
+    # carry on, which is the behaviour wanted.
+    - name: Save Chromium and its system packages
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.cache/ms-playwright
+          ~/.cache/chromium-debs
+        key: ${{ steps.key.outputs.key }}
