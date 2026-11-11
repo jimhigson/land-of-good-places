@@ -35,12 +35,33 @@
  * and is this process's exit code.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-/** Not 5173 (Vite's default) and not any port a handoff has named. */
-const PORT = Number(process.env.SERVED_CHECKS_PORT ?? 5947);
+/**
+ * **A port nobody else is on — asked of the OS, never a fixed number.** It was a
+ * fixed 5947, and several agents run `pnpm run check` at once on one Mac: on
+ * 11 Nov 2026 this harness's own vite failed `--strictPort` on 5947 ("Port 5947
+ * is already in use"), the readiness probe below was answered by *another
+ * worktree's* server on that port, and `check:deep-links` ran against that
+ * server until it stopped — every later link ERR_CONNECTION_REFUSED, a red run
+ * about somebody else's game. The OS hands out a free port (bind to 0, read it,
+ * release it); `--strictPort` still makes the rare race on it loud.
+ * `SERVED_CHECKS_PORT` pins one by hand.
+ */
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      probe.close(() => (port ? resolve(port) : reject(new Error('no free port from the OS'))));
+    });
+  });
+const PORT = process.env.SERVED_CHECKS_PORT ? Number(process.env.SERVED_CHECKS_PORT) : await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
 /** A cold dev server answers in a second or two; this is only a backstop. */
 const READY_TIMEOUT_MS = 60_000;
@@ -103,6 +124,12 @@ for (;;) {
     throw new Error(`vite dev server did not answer on ${BASE} within ${READY_TIMEOUT_MS / 1000} s`);
   }
   await new Promise((resolve) => setTimeout(resolve, 250));
+}
+// And it must be OUR server that answered: a vite that lost `--strictPort` exits within a second of starting,
+// and the probe above can be answered meanwhile by whoever does hold the port.
+await new Promise((resolve) => setTimeout(resolve, 1500));
+if (!server || server.exitCode !== null) {
+  throw new Error(`the vite dev server this harness started is not running — whatever answered on ${BASE} is somebody else's`);
 }
 say(`serving ${BASE}`);
 
