@@ -119,3 +119,17 @@ rule 3 (0e0f9da7). **Part 5's join should merge `origin/feat/library-chapter-boo
 `HANDOFF-library-chapter-books.md` ("PAUSED 23 Oct 22:00"), has the state, the red CI on part 4's
 beacon clause (diagnosed), and the plan, still open at the pause, to put the books straight onto main
 without part 4.
+
+## Proved (11 Nov), on seed 5 restart 1 (LGP_PARK_RESTART=1; the restart main's and #736's parks artifacts record for seed 5)
+- check:library green at 3d0b5e9b-era tree: **386 ✓, exit 0** ("All clauses passed").
+- RED, one run, three mutations at once (`LIBRARY_CHECK_MUTATE=resident-in-den LIBRARY_CHECK_REMOVE='bookcase west-2'`
+  plus Library.ts passing `false` for `unseen` by hand, reverted): exit 1, 375 ✓, and among the ✗:
+  - "inside the secret den's doorway at (-19.60, -4.30) IS reachable with the secret shelf shut" (the shut-shelf
+    reachability's control — the den is unreachable only because of the shelf);
+  - "the children keep out of the secret den ... the nearest 0.00 m, Juno's circuit (-1.5, -3.9) → (-20.8, -4.8)";
+  - "no "Shhh!" in the den ... — 1 shush(es)".
+- The den's enterable+leavable proof is the existing SECRET SHELF clauses: open → "zero pockets with the leaf open:
+  0 clear cell(s) unreached of 8976"; shut → "the one pocket is the secret den: 268 clear cells unreached, 268 inside
+  libraryDenContains".
+- Lanterns: band 3.89..4.53 m; flier at 3.94 m stops 0.000 m short; control over the top passes (-0.415 m, inside plan).
+- The den's longest possible sprint is 0.32 s < SHUSH_RUN_SECONDS 0.35, so the no-shush clause rests on the jump.
