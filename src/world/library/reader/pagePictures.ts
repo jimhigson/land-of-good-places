@@ -28,17 +28,51 @@ import { createRipikaStatue } from '../../../art/models/ripikaStatue';
 import { createBalloon, type BalloonKind } from '../../../art/models/balloons';
 import { createKeychain, KEYCHAIN_KINDS, type KeychainKind } from '../../../art/models/keychains';
 import { createBreakfastBowl, createPetBed, type BreakfastKind } from '../../../art/models/hotelAssets';
-import { createCandyFloss, createStarToy, createSurpriseEgg, type FlossFlavour } from '../../../art/models/shopItems';
+import { createCandyFloss, createFlossStick, createStarToy, createSurpriseEgg, type FlossFlavour } from '../../../art/models/shopItems';
 import { duckBarAssetGeometry } from '../../../art/models/duckBarAsset';
 import { createMini, type MiniHandle } from '../../../art/models/mini';
 import { createLollipopTree, createPinkWall, type TreeVariant } from '../../../art/models/props';
 import { createTortoise } from '../../../art/models/reptiles';
 import { createLibraryOwl } from '../../../art/models/libraryCreatures';
+import { createLibraryBookcase, createLibraryDesk, createLibraryReadingLamp, libraryBookMaterial, libraryBookShapes } from '../../../art/models/libraryAssets';
 import { createJetpack } from '../../../art/models/jetpack';
 import { createDiscoBall } from '../../../art/models/hotelAssets';
 import { createAlienSaucer } from '../../../minigames/ferrisWheel/friends';
-import { createStoryBook, createStoryCloud, createStoryDragon } from './readerAssets';
-import { buildPictureProp, WARM_PROP_PARTS } from './pictureProps';
+import { Rng } from '../../../core/mathUtils';
+import { bookInstances, shelveFace } from '../furnish';
+import { createStoryBook, createStoryDragon } from './readerAssets';
+import {
+  createBattlement,
+  createBiscuitTreat,
+  createCake,
+  createFeather,
+  createFlatStone,
+  createFluffyCloud,
+  createGiantFootprint,
+  createInsideOutUmbrella,
+  createJamTart,
+  createLoosePage,
+  createMagnifyingGlass,
+  createOpenBook,
+  createPancakeFootprint,
+  createParkBench,
+  createPetal,
+  createPicnicBlanket,
+  createPuddle,
+  createQueuePosts,
+  createRainbowArch,
+  createRubberDuck,
+  createSandwich,
+  createSandwichHeap,
+  createSandwichTower,
+  createSpoon,
+  createStick,
+  createStoryCloud,
+  createStoryFlower,
+  createStoryWheel,
+  createTwigNest,
+  createWindowFrame,
+} from './storyProps';
 import { hazardTapeTexture } from '../../../core/textures';
 import { createCatBus } from '../../entrance/catBus';
 import { createCart, SEAT_HEIGHT } from '../../railRace/cart';
@@ -430,11 +464,141 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
       root.add(friend.root);
       return { root, height: top - bottom, dispose: () => friend.dispose() };
     }
+    case 'libraryDesk':
+      return createLibraryDesk();
+    case 'readingLamp':
+      return createLibraryReadingLamp();
+    case 'bookcase':
+      return buildPictureBookcase();
+    case 'flossStick': {
+      const root = new Group();
+      root.add(createFlossStick());
+      return { root, height: visibleBounds(root).top };
+    }
     case 'stormCloud':
-      return createStoryCloud(colour ?? PALETTE.stoneGreyMid);
-    case 'prop':
-      return buildPictureProp(actor.parts ?? []);
+      return createStoryCloud(colour === undefined ? {} : { colour });
+    case 'fluffyCloud':
+      return createFluffyCloud();
+    case 'rainbowArch':
+      return createRainbowArch();
+    case 'queuePosts':
+      return createQueuePosts();
+    case 'rubberDuck':
+      return createRubberDuck();
+    case 'parkBench':
+      return createParkBench();
+    case 'magnifyingGlass':
+      return createMagnifyingGlass();
+    case 'pancakeFootprint':
+      return createPancakeFootprint();
+    case 'giantFootprint':
+      return createGiantFootprint();
+    case 'spoon':
+      return createSpoon();
+    case 'flatStone':
+      return createFlatStone();
+    case 'stick':
+      return createStick();
+    case 'openBook':
+      return createOpenBook(colour);
+    case 'loosePage':
+      return createLoosePage();
+    case 'flower':
+      return createStoryFlower({ ...(colour === undefined ? {} : { colour }), ...(actor.nibbled ? { nibbled: true } : {}) });
+    case 'petal':
+      return createPetal(colour);
+    case 'picnicBlanket':
+      return createPicnicBlanket();
+    case 'sandwich':
+      return createSandwich();
+    case 'sandwichTower':
+      return createSandwichTower();
+    case 'sandwichHeap':
+      return createSandwichHeap();
+    case 'jamTart':
+      return createJamTart();
+    case 'cake':
+      return createCake();
+    case 'puddle':
+      return createPuddle();
+    case 'windowFrame':
+      return createWindowFrame();
+    case 'umbrellaInsideOut':
+      return createInsideOutUmbrella();
+    case 'battlement':
+      return createBattlement();
+    case 'storyWheel':
+      return buildStoryWheel(actor, colour);
+    case 'feather':
+      return createFeather(colour);
+    case 'twigNest':
+      return createTwigNest();
+    case 'biscuitTreat':
+      return createBiscuitTreat();
   }
+}
+
+/** The seed of a picture's bookcase, so a page's shelf holds the same spines every time it is drawn. */
+const PICTURE_SHELF_SEED = 0x5e1f;
+
+/**
+ * A wall case full of spines, for the pages set in the library: the kit's
+ * case (`createLibraryBookcase`) with its rows stocked by the reading room's
+ * own rule — `furnish.ts`'s `shelveFace`, the one owner of how a shelf is
+ * filled — under a spec no readable slot names, so no gap is left for one.
+ */
+function buildPictureBookcase(): AssetHandle {
+  const kind = 'wall';
+  const bookcase = createLibraryBookcase(kind);
+  const shapes = libraryBookShapes();
+  const books = shelveFace({ id: 'picture', kind, at: { x: 0, z: 0 }, facing: 0 }, false, new Rng(PICTURE_SHELF_SEED), shapes);
+  bookcase.root.add(bookInstances(books, shapes, libraryBookMaterial()));
+  return { root: bookcase.root, height: bookcase.height };
+}
+
+/** How much of the bracket's width the star fills when it is back in it. */
+const STAR_IN_BRACKET = 0.9;
+
+/**
+ * The toy wheel: dark with its bracket empty unless the page says `lit`, when
+ * the ring of lights is on and the golden star — the park's own star toy, in
+ * `colour` or yellow — sits in the bracket on the hub's face, scaled to
+ * {@link STAR_IN_BRACKET} of the bracket the Artist measured for it and stood
+ * just in front of it. Both the star and the bracket are measured here, off
+ * their own vertices, so neither size is typed twice.
+ */
+function buildStoryWheel(actor: PictureActor, colour: number | undefined): AssetHandle {
+  const wheel = createStoryWheel(actor.lit ? { lit: true } : {});
+  if (!actor.lit) return wheel;
+  const star = createStarToy(colour ?? PALETTE.flowerYellow);
+  const box = new Box3();
+  visiblePoints(star.root, (point) => box.expandByPoint(point));
+  const bracket = wheel.bracketBox.getSize(new Vector3());
+  const span = Math.max(box.max.x - box.min.x, box.max.y - box.min.y); // flat-ok: the star toy's own local bounds on the picture's flat stage
+  const fit = (Math.max(bracket.x, bracket.y) * STAR_IN_BRACKET) / span;
+  const middle = box.getCenter(new Vector3());
+  star.root.scale.setScalar(fit);
+  star.root.position.set(
+    wheel.bracketCentre.x - middle.x * fit,
+    wheel.bracketCentre.y - middle.y * fit,
+    wheel.bracketBox.max.z - box.min.z * fit,
+  );
+  wheel.root.add(star.root);
+  return wheel;
+}
+
+/**
+ * A model that drew nothing would still pass as "on the page" — a picture's
+ * coverage is of its whole cast — so a factory handing back an empty group (a
+ * kit node renamed, a visibility flag left off) is caught here, loudly, and
+ * never by a child turning to a page with a hole in the story.
+ */
+function assertDrawsSomething(root: Object3D, actor: PictureActor): void {
+  let seen = 0;
+  visiblePoints(root, () => {
+    seen += 1;
+  });
+  if (seen === 0) throw new Error(`pagePictures: the '${actor.model}' model drew nothing — no visible vertex under its root '${root.name}'`);
 }
 
 /** The seed of a picture's tree, so a page's tree is the same tree every time it is drawn. */
@@ -558,10 +722,12 @@ function addLights(scene: Scene, picture: PagePicture): void {
 export function pictureWarmSteps(renderer: WebGLRenderer, look: ReaderLook, pins: Material[]): (() => void)[] {
   const actors = new Map<string, PictureActor>();
   for (const model of PICTURE_MODELS) actors.set(model, { model });
-  // What a bare model does not show: a prop's every kind of piece, a firing
-  // jet pack (its flames are hidden while it is off, and a hidden mesh is not
-  // compiled) on the reader and on a pet, and every flavour of floss.
-  actors.set('prop', { model: 'prop', parts: WARM_PROP_PARTS });
+  // What a bare model does not show: a firing jet pack (its flames are hidden
+  // while it is off, and a hidden mesh is not compiled) on the reader and on
+  // a pet, the lit wheel's ring of lights with the star in its bracket, and
+  // every flavour of floss. The story-props kit is decoded by the first of its
+  // factories to run, so that one-off decode happens here too, behind the bus.
+  actors.set('storyWheel:lit', { model: 'storyWheel', lit: true });
   actors.set('kid:jetpack', { model: 'kid', jetpack: 'on' });
   actors.set('trilla:jetpack', { model: 'trilla', jetpack: 'on' });
   for (const flavour of ['pink', 'blue', 'rainbow'] as const satisfies readonly FlossFlavour[]) {
@@ -685,6 +851,7 @@ export function renderPicture(renderer: WebGLRenderer, picture: PagePicture, loo
     const handle = buildActor(actor, look);
     handles.push(handle);
     const root = handle.root;
+    assertDrawsSomething(root, actor);
     const [x, y, z] = actor.at ?? [0, 0, 0];
     root.position.set(x, y, z);
     root.rotation.y = (actor.turn ?? 0) * DEG;

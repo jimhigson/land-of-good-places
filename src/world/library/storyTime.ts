@@ -31,12 +31,19 @@ import { LIBRARY_FLOOR_Y } from './layout';
  * ## Phases
  *
  * - `idle` — the clock runs.
- * - `gathering` — the call is said, the owl flies to the chair, and every
- *   child is summoned (`LibraryKidDriver.summon`). A child at her cushion's
- *   edge hops onto it ({@link STORY_SIT_SECONDS}, `NpcCharacter.beginSeated`:
- *   her root on the **floor**, the dining rule) facing the chair. When every
- *   child is seated or has settled where she was held, and the owl has
- *   perched — or after {@link GATHER_TIMEOUT} — the reading begins.
+ * - `gathering` — the owl says the call from her desk and every child is
+ *   summoned (`LibraryKidDriver.summon`); **once the call is said, she flies**
+ *   to the chair. Never the call on the wing: her bubble is bigger on screen
+ *   than she is, and a call held over the whole flight turned it into a
+ *   speech bubble gliding over the stacks (browser QA round 1, 23 Oct 2026).
+ *   Every flight of hers is silent, so the flight is hers to see. A child at
+ *   her cushion's edge hops onto it ({@link STORY_SIT_SECONDS},
+ *   `NpcCharacter.beginSeated`: her root on the **floor**, the dining rule)
+ *   facing the chair. When every child is seated or has settled where she was
+ *   held, and the owl has perched — or after {@link GATHER_TIMEOUT} — the
+ *   reading begins. (The owl perches only on a seat nobody is standing on: she
+ *   waits over a child up on it, `LibraryOwl`'s flight; past the timeout, she
+ *   reads from the air.)
  * - `reading` — the owl says the title line, the book's own pages (already
  *   held to the brevity rule by the books' own check) and the ending. A child
  *   still arriving sits when she gets there.
@@ -47,9 +54,16 @@ import { LIBRARY_FLOOR_Y } from './layout';
  * ## Which book
  *
  * Picture books only — `storyTimeMayRead` (`books.ts`, the one owner of that
- * rule: a chapter page is a paragraph, too long for a bubble). The book the
- * owl is recommending, if it may be read; otherwise the next in her one
- * seeded order (`RECOMMENDATION_ORDER`), story by story.
+ * rule: a chapter page is a paragraph, too long for a bubble). **A different
+ * story every time:** the book the owl is recommending, if it may be read and
+ * no story has read it yet this round; otherwise the first of her one seeded
+ * order (`RECOMMENDATION_ORDER`) that may be read and has not been yet this
+ * round. A round ends when every such book has been read to its end once;
+ * the next begins again at the top of her order, never with the book the
+ * last story read. (The plan's `recommended ?? ORDER[storiesTold % 12]` read
+ * the glowing book at every story time for as long as it glowed, and after a
+ * recommended story could pick the very book just read — measured in
+ * `check:library`'s CLOCK: "Fireflies at Night" twice running.)
  *
  * Constructed by `Library`, stepped first in its `update` (before the owl, so
  * a story begun this frame flies this frame), which `World` runs before the
@@ -97,12 +111,18 @@ export class StoryTime {
   private clock = STORY_FIRST_AFTER;
   private gatherFor = 0;
   private storiesTold = 0;
+  /** The books read to their end this round — none is read again until every one story time may read has been. */
+  private readonly heard = new Set<string>();
+  /** The book the last story read to its end: never the next story's, a new round or not. */
+  private lastHeardId: string | null = null;
   private bookValue: LibraryBook | null = null;
   private wanted = false;
   /** She has sat on a story cushion since before the reading began, every frame of it. */
   private listenedThrough = false;
   private awarded = false;
   private held = false;
+  /** The call is being said: she takes off for the chair the frame she falls quiet. */
+  private flyWhenSaid = false;
 
   constructor(owl: LibraryOwl, children: () => readonly StoryChild[], listener: () => StoryListenerView) {
     this.owl = owl;
@@ -162,6 +182,10 @@ export class StoryTime {
         return;
       case 'gathering':
         this.gatherFor += dt;
+        if (this.flyWhenSaid && !this.owl.speaking) {
+          this.flyWhenSaid = false;
+          this.owl.flyTo(false);
+        }
         this.seatArrivals();
         if (this.gatherFor >= GATHER_TIMEOUT || (this.owl.perched && this.children().every((kid) => kid.driver.seated || kid.driver.gaveUp))) this.read();
         return;
@@ -174,6 +198,10 @@ export class StoryTime {
         if (!this.owl.flying && this.owl.atDesk) {
           this.phaseValue = 'idle';
           this.storiesTold += 1;
+          if (this.bookValue) {
+            this.heard.add(this.bookValue.id);
+            this.lastHeardId = this.bookValue.id;
+          }
           this.bookValue = null;
           this.clock = STORY_EVERY;
         }
@@ -190,6 +218,7 @@ export class StoryTime {
    */
   abort(): void {
     this.wanted = false;
+    this.flyWhenSaid = false;
     this.clock = STORY_FIRST_AFTER;
     if (this.phaseValue === 'idle') return;
     for (const kid of this.children()) {
@@ -204,16 +233,26 @@ export class StoryTime {
     this.bookValue = null;
   }
 
-  /** The book this story reads: the recommended one if story time may read it, else the next of the owl's order that it may. */
+  /**
+   * The book this story reads (the class doc's "Which book"): the recommended
+   * one if story time may read it and has not this round, else the first of
+   * the owl's order that it may and has not. Every one heard, a new round —
+   * holding back the one just heard, unless it is the only one.
+   */
   private pickBook(): LibraryBook | null {
+    const readable = RECOMMENDATION_ORDER.filter(storyTimeMayRead);
+    const unheard = (book: LibraryBook): boolean => !this.heard.has(book.id);
+    if (!readable.some(unheard)) {
+      this.heard.clear();
+      if (this.lastHeardId !== null && readable.length > 1) this.heard.add(this.lastHeardId);
+    }
     const recommendedId = this.owl.recommendedBookId;
     const recommended = recommendedId === null ? undefined : bookById(recommendedId);
-    if (recommended && storyTimeMayRead(recommended)) return recommended;
-    const readable = RECOMMENDATION_ORDER.filter(storyTimeMayRead);
-    return readable[this.storiesTold % Math.max(1, readable.length)] ?? null;
+    if (recommended && storyTimeMayRead(recommended) && unheard(recommended)) return recommended;
+    return readable.find(unheard) ?? null;
   }
 
-  /** The call, the flight, the summons. */
+  /** The call and the summons — the flight follows the call, the frame she has said it ({@link update}). */
   private begin(): void {
     this.wanted = false;
     const book = this.pickBook();
@@ -226,7 +265,7 @@ export class StoryTime {
     this.gatherFor = 0;
     this.awarded = false;
     this.owl.tell([LIBRARY_LINES.owl.storyCall]);
-    this.owl.flyTo(false);
+    this.flyWhenSaid = true;
     for (const kid of this.children()) kid.driver.summon();
   }
 

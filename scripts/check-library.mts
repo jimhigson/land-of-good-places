@@ -19,6 +19,11 @@
  * LIBRARY_CHECK_MUTATE=no-lintel pnpm run check:library       # the lintel over the den's doorway out: LINTEL must go red
  * LIBRARY_CHECK_REMOVE='the owl' pnpm run check:library       # the owl's solid out: OWL must go red (her middle is reachable)
  * LIBRARY_CHECK_MUTATE=card-twice pnpm run check:library      # a second card given through the non-idempotent door: CARD must go red
+ * LIBRARY_CHECK_MUTATE=fixed-hysteresis pnpm run check:library  # the selection's band a fixed 0.6 m (before #734): SHELF WALK's arrivals must go red
+ * LIBRARY_CHECK_MUTATE=no-hysteresis pnpm run check:library  # no band at all: SHELF WALK's sway midway must go red (flicker)
+ * LIBRARY_CHECK_MUTATE=tap-loses pnpm run check:library      # a tap dropped while proximity holds anything else (before #734): SHELF WALK's taps must go red
+ * LIBRARY_CHECK_MUTATE=no-glance pnpm run check:library      # the owl's glance at her book never wired (main before it): FOUND FROM THE DESK must go red, book by book
+ * LIBRARY_CHECK_MUTATE=glance-stays pnpm run check:library   # the glance's focus kept after it lets go: RECOMMEND's "the camera comes home" must go red
  * ```
  *
  * `LIBRARY_CHECK_MUTATE` is the one allow-list of this check's own mutations
@@ -112,6 +117,15 @@
  *     children: their routes swept, their stroll inside and freeze outside,
  *     and the story-time rehearsal — summoned, sat, furniture to the player,
  *     dismissed).
+ * 17. SHELF WALK (QA, PR #734) — the big readers' shelf, six books 0.6 m
+ *     apart, walked the way QA walked it: one continuous session, a real
+ *     `Selection` wired as `Game` wires it, E through the InputSystem's own
+ *     key listener and `InteractRouter`. Every arrival on a stand opens that
+ *     stand's book — walked north, walked back south, come from the aisle,
+ *     and stood on link after link — a tap on a neighbour's book selects it
+ *     and E opens it, and a sway midway between two stands never changes the
+ *     selection (no flicker). Its three mutations put back each half of the
+ *     old rule.
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -124,7 +138,7 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Vector3, type BufferAttribute, type Light, type Object3D, type Texture } from 'three';
+import { Box3, Color, Group, HemisphereLight, Mesh, MeshToonMaterial, Raycaster, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { Player } from '../src/entities/Player.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -136,33 +150,41 @@ import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, 
 import { PALETTE } from '../src/core/palette.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { BLINK_DURATION } from '../src/art/style/faceLife.ts';
-import { gameStore } from '../src/state/index.ts';
-import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, storyTimeMayRead, type LibraryBook } from '../src/world/library/books.ts';
+import { gameStore, type CuteThing } from '../src/state/index.ts';
+import { BOOKS, CHAPTER_BOOKS, PICTURE_BOOKS, bookCollectionId, storyTimeMayRead, type LibraryBook } from '../src/world/library/books.ts';
 import { isBookRead, markBookRead } from '../src/world/library/readBooks.ts';
 import { RECOMMENDATION_ORDER, recommendFor } from '../src/world/library/recommendation.ts';
+import { BookGlance, GLANCE_MOVE_CANCEL, type GlanceShot } from '../src/world/library/bookGlance.ts';
+import { FALLBACK_UNIT_PX } from '../src/core/uiScale.ts';
 import { LIBRARY_CARD, hasLibraryCard } from '../src/world/library/libraryCard.ts';
 import {
   BREATH_DEPTH,
   HEAD_TURN_LIMIT,
+  OWL_BUBBLE_OVER_HEAD,
   OWL_CRUISE_OVER_STACKS,
   OWL_FLIGHT_SECONDS,
   OWL_LOOK_RANGE,
   OWL_PERCH_BACK,
   OWL_WING_BEAT,
   OWL_ZONE_ID,
+  OWL_HEADROOM,
   owlCruiseHeight,
   owlFlightPose,
   owlPerch,
   owlWingOpening,
+  flightReach,
+  perchShape,
+  OWL_WINGS_OPEN_FROM,
   SHUSH_COOLDOWN_SECONDS,
   SHUSH_RUN_SECONDS,
   SHUSH_WING_X,
+  type LibraryOwl,
 } from '../src/world/library/LibraryOwl.ts';
-import { GATHER_TIMEOUT, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_ID, STORY_SIT_SECONDS, type StoryPhase } from '../src/world/library/storyTime.ts';
+import { GATHER_TIMEOUT, STORY_EVERY, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_ID, STORY_SIT_SECONDS, StoryTime, type StoryPhase } from '../src/world/library/storyTime.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
-import { visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
+import { visibleBounds, visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { PLAYER_SEPARATION, SEPARATION } from '../src/entities/npc/NpcSystem.ts';
 import { GUEST_PACE } from '../src/entities/npc/residentLooks.ts';
@@ -173,7 +195,9 @@ import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { END_HALF, LibraryProps, libraryKeepOuts, segmentDistance, type BoxFootprint, type LibrarySolid } from '../src/world/library/props.ts';
 import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/library/furnish.ts';
-import { SHELF_BOOK_ZONE_PREFIX, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
+import { SHELF_BOOK_ZONE_PREFIX, SHELF_BOOKS, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
+import { Selection } from '../src/world/Selection.ts';
+import { InteractRouter } from '../src/world/InteractRouter.ts';
 import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
@@ -284,6 +308,11 @@ const MUTATIONS = [
   'open-leaf-hollow',
   'resident-in-den',
   'block-walk',
+  'fixed-hysteresis',
+  'no-hysteresis',
+  'tap-loses',
+  'no-glance',
+  'glance-stays',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -1396,13 +1425,9 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
       (wrongKind.length > 0 ? ` — wrong: ${wrongKind.map(({ book, slot }) => `${book.id} (${book.kind}) on ${slot ? `a ${slot.kind} slot` : 'no slot'}`).join(', ')}` : ''),
   );
   say(pictureSlots.length === PICTURE_BOOKS.length, `${pictureSlots.length} picture-book slots for the ${PICTURE_BOOKS.length} picture books`);
-  say(CHAPTER_BOOKS.length <= chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
-  if (CHAPTER_BOOKS.length < chapterSlots.length) {
-    note(
-      `${chapterSlots.length - CHAPTER_BOOKS.length} of the ${chapterSlots.length} big readers' slots wait for their chapter books — ` +
-        `BOOKS (${BOOKS.length}) and LIBRARY_READABLE_SLOTS (${LIBRARY_READABLE_SLOTS.length}) must be equal before track A's shelf books are paired with them`,
-    );
-  }
+  // The six chapter books are all on the shelf (the books' join), so no big
+  // readers' slot waits any more: one missing goes red here, never a WAIT.
+  say(CHAPTER_BOOKS.length === chapterSlots.length, `${chapterSlots.length} big readers' slots for the ${CHAPTER_BOOKS.length} chapter books`);
   const shelves = libraryBookcaseSize('wall').shelfTops;
   say(shelves.some((top) => top > KID_REACH_HEIGHT), `CONTROL: the drawn case does have shelves out of her reach (${shelves.filter((top) => top > KID_REACH_HEIGHT).map((top) => top.toFixed(3)).join(', ')}), so the measure can say no`);
 
@@ -1412,18 +1437,7 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // naming the books.
   const shift = mutating('shift-books') ? 1 : 0;
   if (shift > 0) note('SHIFTED the pairing this check expects by one on purpose (slot i must hold BOOKS[i+1]) — this run must go red, naming the books');
-  // A slot past the last book waits for one (the big readers' shelf, until its
-  // chapter books land): it holds nothing, and nothing below asks it to.
-  const expected = LIBRARY_READABLE_SLOTS.map((slot, i): { slot: (typeof LIBRARY_READABLE_SLOTS)[number]; book: (typeof BOOKS)[number] | null } => ({
-    slot,
-    book: i < BOOKS.length ? BOOKS[(i + shift) % BOOKS.length]! : null,
-  }));
-  const waiting = expected.filter(({ book }) => book === null);
-  note(
-    waiting.length === 0
-      ? `every one of the ${LIBRARY_READABLE_SLOTS.length} slots holds a book`
-      : `${waiting.length} slot(s) WAIT for their books, so nothing is asserted about what stands in them: ${waiting.map(({ slot }) => `slot ${slot.index + 1} (${slot.bookcase}, shelf ${slot.shelf}, ${slot.along} m along)`).join(', ')}`,
-  );
+  const expected = LIBRARY_READABLE_SLOTS.map((slot, i) => ({ slot, book: BOOKS[(i + shift) % BOOKS.length]! }));
 
   // Every `library.book.<id>` mesh in the room (an outline is `<…>.outline`).
   const named = new Map<string, Mesh[]>();
@@ -1449,7 +1463,6 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   let worstOut = { what: 'none', by: -Infinity };
   let placedOk = 0;
   for (const { slot, book } of expected) {
-    if (!book) continue;
     const mesh = named.get(book.id)?.[0];
     const spec = LIBRARY_BOOKCASES.find((candidate) => candidate.id === slot.bookcase);
     const box = boxes.get(`bookcase ${slot.bookcase}`);
@@ -1546,7 +1559,6 @@ console.log(`\nREADABLE — the ${BOOKS.length} readable books: within her reach
   // Each zone in its slot, read against the expected pairing.
   let zonesOk = 0;
   for (const { slot, book } of expected) {
-    if (!book) continue;
     const zone = zones.find((candidate) => candidate.id === shelfBookZoneId(book.id));
     const mesh = named.get(book.id)?.[0];
     if (!zone || !mesh) {
@@ -1768,7 +1780,7 @@ type Steer = (input: InputSystem) => void;
  * also takes the probe's place in the Library). One {@link RealChild.step} is
  * the game's own order for everything a library clause reads, at 1/60 s:
  *
- *     input.update → (steer) → player.update → camera.update → library.update → world.npcs.update
+ *     input.update → (steer) → player.update → the glance's camera claim → camera.update → library.update → world.npcs.update
  *
  * `world.npcs.update` is in it so the library's children (#718, Step 8) walk
  * exactly as the game walks them.
@@ -1810,6 +1822,30 @@ interface RealChild {
   also(system: { update(context: FrameContext): void }): void;
 }
 
+/**
+ * **`Game`'s camera claim from the reading room** — the owl's glance at the book she recommends
+ * (`bookGlance.ts`), applied exactly as `Game.tick` applies it: after the player and before the camera,
+ * its claim set as the camera's focus override, or the override cleared. It is the one claimant in the
+ * reading room, as it is in this check, so the camera every clause measures from here on is the camera
+ * the game draws. `no-glance` takes it out (main before it); `glance-stays` keeps its last focus after it
+ * lets go.
+ */
+const bookGlance = new BookGlance(library);
+let glanceKept: Vector3 | null = null;
+const glanceFrame = (player: Player): void => {
+  if (mutating('no-glance')) {
+    camera.clearFocusOverride();
+    return;
+  }
+  let claim: Readonly<Vector3> | null = bookGlance.apply(camera, player);
+  if (mutating('glance-stays')) {
+    if (claim) glanceKept = claim.clone();
+    else claim = glanceKept;
+  }
+  if (claim) camera.setFocusOverride(claim);
+  else camera.clearFocusOverride();
+};
+
 const child: RealChild = (() => {
   const player = quietly(() => new Player(world.collision, camera, new Vector3(OX + LIBRARY_ARRIVAL.x, LIBRARY_FLOOR_Y, OZ + LIBRARY_ARRIVAL.z)));
   scene.add(player.group);
@@ -1826,6 +1862,7 @@ const child: RealChild = (() => {
     context.elapsed = frames * CHILD_DT;
     quietly(() => {
       player.update(context);
+      glanceFrame(player);
       camera.update(context, player.position, player.velocity);
       library.update(context);
       world.npcs.update(context);
@@ -1984,6 +2021,22 @@ const drawnOwlReach = ((): number => {
   return reach;
 })();
 
+/**
+ * **The owl's drawn top at her tallest, measured apart** — a FRESH model's visible top with her breath at
+ * rest and at either extreme of `BREATH_DEPTH` (her head rides her body, so a breath in lifts it): the
+ * top every solid of hers must stand to, so a child stood on her head is never pierced by her ear tufts
+ * as she breathes (NEVER INSIDE HER found that, with her solid's top at the rest pose's height).
+ */
+const drawnOwlTop = ((): number => {
+  const fresh = createLibraryOwl();
+  let top = 0;
+  for (const breath of [-BREATH_DEPTH, 0, BREATH_DEPTH]) {
+    fresh.body.scale.set(1 + 0.6 * breath, 1 - breath, 1 + 0.6 * breath);
+    top = Math.max(top, visibleBounds(fresh.root).top);
+  }
+  return top;
+})();
+
 /** Every bearing (5° bins) where the drawn owl reaches past her solid, the furthest she reaches, and the bins a child can stand in. */
 interface PastHerSolid {
   furthest: number;
@@ -2033,6 +2086,47 @@ const wingsWide = pastHerSolid();
 const wingsOut = (): boolean =>
   Math.abs(owl.handle.wingL.rotation.x) + Math.abs(owl.handle.wingL.rotation.z) + Math.abs(owl.handle.wingR.rotation.x) + Math.abs(owl.handle.wingR.rotation.z) > 0.05;
 
+/** A world point on the check's screen, through the game's own camera (CSS pixels, y down). */
+const screenPoint = (world: Readonly<Vector3>): { x: number; y: number; ahead: boolean } => {
+  camera.camera.updateMatrixWorld();
+  const v = world.clone().project(camera.camera);
+  return { x: ((v.x + 1) / 2) * SCREEN.width, y: ((1 - v.y) / 2) * SCREEN.height, ahead: v.z < 1 };
+};
+/**
+ * **Where the owl's bubble is drawn on the screen, now**: its painted pill and tail (`contentBox`), the
+ * sprite's corners laid out on the camera's own axes exactly as `LabelManager.measureSprite` lays them out
+ * (and `owlBubbleBehindTheRoom` below), projected onto the check's screen — the rectangle anything behind it
+ * is hidden by, since it is drawn over the scenery.
+ */
+const owlBubbleOnScreen = (): { x0: number; y0: number; x1: number; y1: number } => {
+  const sprite = owl.bubble.sprite;
+  const box = owl.bubble.contentBox;
+  sprite.updateWorldMatrix(true, false);
+  const e = sprite.matrixWorld.elements;
+  const scaleX = Math.hypot(e[0]!, e[1]!, e[2]!);
+  const scaleY = Math.hypot(e[4]!, e[5]!, e[6]!);
+  const centre = new Vector3().setFromMatrixPosition(sprite.matrixWorld);
+  camera.camera.updateMatrixWorld();
+  const c = camera.camera.matrixWorld.elements;
+  const right = new Vector3(c[0]!, c[1]!, c[2]!).normalize();
+  const up = new Vector3(c[4]!, c[5]!, c[6]!).normalize();
+  const rect = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const fx of [box.x0, box.x1]) {
+    for (const fy of [box.y0, box.y1]) {
+      const corner = centre
+        .clone()
+        .addScaledVector(right, (fx - sprite.center.x) * scaleX)
+        .addScaledVector(up, (1 - fy - sprite.center.y) * scaleY);
+      const at = screenPoint(corner);
+      rect.x0 = Math.min(rect.x0, at.x);
+      rect.y0 = Math.min(rect.y0, at.y);
+      rect.x1 = Math.max(rect.x1, at.x);
+      rect.y1 = Math.max(rect.y1, at.y);
+    }
+  }
+  return rect;
+};
+
 console.log('\nOWL — the librarian at her desk: solid, and alive:');
 {
   const player = child.player;
@@ -2042,9 +2136,9 @@ console.log('\nOWL — the librarian at her desk: solid, and alive:');
       solid.shape === 'wall' &&
       solid.points.length === 2 &&
       solid.points.every((point) => point.x === owlSpot.x && point.z === owlSpot.z) &&
-      solid.top === owl.handle.height,
+      Math.abs(solid.top - drawnOwlTop) <= 0.002,
     `'the owl' is registered as a zero-length capsule at (${owlSpot.x}, ${owlSpot.z}): a disc of r ${solid?.radius.toFixed(3) ?? '?'}, ` +
-      `top ${owl.handle.height.toFixed(3)} m (her measured height)${solid ? '' : ' — NOT REGISTERED'}`,
+      `top ${solid?.top.toFixed(3) ?? '?'} m against her drawn top at her tallest breath ${drawnOwlTop.toFixed(3)} m, measured apart (2 mm allowed; her rest pose's ${owl.handle.height.toFixed(3)})${solid ? '' : ' — NOT REGISTERED'}`,
   );
   const solidRadius = solid?.radius ?? 0;
   say(
@@ -2213,11 +2307,28 @@ console.log('\nCARD — her library card, on the first press at the desk:');
   child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
   const said = new Set<string>(owl.lastSaid === null ? [] : [owl.lastSaid]);
   let flapLow = 0;
+  /** The card's sparkles on the hand-over line, frame by frame: how many were drawn on the screen, and how many of those behind her bubble. */
+  const sparkles = { frames: 0, seen: 0, underBubble: 0, first: '' };
+  const handOver = LIBRARY_LINES.owl.card[LIBRARY_LINES.owl.cardCheerAt];
   for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
     child.step();
     if (owl.lastSaid !== null) said.add(owl.lastSaid);
     flapLow = Math.min(flapLow, owl.handle.wingR.rotation.x);
     if (wingsOut()) measurePastHerSolid(owlSolidRadius, wingsWide);
+    if (owl.lastSaid !== handOver) continue;
+    const live = owl.cardSparkles.sprites.filter((sprite) => sprite.visible);
+    if (live.length === 0) continue;
+    sparkles.frames += 1;
+    const bubble = owlBubbleOnScreen();
+    for (const sprite of live) {
+      const at = screenPoint(sprite.getWorldPosition(new Vector3()));
+      if (!at.ahead || at.x < 0 || at.x > SCREEN.width || at.y < 0 || at.y > SCREEN.height) continue;
+      sparkles.seen += 1;
+      if (at.x >= bubble.x0 && at.x <= bubble.x1 && at.y >= bubble.y0 && at.y <= bubble.y1) {
+        sparkles.underBubble += 1;
+        if (!sparkles.first) sparkles.first = `a sparkle at (${at.x.toFixed(0)}, ${at.y.toFixed(0)}) px inside her bubble's (${bubble.x0.toFixed(0)}, ${bubble.y0.toFixed(0)})–(${bubble.x1.toFixed(0)}, ${bubble.y1.toFixed(0)})`;
+      }
+    }
   }
   const lines = LIBRARY_LINES.owl.card;
   say(
@@ -2225,6 +2336,12 @@ console.log('\nCARD — her library card, on the first press at the desk:');
     `her ${lines.length} card lines were said in turn and the bubble went away: ${[...said].map((line) => `"${line}"`).join(', ')}`,
   );
   say(flapLow <= -0.3, `on the hand-over line (#${LIBRARY_LINES.owl.cardCheerAt + 1}) she flapped the wing that holds her book forward, over her desk: rotation.x down to ${flapLow.toFixed(2)}`);
+  say(
+    sparkles.frames > 0 && sparkles.seen > 0 && sparkles.underBubble === 0,
+    `the card's sparkles can be seen (browser QA round 1: "the card sparkles hardly show"): on ${sparkles.frames} frames of the hand-over line, ${sparkles.seen} sparkle-frames drawn on the ` +
+      `${SCREEN.width}×${SCREEN.height} screen from the desk's front, ${sparkles.underBubble} of them behind her bubble, which is drawn over the scenery${sparkles.first ? ` — e.g. ${sparkles.first}` : ''}` +
+      `${sparkles.frames === 0 ? ' — NO SPARKLE WAS EVER LIVE: this asserts nothing' : ''}`,
+  );
   const again = owlOffer();
   say(
     again.length === 1 && again[0]?.label === LIBRARY_CHIPS.hello && cardsHeld() === 1,
@@ -2232,6 +2349,258 @@ console.log('\nCARD — her library card, on the first press at the desk:');
   );
   note(`CARD: ${cardsHeld()} card(s); ${said.size} distinct line(s) said; flap ${flapLow.toFixed(2)}; ${child.frames} frames stepped so far`);
 }
+
+/** A screen the check measures the glance on, in CSS pixels. */
+interface CheckScreen {
+  readonly width: number;
+  readonly height: number;
+  readonly what: string;
+}
+/** The landscape screen the owl's clauses lay labels out on ({@link SCREEN}), named for the reports. */
+const LAPTOP: CheckScreen = { ...SCREEN, what: 'landscape' };
+/** A phone held upright — the device Eleri mostly plays on (GAME_DESIGN.md's HIGHLIGHT rule) — the glance's other screen. */
+const PHONE: CheckScreen = { width: 390, height: 844, what: 'a phone held upright' };
+/** A world point on `screen`, through the game's own camera as it stands (CSS pixels, y down). */
+const pointOn = (at: Readonly<Vector3>, screen: CheckScreen): { x: number; y: number; on: boolean } => {
+  camera.camera.updateMatrixWorld();
+  const v = at.clone().project(camera.camera);
+  const x = ((v.x + 1) / 2) * screen.width;
+  const y = ((1 - v.y) / 2) * screen.height;
+  return { x, y, on: v.z < 1 && x >= 0 && x <= screen.width && y >= 0 && y <= screen.height };
+};
+/** Everything of the room and its children a sparkle can be hidden behind, this frame: drawn, opaque, not the owl (a stack fades as she passes behind it). */
+const roomOccluders = (): Mesh[] => {
+  const opaque = (material: Material): boolean => material.visible && material.depthWrite && (!material.transparent || material.opacity >= 0.999);
+  const drawnNode = (node: Object3D): boolean => {
+    for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return false;
+    return true;
+  };
+  const meshes: Mesh[] = [];
+  for (const root of [library.roomRoot, library.kidsRoot]) {
+    root.traverse((node) => {
+      if (!(node instanceof Mesh) || !drawnNode(node)) return;
+      for (let at: Object3D | null = node; at; at = at.parent) if (at === owl.handle.root) return;
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      if (materials.some(opaque)) meshes.push(node);
+    });
+  }
+  return meshes;
+};
+
+/**
+ * **The smallest a sparkle of the glow may be drawn and still count as found** — GAME_DESIGN.md's TEXT RULE
+ * minimum, one UI unit: the smallest thing the game ever asks a six-year-old to read, so the least it may
+ * ask her to spot. In CSS pixels; `style.css`'s `clamp(20px, 0.62vw + 0.55vh + 8px, 38px)` sits on its
+ * floor on both screens measured here (390×844: 15.1 px by the formula; 1280×720: 19.9 px), so this is
+ * `FALLBACK_UNIT_PX`, the floor itself. **Deliberately not the glance's own number** (`GLANCE_DRAW_BACK`,
+ * how far it draws back): a check that reads its threshold from the code under test cannot fail on it —
+ * review of #735: with `GLANCE_DRAW_BACK = 0.4` the old clause stayed green while a phone drew the *Cat
+ * Bus* book's glow at zoom 0.46, a sparkle 10.5 px across.
+ */
+const GLOW_MIN_PX = FALLBACK_UNIT_PX;
+
+/**
+ * **What the child at the desk sees while the owl recommends a book** — from her press of "Say hello!"
+ * (already made) until the owl falls quiet, and on until the camera is hers again (2 s at most), with the
+ * owl's glance at the book (`bookGlance.ts`) applied as `Game` applies it ({@link glanceFrame}).
+ *
+ * On every frame of the naming line ("Try “…” next!"): whether the owl's bubble can be drawn — its anchor
+ * in shot, the bubble's own gate (`SpeechBubble.updateScreenSize`) — so the title can be read. On every
+ * frame of the glow line ("It is glowing on its shelf!"): whether a sparkle of the book's glow — its
+ * beacon's or its twinkles' — stands in the open over the top of the book's own case, on the screen and in
+ * clear view of the camera (a ray from the eye reaching it past every opaque mesh of the room and its
+ * children, taken that frame), and whether one drawn at least {@link GLOW_MIN_PX} across does (a sparkle's
+ * drawn width: its own world scale, laid along the camera's screen right and projected); on the frames the
+ * glance holds everything (`GlanceShot.whole`), whether the owl's bubble's anchor is in shot and the child
+ * is on the screen, feet and head; on the frames it looks at the book itself, whether the case's top over
+ * the book is drawn in the middle half of the screen. After the last line: how many frames until the
+ * glance has let go, the zoom she had is back, and the camera orbits her again — within 0.25 m of the point
+ * it orbited her at on the last frame before the glance took it (she stands still throughout, so that is
+ * where its follow puts it — measured, not re-derived).
+ */
+interface RecommendWatch {
+  readonly lines: Set<string>;
+  readonly caseId: string;
+  readonly caseTop: number;
+  glowFrames: number;
+  seenFrames: number;
+  seenSprites: number;
+  hidden: number;
+  lowest: number;
+  /** Frames of the naming line, and of them the frames the owl's bubble's anchor was in shot (her words can be drawn). */
+  nameFrames: number;
+  nameBubbleFrames: number;
+  /** Glow-line frames a sparkle of the glow at least {@link GLOW_MIN_PX} across was seen. */
+  bigFrames: number;
+  /** The smallest, over the glow-line frames the glow was seen, of the widest sparkle seen that frame (px). */
+  glowPx: number;
+  /** Glow-line frames the glance looked at the book itself and the owl's bubble's anchor was still in shot. */
+  bookBubbleFrames: number;
+  /** Glow-line frames the glance held everything — her, the owl and the book — and of them, the frames she and the owl's bubble's anchor were in shot. */
+  wholeFrames: number;
+  /**
+   * Glow-line frames the glance looked at the book itself; of them, the frames the camera had arrived — its
+   * focus within {@link ARRIVED} of the shot's, across the floor (it slides there in the line's first moments,
+   * now that the glance opens on the glow line) — and of those, the frames the case's top over the book was
+   * drawn in the middle half of the screen.
+   */
+  bookFrames: number;
+  arrivedFrames: number;
+  centredFrames: number;
+  bubbleFrames: number;
+  childFrames: number;
+  glanceFrames: number;
+  /** The glance's shot on the glow line's last frame. */
+  shot: GlanceShot | null;
+  /** Where the beacon's base was on the screen on the glow line's last frame. */
+  beaconAt: { x: number; y: number; on: boolean } | null;
+  zoomBefore: number;
+  /** Where the camera orbited her on the last frame before the glance took it (null: it never did). */
+  followedAt: Vector3 | null;
+  /** Frames from the owl falling quiet until the camera is home (−1: not within 2 s). */
+  homeAfter: number;
+  /** How far the camera's focus was from {@link followedAt}, and its zoom, when the watch ended. */
+  homeOff: number;
+  zoomAfter: number;
+}
+/** How near the camera's focus must be to a book-itself shot's, across the floor, to have arrived at it (metres). */
+const ARRIVED = 1;
+/** How far off a book, across the floor, a sparkle of its glow can be: a puff's ±0.3 m in x and z, corner to corner, and a hair. */
+const OVER_BOOK = 0.3 * Math.SQRT2 + 0.02;
+const watchRecommendation = (book: LibraryBook, screen: CheckScreen): RecommendWatch => {
+  const placed = library.shelfBooks.find((candidate) => candidate.book.id === book.id);
+  const spec = placed ? LIBRARY_BOOKCASES.find((candidate) => candidate.id === placed.slot.bookcase) : undefined;
+  const watch: RecommendWatch = {
+    lines: new Set<string>(),
+    caseId: placed?.slot.bookcase ?? '?',
+    caseTop: spec ? libraryBookcaseSize(spec.kind).height : Number.NaN,
+    glowFrames: 0,
+    seenFrames: 0,
+    seenSprites: 0,
+    hidden: 0,
+    lowest: Infinity,
+    nameFrames: 0,
+    nameBubbleFrames: 0,
+    bigFrames: 0,
+    glowPx: Infinity,
+    bookBubbleFrames: 0,
+    wholeFrames: 0,
+    bookFrames: 0,
+    arrivedFrames: 0,
+    centredFrames: 0,
+    bubbleFrames: 0,
+    childFrames: 0,
+    glanceFrames: 0,
+    shot: null,
+    beaconAt: null,
+    zoomBefore: camera.targetZoom,
+    followedAt: null,
+    homeAfter: -1,
+    homeOff: Number.NaN,
+    zoomAfter: Number.NaN,
+  };
+  const ray = new Raycaster();
+  const eye = new Vector3();
+  const player = child.player;
+  const followed = new Vector3();
+  let glanced = false;
+  /** The case's top over the book, world: where the beacon rises from. */
+  const caseTopAt = placed ? placed.mesh.getWorldPosition(new Vector3()).setY(LIBRARY_FLOOR_Y + watch.caseTop) : null;
+  /** How wide a sprite is drawn, in pixels: its world scale laid along the camera's screen right, through the camera as it is. */
+  const drawnPx = (sprite: Object3D, at: Readonly<Vector3>): number => {
+    const half = camera.screenRightAxis.clone().multiplyScalar(sprite.getWorldScale(new Vector3()).x / 2);
+    const a = pointOn(at.clone().sub(half), screen);
+    const b = pointOn(at.clone().add(half), screen);
+    return Math.hypot(b.x - a.x, b.y - a.y); // flat-ok: two points on the screen, CSS pixels — not heights in the world
+  };
+  const naming = LIBRARY_LINES.owl.recommend(book.title);
+  for (let i = 0; i < Math.round(20 / CHILD_DT) && owl.speaking; i += 1) {
+    if (!glanced) followed.copy(camera.focusPoint);
+    child.step();
+    if (owl.lastSaid !== null) watch.lines.add(owl.lastSaid);
+    if (bookGlance.active) {
+      watch.glanceFrames += 1;
+      if (!glanced) watch.followedAt = followed.clone();
+      glanced = true;
+    }
+    if (owl.speaking && owl.lastSaid === naming) {
+      watch.nameFrames += 1;
+      if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.nameBubbleFrames += 1;
+    }
+    if (!owl.speaking || owl.lastSaid !== LIBRARY_LINES.owl.recommendGlow) continue;
+    watch.glowFrames += 1;
+    watch.shot = bookGlance.shot;
+    if (caseTopAt) watch.beaconAt = pointOn(caseTopAt, screen);
+    if (bookGlance.shot?.whole) {
+      watch.wholeFrames += 1;
+      const feet = pointOn(player.position, screen);
+      const head = pointOn(player.position.clone().setY(player.position.y + player.topHeight), screen);
+      if (feet.on && head.on) watch.childFrames += 1;
+      if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.bubbleFrames += 1;
+    } else if (bookGlance.shot) {
+      watch.bookFrames += 1;
+      if (camera.isOnScreen(owl.bubble.worldAnchor())) watch.bookBubbleFrames += 1;
+      const focus = camera.focusPoint;
+      const target = bookGlance.shot.focus;
+      if (Math.hypot(focus.x - target.x, focus.z - target.z) <= ARRIVED) {
+        watch.arrivedFrames += 1;
+        const at = watch.beaconAt;
+        if (at && Math.abs(at.x - screen.width / 2) <= screen.width / 4 && Math.abs(at.y - screen.height / 2) <= screen.height / 4) watch.centredFrames += 1;
+      }
+    }
+    camera.camera.updateMatrixWorld();
+    eye.setFromMatrixPosition(camera.camera.matrixWorld);
+    const meshes = roomOccluders();
+    const overBook = placed ? placed.mesh.getWorldPosition(new Vector3()) : null;
+    let seenNow = false;
+    let widest = 0;
+    for (const sprite of [...owl.beacon.sprites, ...owl.twinkles.sprites]) {
+      if (!sprite.visible) continue;
+      const at = sprite.getWorldPosition(new Vector3());
+      const up = at.y - LIBRARY_FLOOR_Y; // flat-ok: a height over the reading room's own flat floor
+      // Over this book: a puff lands within ±0.3 m of it in x and z (`SpritePuffs.puff`), so a sparkle still
+      // rising off another book's case is not this one's.
+      if (!overBook || Math.hypot(at.x - overBook.x, at.z - overBook.z) > OVER_BOOK) continue;
+      if (!pointOn(at, screen).on || up < watch.caseTop) continue;
+      watch.lowest = Math.min(watch.lowest, up);
+      const towards = at.clone().sub(eye);
+      const distance = towards.length();
+      ray.set(eye, towards.normalize());
+      ray.far = distance - 0.05;
+      if (ray.intersectObjects(meshes, false).length > 0) {
+        watch.hidden += 1;
+        continue;
+      }
+      watch.seenSprites += 1;
+      seenNow = true;
+      widest = Math.max(widest, drawnPx(sprite, at));
+    }
+    if (seenNow) {
+      watch.seenFrames += 1;
+      watch.glowPx = Math.min(watch.glowPx, widest);
+      if (widest >= GLOW_MIN_PX) watch.bigFrames += 1;
+    }
+  }
+  const homeOff = (): number => (watch.followedAt ? camera.focusPoint.distanceTo(watch.followedAt) : Number.NaN);
+  for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
+    if (!bookGlance.active && Math.abs(camera.zoom - watch.zoomBefore) < 0.01 && camera.targetZoom === watch.zoomBefore && (!watch.followedAt || homeOff() < 0.25)) {
+      watch.homeAfter = i;
+      break;
+    }
+    child.step();
+  }
+  watch.homeOff = homeOff();
+  watch.zoomAfter = camera.zoom;
+  return watch;
+};
+/** One book's watch, in a report's words. */
+const watchSays = (book: LibraryBook, watch: RecommendWatch): string =>
+  `'${book.id}' on '${watch.caseId}' (${watch.caseTop.toFixed(2)} m): seen on ${watch.seenFrames} of ${watch.glowFrames} frames of the glow line ` +
+  `(${watch.seenSprites} sparkle-frames; ${watch.hidden} hidden by the room; the lowest at ${Number.isFinite(watch.lowest) ? watch.lowest.toFixed(2) : '—'} m)` +
+  `${watch.beaconAt ? `, its case's top drawn at (${Math.round(watch.beaconAt.x)}, ${Math.round(watch.beaconAt.y)})${watch.beaconAt.on ? '' : ' OFF THE SCREEN'}` : ''}; ` +
+  `the glance on ${watch.glanceFrames} frames${watch.shot ? `, zoom ${watch.shot.zoom.toFixed(2)}${watch.shot.whole ? ', everything in shot' : `, the book itself (everything did not fit), arrived on ${watch.arrivedFrames} of its ${watch.bookFrames} frames and its case's top in the middle half of the screen on ${watch.centredFrames} of those, the owl's bubble in shot on ${watch.bookBubbleFrames}`}` : ', NO SHOT'}; ` +
+  `a sparkle ${GLOW_MIN_PX} px across or more seen on ${watch.bigFrames} (the widest seen ${Number.isFinite(watch.glowPx) ? watch.glowPx.toFixed(1) : '—'} px at its narrowest); ` +
+  `the naming line's bubble in shot on ${watch.nameBubbleFrames} of its ${watch.nameFrames} frames`;
 
 console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl's order, and it glows until it is read:");
 {
@@ -2249,6 +2618,9 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
       ?.actions?.()[0]?.label;
   const glowing = (): string[] => library.shelfBooks.filter((placed) => placed.material.emissiveIntensity > 0.2).map((placed) => placed.book.id);
   say(glowing().length === 0 && owl.recommendedBookId === null, `before the press no book glows (${glowing().length} over 0.2) and nothing is recommended`);
+  // She presses at the desk's front, standing still, listening — where the glance is measured from.
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  child.run(0.3);
   owlOffer()[0]?.run();
   let lit = -1;
   for (let i = 0; i < 60; i += 1) {
@@ -2267,11 +2639,91 @@ console.log("\nRECOMMEND — 'Say hello!' names the first unread book of the owl
     chipFor(first.id) === LIBRARY_CHIPS.readGlowing && chipFor(otherId) === LIBRARY_CHIPS.read,
     `its Read chip says '${chipFor(first.id) ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.readGlowing}'); another book's ('${otherId}') says '${chipFor(otherId) ?? 'nothing'}' ('${LIBRARY_CHIPS.read}')`,
   );
-  const said = untilQuiet(20);
+  // Found from the desk (browser QA round 1: from here the glowing book was a pale sliver 5 px wide among
+  // the spines; 23 Oct: from here most books' beacons were off the screen). While she names the book and
+  // says it is glowing, the owl's glance draws the camera back until the child, the owl and the book are
+  // all in shot: on the glow line's frames a sparkle of its glow must stand in the open over the top of
+  // the book's own case, on the screen and in clear view of the camera — the shot the game draws, the
+  // glance applied as `Game` applies it. FOUND FROM THE DESK, below, asks the same of every book.
+  const watched = watchRecommendation(first, LAPTOP);
+  const said = watched.lines;
   say(
     said.has(LIBRARY_LINES.owl.recommend(first.title)) && said.has(LIBRARY_LINES.owl.recommendGlow) && !owl.speaking,
     `she said "${LIBRARY_LINES.owl.recommend(first.title)}" — the first unread title in RECOMMENDATION_ORDER — and "${LIBRARY_LINES.owl.recommendGlow}" (${said.size} lines, then quiet)`,
   );
+  say(
+    watched.glowFrames > 0 && watched.seenFrames >= watched.glowFrames * 0.8,
+    `found from the desk (browser QA round 1: from here the glowing book was a sliver among the spines): while she says it is glowing, the camera shows it — ` +
+      `${watchSays(first, watched)}, on the ${LAPTOP.width}×${LAPTOP.height} screen — 80% of the line wanted` +
+      `${watched.glowFrames === 0 ? ' — THE GLOW LINE WAS NEVER SAID: this asserts nothing' : ''}`,
+  );
+  say(
+    watched.bubbleFrames === watched.wholeFrames && watched.childFrames === watched.wholeFrames,
+    `and while it holds everything, she and the owl are in the picture: on the ${watched.wholeFrames} of the glow line's ${watched.glowFrames} frames the glance held everything, ` +
+      `the child was on the screen, feet and head, on ${watched.childFrames}, and the owl's bubble's anchor in shot (so her words can be drawn) on ${watched.bubbleFrames} — every one wanted`,
+  );
+  say(
+    watched.bookFrames === 0 || (watched.arrivedFrames > 0 && watched.centredFrames === watched.arrivedFrames),
+    `and when it looks at the book itself, the book is in the middle once the camera is there: its case's top drawn in the middle half of the screen on ${watched.centredFrames} ` +
+      `of the ${watched.arrivedFrames} frames the camera had arrived (its focus within ${ARRIVED} m of the shot's), of the ${watched.bookFrames} it looked at the book — every one wanted`,
+  );
+  if (watched.wholeFrames === 0) note("RECOMMEND: the owl's first pick was shown book itself on every frame of the glow line, so 'she and the owl are in the picture' asserted nothing here");
+  if (watched.bookFrames === 0) note("RECOMMEND: the owl's first pick was shown with everything in shot on every frame of the glow line, so 'the book is in the middle' asserted nothing here; FOUND FROM THE DESK asks it of the books that are shown book first");
+  say(
+    watched.glowFrames > 0 && watched.bigFrames >= watched.glowFrames * 0.8,
+    `and it never draws back so far the glow is lost: a sparkle of it at least ${GLOW_MIN_PX} px across (the TEXT RULE's minimum, the smallest thing she is asked to read) ` +
+      `seen on ${watched.bigFrames} of the glow line's ${watched.glowFrames} frames, the widest seen ${Number.isFinite(watched.glowPx) ? watched.glowPx.toFixed(1) : '—'} px at its narrowest — 80% wanted`,
+  );
+  say(
+    watched.nameFrames > 0 && watched.nameBubbleFrames === watched.nameFrames,
+    `and she names the book where it can be read: on ${watched.nameBubbleFrames} of the ${watched.nameFrames} frames of "${LIBRARY_LINES.owl.recommend(first.title)}" ` +
+      `the owl's bubble's anchor was in shot (so her bubble can be drawn) — every one wanted`,
+  );
+  say(
+    watched.followedAt !== null && watched.homeAfter >= 0 && watched.homeAfter <= Math.round(1.5 / CHILD_DT),
+    `and the camera comes home: ${watched.homeAfter >= 0 ? `${watched.homeAfter} frames` : 'NOT within 2 s'} after her last line the glance has let go, ` +
+      `the zoom is back at the ${watched.zoomBefore.toFixed(2)} she had (${watched.zoomAfter.toFixed(3)}) and the camera orbits her again (${watched.homeOff.toFixed(3)} m off the point it orbited her at before the glance; 0.25 wanted, within 1.5 s)`,
+  );
+  // A step hands the camera straight back. Pressed again (the same book, unread), the glance takes the
+  // camera as she names it; a nudge of the stick mid-glance and it is hers on that frame, the zoom she had
+  // given back, and it does not come back for the rest of the recommendation though she stands still again.
+  {
+    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+    child.run(0.3);
+    const zoomHad = camera.targetZoom;
+    owlOffer()[0]?.run();
+    let waited = 0;
+    while (!bookGlance.active && owl.speaking && waited < Math.round(12 / CHILD_DT)) {
+      child.step();
+      waited += 1;
+    }
+    const took = bookGlance.active;
+    child.run(0.6);
+    const zoomIn = camera.targetZoom;
+    const nudge = child.towards(1, 0, false, 0.4);
+    let releasedAfter = -1;
+    for (let i = 0; i < 6; i += 1) {
+      child.step(nudge);
+      if (!bookGlance.active) {
+        releasedAfter = i + 1;
+        break;
+      }
+    }
+    const zoomBack = camera.targetZoom;
+    let cameBack = 0;
+    for (let i = 0; i < Math.round(12 / CHILD_DT) && owl.speaking; i += 1) {
+      child.step();
+      if (bookGlance.active) cameBack += 1;
+    }
+    say(
+      took && releasedAfter === 1 && zoomBack === zoomHad && cameBack === 0,
+      `a step hands the camera straight back: pressed again, the glance took the camera after ${waited} frames (${took}; zoom ${zoomIn.toFixed(2)}, she had ${zoomHad.toFixed(2)}); ` +
+        `a nudge of the stick and it let go ${releasedAfter >= 0 ? `on frame ${releasedAfter}` : 'NOT within 6 frames'} (1 wanted: she is no longer standing still — a drift of ${GLANCE_MOVE_CANCEL} m off where she stood counts too), ` +
+        `the zoom target back at ${zoomBack.toFixed(2)}, and it took the camera again on ${cameBack} frames of the rest of her recommendation (0 wanted)`,
+    );
+    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+    child.run(1.5);
+  }
   // Read to the end: the glow goes on the next frames, the recommendation clears, the chip is plain again.
   markBookRead(first);
   child.step();
@@ -2850,6 +3302,7 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
         `none marked elsewhere (${markedFrames} child-frames), none left the room (${leftTheRoom})`,
     );
     say(
+      // flat-ok: `feetOf` is her height above the reading room's own flat floor (its own space at (-600, -600), off the sphere)
       kids.length > 0 && maxFeet.every((feet) => feet <= 0.02) && maxStep.every((step) => step <= NPC_RADIUS * 2),
       `their feet stayed within ${Math.max(...maxFeet, 0).toFixed(3)} m of the floor (0.02 allowed) and no step in any frame was over ${Math.max(...maxStep, 0).toFixed(3)} m ` +
         `(${(NPC_RADIUS * 2).toFixed(2)} allowed, check:jitter's own bound)`,
@@ -3366,9 +3819,21 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  *   sit is never a metre's snap; none moving more than 0.05 while the story
  *   is read;
  * - **the owl**: perched within 0.1 of `owlPerch()`, her desk spot clear while
- *   she is away, and **as drawn on the chair, no point a child standing on
- *   clear floor can touch beyond the chair's solids** (the reason she sits
- *   `OWL_PERCH_BACK` into it);
+ *   she is away, **solid on the chair** (the top over her perch is her head
+ *   while she sits there, and the seat's again once she has gone — browser QA
+ *   round 1: the child stood inside her on the seat), and **as drawn on the
+ *   chair, no point a child standing on clear floor can touch beyond her
+ *   solids** (the reason she sits `OWL_PERCH_BACK` into it); her two flights
+ *   each `OWL_FLIGHT_SECONDS` long, with nobody in her way to wait for;
+ * - **her bubble** (plan Step 9: "the bubble follows her"): on every frame she
+ *   speaks — the call at her desk, the story on the chair — its tail is over
+ *   her head, read off the bubble (`worldAnchor`) against the live owl, and
+ *   **never a word on the wing** (she calls first and then flies, so her bubble
+ *   never hides her flight: browser QA round 1); the
+ *   label manager (`world.labels.resolve`, every frame here, as `Game` runs
+ *   it) draws it on every frame she reads aloud, so the child on her cushion
+ *   can read the story; and, seen from that cushion, the room's furniture
+ *   cannot cut it (it is drawn over the scenery);
  * - **the words**: the title line, every page of the book, both ending lines;
  * - **her pets** (Jim, 19 Oct 2026): a cushion is a seat, not a ride — all
  *   three out at her heels the whole story, none in a seat beside her
@@ -3376,20 +3841,401 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
  *   first);
  * - **the card**: Story listener, which she did not have before (the control);
  * - **afterwards**: every child up and a metre off her cushion within 20 s of
- *   the last word, the owl home within 10 s, her middle unreachable again.
+ *   the last word, the owl home within 10 s, her middle unreachable again;
+ *   story time idle with one more story told and its clock at `STORY_EVERY`.
  *
  * Then **FLIGHT** (the path over the stacks, both ways, and the live owl on
- * it), **CLOCK** (with the clock let go, the call comes `STORY_FIRST_AFTER`
- * into a visit) and **ABORT** (she leaves by the door mid-story: nobody left
- * sitting, the owl home and solid, quiet, the clock restarted).
+ * it), **CLOCK** (with the clock let go, the next story is called
+ * `STORY_EVERY` after the last one's landing and reads a different book; a
+ * fresh visit's first, `STORY_FIRST_AFTER` in) and **ABORT** (she leaves by
+ * the door mid-story: nobody left sitting, the owl home and solid, quiet, the
+ * clock restarted). The story clock is held from the real child's first
+ * clause until CLOCK lets it go, so nothing else is timed by it.
  *
  * Proved red by `LIBRARY_CHECK_MUTATE=no-story` (the vacuity guard),
  * `block-cushion` (a 0.9 m disc on cushion 4: "every child seated" goes red
  * while the story still reads), and by hand (the handoff): the cruise under
- * the stacks (FLIGHT), the perch on the seat centre (the owl as drawn).
+ * the stacks (FLIGHT), the perch on the seat centre (the owl as drawn), the
+ * bubble left where she was (`LibraryOwl.update` without `anchorBubble`: the
+ * bubble clauses), the bubble depth-tested (no `overScenery`).
  */
 /** What the live owl's flights measured against `owlFlightPose` — STORY flies them, FLIGHT reports them. */
-const liveFlight = { frames: 0, worst: 0, flights: 0 };
+const liveFlight = { frames: 0, worst: 0, flights: 0, waited: 0 };
+/** The book STORY's story read to its end — CLOCK's next story must be another. */
+let storyHeard: LibraryBook | null = null;
+
+/**
+ * **How far the owl's bubble's tail is from over her head, now** — read off the
+ * bubble (`SpeechBubble.worldAnchor`: where its tail points, in the world)
+ * against the live owl: her root (room-local), `OWL_BUBBLE_OVER_HEAD` over her
+ * measured height, taken into the world through the room. Zero while the
+ * bubble follows her; a bubble left anchored where she was reads the distance
+ * she has flown since.
+ */
+function owlBubbleOffHerHead(): number {
+  const owl = library.owl;
+  const over = new Vector3(owl.feet.x, owl.feet.y + owl.handle.height + OWL_BUBBLE_OVER_HEAD, owl.feet.z);
+  library.roomRoot.updateWorldMatrix(true, false);
+  return owl.bubble.worldAnchor().distanceTo(library.roomRoot.localToWorld(over));
+}
+
+/**
+ * **How much of the owl's bubble the room stands in front of, from the game's camera** — a grid of 9 × 5
+ * points over its painted pill and tail (`contentBox`, laid out on the camera's own axes exactly as
+ * `LabelManager.measureSprite` lays out its corners), each asked of a ray from the camera: does an opaque,
+ * drawn mesh of the reading room or its children (never the owl herself, never a stack faded for the
+ * camera) stand nearer than the point? A depth-tested bubble is cut wherever one does; a bubble drawn over
+ * the scenery (`depthTest` off) is not. Measured, not assumed: the story chair is backed onto the bookcase
+ * wall, and headless Chrome showed a depth-tested bubble there losing its right side ("A day in the pa…").
+ */
+function owlBubbleBehindTheRoom(): { points: number; behind: number; first: string; depthTested: boolean; offHerHead: number; drawn: boolean } {
+  const sprite = library.owl.bubble.sprite;
+  const box = library.owl.bubble.contentBox;
+  sprite.updateWorldMatrix(true, false);
+  const e = sprite.matrixWorld.elements;
+  const scaleX = Math.hypot(e[0]!, e[1]!, e[2]!);
+  const scaleY = Math.hypot(e[4]!, e[5]!, e[6]!);
+  const centre = new Vector3().setFromMatrixPosition(sprite.matrixWorld);
+  const lens = camera.camera;
+  lens.updateMatrixWorld();
+  const c = lens.matrixWorld.elements;
+  const right = new Vector3(c[0]!, c[1]!, c[2]!).normalize();
+  const up = new Vector3(c[4]!, c[5]!, c[6]!).normalize();
+  const eye = new Vector3().setFromMatrixPosition(lens.matrixWorld);
+  const opaque = (material: Material): boolean => material.visible && material.depthWrite && (!material.transparent || material.opacity >= 0.999);
+  const drawn = (node: Object3D): boolean => {
+    for (let at: Object3D | null = node; at; at = at.parent) if (!at.visible) return false;
+    return true;
+  };
+  const owlRoot = library.owl.handle.root;
+  const meshes: Mesh[] = [];
+  for (const root of [library.roomRoot, library.kidsRoot]) {
+    root.traverse((node) => {
+      if (!(node instanceof Mesh) || !drawn(node)) return;
+      for (let at: Object3D | null = node; at; at = at.parent) if (at === owlRoot) return;
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      if (materials.some(opaque)) meshes.push(node);
+    });
+  }
+  const ray = new Raycaster();
+  let points = 0;
+  let behind = 0;
+  let first = '';
+  for (let i = 0; i <= 8; i += 1) {
+    for (let j = 0; j <= 4; j += 1) {
+      const fx = box.x0 + (box.x1 - box.x0) * (0.05 + 0.9 * (i / 8));
+      const fy = box.y0 + (box.y1 - box.y0) * (0.05 + 0.9 * (j / 4));
+      const point = centre
+        .clone()
+        .addScaledVector(right, (fx - sprite.center.x) * scaleX)
+        .addScaledVector(up, (1 - fy - sprite.center.y) * scaleY);
+      const towards = point.clone().sub(eye);
+      const distance = towards.length();
+      ray.set(eye, towards.normalize());
+      ray.far = distance;
+      points += 1;
+      const hit = ray.intersectObjects(meshes, false)[0];
+      if (!hit) continue;
+      behind += 1;
+      if (!first) {
+        const what = hit.object.name || hit.object.parent?.name || hit.object.type;
+        first = `(${(point.x - OX).toFixed(2)}, ${(point.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(point.z - OZ).toFixed(2)}) behind '${what}', which stands ${(distance - hit.distance).toFixed(2)} m nearer the camera`; // flat-ok: room-local, the reading room's own flat space
+      }
+    }
+  }
+  // Which bubble was measured: hers, over her head and drawn — never a stale sprite left somewhere else.
+  return { points, behind, first, depthTested: sprite.material.depthTest, offHerHead: owlBubbleOffHerHead(), drawn: sprite.visible };
+}
+console.log("\nSHELF WALK — the real child walks the big readers' shelf stand to stand, both ways, in one session, and presses E at every stand; taps a neighbour's book; sways midway between two stands (QA, PR #734):");
+{
+  const player = child.player;
+  const input = child.input;
+  /**
+   * The six chapter books on west-4, in shelf order, and their stands (room-local). Read off
+   * `SHELF_BOOKS`, the pairing the game itself builds the shelf from — never typed here.
+   */
+  const shelf = SHELF_BOOKS.filter((entry) => entry.book.kind === 'chapter').map((entry) => ({
+    id: entry.book.id,
+    zoneId: shelfBookZoneId(entry.book.id),
+    x: entry.slot.stand.x,
+    z: entry.slot.stand.z,
+    facing: entry.slot.stand.facing,
+  }));
+  /**
+   * Standing ON a stand, to the readout's precision: QA stopped on each by the F3 readout, which reads
+   * to 0.1 m, so within 5 cm. The walk's own stop is held to it below — a stop further off is the
+   * instrument failing, and says so, never a pass.
+   */
+  const ON_STAND = 0.05;
+  /** How far she may coast once the stick is let go near a spot: the light touch below is solved from it. */
+  const COAST = 0.05;
+  const touch = Math.min(1, Math.sqrt(2 * PLAYER_DECELERATION * COAST) / PLAYER_MAX_SPEED);
+
+  // The mutations this clause arms: each puts back one half of the rule it measures, in the check only.
+  const innards = Selection.prototype as unknown as Record<string, unknown>;
+  const restore: (() => void)[] = [];
+  const patch = (name: string, value: unknown): void => {
+    const before = innards[name];
+    if (typeof before !== 'function') throw new Error(`SHELF WALK: Selection has no '${name}' to mutate — this run would assert nothing`);
+    innards[name] = value;
+    restore.push(() => {
+      innards[name] = before;
+    });
+  };
+  if (mutating('fixed-hysteresis')) {
+    patch('hysteresisBand', () => 0.6);
+    note('MUTATED Selection.hysteresisBand to a fixed 0.6 m whatever the gap (the rule before PR #734): the arrivals must go red — every one from the aisle; a straight walk stops on an exact tie at 0.6 m, so some of those pass by rounding');
+  }
+  if (mutating('no-hysteresis')) {
+    patch('hysteresisBand', () => 0);
+    note('MUTATED Selection.hysteresisBand to 0 (no hysteresis at all): the sway midway between two stands must go red');
+  }
+  if (mutating('tap-loses')) {
+    patch('tapOutlives', () => false);
+    note('MUTATED Selection.tapOutlives to false (a tap dropped whenever proximity holds anything else, the rule before PR #734): the taps must go red');
+  }
+
+  // The selection, wired as `Game` wires it: the world's zones, blocked while a book is open
+  // (`Game.selectionBlocked` asks `bookReader.isOpen`); she walks herself, so no navigator.
+  let readerOpen = false;
+  const opened: string[] = [];
+  library.attachBookReader({
+    open: (bookId) => {
+      opened.push(bookId);
+      readerOpen = true;
+      return true;
+    },
+    isOpen: () => readerOpen,
+  });
+  const canvas = { dataset: {} } as unknown as HTMLCanvasElement;
+  const selection = new Selection(player, camera, canvas, {
+    zones: () => world.interactZones(),
+    blocked: () => readerOpen,
+    walkTo: () => {},
+    walking: () => false,
+    flash: () => {},
+  });
+  // E reaches the selection the one way the game's E does: the key's own listener on the InputSystem,
+  // `takeInteractPress`, `InteractRouter`, `Selection.handleInteractPress`.
+  const router = new InteractRouter([], selection);
+  const listeners = new Map<string, (event: unknown) => void>();
+  const keyTarget = {
+    addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, listener),
+    removeEventListener: (type: string) => listeners.delete(type),
+  };
+  input.attach(keyTarget as unknown as Window);
+  const pressE = (): void => {
+    listeners.get('keydown')?.({ code: 'KeyE', key: 'e', repeat: false, target: null, preventDefault() {} });
+    listeners.get('keyup')?.({ code: 'KeyE', key: 'e', target: null });
+  };
+  const context = { dt: CHILD_DT, elapsed: 0, input, playerPosition: player.position, cameraForward: camera.forward, frame: 0 } as unknown as FrameContext;
+  /** One frame: the child's (input, player, camera, library, crowd), then `Game`'s order after them — the selection, then E's router. */
+  const frame = (steer?: Steer): void => {
+    child.step(steer);
+    context.frame = child.frames;
+    context.elapsed = child.frames * CHILD_DT;
+    selection.update(context);
+    router.update(context);
+  };
+  const run = (seconds: number, steer?: Steer): void => {
+    for (let i = 0; i < Math.round(seconds / CHILD_DT); i += 1) frame(steer);
+  };
+  /** Walk her on the stick onto room-local (x, z) and let her come to rest: full tilt from afar, then the light touch. */
+  const walkTo = (x: number, z: number): void => {
+    for (let i = 0; i < Math.round(8 / CHILD_DT); i += 1) {
+      const here = child.room();
+      const left = Math.hypot(x - here.x, z - here.z);
+      if (left <= COAST) break;
+      frame(child.towards(x - here.x, z - here.z, false, left > 1.6 ? 1 : touch));
+    }
+    run(0.6);
+  };
+  const where = (): string => `(${child.room().x.toFixed(2)}, ${child.room().z.toFixed(2)})`;
+  const offStand = (stand: { readonly x: number; readonly z: number }): number => Math.hypot(child.room().x - stand.x, child.room().z - stand.z);
+  /** E on the stand she is standing on: what was selected, and what opened — then the book closed, as the reader's ✕ closes it. */
+  const pressHere = (): { selected: string; opened: string | null } => {
+    const selected = selection.selected?.id ?? 'nothing';
+    const before = opened.length;
+    pressE();
+    frame();
+    const got = opened.length > before ? opened[opened.length - 1]! : null;
+    run(0.3);
+    readerOpen = false;
+    run(0.3);
+    return { selected, opened: got };
+  };
+  const results: { what: string; ok: boolean }[] = [];
+  const arrive = (how: string, stand: (typeof shelf)[number]): void => {
+    const off = offStand(stand);
+    const at = where();
+    const { selected, opened: got } = pressHere();
+    const ok = off <= ON_STAND && selected === stand.zoneId && got === stand.id;
+    results.push({ what: `${how}: '${stand.id}'`, ok });
+    say(
+      ok,
+      `${how}, onto '${stand.id}''s stand (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}): stopped at ${at}, ${off.toFixed(3)} m off it (${ON_STAND} allowed); ` +
+        `selected '${selected}', and E opened ${got === null ? 'NOTHING' : `'${got}'`}${got === stand.id ? '' : ` — WRONG, wanted '${stand.id}'`}`,
+    );
+  };
+
+  // The geometry this clause is proved against, read off the built shelf and the selection itself.
+  const zoneOf = (id: string): InteractZone | undefined => world.interactZones().find((zone) => zone.id === id);
+  /** The selection's own band between two zones, or null where this build's Selection has none (the rule before PR #734: a fixed 0.6 m). */
+  const band = (a: string, b: string): number | null => {
+    const one = zoneOf(a);
+    const two = zoneOf(b);
+    const ask = (selection as unknown as { hysteresisBand?: (x: InteractZone, y: InteractZone) => number }).hysteresisBand;
+    return one && two && typeof ask === 'function' ? ask.call(selection, one, two) : null;
+  };
+  const bandText = (value: number | null): string => (value === null ? 'none (no hysteresisBand: a fixed 0.6 m)' : `${value.toFixed(3)} m`);
+  const { PARK_SEED_ASKED, PARK_RESTART } = await import('../src/world/parkManifest.ts');
+  const gaps = shelf.slice(1).map((stand, i) => Math.hypot(stand.x - shelf[i]!.x, stand.z - shelf[i]!.z));
+  note(
+    `SHELF WALK geometry: seed ${PARK_SEED_ASKED} restart ${PARK_RESTART}, the reading room at (${OX}, ${OZ}); west-4's stands, room-local, facing ${shelf[0]?.facing}: ` +
+      shelf.map((stand) => `${stand.id} (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)})`).join(', ') +
+      `; gaps ${gaps.map((gap) => gap.toFixed(3)).join(', ')} m; the selection's band between neighbours ` +
+      shelf.slice(1).map((stand, i) => bandText(band(shelf[i]!.zoneId, stand.zoneId))).join(', ') +
+      `; stand radius ${zoneOf(shelf[0]!.zoneId) ? standRadiusOf(zoneOf(shelf[0]!.zoneId)!) : '?'} m; the stick's light touch ${touch.toFixed(3)} (coast ${COAST} m)`,
+  );
+  say(shelf.length === 6 && shelf.every((stand) => zoneOf(stand.zoneId) !== undefined), `six chapter books on the big readers' shelf, each with a Read zone (${shelf.length} found)`);
+
+  // 1. North, on foot: onto the first stand (the PR's own link stands her there), then walked to each next one.
+  const first = shelf[0]!;
+  child.stand(first.x, first.z, first.facing);
+  run(0.6);
+  arrive('stood on the first stand, as /library?at= does', first);
+  for (let i = 1; i < shelf.length; i += 1) {
+    walkTo(shelf[i]!.x, shelf[i]!.z);
+    arrive(`walked north from '${shelf[i - 1]!.id}'`, shelf[i]!);
+  }
+  // 2. South, on foot, all the way back.
+  for (let i = shelf.length - 2; i >= 0; i -= 1) {
+    walkTo(shelf[i]!.x, shelf[i]!.z);
+    arrive(`walked south from '${shelf[i + 1]!.id}'`, shelf[i]!);
+  }
+  // 3. From the room: out from the stand she is at into the aisle, then onto the next stand along.
+  const aisleOut = 1.5;
+  for (let i = 1; i < shelf.length; i += 1) {
+    const from = shelf[i - 1]!;
+    const out = { x: from.x + aisleOut, z: from.z };
+    const outClear = collision.isClearCircle(OX + out.x, OZ + out.z, PLAYER_RADIUS);
+    walkTo(out.x, out.z);
+    const heldOut = selection.selected?.id ?? 'nothing';
+    walkTo(shelf[i]!.x, shelf[i]!.z);
+    arrive(`from the aisle at (${out.x.toFixed(2)}, ${out.z.toFixed(2)}) (clear floor: ${outClear}; held there: '${heldOut}')`, shelf[i]!);
+  }
+  // 4. The deep links one after another: stood on the stand before (the save's spot), then on this one.
+  for (let i = 1; i < shelf.length; i += 1) {
+    const before = shelf[i - 1]!;
+    child.stand(before.x, before.z, before.facing);
+    run(0.6);
+    const heldBefore = selection.selected?.id ?? 'nothing';
+    child.stand(shelf[i]!.x, shelf[i]!.z, shelf[i]!.facing);
+    run(0.6);
+    arrive(`stood on it straight from '${before.id}''s stand, as the next /library?at= link does (held before: '${heldBefore}')`, shelf[i]!);
+  }
+
+  const walked = results.filter((result) => result.ok).length;
+  say(walked === results.length, `${walked} of ${results.length} arrivals on a stand — on foot both ways, from the aisle, and by link after link — opened that stand's own book`);
+
+  // 5. A tap on a neighbour's book, standing on a stand: it selects that book, and E opens it.
+  camera.camera.updateMatrixWorld(true);
+  let tapsOk = 0;
+  let taps = 0;
+  for (let i = 0; i < shelf.length; i += 1) {
+    for (const j of [i - 1, i + 1]) {
+      const target = shelf[j];
+      if (!target) continue;
+      const here = shelf[i]!;
+      child.stand(here.x, here.z, here.facing);
+      // A fresh pick where she stands (a book opened and closed clears the selection, as the reader
+      // does), so this measures the tap alone and never the hysteresis — that is 1-4's question.
+      readerOpen = true;
+      frame();
+      readerOpen = false;
+      run(0.6);
+      const heldBefore = selection.selected?.id ?? 'nothing';
+      const mesh = library.roomRoot.getObjectByName(`library.book.${target.id}`);
+      camera.camera.updateMatrixWorld(true);
+      const aim = mesh ? new Box3().setFromObject(mesh).getCenter(new Vector3()).project(camera.camera) : null;
+      const tapped = aim ? selection.handleTap(aim.x, aim.y) : false;
+      frame();
+      const { selected, opened: got } = pressHere();
+      const ok = tapped && heldBefore === here.zoneId && selected === target.zoneId && got === target.id;
+      taps += 1;
+      if (ok) tapsOk += 1;
+      say(
+        ok,
+        `on '${here.id}''s stand (holding '${heldBefore}'), a tap on '${target.id}''s book at NDC (${aim ? `${aim.x.toFixed(3)}, ${aim.y.toFixed(3)}` : 'no mesh'}) ` +
+          `${tapped ? 'landed on a zone' : 'MISSED every zone'}: selected '${selected}', and E opened ${got === null ? 'NOTHING' : `'${got}'`}${got === target.id ? '' : ` — WRONG, wanted '${target.id}'`}`,
+      );
+    }
+  }
+  say(taps === 10 && tapsOk === taps, `${tapsOk} of ${taps} taps on a neighbour's book selected that book, and E opened it`);
+
+  // 6. Midway between two stands, swaying a hand's breadth either side: the selection holds still.
+  const north = shelf[2]!;
+  const south = shelf[3]!;
+  const mid = { x: (north.x + south.x) / 2, z: (north.z + south.z) / 2 };
+  /** A hand's breadth either side of the midpoint: well inside the band the rule keeps for a shelf like this (a quarter of the gap). */
+  const SWAY = 0.08;
+  /** How far past SWAY a stop may coast before the instrument, not the rule, is to blame. */
+  const SWAY_SLACK = 0.04;
+  walkTo(mid.x, mid.z);
+  const settled = selection.selected?.id ?? 'nothing';
+  let changes = 0;
+  let last = settled;
+  let nearest = Infinity;
+  let furthest = 0;
+  const along = (): number => {
+    const here = child.room();
+    // signed distance from the midpoint along the shelf line, + towards the north stand
+    const dx = north.x - south.x;
+    const dz = north.z - south.z;
+    const length = Math.hypot(dx, dz);
+    return ((here.x - mid.x) * dx + (here.z - mid.z) * dz) / length;
+  };
+  const watch = (): void => {
+    const now = selection.selected?.id ?? 'nothing';
+    if (now !== last) changes += 1;
+    last = now;
+    const a = along();
+    nearest = Math.min(nearest, a);
+    furthest = Math.max(furthest, a);
+  };
+  const swayTo = (sign: number): void => {
+    const length = Math.hypot(north.x - south.x, north.z - south.z);
+    const x = mid.x + (sign * SWAY * (north.x - south.x)) / length;
+    const z = mid.z + (sign * SWAY * (north.z - south.z)) / length;
+    for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+      const here = child.room();
+      const left = Math.hypot(x - here.x, z - here.z);
+      if (left <= COAST) break;
+      frame(child.towards(x - here.x, z - here.z, false, touch));
+      watch();
+    }
+    for (let i = 0; i < Math.round(0.6 / CHILD_DT); i += 1) {
+      frame();
+      watch();
+    }
+  };
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    swayTo(1);
+    swayTo(-1);
+  }
+  const swayBand = band(north.zoneId, south.zoneId);
+  const inside = Math.max(-nearest, furthest) <= SWAY + SWAY_SLACK;
+  say(
+    inside && changes === 0 && settled !== 'nothing',
+    `midway between '${north.id}' and '${south.id}' (${mid.x.toFixed(2)}, ${mid.z.toFixed(2)}), swaying ${SWAY} m either way 4 times ` +
+      `(she reached ${nearest.toFixed(3)} .. +${furthest.toFixed(3)} m along the shelf): the selection changed ${changes} time(s) from '${settled}' (0 wanted — no flicker; ` +
+      `the band between the two: ${bandText(swayBand)})${inside ? '' : ' — the sway left its hand\'s breadth: the instrument, not the rule, failed'}`,
+  );
+
+  input.detach(keyTarget as unknown as Window);
+  library.attachBookReader(null);
+  for (const undo of restore) undo();
+}
 console.log('\nSTORY — the owl calls, flies to the big chair, the children sit, she reads a whole book, and everyone wanders off:');
 {
   const player = child.player;
@@ -3468,20 +4314,50 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   let petFrames = 0;
   let petsOutLeast = Infinity;
   let petsSeatedMost = 0;
+  /** The owl's bubble against the room, a second into the reading, from her cushion's camera. */
+  let bubbleCut: ReturnType<typeof owlBubbleBehindTheRoom> | null = null;
+  /** Her bubble's tail against over her head, on every frame she spoke: frames by where she was, and the worst. */
+  const trail = { wing: 0, chair: 0, desk: 0, worst: 0, worstAt: '' };
+  /** Frames she read the story aloud from the chair, and how many of them the label manager drew her bubble on. */
+  let readAloud = 0;
+  let readDrawn = 0;
+  /** Story time as the owl landed home — idle again: its clock, and how many stories it has told. */
+  const toldBefore = library.storyTime.told;
+  let landed: { nextIn: number; told: number } | null = null;
   const offCushionAt = kids.map(() => Number.NaN);
   let homeAt = Number.NaN;
+  /** The top over her perch, read off the collision world the first frame she sits there: her head, if her chair solid came with her. */
+  let perchTopSat = Number.NaN;
   let prevFeet = new Vector3().copy(owl.feet);
   let flight: { from: { x: number; y: number; z: number }; to: { x: number; y: number; z: number }; k: number } | null = null;
+  /** Each flight's frames, as she landed it. */
+  const flightFrames: number[] = [];
   const expected = { x: 0, y: 0, z: 0 };
   let t = 0;
   const LIMIT = 150;
   while (t < LIMIT) {
     child.step();
+    // The label manager decides, once a frame after every system, which labels are drawn (`Game.tick`'s order).
+    world.labels.resolve(view, CHILD_DT);
     t += CHILD_DT;
     const phase = library.storyPhase;
     if (phaseAt[phase] === undefined) phaseAt[phase] = t;
     if (owl.lastSaid !== null) said.add(owl.lastSaid);
-    // The live owl on her path.
+    // Her bubble follows her: on every frame she speaks, wherever she is.
+    if (owl.speaking) {
+      const off = owlBubbleOffHerHead();
+      const where = owl.flying ? 'wing' : owl.perched ? 'chair' : 'desk';
+      trail[where] += 1;
+      if (off > trail.worst) {
+        trail.worst = off;
+        trail.worstAt = `on the ${where} ${t.toFixed(1)} s in, the owl's feet at room (${owl.feet.x.toFixed(2)}, ${owl.feet.z.toFixed(2)})`;
+      }
+    }
+    if (phase === 'reading' && owl.speaking) {
+      readAloud += 1;
+      if (owl.bubble.sprite.visible) readDrawn += 1;
+    }
+    // The live owl on her path, at the progress she has made along it (a wait pauses her on it).
     if (owl.flying) {
       if (!flight) {
         const home = phase === 'dispersing';
@@ -3489,10 +4365,13 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
         liveFlight.flights += 1;
       }
       flight.k += 1;
-      owlFlightPose(flight.from, flight.to, (flight.k * CHILD_DT) / OWL_FLIGHT_SECONDS, expected);
+      owlFlightPose(flight.from, flight.to, owl.flightProgress, expected);
+      // flat-ok: two room-local points (her root in the room's group, the pure path's pose) in the reading room's own flat space
       liveFlight.worst = Math.max(liveFlight.worst, Math.hypot(owl.feet.x - expected.x, owl.feet.y - expected.y, owl.feet.z - expected.z));
       liveFlight.frames += 1;
+      liveFlight.waited = Math.max(liveFlight.waited, owl.waited);
     } else {
+      if (flight) flightFrames.push(flight.k);
       flight = null;
     }
     prevFeet.copy(owl.feet);
@@ -3501,6 +4380,8 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
       deskClearAway &&= collision.isClearCircle(OX + desk.x, OZ + desk.z, PLAYER_RADIUS);
     }
     if (owl.perched) {
+      if (Number.isNaN(perchTopSat)) perchTopSat = collision.highestTopAt(OX + perch.x, OZ + perch.z, Infinity) - LIBRARY_FLOOR_Y; // flat-ok: a top over the reading room's own flat floor
+      // flat-ok: two room-local points (her root in the room's group, owlPerch()) in the reading room's own flat space
       perchedOff = Math.min(perchedOff, Math.hypot(owl.feet.x - perch.x, owl.feet.y - perch.y, owl.feet.z - perch.z));
       if (!perchedTouch) {
         // The owl as drawn on the chair: every visible point more than the resolver's slack outside every
@@ -3530,6 +4411,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
         perchedTouch = { points, touchable, first };
       }
     }
+    if (!bubbleCut && phase === 'reading' && owl.perched && owl.speaking && t - (phaseAt.reading ?? t) >= 1) bubbleCut = owlBubbleBehindTheRoom();
     if (library.playerIsSeated) {
       petFrames += 1;
       const line = parade.lineNow();
@@ -3557,7 +4439,8 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
         if (off >= 1) offCushionAt[i] = t - phaseAt.dispersing;
       }
     });
-    if (phaseAt.dispersing !== undefined && Number.isNaN(homeAt) && owl.atDesk && !owl.flying && !owl.solidWaiting) homeAt = t - phaseAt.dispersing;
+    if (phaseAt.dispersing !== undefined && Number.isNaN(homeAt) && owl.atDesk && !owl.flying) homeAt = t - phaseAt.dispersing;
+    if (phaseAt.dispersing !== undefined && phase === 'idle' && landed === null) landed = { nextIn: library.storyTime.nextIn, told: library.storyTime.told };
     if (phaseAt.dispersing !== undefined && phase === 'idle' && kids.every((kid, i) => !Number.isNaN(offCushionAt[i]!) || kid.driver.mode === 'stroll')) break;
   }
   if (blocked !== null) collision.removeCircle(blocked);
@@ -3606,11 +4489,42 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     awayFrames > 0 && deskClearAway,
     `while she was away (${awayFrames} frames) her desk spot (${desk.x}, ${desk.z}) was clear for a child: ${deskClearAway} — her solid goes with her`,
   );
+  const chairSeat = libraryArmchairSize().seat;
+  const perchTopGone = collision.highestTopAt(OX + perch.x, OZ + perch.z, Infinity) - LIBRARY_FLOOR_Y; // flat-ok: a top over the reading room's own flat floor
+  say(
+    Math.abs(perchTopSat - (perch.y + drawnOwlTop)) <= 0.002 && Math.abs(perchTopGone - chairSeat) <= 0.002,
+    `solid on the chair: the top over her perch was ${perchTopSat.toFixed(3)} m the first frame she sat there — her head (${(perch.y + drawnOwlTop).toFixed(3)}: the seat ` +
+      `${perch.y.toFixed(3)} and her drawn top ${drawnOwlTop.toFixed(3)}), a body nobody stands inside — and ${perchTopGone.toFixed(3)} m once she had flown home (the seat's, ${chairSeat.toFixed(3)})`,
+  );
   say(
     !!perchedTouch && perchedTouch.points > 0 && perchedTouch.touchable === 0,
     `the owl as drawn on the chair: ${perchedTouch?.touchable ?? '?'} of her ${perchedTouch?.points ?? 0} visible points are beyond the chair's solids (by more than ${RESOLVER_SLACK} m) ` +
       `where a child standing on clear floor could touch them${perchedTouch?.first ? ` — e.g. ${perchedTouch.first}` : ''}`,
   );
+  /** How far a bubble's tail may be from over her head: the anchor is written the frame she moves, so this is rounding. */
+  const TAIL_OFF = 0.02;
+  say(
+    trail.desk > 0 && trail.chair > 0 && trail.worst <= TAIL_OFF,
+    `her bubble follows her: on every frame she spoke through the story (${trail.desk} at her desk, the call; ${trail.chair} on the story chair, the reading) ` +
+      `its tail was at most ${trail.worst.toFixed(3)} m from ${OWL_BUBBLE_OVER_HEAD} m over her head (${TAIL_OFF} allowed)${trail.worstAt ? `, the worst ${trail.worstAt}` : ''}` +
+      `${trail.desk === 0 ? ' — SHE NEVER SPOKE AT HER DESK: the call was not measured' : ''}${trail.chair === 0 ? ' — SHE NEVER SPOKE ON THE CHAIR: nothing measured there' : ''}`,
+  );
+  say(
+    trail.wing === 0 && liveFlight.frames > 0,
+    `her flights are silent, so her bubble never hides her flying over the stacks (browser QA round 1): she spoke on ${trail.wing} of her ${liveFlight.frames} frames on the wing — the call is said at her desk, and she takes off when it is said`,
+  );
+  say(
+    readAloud > 0 && readDrawn === readAloud,
+    `the child on her cushion can read the story: the label manager drew the owl's bubble on ${readDrawn} of the ${readAloud} frames she read aloud (every one wanted; the screen ${SCREEN.width}×${SCREEN.height})`,
+  );
+  const bubbleHers = !!bubbleCut && bubbleCut.offHerHead <= TAIL_OFF && bubbleCut.drawn;
+  say(
+    !!bubbleCut && bubbleHers && (bubbleCut.behind === 0 || !bubbleCut.depthTested),
+    `her bubble as she reads from the chair, seen from her cushion — hers, its tail ${bubbleCut?.offHerHead.toFixed(3) ?? '?'} m off over her head (${TAIL_OFF} allowed), drawn ${bubbleCut?.drawn ?? false}: ` +
+      `${bubbleCut?.behind ?? '?'} of ${bubbleCut?.points ?? 0} points of it stand behind the room's own furniture from the camera` +
+      `${bubbleCut?.first ? ` (e.g. ${bubbleCut.first})` : ''}; it is drawn ${bubbleCut?.depthTested === false ? 'over the scenery (depthTest off), so none of it is cut' : 'DEPTH-TESTED, so it is cut there'}`,
+  );
+  if (bubbleCut && bubbleHers && bubbleCut.behind === 0) note("STORY: the owl's bubble cleared the room's furniture from this camera — the bubble clause asserted nothing about its depth on this run");
   const pages = book?.pages.map((page) => page.text) ?? [];
   const missing = [
     ...(book ? [LIBRARY_LINES.owl.storyBegin(book.title)] : ['the title line']),
@@ -3632,6 +4546,18 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     `afterwards every child was up and a metre off her cushion within ${Math.max(...offCushionAt).toFixed(1)} s of the last word ` +
       `(${kids.map((kid, i) => `${kid.plan.name} ${offCushionAt[i]!.toFixed(1)} s`).join(', ')}; 20 allowed), and the owl home, solid, within ${homeAt.toFixed(1)} s (10 allowed)`,
   );
+  const flightLength = Math.round(OWL_FLIGHT_SECONDS / CHILD_DT);
+  say(
+    flightFrames.length === 2 && flightFrames.every((frames) => Math.abs(frames - flightLength) <= 2) && liveFlight.waited === 0,
+    `nobody was in her way: her ${flightFrames.length} flights took ${flightFrames.join(' and ')} frames (${flightLength} for OWL_FLIGHT_SECONDS ${OWL_FLIGHT_SECONDS} s, 2 allowed either way), ` +
+      `and she waited ${liveFlight.waited.toFixed(2)} s for anybody (the child on her cushion, her pets at her heels, the children on theirs)`,
+  );
+  say(
+    landed !== null && landed.told === toldBefore + 1 && landed.nextIn === STORY_EVERY,
+    `the owl home, story time is idle again with one more story told (${toldBefore} → ${landed?.told ?? '?'}) and the next story's clock set to ${landed?.nextIn ?? '?'} s (STORY_EVERY ${STORY_EVERY} s)` +
+      `${landed === null ? ' — STORY TIME NEVER CAME BACK TO IDLE' : ''}`,
+  );
+  storyHeard = book;
   const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
   say(!reachedAt(seen, OX + desk.x, OZ + desk.z) && owl.atDesk, `back behind her desk, her middle is unreachable again (the fill from the arrival: ${seen.reached.size} cells)`);
   note(
@@ -3702,47 +4628,496 @@ console.log("\nFLIGHT — the owl's path to the story chair and home: over every
     liveFlight.flights >= 2 && liveFlight.frames > 0 && liveFlight.worst <= 0.01,
     `the live owl flew owlFlightPose itself: ${liveFlight.flights} flights, ${liveFlight.frames} frames, at most ${(liveFlight.worst * 100).toFixed(2)} cm off it (1 cm allowed)`,
   );
-  // Landing home onto a child: she stands where the owl's solid goes while the owl is away, and the
-  // owl lands there. Her solid must wait — never appear round the child and shove her — and go back
-  // the moment she has stepped out. Flown by the owl's own `flyTo`, story time not asked.
-  {
-    const spot = LIBRARY_LIBRARIAN_SPOT;
-    owl.flyTo(false);
-    child.run(OWL_FLIGHT_SECONDS + 0.2);
-    const perchedThere = owl.perched;
-    // Behind the desk, on her spot: the desk is in front of it, so stand her there by teleport, as a
-    // child who walked round would be.
-    child.stand(spot.x, spot.z, 0);
-    child.run(0.2);
-    const stood = child.room();
-    const onTheSpot = Math.hypot(stood.x - spot.x, stood.z - spot.z);
-    owl.flyTo(true);
-    child.run(OWL_FLIGHT_SECONDS + 0.2);
-    const after = child.room();
-    const shoved = Math.hypot(after.x - stood.x, after.z - stood.z);
-    const waited = owl.atDesk && owl.solidWaiting && collision.isClearCircle(OX + spot.x, OZ + spot.z, 0.05);
-    // She walks out from behind the desk: the solid goes back as soon as she is clear of it.
-    child.run(2, child.towards(-1, 0));
-    const back = !owl.solidWaiting && !collision.isClearCircle(OX + spot.x, OZ + spot.z, 0.05);
-    say(
-      perchedThere && onTheSpot <= owl.radius && waited && shoved <= 0.01 && back,
-      `landing home onto a child: stood on the owl's spot (${onTheSpot.toFixed(2)} m from it) while she was on the chair (${perchedThere}), ` +
-        `the owl landed and her solid waited (${waited}) — the child was moved ${shoved.toFixed(3)} m (0.01 allowed) — and went back once she walked out (${back})`,
-    );
-    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
-    child.run(0.3);
-  }
   note(`FLIGHT: ${OWL_FLIGHT_SECONDS} s a flight, cruise ${owlCruiseHeight().toFixed(2)} m (the stacks' ${stack.toFixed(2)} + ${OWL_CRUISE_OVER_STACKS}); the owl's own desk solid and the chair she lands in left out of the sweep; ${owl.atDesk ? 'she is home' : 'SHE IS NOT HOME'}`);
 }
 
-console.log('\nCLOCK and ABORT — the call comes forty seconds into a visit, and leaving mid-story leaves nobody sitting:');
+
+/**
+ * **NEVER INSIDE HER** (browser QA round 1, 23 Oct 2026) — the owl is solid
+ * wherever she is drawn, and never moves into anybody.
+ *
+ * QA found the two drawn inside each other twice: the child hopped onto the
+ * story chair's seat and stood inside the reading owl (her only solid was her
+ * desk's; the seat is a top), and the owl flew home onto a child standing in
+ * her spot behind the desk (her desk solid deliberately waited, so she stood
+ * drawn through the child). Now she has a solid on the chair, one moving body
+ * on the wing, and she waits for anybody in her way (`LibraryOwl`'s class doc).
+ *
+ * **The instrument** is the thing QA saw, measured: every visible point of the
+ * owl as the game poses her, each frame, inside the real child's own collision
+ * cylinder (`PLAYER_RADIUS` round her feet, `KID_HEIGHT` tall — what every
+ * solid in the game keeps her out of) by more than the resolver's slack. It
+ * has a control first: a cylinder stood on the owl's own feet finds her inside
+ * it, one 2.5 m off finds nothing. Then, each by the real child on the stick
+ * — her three pets at her heels, the library's children strolling — with the
+ * real owl flying by her own `flyTo` (story time not asked, its clock held),
+ * each from a state it sets up and asserts:
+ *
+ * 1. **the seat, the owl on it** (QA's major): hops at the seat from the floor
+ *    at its front and from the tops of cushions 4 and 5, at three moments of a
+ *    step — she is never up on the chair, the owl never inside her;
+ * 2. **the seat, the child on it first**: the owl comes to the chair and waits
+ *    over her, never moving her, and perches once she has stepped down;
+ * 3. **her desk spot, the child in it** (QA's other major): the owl comes home,
+ *    waits over her through three hops, and lands once she has walked out,
+ *    her desk solid back;
+ * 4. **beside her at take-off**: the child pressed against her north side,
+ *    where the flight goes — she rises straight up, wings folded, without
+ *    waiting, touching or moving her; and (4b) **the child waiting at the
+ *    chair's front** as the owl comes to it — QA's own spot — she comes
+ *    straight down over the chair and lands without waiting;
+ * 5. **on her head at take-off**: she does not fly off with the child on her
+ *    head, and goes once the child has stepped off.
+ *
+ * Who she waited for is reported with each (`LibraryOwl.waitingFor`).
+ *
+ * Proved red by hand (the handoff, with the geometry): her body taken out as
+ * she perches; the wait taken out (`wouldTouch` always false); her solids' top
+ * at the rest pose's height; no headroom; the old slanting way down.
+ */
+console.log('\nNEVER INSIDE HER — the owl is solid wherever she is drawn, and never flies into anybody or comes down on them:');
+{
+  const spot = LIBRARY_LIBRARIAN_SPOT;
+  const perch = owlPerch();
+  const chair = libraryArmchairSize();
+  const seatTop = chair.seat;
+  /** A room-local point in the story chair's own frame (+Z its front, the way its sitter looks). */
+  const chairLocal = (x: number, z: number): { x: number; z: number } => {
+    const yaw = (LIBRARY_STORY_CHAIR.facing * Math.PI) / 180;
+    const dx = x - LIBRARY_STORY_CHAIR.at.x;
+    const dz = z - LIBRARY_STORY_CHAIR.at.z;
+    return { x: dx * Math.cos(yaw) - dz * Math.sin(yaw), z: dx * Math.sin(yaw) + dz * Math.cos(yaw) };
+  };
+  /** Up on the story chair: her feet on its seat's top, her middle over the chair or just off its front (QA stood her there). */
+  const upOnTheChair = (): boolean => {
+    const at = chairLocal(child.room().x, child.room().z);
+    const front = chair.centreZ + chair.depth / 2;
+    return (
+      Math.abs(at.x - chair.centreX) <= chair.width / 2 + 0.1 &&
+      at.z <= front + 0.35 &&
+      Math.abs(child.player.position.y - (LIBRARY_FLOOR_Y + seatTop)) <= 0.03 // flat-ok: her feet over the reading room's own flat floor
+    );
+  };
+
+  /** How much of the owl is drawn inside an upright cylinder `radius` round `feet` (world), `height` tall — deeper than the resolver's slack. */
+  const owlDrawnInside = (feet: Readonly<Vector3>, radius: number, height: number): { points: number; inside: number; first: string } => {
+    let points = 0;
+    let inside = 0;
+    let first = '';
+    const fx = feet.x - OX;
+    const fy = feet.y - LIBRARY_FLOOR_Y; // flat-ok: the reading room's own flat floor
+    const fz = feet.z - OZ;
+    visiblePoints(
+      owl.handle.root,
+      (p) => {
+        points += 1;
+        if (Math.hypot(p.x - fx, p.z - fz) > radius - RESOLVER_SLACK) return;
+        const up = p.y - fy; // flat-ok: a height in the reading room's own flat space
+        if (up < RESOLVER_SLACK || up > height - RESOLVER_SLACK) return;
+        inside += 1;
+        if (!first) first = `(${p.x.toFixed(2)}, ${p.y.toFixed(2)} up, ${p.z.toFixed(2)})`;
+      },
+      library.roomRoot,
+    );
+    return { points, inside, first };
+  };
+  /** Every frame of a scenario: on how many the owl was drawn inside the child, the worst and where, frames she was up on the chair, and who the owl waited for. */
+  interface Watch {
+    frames: number;
+    insideFrames: number;
+    worst: number;
+    worstAt: string;
+    onChair: number;
+    readonly waitedFor: Set<string>;
+  }
+  const watching = (): Watch => ({ frames: 0, insideFrames: 0, worst: 0, worstAt: '', onChair: 0, waitedFor: new Set() });
+  const look = (into: Watch, what: string): void => {
+    into.frames += 1;
+    if (owl.waitingFor) into.waitedFor.add(owl.waitingFor);
+    if (upOnTheChair() && owl.perched) into.onChair += 1;
+    const seen = owlDrawnInside(child.player.position, PLAYER_RADIUS, KID_HEIGHT);
+    if (seen.inside === 0) return;
+    into.insideFrames += 1;
+    if (seen.inside <= into.worst) return;
+    into.worst = seen.inside;
+    const at = child.player.position;
+    into.worstAt =
+      `${what}: ${seen.inside} of her ${seen.points} points inside the child, e.g. ${seen.first}; the child's feet at room ` +
+      `(${(at.x - OX).toFixed(2)}, ${(at.y - LIBRARY_FLOOR_Y).toFixed(2)} up, ${(at.z - OZ).toFixed(2)})`; // flat-ok: room-local, the reading room's own flat space
+  };
+  /** Steps `seconds` (or until `until`), watching every frame; hands back the seconds `until` took, or NaN. */
+  const run = (into: Watch, what: string, seconds: number, steer?: Steer, until?: () => boolean): number => {
+    for (let i = 0; i < Math.round(seconds / CHILD_DT); i += 1) {
+      child.step(steer);
+      look(into, what);
+      if (until?.()) return (i + 1) * CHILD_DT;
+    }
+    return Number.NaN;
+  };
+  const verdict = (watch: Watch): string =>
+    (watch.insideFrames === 0
+      ? `the owl drawn inside her on 0 of ${watch.frames} frames`
+      : `the owl drawn INSIDE HER on ${watch.insideFrames} of ${watch.frames} frames — the worst ${watch.worstAt}`) +
+    `; she waited for ${watch.waitedFor.size ? [...watch.waitedFor].join(', ') : 'nobody'}`;
+  /** The top over a room-local point: a solid's, or the floor's. */
+  const topAt = (x: number, z: number): number => collision.highestTopAt(OX + x, OZ + z, Infinity) - LIBRARY_FLOOR_Y; // flat-ok: a top over the reading room's own flat floor
+  /**
+   * **The owl home, or on the chair, with the child well out of her way first** (at the desk's front,
+   * her pets with her) — a scenario's starting state, asserted: a set-up that did not happen throws, and
+   * says who the owl was waiting for.
+   */
+  const settle = (home: boolean, into: Watch, what: string): void => {
+    child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+    child.run(1);
+    if (home ? owl.atDesk : owl.perched) return;
+    owl.flyTo(home);
+    const took = run(into, what, OWL_FLIGHT_SECONDS + 6, undefined, () => (home ? owl.atDesk : owl.perched));
+    if (Number.isNaN(took)) throw new Error(`NEVER INSIDE HER: ${what} — the owl never got there in ${OWL_FLIGHT_SECONDS + 6} s (waiting for: ${owl.waitingFor || 'nobody'}; flying ${owl.flying}, progress ${owl.flightProgress.toFixed(3)})`);
+  };
+
+  // CONTROL — the instrument finds the owl inside a cylinder stood on her own feet, and nothing in one 2.5 m off.
+  const atHer = new Vector3(OX + owl.feet.x, LIBRARY_FLOOR_Y + owl.feet.y, OZ + owl.feet.z);
+  const onHer = owlDrawnInside(atHer, PLAYER_RADIUS, KID_HEIGHT);
+  const offHer = owlDrawnInside(atHer.clone().add(new Vector3(0, 0, -2.5)), PLAYER_RADIUS, KID_HEIGHT);
+  say(
+    owl.atDesk && onHer.inside > 0 && offHer.inside === 0,
+    `CONTROL — the instrument: a child's cylinder (r ${PLAYER_RADIUS}, ${KID_HEIGHT} m) stood on the owl's own feet has ${onHer.inside} of her ${onHer.points} drawn points inside it; ` +
+      `one 2.5 m north of her, ${offHer.inside}`,
+  );
+
+  // Her solids' shapes against her drawn body measured apart on fresh models: perched, a box of her
+  // outline — inside the chair's own plan, so a child at the chair's front or sides is never in her way;
+  // in the air, a disc of her reach at her wings' widest beat.
+  const drawnPerch = perchShape(createLibraryOwl());
+  const drawnFlightReach = flightReach(createLibraryOwl());
+  const box = owl.perchBox;
+  const perchYaw = (perch.facing * Math.PI) / 180;
+  const corners = [-1, 1].flatMap((sx) => [-1, 1].map((sz) => {
+    const lx = box.offX + sx * box.halfX;
+    const lz = box.offZ + sz * box.halfZ;
+    return chairLocal(perch.x + lx * Math.cos(perchYaw) + lz * Math.sin(perchYaw), perch.z - lx * Math.sin(perchYaw) + lz * Math.cos(perchYaw));
+  }));
+  const chairFront = chair.centreZ + chair.depth / 2;
+  const chairHalfWidth = chair.width / 2;
+  const frontInside = chairFront - Math.max(...corners.map((corner) => corner.z));
+  const sidesInside = chairHalfWidth - Math.max(...corners.map((corner) => Math.abs(corner.x - chair.centreX)));
+  say(
+    Math.abs(box.halfX - drawnPerch.halfX) <= 0.002 &&
+      Math.abs(box.halfZ - drawnPerch.halfZ) <= 0.002 &&
+      Math.abs(box.offZ - drawnPerch.offZ) <= 0.002 &&
+      box.rounding === 0 &&
+      frontInside >= 0 &&
+      sidesInside >= 0 &&
+      owl.flightRadius >= drawnFlightReach - 0.002,
+    `her solid on the story chair: a box of ${(box.halfX * 2).toFixed(3)} × ${(box.halfZ * 2).toFixed(3)} m about her middle (+${box.offZ.toFixed(3)} ahead), against her drawn outline there ` +
+      `${(drawnPerch.halfX * 2).toFixed(3)} × ${(drawnPerch.halfZ * 2).toFixed(3)} (a fresh model: breath at its widest, head straight, wings down; 2 mm allowed) — ` +
+      `${frontInside.toFixed(3)} m inside the chair's front and ${sidesInside.toFixed(3)} m inside its sides (OWL_PERCH_BACK ${OWL_PERCH_BACK}); its top her head on the seat ` +
+      `${(perch.y + drawnOwlTop).toFixed(3)}; in the air a moving disc r ${owl.flightRadius.toFixed(3)} against her drawn reach at the widest beat ${drawnFlightReach.toFixed(3)} m`,
+  );
+
+  // 1. The seat, the owl on it: hops at the seat from the floor at its front (QA's spot between
+  // cushions 4 and 5) and from the tops of cushions 4 and 5 (QA's other road, "Up+Left from cushion
+  // 5"), each at three moments of a step.
+  const toChair = watching();
+  settle(false, toChair, 'flying to the chair');
+  const seatTopPerched = topAt(perch.x, perch.z);
+  const cushionTop = libraryCushionSize().top;
+  const seatFront = { x: perch.x - 0.2, z: perch.z + 0.5 };
+  const STARTS = [
+    { what: "the floor at the chair's front", x: 4.0, z: -9.95, up: 0, dx: seatFront.x - 4.0, dz: seatFront.z + 9.95 },
+    { what: 'the top of cushion 5', x: libraryCushion('cushion-5').at.x, z: libraryCushion('cushion-5').at.z, up: cushionTop, dx: -0.55, dz: -0.85 },
+    { what: 'the top of cushion 4', x: libraryCushion('cushion-4').at.x, z: libraryCushion('cushion-4').at.z, up: cushionTop, dx: 0.55, dz: -0.85 },
+  ];
+  /** Stood at a start: on the floor, or on a cushion's top (a teleport to its height, as a child who climbed it is). */
+  const standAt = (start: (typeof STARTS)[number]): void => {
+    child.player.teleportTo(OX + start.x, LIBRARY_FLOOR_Y + start.up, OZ + start.z, Math.PI);
+    camera.snapTo(child.player.position);
+    child.run(0.3);
+  };
+  /** QA's hop: the stick held toward the seat, jump pressed `after` seconds in, the stick let go `hold` seconds in. */
+  const hopAtTheSeat = (start: (typeof STARTS)[number], after: number, hold: number, into: Watch | null): void => {
+    const steer = child.towards(start.dx, start.dz);
+    for (let i = 0; i < Math.round(1.6 / CHILD_DT); i += 1) {
+      if (i === Math.round(after / CHILD_DT)) child.input.pressVirtual('jump');
+      child.step(i * CHILD_DT < hold ? steer : undefined);
+      if (into) look(into, `hopping at the seat from ${start.what}, the jump ${after} s in`);
+    }
+  };
+  const hops = watching();
+  let hopsTried = 0;
+  for (const start of STARTS) {
+    for (const after of [0.06, 0.15, 0.3]) {
+      standAt(start);
+      hopAtTheSeat(start, after, 0.45, hops);
+      hopsTried += 1;
+    }
+  }
+  say(
+    owl.perched && Math.abs(seatTopPerched - (perch.y + drawnOwlTop)) <= 0.002 && hops.onChair === 0 && hops.insideFrames === 0 && toChair.insideFrames === 0,
+    `the seat with the owl on it (QA's major): perched (${owl.perched}), the top over her perch ${seatTopPerched.toFixed(3)} m — her head; ` +
+      `${hopsTried} hops at the seat from its front and from cushions 4 and 5 — the child up on the chair on ${hops.onChair} frames, ${verdict(hops)}; flying in, ${verdict(toChair)}`,
+  );
+
+  // 2. The seat, the child on it first: the owl home, the child hops up the way QA did, the owl comes — and waits.
+  const home1 = watching();
+  settle(true, home1, 'flying home');
+  let upOn = false;
+  for (const hold of [0.38, 0.3, 0.45, 0.52]) {
+    standAt(STARTS[1]!);
+    hopAtTheSeat(STARTS[1]!, 0.06, hold, null);
+    upOn = upOnTheChair() && !child.player.isAirborne;
+    if (upOn) break;
+  }
+  child.run(0.3);
+  const onSeatAt = child.room();
+  const rescuesOnSeat = child.player.wedgeRescues;
+  const firstOn = watching();
+  owl.flyTo(false);
+  run(firstOn, 'the owl coming to the chair with the child on its seat', 6);
+  const waitedOverHer = owl.waited;
+  const waitingThen = owl.waitingFor;
+  const stillUp = upOnTheChair();
+  const perchedOnHer = owl.perched;
+  const offAt = child.room();
+  const stayedPut = Math.hypot(offAt.x - onSeatAt.x, offAt.z - onSeatAt.z);
+  const rescuesWaited = child.player.wedgeRescues - rescuesOnSeat;
+  // Down off the chair the way she came, and off with her pets along the north aisle, out of the owl's way.
+  // Down off the chair the way she came, over cushion 5's top (a step, climbed walking into it: the floor
+  // in front of the chair between cushions 4 and 5 is narrower than she is), and then she goes — stood at the
+  // desk's front, as a child who walked off would be; her pets walk after her.
+  const back = child.room();
+  run(firstOn, 'the child stepping down off the seat over cushion 5, the owl waiting over her', 0.8, child.towards(libraryCushion('cushion-5').at.x + 0.6 - back.x, libraryCushion('cushion-5').at.z + 0.6 - back.z));
+  const steppedTo = child.room();
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  const goneTo = child.room();
+  const perchedAfter = run(firstOn, 'the owl perching once the seat is free', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.perched);
+  say(
+    upOn && stillUp && !perchedOnHer && waitedOverHer > 2 && waitingThen === 'the child' && stayedPut <= 0.01 && !Number.isNaN(perchedAfter) && firstOn.insideFrames === 0,
+    `the child on the seat first (up on it: ${upOn}, at room (${onSeatAt.x.toFixed(2)}, ${onSeatAt.z.toFixed(2)})): the owl came and waited ${waitedOverHer.toFixed(1)} s for '${waitingThen || 'nobody'}' ` +
+      `(perched on her: ${perchedOnHer}; the child moved ${stayedPut.toFixed(3)} m meanwhile, 0.01 allowed; still up on the chair: ${stillUp}), and perched ${perchedAfter.toFixed(1)} s after she had gone ` +
+      `(stepped down to room (${steppedTo.x.toFixed(2)}, ${steppedTo.z.toFixed(2)}), then off to the desk's front (${goneTo.x.toFixed(2)}, ${goneTo.z.toFixed(2)})); ${verdict(firstOn)}`,
+  );
+  say(
+    upOn && rescuesWaited === 0,
+    `nothing about where she stood changed with the owl waiting over her (${OWL_HEADROOM} m of headroom kept over a head, a step): ${rescuesWaited} wedge put-down(s) ` +
+      `while the owl waited (none wanted; an owl hovering a hand over her hair once made the chair's arm — a step she could climb — a wall, and put her down on a cushion 1.25 m off)`,
+  );
+
+  // 3. Her desk spot, the child in it (QA's other major): the owl comes home, waits over her through three hops, lands once she has walked out.
+  const toChair2 = watching();
+  settle(false, toChair2, 'flying to the chair');
+  child.stand(spot.x, spot.z, 0);
+  child.run(0.5);
+  const inSpot = child.room();
+  const spotClear = topAt(spot.x, spot.z) <= 0.01;
+  const homing = watching();
+  owl.flyTo(true);
+  run(homing, 'the owl coming home with the child in her spot', 6);
+  const waitedHome = owl.waited;
+  const waitingHome = owl.waitingFor;
+  const landedOnHer = owl.atDesk;
+  const stood = child.room();
+  const moved = Math.hypot(stood.x - inSpot.x, stood.z - inSpot.z);
+  for (let hop = 0; hop < 3; hop += 1) {
+    child.input.pressVirtual('jump');
+    run(homing, `hop ${hop + 1} under the waiting owl`, 1.2);
+  }
+  // Out from behind the desk the way a child goes: north onto the entrance hall's aisle, and off east along it, her pets after her.
+  run(homing, 'the child walking out of her spot, north', 0.3, child.towards(0, -1));
+  run(homing, 'the child going off east along the aisle, her pets after her', 1.2, child.towards(1, 0));
+  const leftTo = child.room();
+  const landed = run(homing, 'the owl landing once her spot is free', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.atDesk);
+  const deskTop = topAt(spot.x, spot.z);
+  say(
+    spotClear && !landedOnHer && waitedHome > 2 && waitingHome === 'the child' && moved <= 0.01 && !Number.isNaN(landed) && Math.abs(deskTop - drawnOwlTop) <= 0.002 && homing.insideFrames === 0,
+    `the child in the owl's desk spot (QA's other major; the spot clear floor while she was away: ${spotClear}): the owl came home and waited ${waitedHome.toFixed(1)} s for '${waitingHome || 'nobody'}' ` +
+      `(landed on her: ${landedOnHer}; the child moved ${moved.toFixed(3)} m, 0.01 allowed; three hops under her), and landed ${landed.toFixed(1)} s after she had walked out (to room (${leftTo.x.toFixed(2)}, ${leftTo.z.toFixed(2)})), ` +
+      `the top over her spot then ${deskTop.toFixed(3)} m — her head, her desk solid back; ${verdict(homing)}`,
+  );
+
+  // 4. Beside her at take-off: the child pressed against her north side, where the flight goes. She
+  // rises straight up with her wings folded, no wider than her desk solid, and opens them only a step over
+  // the child's head — so she never waits for her, never moves her, never touches her.
+  const home2 = watching();
+  settle(true, home2, 'flying home');
+  child.stand(spot.x, spot.z - (owl.radius + PLAYER_RADIUS + 0.02), 180);
+  child.run(0.5);
+  const beside = child.room();
+  const besideApart = Math.hypot(beside.x - spot.x, beside.z - spot.z);
+  const takeOff = watching();
+  owl.flyTo(false);
+  const flewOff = run(takeOff, 'the owl taking off with the child against her', OWL_FLIGHT_SECONDS + 1, undefined, () => owl.perched);
+  const afterBeside = child.room();
+  const besideMoved = Math.hypot(afterBeside.x - beside.x, afterBeside.z - beside.z);
+  say(
+    besideApart < owl.flightRadius + PLAYER_RADIUS && !Number.isNaN(flewOff) && owl.waited === 0 && besideMoved <= 0.01 && takeOff.insideFrames === 0,
+    `the child pressed against her at take-off, ${besideApart.toFixed(2)} m north of her middle (her open wings would want ${(owl.flightRadius + PLAYER_RADIUS).toFixed(2)}): ` +
+      `she rose with her wings folded until ${OWL_WINGS_OPEN_FROM} of the flight and was on the chair ${flewOff.toFixed(1)} s later, waiting ${owl.waited.toFixed(2)} s; ` +
+      `the child moved ${besideMoved.toFixed(3)} m (0.01 allowed); ${verdict(takeOff)}`,
+  );
+
+  // 4b. The child waiting at the chair's front as the owl comes to it — QA's own spot, between cushions 4
+  // and 5. She comes straight down over the chair, inside its plan, so she lands: a child there is never
+  // in her way (on a slanting way down over the rug, a child here held her in the air for good).
+  const home2b = watching();
+  settle(true, home2b, 'flying home');
+  // There the way QA got there: off cushion 5's top, west into the gap between the chair's front and
+  // cushions 4 and 5 (a teleport there is put down beside the chair by the put-down rule: no walk out of
+  // the gap but over a cushion).
+  const qaSpot = { x: 4.0, z: -9.95 };
+  standAt(STARTS[1]!);
+  const touch = Math.min(1, Math.sqrt(2 * PLAYER_DECELERATION * 0.1) / PLAYER_MAX_SPEED);
+  for (let i = 0; i < Math.round(4 / CHILD_DT); i += 1) {
+    const here = child.room();
+    const left = Math.hypot(qaSpot.x - here.x, qaSpot.z - here.z);
+    if (left <= 0.08) break;
+    child.step(child.towards(qaSpot.x - here.x, qaSpot.z - here.z, false, left > 0.6 ? 1 : touch));
+  }
+  child.run(0.5);
+  const waiting = child.room();
+  const atQaSpot = Math.hypot(waiting.x - qaSpot.x, waiting.z - qaSpot.z) <= 0.15;
+  const toWaiting = watching();
+  owl.flyTo(false);
+  const landedByHer = run(toWaiting, 'the owl coming to the chair with the child at its front', OWL_FLIGHT_SECONDS + 1, undefined, () => owl.perched);
+  const waitingMoved = Math.hypot(child.room().x - waiting.x, child.room().z - waiting.z);
+  say(
+    atQaSpot && !Number.isNaN(landedByHer) && owl.waited === 0 && waitingMoved <= 0.01 && toWaiting.insideFrames === 0,
+    `the child waiting at the chair's front at room (${waiting.x.toFixed(2)}, ${waiting.z.toFixed(2)}) — QA's spot (${qaSpot.x}, ${qaSpot.z}): ${atQaSpot ? 'there' : 'NOT THERE'}; the owl came straight down onto the chair and perched ` +
+      `${landedByHer.toFixed(1)} s after taking off, waiting ${owl.waited.toFixed(2)} s; the child moved ${waitingMoved.toFixed(3)} m (0.01 allowed); ${verdict(toWaiting)}`,
+  );
+
+  // 5. On her head at take-off: home first, then the child stood on her head, then asked to fly.
+  const home3 = watching();
+  settle(true, home3, 'flying home');
+  child.player.teleportTo(OX + spot.x, LIBRARY_FLOOR_Y + drawnOwlTop, OZ + spot.z, 0);
+  camera.snapTo(child.player.position);
+  child.run(0.5);
+  const headFeet = child.player.position.y - LIBRARY_FLOOR_Y; // flat-ok: her feet over the reading room's own flat floor
+  const onHead = Math.abs(headFeet - drawnOwlTop) <= 0.02 && !child.player.isAirborne;
+  const onHerHead = watching();
+  owl.flyTo(false);
+  run(onHerHead, 'the owl asked to fly with the child on her head', 3);
+  const stayedDown = !owl.airborne && owl.waited >= 2.9;
+  const waitingHead = owl.waitingFor;
+  // Off her head the way a child goes: a step off its edge, north, onto the floor, and off east along the aisle.
+  run(onHerHead, 'the child stepping off her head', 0.4, child.towards(0, -1));
+  run(onHerHead, 'the child going off east along the aisle, her pets after her', 1.2, child.towards(1, 0));
+  const flewAfter = run(onHerHead, 'the owl taking off once her head is free', OWL_FLIGHT_SECONDS + 8, undefined, () => owl.perched);
+  say(
+    onHead && stayedDown && onHerHead.waitedFor.has('the child') && !Number.isNaN(flewAfter) && onHerHead.insideFrames === 0,
+    `the child stood on her head (her feet at ${headFeet.toFixed(3)} m, her drawn top ${drawnOwlTop.toFixed(3)}: on her head ${onHead}): asked to fly, she stayed down for '${waitingHead || 'nobody'}' (${stayedDown}) ` +
+      `(for '${waitingHead || 'nobody'}' at 3 s) and flew once the child stepped off (perched ${flewAfter.toFixed(1)} s later); ${verdict(onHerHead)}`,
+  );
+
+  // Home again, the child at the desk's front, for CLOCK.
+  const home4 = watching();
+  settle(true, home4, 'flying home');
+  const between = [home1, toChair2, home2, home2b, home3, home4];
+  const merged: Watch = watching();
+  for (const watch of between) {
+    merged.frames += watch.frames;
+    merged.insideFrames += watch.insideFrames;
+    if (watch.worst > merged.worst) {
+      merged.worst = watch.worst;
+      merged.worstAt = watch.worstAt;
+    }
+    for (const who of watch.waitedFor) merged.waitedFor.add(who);
+  }
+  say(
+    owl.atDesk && !owl.flying && Math.abs(topAt(spot.x, spot.z) - drawnOwlTop) <= 0.002 && merged.insideFrames === 0,
+    `and home behind her desk at the end, solid there (${owl.atDesk}); her flights between the scenarios, the child at the desk's front: ${verdict(merged)}`,
+  );
+  note(
+    `NEVER INSIDE HER: ${[toChair, hops, home1, firstOn, toChair2, homing, home2, takeOff, home2b, toWaiting, home3, onHerHead, home4].reduce((sum, watch) => sum + watch.frames, 0)} frames watched ` +
+      `(the owl's ${onHer.points} drawn points against the child's cylinder each frame); her chair solid a box ${(owl.perchBox.halfX * 2).toFixed(3)} × ${(owl.perchBox.halfZ * 2).toFixed(3)}, her body on the wing r ${owl.flightRadius.toFixed(3)}, ` +
+      `her solids' top ${drawnOwlTop.toFixed(3)} m over her feet; ${child.frames} frames stepped so far`,
+  );
+}
+
+console.log('\nCLOCK and ABORT — the next story comes STORY_EVERY after the last one, a different book; a fresh visit\'s forty seconds in; and leaving mid-story leaves nobody sitting:');
 {
   const owl = library.owl;
   const kids = library.children;
-  // A fresh visit: out by the door and back in at the desk's front, the clock let go.
+  // The next story. STORY left story time idle at its landing, its clock held at STORY_EVERY (asserted
+  // there): let it go where FLIGHT left her, at the desk's front, and wait for the call.
+  const told = library.storyTime.told;
+  const clockAt = library.storyTime.nextIn;
+  const recommended = owl.recommendedBookId;
+  library.storyTime.holdClock(false);
+  let calledNext = Number.NaN;
+  for (let t = 0; t < STORY_EVERY + 5; t += CHILD_DT) {
+    child.step();
+    if (library.storyPhase !== 'idle') {
+      calledNext = t + CHILD_DT;
+      break;
+    }
+  }
+  const nextBook = library.storyTime.book;
+  say(
+    clockAt === STORY_EVERY && Math.abs(calledNext - STORY_EVERY) <= 2 * CHILD_DT,
+    `with the clock let go after story ${told}'s landing, the next story is called ${calledNext.toFixed(2)} s on (STORY_EVERY ${STORY_EVERY} s; the clock stood at ${clockAt} s)`,
+  );
+  // The rule, restated: a different story every time — the recommended book if no story has read it yet,
+  // else the first of the owl's order story time may read that no story has; never the one just heard.
+  const mayRead = RECOMMENDATION_ORDER.filter(storyTimeMayRead);
+  const unheard = (id: string | null): boolean => id !== null && id !== storyHeard?.id && mayRead.some((book) => book.id === id);
+  const wantedId = unheard(recommended) ? recommended : (mayRead.find((book) => unheard(book.id))?.id ?? null);
+  say(
+    !!storyHeard && told === 1 && !!nextBook && nextBook.id === wantedId && nextBook.id !== storyHeard.id,
+    `and it reads a different book: '${nextBook?.id ?? 'none'}' after STORY's '${storyHeard?.id ?? 'none'}' (story ${told + 1} of this session; ` +
+      `'${wantedId ?? 'none'}' wanted — the owl recommending '${recommended ?? 'nothing'}', which ${recommended !== null && recommended === storyHeard?.id ? 'STORY has read' : 'no story has read'})`,
+  );
+  // And over whole rounds, which no child stays long enough for here (twelve stories is half an hour):
+  // the real StoryTime, driven through its four phases by a stand-in owl that is always free, perched
+  // and quiet, with no children — four frames a story. Three owls: one recommending STORY's book all
+  // along, one recommending nothing, and one that starts recommending the last book of her order just
+  // before the round's last story (so the round ends on it, and the next must not begin with it).
+  const lastOfOrder = mayRead[mayRead.length - 1]?.id ?? null;
+  const rounds = [
+    { what: `recommending '${storyHeard?.id ?? 'none'}' all along`, recommends: (_story: number): string | null => storyHeard?.id ?? null },
+    { what: 'recommending nothing', recommends: (_story: number): string | null => null },
+    { what: `recommending '${lastOfOrder ?? 'none'}' from story ${mayRead.length}`, recommends: (story: number): string | null => (story >= mayRead.length ? lastOfOrder : null) },
+  ].map(({ what, recommends }) => {
+    let story = 1;
+    const standIn = {
+      atDesk: true,
+      midScript: false,
+      perched: true,
+      speaking: false,
+      flying: false,
+      get recommendedBookId(): string | null {
+        return recommends(story);
+      },
+      tell: (): void => {},
+      flyTo: (): void => {},
+      sparkleOver: (): void => {},
+    };
+    const time = new StoryTime(standIn as unknown as LibraryOwl, () => [], () => ({ seated: false, feet: { x: 0, y: 0, z: 0 } }));
+    const read: string[] = [];
+    for (; story <= mayRead.length + 2; story += 1) {
+      time.requestStoryTime();
+      time.update(CHILD_DT, true);
+      read.push(time.book?.id ?? 'none');
+      for (let frame = 0; frame < 3; frame += 1) time.update(CHILD_DT, true);
+    }
+    const firstRound = read.slice(0, mayRead.length);
+    const repeats = read.flatMap((id, i) => (i > 0 && id === read[i - 1] ? [`${i}→${i + 1} '${id}'`] : []));
+    const ok =
+      new Set(firstRound).size === mayRead.length &&
+      mayRead.every((book) => firstRound.includes(book.id)) &&
+      repeats.length === 0 &&
+      (recommends(1) === null || read[0] === recommends(1)) &&
+      time.told === read.length;
+    return { what, read, repeats, ok };
+  });
+  say(
+    rounds.every((round) => round.ok),
+    `a different story every time, over whole rounds (the real StoryTime, ${mayRead.length + 2} stories each): the first ${mayRead.length} all different and every book story time may read among them, ` +
+      `the recommended one first, never the same book twice running — ${rounds.map((round) => `${round.what}: ${round.read.join(' → ')}${round.repeats.length ? ` (TWICE RUNNING: ${round.repeats.join(', ')})` : ''}`).join('; ')}`,
+  );
+  // A fresh visit: out by the door (which leaves this story mid-gathering) and back in at the desk's front, the clock let go.
   if (!quietly(() => library.requestEnterDoor())) throw new Error('CLOCK: /library-door refused her');
   child.run(0.2);
-  library.storyTime.holdClock(false);
   child.enter({ x: LIBRARY_DESK_STAND.x, z: LIBRARY_DESK_STAND.z, facing: LIBRARY_DESK_STAND.facing });
   const startsAt = library.storyTime.nextIn;
   let called = Number.NaN;
@@ -3779,7 +5154,73 @@ console.log('\nCLOCK and ABORT — the call comes forty seconds into a visit, an
   library.storyTime.holdClock(true);
   child.enter({ x: LIBRARY_DESK_STAND.x, z: LIBRARY_DESK_STAND.z, facing: LIBRARY_DESK_STAND.facing });
   child.run(0.5);
-  note(`CLOCK: called ${called.toFixed(2)} s into the visit; ABORT left at '${phaseLeft}'; ${child.frames} frames stepped so far`);
+  note(
+    `CLOCK: the next story called ${calledNext.toFixed(2)} s after story ${told}'s landing, reading '${nextBook?.id ?? 'none'}'; a fresh visit's called ${called.toFixed(2)} s in; ` +
+      `ABORT left at '${phaseLeft}'; ${child.frames} frames stepped so far`,
+  );
+}
+
+console.log("\nFOUND FROM THE DESK — every book made the one the owl recommends, in turn: while she says it is glowing, the camera shows it, landscape and on a phone held upright:");
+{
+  // Each book in turn is made the first unread of the owl's order — every book before it in
+  // RECOMMENDATION_ORDER read through `markBookRead`, its own bookmark taken out — so "Say hello!" at the
+  // desk's front recommends it by the owl's own rule (`recommendFor`); the store is put back exactly
+  // afterwards. The owl's first pick changes whenever a book is added (the order is a seeded shuffle of
+  // every book): RECOMMEND measures whichever it is, and this measures all of them, so no pick can pass by
+  // being lucky — part 4's beacon passed on part 4's shelf only because its first pick stood in view.
+  const collection = gameStore.get().collection as Record<string, CuteThing>;
+  const saved = new Map(Object.entries(collection).map(([id, entry]) => [id, { ...entry }]));
+  const restore = (): void => {
+    for (const id of Object.keys(collection)) if (!saved.has(id)) delete collection[id];
+    for (const [id, entry] of saved) collection[id] = { ...entry };
+  };
+  const recommendedBefore = owl.recommendedBookId;
+  untilQuiet(20);
+  const rows: { screen: CheckScreen; book: LibraryBook; watch: RecommendWatch; recommended: string | null }[] = [];
+  for (const screen of [LAPTOP, PHONE]) {
+    camera.resize(screen.width, screen.height);
+    RECOMMENDATION_ORDER.forEach((book, k) => {
+      restore();
+      for (const earlier of RECOMMENDATION_ORDER.slice(0, k)) markBookRead(earlier);
+      delete collection[bookCollectionId(book.id)];
+      child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+      child.run(0.3);
+      owlOffer()[0]?.run();
+      const recommended = owl.recommendedBookId;
+      rows.push({ screen, book, watch: watchRecommendation(book, screen), recommended });
+    });
+  }
+  camera.resize(SCREEN.width, SCREEN.height);
+  restore();
+  for (const { screen, book, watch, recommended } of rows) {
+    say(
+      recommended === book.id && watch.glowFrames > 0 && watch.seenFrames >= watch.glowFrames * 0.8 && watch.childFrames === watch.wholeFrames && watch.bubbleFrames === watch.wholeFrames &&
+        (watch.bookFrames === 0 || (watch.arrivedFrames > 0 && watch.centredFrames === watch.arrivedFrames)) &&
+        watch.bigFrames >= watch.glowFrames * 0.8 && watch.nameFrames > 0 && watch.nameBubbleFrames === watch.nameFrames &&
+        (watch.followedAt === null || watch.homeAfter >= 0),
+      `${screen.what} (${screen.width}×${screen.height}): ${watchSays(book, watch)} — 80% wanted; of the ${watch.wholeFrames} frames it held everything, she on the screen on ${watch.childFrames}, ` +
+        `the owl's bubble's anchor in shot on ${watch.bubbleFrames} (all wanted); the camera home ${watch.homeAfter >= 0 ? `${watch.homeAfter} frames after` : 'NOT within 2 s of'} her last line` +
+        `${recommended === book.id ? '' : ` — SHE RECOMMENDED '${recommended ?? 'nothing'}', NOT '${book.id}': the store was not set as this clause meant`}`,
+    );
+  }
+  const fitted = (what: string): string => {
+    const these = rows.filter((row) => row.screen.what === what);
+    return `${these.filter((row) => row.watch.shot?.whole === true).length} of ${these.length} ${what}`;
+  };
+  const zooms = rows.map((row) => row.watch.shot?.zoom ?? Number.NaN).filter(Number.isFinite);
+  note(
+    `FOUND FROM THE DESK: ${rows.length} recommendations (${BOOKS.length} books × 2 screens); the child, the owl and the book all in one shot on ${fitted(LAPTOP.what)} and ${fitted(PHONE.what)} ` +
+      `(the rest the book itself); the glance's zoom ${Math.min(...zooms).toFixed(2)}..${Math.max(...zooms).toFixed(2)}`,
+  );
+  // Put back as found: the store as it was (above), and her recommendation — the owl's own rule on it.
+  child.stand(LIBRARY_DESK_STAND.x, LIBRARY_DESK_STAND.z, LIBRARY_DESK_STAND.facing);
+  child.run(0.3);
+  if (recommendedBefore !== null) {
+    owlOffer()[0]?.run();
+    untilQuiet(20);
+  }
+  child.run(1.5);
+  note(`FOUND FROM THE DESK: the store put back; the owl recommending '${owl.recommendedBookId ?? 'nothing'}' (before: '${recommendedBefore ?? 'nothing'}'); ${child.frames} frames stepped so far`);
 }
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──

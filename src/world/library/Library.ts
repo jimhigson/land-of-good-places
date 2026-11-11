@@ -16,19 +16,20 @@ import type { CharacterModel } from '../../entities/CharacterModel';
 import type { NpcCharacter, ResidentSpec } from '../../entities/npc';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
-import { BUILDING_STEP_UP } from '../../core/constants';
+import { BUILDING_STEP_UP, NPC_RADIUS, PARADE_MEMBER_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { NameLabel } from '../../ui/NameLabel';
 import { ANCHORS_BY_ID } from '../anchors';
 import { createLibraryExterior, createLibrarySkirt, dressedReach, libraryCushionSize, type LibraryExterior } from '../../art/models/libraryAssets';
 import { KID_HIP_HEIGHT } from '../../art/models/kid';
+import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
 import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
 import { furnishReadingRoom, type FurnishedShelfBook, type StackFader } from './furnish';
 import { LIBRARY_CHIPS } from './libraryLines';
 import { shelfBookZoneId } from './shelfBooks';
-import { LibraryOwl, OWL_ZONE_ID } from './LibraryOwl';
+import { LibraryOwl, OWL_ZONE_ID, type OwlBystander } from './LibraryOwl';
 import { hasLibraryCard } from './libraryCard';
 import { gameStore } from '../../state';
 import { libraryResidents, type LibraryResident } from './LibraryKids';
@@ -300,6 +301,10 @@ export class Library implements GameSystem {
   /** The drawn building. */
   readonly exterior: LibraryExterior;
   private player: Player | null = null;
+  /** Her line of pets out of the backpack ({@link attachParade}) — the owl keeps clear of them as she does of her. */
+  private parade: { standing(): Iterable<Readonly<Vector3>> } | null = null;
+  /** The one record {@link owlBystanders} writes and hands out, again and again: the owl reads each at once. */
+  private readonly bystander: OwlBystander = { what: '', x: 0, y: 0, z: 0, radius: 0, height: 0 };
   private inside = false;
   private readonly from = new Vector3();
   private readonly cameraLocal = new Vector3();
@@ -347,7 +352,7 @@ export class Library implements GameSystem {
     this.shelfBooks = furnished.shelfBooks;
     // The owl (#718): after the furniture, whose shelf books her glow lights,
     // and before `assertClear`, so her solid is checked against every keep-out.
-    this.owl = new LibraryOwl(this.roomRoot, this.props, this.shelfBooks, controls);
+    this.owl = new LibraryOwl(this.roomRoot, this.props, collision, this.shelfBooks, controls, () => this.owlBystanders());
     this.owlZone = this.buildOwlZone();
     this.bookZones = this.shelfBooks.map((placed) => this.shelfBookZone(placed));
     this.lighting = new LibraryLighting(furnished.pools);
@@ -501,6 +506,16 @@ export class Library implements GameSystem {
 
   attachPlayer(player: Player): void {
     this.player = player;
+  }
+
+  /**
+   * **Her line of pets, for the owl to keep clear of** — given by
+   * `World.attachParade`, the one place her parade is introduced to the park,
+   * as the train is given it. Each pet standing out of the backpack is somebody
+   * the owl never flies into or comes down on.
+   */
+  attachParade(parade: { standing(): Iterable<Readonly<Vector3>> }): void {
+    this.parade = parade;
   }
 
   /**
@@ -852,6 +867,47 @@ export class Library implements GameSystem {
   private showRoom(visible: boolean): void {
     this.roomRoot.visible = visible;
     this.kidsRoot.visible = visible;
+  }
+
+  /**
+   * **Everybody the owl must never fly into or come down on** (`LibraryOwl`'s
+   * `wouldTouch`): the child — her collision radius and her height — every pet
+   * of hers standing out of the backpack, and the library's three children.
+   * Each as an upright cylinder from where its feet are; a pet as tall as the
+   * child (shorter in fact, so the owl only ever waits a little higher over
+   * one). One record, rewritten for each and read at once.
+   */
+  private *owlBystanders(): Generator<Readonly<OwlBystander>> {
+    const one = this.bystander;
+    const player = this.player;
+    if (player) {
+      one.what = 'the child';
+      one.x = player.position.x;
+      one.y = player.position.y;
+      one.z = player.position.z;
+      one.radius = PLAYER_RADIUS;
+      one.height = KID_HEIGHT;
+      yield one;
+    }
+    for (const kid of this.kidsAttached) {
+      one.what = kid.plan.name;
+      one.x = kid.body.position.x;
+      one.y = kid.body.position.y;
+      one.z = kid.body.position.z;
+      one.radius = NPC_RADIUS;
+      one.height = KID_HEIGHT;
+      yield one;
+    }
+    if (!this.parade) return;
+    for (const at of this.parade.standing()) {
+      one.what = 'a pet';
+      one.x = at.x;
+      one.y = at.y;
+      one.z = at.z;
+      one.radius = PARADE_MEMBER_RADIUS;
+      one.height = KID_HEIGHT;
+      yield one;
+    }
   }
 
   /** Story time's view of her: on one of her cushions, and where her feet are, room-local. */

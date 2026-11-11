@@ -28,7 +28,7 @@ import { glowTexture } from '../../core/textures';
  * puff or per frame. Sprites live in `parent`'s coordinates.
  */
 export class SpritePuffs {
-  private readonly sprites: Sprite[] = [];
+  private readonly pool: Sprite[] = [];
   private readonly life: number[] = [];
   private readonly scale: number;
   private next = 0;
@@ -40,17 +40,22 @@ export class SpritePuffs {
       sprite.visible = false;
       sprite.scale.setScalar(scale);
       parent.add(sprite);
-      this.sprites.push(sprite);
+      this.pool.push(sprite);
       this.life.push(0);
     }
+  }
+
+  /** Every sprite of the pool, live or not (`visible` says which) — for a check to measure where they are drawn. */
+  get sprites(): readonly Sprite[] {
+    return this.pool;
   }
 
   /** `count` sprites at (x, y, z), each jittered ±0.3 m in x and z. */
   puff(x: number, y: number, z: number, rng: Rng, count = 3): void {
     for (let i = 0; i < count; i += 1) {
       const index = this.next;
-      this.next = (this.next + 1) % this.sprites.length;
-      const sprite = this.sprites[index]!;
+      this.next = (this.next + 1) % this.pool.length;
+      const sprite = this.pool[index]!;
       sprite.position.set(x + rng.range(-0.3, 0.3), y, z + rng.range(-0.3, 0.3));
       sprite.visible = true;
       this.life[index] = 1.2;
@@ -59,7 +64,7 @@ export class SpritePuffs {
 
   /** Rises, shrinks and fades every live sprite; call once a frame. */
   update(dt: number): void {
-    this.sprites.forEach((sprite, index) => {
+    this.pool.forEach((sprite, index) => {
       const life = this.life[index] ?? 0;
       if (life <= 0) return;
       const remaining = Math.max(0, life - dt);

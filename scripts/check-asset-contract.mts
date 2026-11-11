@@ -101,6 +101,39 @@ import {
   createLibraryDragonNest,
   createLibraryOwl,
 } from '../src/art/models/libraryCreatures.ts';
+import {
+  createBattlement,
+  createBiscuitTreat,
+  createCake,
+  createFeather,
+  createFlatStone,
+  createFluffyCloud,
+  createGiantFootprint,
+  createInsideOutUmbrella,
+  createJamTart,
+  createLoosePage,
+  createMagnifyingGlass,
+  createOpenBook,
+  createPancakeFootprint,
+  createParkBench,
+  createPetal,
+  createPicnicBlanket,
+  createPuddle,
+  createQueuePosts,
+  createRainbowArch,
+  createRubberDuck,
+  createSandwich,
+  createSandwichHeap,
+  createSandwichTower,
+  createSpoon,
+  createStick,
+  createStoryClosedBook,
+  createStoryCloud,
+  createStoryFlower,
+  createStoryWheel,
+  createTwigNest,
+  createWindowFrame,
+} from '../src/world/library/reader/storyProps.ts';
 
 /**
  * How far a declared height may sit from the measured one, in metres.
@@ -335,6 +368,43 @@ function collect(): Subject[] {
   add('library.dragonNest', createLibraryDragonNest());
   add('library.cat', createLibraryCat());
   add('library.bookPile', createLibraryBookPile());
+
+  // The story-props kit (`src/world/library/reader/storyProps.ts`): every
+  // picture prop the six chapter books needed that the park had no model for,
+  // from `storyProps.glb`. Each origin is at the base and each height is
+  // measured off the built model, so these carry no recorded drift either.
+  add('story.storm-cloud', createStoryCloud());
+  add('story.fluffy-cloud', createFluffyCloud());
+  add('story.rainbow-arch', createRainbowArch());
+  add('story.queue-posts', createQueuePosts());
+  add('story.rubber-duck', createRubberDuck());
+  add('story.park-bench', createParkBench());
+  add('story.magnifying-glass', createMagnifyingGlass());
+  add('story.pancake-footprint', createPancakeFootprint());
+  add('story.giant-footprint', createGiantFootprint());
+  add('story.spoon', createSpoon());
+  add('story.flat-stone', createFlatStone());
+  add('story.stick', createStick());
+  add('story.open-book', createOpenBook());
+  add('story.loose-page', createLoosePage());
+  add('story.closed-book', createStoryClosedBook());
+  add('story.flower', createStoryFlower());
+  add('story.flower.nibbled', createStoryFlower({ nibbled: true }));
+  add('story.petal', createPetal());
+  add('story.picnic-blanket', createPicnicBlanket());
+  add('story.sandwich', createSandwich());
+  add('story.sandwich-tower', createSandwichTower());
+  add('story.sandwich-heap', createSandwichHeap());
+  add('story.jam-tart', createJamTart());
+  add('story.cake', createCake());
+  add('story.puddle', createPuddle());
+  add('story.window-frame', createWindowFrame());
+  add('story.umbrella-inside-out', createInsideOutUmbrella());
+  add('story.battlement', createBattlement());
+  add('story.story-wheel', createStoryWheel({ lit: true }));
+  add('story.feather', createFeather());
+  add('story.twig-nest', createTwigNest());
+  add('story.biscuit-treat', createBiscuitTreat());
 
   // Scenery. Seeded, so a few seeds each is a fair sample of what a seed can do.
   for (const seed of [0, 1, 2, 3]) {

@@ -39,6 +39,14 @@ export function flossStickGeometry(): CylinderGeometry {
   return new CylinderGeometry(0.018, 0.018, 0.34, 6);
 }
 
+/** The stick on its own, standing on its end at the origin — what is left once the floss is eaten (and the start of every candy floss). */
+export function createFlossStick(): Mesh {
+  const geometry = flossStickGeometry();
+  const stick = solid(new Mesh(geometry, toonMaterial(ART.creamDark)));
+  stick.position.y = geometry.parameters.height / 2;
+  return stick;
+}
+
 /**
  * A cloud of candy floss on a stick.
  *
@@ -49,9 +57,7 @@ export function createCandyFloss(flavour: FlossFlavour): AssetHandle {
   const root = new Group();
   root.name = `floss.${flavour}`;
 
-  const stick = solid(new Mesh(flossStickGeometry(), toonMaterial(ART.creamDark)));
-  stick.position.y = 0.17;
-  root.add(stick);
+  root.add(createFlossStick());
 
   const colours = FLOSS_COLOURS[flavour];
   const lumps: readonly (readonly [number, number, number, number])[] = [

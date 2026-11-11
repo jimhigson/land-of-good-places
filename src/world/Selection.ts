@@ -58,9 +58,34 @@ import {
 /**
  * How much closer a *different* zone must be before it steals the selection —
  * the hysteresis band that stops a child standing between two stalls seeing the
- * chips flicker.
+ * chips flicker. **At most**: between two zones whose stands are close together
+ * the band is narrower, never more than {@link HYSTERESIS_SHARE} of the gap
+ * between them — see {@link Selection.hysteresisBand}.
  */
 const HYSTERESIS_MARGIN = 0.6;
+
+/**
+ * **The most of the gap between two zones' stands the hysteresis band may
+ * take: half of it.**
+ *
+ * The band is a distance *difference*: the held zone keeps the selection until
+ * a rival's stand is that much nearer than its own. Walking the straight line
+ * from one stand to the other, a band of `b` holds the old zone until she is
+ * `b / 2` past the midpoint. So with `b` at most half the gap `g`, the hold ends
+ * by three quarters of the way across, and **the last quarter of the gap — a
+ * circle of `g / 4` round each stand — always belongs to that stand's own
+ * zone**, whatever was selected before and wherever she came from. The middle
+ * half is the band, so a child standing midway between two things still sees
+ * no flicker.
+ *
+ * A fixed 0.6 m could not promise that. Two zones whose stands are 0.6 m apart
+ * or closer never let go of each other: on the rival's own stand the rival is
+ * exactly the gap nearer, never *more* than 0.6 m nearer. That is how the
+ * Library's big readers' shelf, six books 0.6 m apart, came to open the book
+ * of the stand she had just left at every stand she walked to (QA, PR #734).
+ * Any pair at least 1.2 m apart keeps the full 0.6 m, as before.
+ */
+const HYSTERESIS_SHARE = 0.5;
 
 /** Nothing further than this from the player is worth pointing at. Matches TapNavigator. */
 const MAX_PICK_DISTANCE = 90;
@@ -100,6 +125,15 @@ export class Selection implements GameSystem {
 
   private hasCursor = false;
   private sticky: InteractZone | null = null;
+  /**
+   * **What proximity held when a tap chose {@link sticky}** — that zone's id,
+   * or `null` if she was standing at nothing — so that "walking up to
+   * something else" (which drops a tapped pick) means *the proximity pick
+   * changed since the tap*, not merely *differs from it*. `undefined` whenever
+   * the sticky pick came from hover, or there is none: hover never outranks a
+   * different proximity pick (see {@link refreshSticky}).
+   */
+  private tapBaseline: string | null | undefined = undefined;
   private proximity: InteractZone | null = null;
   private current: InteractZone | null = null;
   private currentActions: readonly ZoneAction[] = [];
@@ -198,11 +232,14 @@ export class Selection implements GameSystem {
     if (!zone) {
       // A tap on open ground is also "never mind that": it puts the selection
       // away, so the chips do not hang about over something she has walked off.
-      this.sticky = null;
+      this.dropSticky();
       return false;
     }
 
     this.sticky = zone;
+    // A tap is a choice made where she stands: it outlives what she is
+    // standing at, until she walks up to something else (`refreshSticky`).
+    this.tapBaseline = this.proximity?.id ?? null;
     this.pending = null;
     // On a phone there is no hover at all, so this burst is the only thing that
     // tells a child her tap landed on the thing she aimed at.
@@ -355,7 +392,12 @@ export class Selection implements GameSystem {
 
   /** Drops a sticky selection that has gone stale, and keeps the object identity fresh. */
   private refreshSticky(zones: readonly InteractZone[], hovered: InteractZone | null): void {
-    if (hovered) this.sticky = hovered;
+    // Hovering the thing a tap already chose keeps the tap's standing: on a
+    // desktop the mouse is still over what was just clicked.
+    if (hovered && hovered.id !== this.sticky?.id) {
+      this.sticky = hovered;
+      this.tapBaseline = undefined;
+    }
 
     const sticky = this.sticky;
     if (!sticky) return;
@@ -363,20 +405,43 @@ export class Selection implements GameSystem {
     // Zones are rebuilt every frame, so hold the id rather than the object.
     const live = zones.find((zone) => zone.id === sticky.id);
     if (!live || !this.selectable(live)) {
-      this.sticky = null;
+      this.dropSticky();
       return;
     }
     // Walking up to something else is a choice, and it wins over whatever was
-    // tapped a moment ago.
-    if (this.proximity && this.proximity.id !== live.id) {
-      this.sticky = null;
+    // tapped a moment ago. A hovered pick never outranks a different proximity
+    // pick; a tapped one does, for as long as proximity still holds what it
+    // held when she tapped — see `tapOutlives`.
+    if (this.proximity && this.proximity.id !== live.id && !this.tapOutlives(this.proximity)) {
+      this.dropSticky();
       return;
     }
     this.sticky = live;
   }
 
-  private clear(): void {
+  /**
+   * **Does a tapped pick outlive this proximity pick?** Only if proximity has
+   * not changed since the tap: she chose the tapped thing over the one she was
+   * standing at, and nothing she has done since says otherwise.
+   *
+   * It used to be dropped whenever proximity held *anything else*. So a child
+   * standing at one thing could never select another by tapping it, contrary to
+   * this file's own header ("dropped … when you walk up to something else").
+   * Nobody noticed while no two things stood close together. The Library's big
+   * readers' shelf has six books within one stand's reach: tapping the one she
+   * wanted put the chip back on the book she was standing at, a frame later.
+   */
+  private tapOutlives(proximity: InteractZone): boolean {
+    return this.tapBaseline !== undefined && this.tapBaseline === proximity.id;
+  }
+
+  private dropSticky(): void {
     this.sticky = null;
+    this.tapBaseline = undefined;
+  }
+
+  private clear(): void {
+    this.dropSticky();
     this.proximity = null;
     this.current = null;
     this.currentActions = [];
@@ -441,14 +506,16 @@ export class Selection implements GameSystem {
    * Higher {@link InteractZone.selectRank} wins outright — the old "an
    * interactable you can act on beats a sign you can read" precedence — and
    * equal ranks are settled by distance, with the current pick kept unless a
-   * rival beats it by more than {@link HYSTERESIS_MARGIN}.
+   * rival beats it by more than the {@link hysteresisBand} between the two.
    */
   private pickNearby(zones: readonly InteractZone[]): InteractZone | null {
     const { position } = this.player;
     let best: InteractZone | null = null;
     let bestRank = -Infinity;
     let bestDistance = Infinity;
-    let currentDistance = Infinity;
+    /** The held zone as this frame rebuilt it (stands move: the lift doors follow the car), if still in reach. */
+    let held: InteractZone | null = null;
+    let heldDistance = Infinity;
 
     for (const zone of zones) {
       if (!this.selectable(zone)) continue;
@@ -457,7 +524,10 @@ export class Selection implements GameSystem {
       if (distance > standRadiusOf(zone)) continue;
 
       const rank = zone.selectRank ?? 0;
-      if (zone.id === this.proximity?.id) currentDistance = distance;
+      if (zone.id === this.proximity?.id) {
+        held = zone;
+        heldDistance = distance;
+      }
       if (rank > bestRank || (rank === bestRank && distance < bestDistance)) {
         best = zone;
         bestRank = rank;
@@ -465,14 +535,24 @@ export class Selection implements GameSystem {
       }
     }
 
-    const held = this.proximity;
-    if (held && currentDistance < Infinity && best) {
+    if (held && best && best.id !== held.id) {
       const heldRank = held.selectRank ?? 0;
-      if (bestRank <= heldRank && bestDistance >= currentDistance - HYSTERESIS_MARGIN) {
-        return zones.find((zone) => zone.id === held.id) ?? best;
-      }
+      if (bestRank <= heldRank && bestDistance >= heldDistance - this.hysteresisBand(held, best)) return held;
     }
     return best;
+  }
+
+  /**
+   * **How much nearer `rival`'s stand must be than `held`'s before it takes the
+   * selection**: {@link HYSTERESIS_MARGIN}, but never more than
+   * {@link HYSTERESIS_SHARE} of the gap between the two stands. So on — or
+   * within a quarter of that gap of — another zone's own stand, the zone she
+   * held before always lets go, and midway between the two she still sees no
+   * flicker.
+   */
+  private hysteresisBand(held: InteractZone, rival: InteractZone): number {
+    const gap = Math.hypot(held.standX - rival.standX, held.standZ - rival.standZ);
+    return Math.min(HYSTERESIS_MARGIN, HYSTERESIS_SHARE * gap);
   }
 
   /**

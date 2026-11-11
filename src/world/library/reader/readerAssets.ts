@@ -2,21 +2,24 @@ import { CylinderGeometry, Group, Mesh } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../../core/palette';
 import { ART } from '../../../art/style/artPalette';
-import { addOutline, decal, inkTint, solid, toonMaterial } from '../../../art/style/materials';
+import { addOutline, decal, solid, toonMaterial } from '../../../art/style/materials';
 import { createBakedFace, type Expression } from '../../../art/style/faces';
 import { applyWalk, blob, makeLimbs, stub, type AssetHandle, type CreatureHandle } from '../../../art/style/asset';
 import { LIBRARY_GLB_STYLES } from '../../../art/models/libraryAssets';
+import { createStoryClosedBook } from './storyProps';
 
 /**
- * **The book reader's own models, built from primitives until Blender's arrive**
- * (#717, part 3 of the Library epic #714).
+ * **The book reader's own models** (#717, part 3 of the Library epic #714):
+ * the cover it turns pages in, built from primitives until the Artist's
+ * arrives, and the storybook dragon, a page illustration from before the
+ * Blender ruling (Jim, 22 Oct 2026) that every new picture model is the
+ * Artist's — see `storyProps.ts` for those.
  *
  * They live beside the reader rather than in `art/models/` because nothing but
- * the reader uses them — the cover it turns pages in, and two props that only
- * ever appear inside a book's pictures — and because `art/models/libraryAssets.ts`
- * belongs to the library building (#716): its shelves, desk, lamps and shelf
- * books. A shelf book is not a picture-book prop; the two are drawn at
- * different scales for different jobs, and each has its own owner.
+ * the reader uses them, and because `art/models/libraryAssets.ts` belongs to
+ * the library building (#716): its shelves, desk, lamps and shelf books. A
+ * shelf book is not a picture-book prop; the two are drawn at different scales
+ * for different jobs, and each has its own owner.
  *
  * Three factories, each the one owner of its thing:
  *
@@ -27,8 +30,10 @@ import { LIBRARY_GLB_STYLES } from '../../../art/models/libraryAssets';
  *   this file and nothing else. When it lands, the dimensions below must be
  *   *measured off the glb* (`visibleBounds`), never typed a second time — the
  *   reader reads them from here, and only from here.
- * - {@link createStoryBook} — a closed picture book, for the pictures inside the
- *   books (a dragon's pile of them).
+ * - {@link createStoryBook} — the closed storybook in the pictures (a dragon's
+ *   pile of them): the story-props kit's `closed-book`, behind the name the
+ *   picture books' pages already use, so the twelve and the six name one
+ *   closed book.
  * - {@link createStoryDragon} — the baby dragon in *The Dragon Who Reads*. The
  *   epic's fifth PR brings a Blender dragon to live in the secret den; this one
  *   is a page illustration, built the way the mini is (`mini.ts`): squashed
@@ -117,24 +122,15 @@ export function createReaderCover(colour: number): ReaderCoverHandle {
   return { root, height: boardH, left, right };
 }
 
-/** A closed picture book, standing on its back cover. Origin at the bottom, facing +Z. */
+/**
+ * A closed picture book lying flat, its cover in `colour`: the story-props
+ * kit's `closed-book` ({@link createStoryClosedBook}), whose size is the glb's
+ * own. Origin at the bottom, spine to the front. One closed book for the
+ * twelve picture books and the six chapter books alike — this is the picture
+ * books' name for it, kept so their pages did not change.
+ */
 export function createStoryBook(colour: number): AssetHandle {
-  const root = new Group();
-  root.name = 'library.storyBook';
-  const width = 0.42;
-  const depth = 0.32;
-  const thick = 0.1;
-  const cover = solid(new Mesh(new RoundedBoxGeometry(width, thick, depth, 3, 0.02), toonMaterial(colour)));
-  cover.position.y = thick / 2;
-  root.add(cover);
-  addOutline(cover, 0.01, inkTint(colour));
-  // The pages, cream, showing on the three open sides.
-  const pages = solid(
-    new Mesh(new RoundedBoxGeometry(width - 0.03, thick * 0.72, depth - 0.02, 2, 0.01), toonMaterial(PALETTE.signBoard)),
-  );
-  pages.position.set(0.016, thick / 2, 0);
-  root.add(pages);
-  return { root, height: thick };
+  return createStoryClosedBook(colour);
 }
 
 /** Head scale-up over the original authoring, the mini's own trick for a big cute skull. */
@@ -269,78 +265,5 @@ export function createStoryDragon(): CreatureHandle {
     height: 0.48 + 0.16 * DRAGON_HEAD * 0.98 + 0.08,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.5, 0.06),
-  };
-}
-
-/**
- * **A cloud with a face** — Nimbus, the storm cloud in *Biscuit and the
- * Storm* (track D of #714), and any other weather a chapter book needs: a
- * page illustration like {@link createStoryDragon}, built the mini's way
- * (squashed spheres and a baked face), never a model of the park's sky.
- *
- * `colour` is the whole cloud's, so one model is both a grey storm and the
- * white cloud it turns into. It floats: its lowest puff is on the ground plane
- * at the origin like every picture model, and a page lifts it with `at`. Its
- * moods are the house five (`setExpression`); it has no limbs.
- */
-export function createStoryCloud(colour: number): CreatureHandle {
-  const root = new Group();
-  root.name = 'library.storyCloud';
-  const body = new Group();
-  root.add(body);
-  const fluff = toonMaterial(colour);
-
-  // The puffs round the face: a lumpy, friendly outline, wider than tall.
-  const puffs: readonly [number, number, number, number][] = [
-    [-0.62, 0.32, -0.05, 0.3],
-    [0.62, 0.3, -0.05, 0.32],
-    [-0.36, 0.62, -0.1, 0.32],
-    [0.34, 0.66, -0.1, 0.34],
-    [0, 0.82, -0.15, 0.3],
-    [-0.88, 0.2, -0.12, 0.22],
-    [0.9, 0.18, -0.12, 0.22],
-  ];
-  for (const [x, y, z, r] of puffs) {
-    const puff = blob(r, fluff, [1.1, 0.92, 0.95], 22);
-    puff.position.set(x, y + 0.02, z);
-    body.add(puff);
-    addOutline(puff, 0.014);
-  }
-
-  // The middle puff carries the face, in the cloud's own colour.
-  const head = new Group();
-  head.position.set(0, 0.42, 0.06);
-  body.add(head);
-  const middle = blob(0.42, fluff, [1.12, 0.95, 0.9], 32);
-  head.add(middle);
-  addOutline(middle, 0.016);
-  const face = createBakedFace({
-    fill: colour,
-    spreadX: 1.8,
-    spreadY: 1.7,
-    tilt: 0.06,
-    size: 256,
-    eyeY: 0.46,
-    eyeGap: 0.36,
-    eyeW: 0.1,
-    eyeH: 0.13,
-    iris: PALETTE.iris,
-    mouth: 'smile',
-    mouthW: 0.1,
-    mouthDrop: 0.17,
-    blush: ART.blush,
-    blushStyle: 'soft',
-    blushR: 0.07,
-  });
-  face.applyTo(middle);
-
-  return {
-    root,
-    body,
-    head,
-    limbs: null,
-    height: 0.42 + 0.42 * 0.95,
-    setExpression: (name: Expression) => face.setExpression(name),
-    setWalkPhase: () => {},
   };
 }

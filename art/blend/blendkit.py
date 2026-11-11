@@ -57,6 +57,16 @@ def ts_const(relative_path: str, name: str) -> float:
     cannot silently return a default, it drags no import graph into Blender,
     and the assertion turns a rename or a reformat into a loud failure rather
     than into a wrong asset.
+
+    **A re-export is followed.** `kid.ts` moved `KID_HEIGHT` into its own leaf
+    (`kidHeight.ts`, so the collision engine can ask without loading the whole
+    kid model) and kept `export { KID_HEIGHT } from './kidHeight';` so that
+    "every caller that learned it there still finds it". Nine blend scripts
+    had learned it there and every one stopped running, because this regex
+    only knew the literal form. So a module that re-exports the name is read
+    through to the module it names — the owner is still one file, and the
+    number is still read, never typed. A re-export chain that never reaches a
+    literal fails exactly as a missing constant does.
     """
     path = os.path.join(REPO, relative_path)
     with open(path, encoding="utf-8") as handle:
@@ -64,10 +74,21 @@ def ts_const(relative_path: str, name: str) -> float:
     found = re.findall(
         rf"^export const {name} = (-?\d+(?:\.\d+)?);\s*$", source, flags=re.MULTILINE
     )
+    if not found:
+        re_exported = re.findall(
+            rf"^export \{{[^}}]*\b{name}\b[^}}]*\}} from ['\"](\.[^'\"]+)['\"];\s*$",
+            source,
+            flags=re.MULTILINE,
+        )
+        if len(re_exported) == 1:
+            target = os.path.normpath(os.path.join(os.path.dirname(relative_path), re_exported[0]))
+            if not target.endswith(".ts"):
+                target += ".ts"
+            return ts_const(target, name)
     assert len(found) == 1, (
         f"{relative_path} must declare `export const {name} = <number>;` exactly once "
-        f"and declares it {len(found)} times — this asset is built to that number and "
-        "cannot guess it"
+        f"(or re-export it from one module that does) and declares it {len(found)} times — "
+        "this asset is built to that number and cannot guess it"
     )
     return float(found[0])
 

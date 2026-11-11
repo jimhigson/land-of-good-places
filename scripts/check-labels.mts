@@ -21,8 +21,9 @@
  *
  * The real `World` (`park-harness.mts`), a real `Player` attached to it, the
  * real `Selection` and the real `ActionChips`, stepped at 1/60 in `Game.tick`'s
- * own order — player, camera, world, selection, chips, then
- * `world.labels.resolve` — through four scenes:
+ * own order — player, the reading room's camera claim (the owl's glance at the
+ * book she recommends, `bookGlance.ts`, applied as `Game` applies it), camera,
+ * world, selection, chips, then `world.labels.resolve` — through four scenes:
  *
  *  1. **A busy plaza.** From the gate into the middle of the garden and back,
  *     through the crowd, chips coming and going as she passes things.
@@ -32,6 +33,27 @@
  *  3. **The castle shops.** Every shop counter on the ground floor, with the
  *     crowd that shops there.
  *  4. **The hotel lobby.** Reception: check in, and let the receptionist talk.
+ *  5. **The Library** (#718). The owl at her desk: her card handed over, then
+ *     a book recommended, her bubble over her own chip; a shelf book's
+ *     "Read it!" chip; then story time, called with her at the owl's desk —
+ *     the call said there, then the owl's silent flight over the stacks to
+ *     the big chair (she calls first and flies when it is said: browser QA
+ *     round 1 found the call's bubble hiding her whole flight) while the
+ *     child goes to her story cushion and sits, the children walking to the
+ *     rug, and the first pages read over the rug, the cushion's "Get up"
+ *     chip up below them. Each visit is asked what it was
+ *     for (the card held, a book recommended, her seated, the reading
+ *     reached), not only whether a chip was up — and story time is asked what
+ *     it showed: the frames the owl's bubble was drawn while she called from
+ *     her desk, and, while she read, the frames her bubble, the Get up chip,
+ *     and both together were drawn. None may be zero (the review of the join:
+ *     with her bubble left over her desk, 17 m away, no word of the story was
+ *     drawn over the rug, and the scene's other counts did not change). And
+ *     the line that names the book she recommends ("Try “…” next!") must be
+ *     drawn on **every** frame she says it: the owl's glance at the book
+ *     (`bookGlance.ts`) once took the camera — and her bubble with it — as she
+ *     began it, and on a phone the title was up for a tenth of a second
+ *     (review and QA of #735).
  *
  * ## What is asserted, every frame
  *
@@ -106,7 +128,14 @@ import { SpeechBubble } from '../src/ui/SpeechBubble.ts';
 import { minTextPx } from '../src/core/uiScale.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
-import { spaceAt, SPACE_GARDEN, SPACE_REPTILE_HOUSE, SPACE_HOTEL_LOBBY } from '../src/world/spaces.ts';
+import { spaceAt, SPACE_GARDEN, SPACE_REPTILE_HOUSE, SPACE_HOTEL_LOBBY, SPACE_LIBRARY } from '../src/world/spaces.ts';
+import { OWL_ZONE_ID } from '../src/world/library/LibraryOwl.ts';
+import { BookGlance } from '../src/world/library/bookGlance.ts';
+import { hasLibraryCard } from '../src/world/library/libraryCard.ts';
+import { gameStore } from '../src/state/index.ts';
+import { LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
+import { bookById } from '../src/world/library/books.ts';
+import { lineSeconds } from '../src/ui/speechTiming.ts';
 import { PRIMARY_ACTION, type InteractZone } from '../src/world/interact.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
@@ -165,10 +194,23 @@ scene.add(player.group);
 quietly(() => world.attachPlayer(player));
 const input = new InputSystem();
 
+/**
+ * The owl's glance at the book she recommends (`bookGlance.ts`): `Game.tick` applies it after the player
+ * and before the camera, its claim the camera's focus override — so here, so the labels of the library
+ * scene are laid out on the camera the game draws while the owl names her book and the camera shows it.
+ * And while it holds nothing is selected (`Game.selectionBlocked`), so here too. The frames it held are
+ * counted ({@link glanceFrames}), and the frames a chip was drawn while it held ({@link glanceChipFrames}).
+ */
+const bookGlance = new BookGlance(world.library);
+let glanceFrames = 0;
+let glanceChipFrames = 0;
+/** The frames the owl said the line naming the book she recommends, and the frames her bubble was drawn while she did. */
+let namingFrames = 0;
+let namingDrawnFrames = 0;
 const canvas = document.createElement('div') as unknown as HTMLCanvasElement;
 const selection = new Selection(player, camera, canvas, {
   zones: () => world.interactZones(),
-  blocked: () => false,
+  blocked: () => bookGlance.active,
   walkTo: () => {},
   walking: () => false,
   flash: () => {},
@@ -216,6 +258,9 @@ const view = { camera: camera.camera, width: WIDTH, height: HEIGHT };
     ['the hotel', world.hotel.screenLabels],
     ['the reptile house', world.reptileHouse.screenLabels],
     ['the library', world.library.screenLabels],
+    // Named apart from `screenLabels`, so a bubble dropped from that list is missed here rather than
+    // agreed with: the owl's speech (#718), whose bubble scene 5 watches fly to the story chair.
+    ['the library owl', [world.library.owl.bubble]],
     ['the castle', world.building.screenLabels],
     ['the player', [player.label]],
     ['the chips', [chips]],
@@ -502,6 +547,10 @@ function step(): void {
   };
   quietly(() => {
     player.update(context);
+    const glanceClaim = bookGlance.apply(camera, player);
+    if (glanceClaim) camera.setFocusOverride(glanceClaim);
+    else camera.clearFocusOverride();
+    if (bookGlance.active) glanceFrames += 1;
     camera.update(context, player.position, velocity);
     world.update(context);
     selection.update(context);
@@ -509,6 +558,7 @@ function step(): void {
   });
   world.labels.resolve(view, DT);
   audit();
+  if (bookGlance.active && isDrawn(chips)) glanceChipFrames += 1;
   frame += 1;
 }
 
@@ -602,6 +652,95 @@ let reptileVisited = 0;
   for (const zone of zones) visit(zone, true, 1.2);
 }
 
+// 5 — the Library (#718): the owl hands over her card and recommends a book, a shelf book's chip is up,
+// and story time is called with her sat on her story cushion — the owl calls from her desk, flies over the
+// stacks silent, and reads from the big chair over the rug, while the cushion's 'Get up' chip is up below it.
+scene_ = 'library';
+let owlSelected = 0;
+let cardGiven = false;
+let recommended = false;
+let libraryRead = false;
+let seatedForStory = false;
+let storyFrames = 0;
+let readingFrames = 0;
+/** While the owl reads: the frames her bubble was drawn, the cushion's Get up chip was, and both at once. */
+let readingBubbleFrames = 0;
+let readingChipFrames = 0;
+let readingBothFrames = 0;
+/** The call, said from her desk before she flies: the frames she spoke it, and the frames her bubble was drawn. */
+let callSpeakingFrames = 0;
+let callBubbleFrames = 0;
+/** The frames she spoke on the wing — none: her flights are silent (`storyTime.ts`). */
+let wingSpeakingFrames = 0;
+{
+  // The Reptile House's last press may have left her on its tortoise: off it first, as a tap would.
+  if (player.riding) quietly(() => player.rideHolder?.letGo());
+  run(0.5);
+  const entered = quietly(() => world.library.requestEnter());
+  run(1);
+  if (!entered || !world.library.playerIsInside) fail('E coverage', `the library scene could not enter the reading room (requestEnter ${entered}, riding ${player.riding}, in '${spaceAt(player.position.x, player.position.z)}')`);
+  const zones = world.library.interactZones().filter((zone) => spaceAt(zone.x, zone.z) === SPACE_LIBRARY);
+  const owl = zones.find((zone) => zone.id === OWL_ZONE_ID);
+  const firstRead = zones.find((zone) => zone.id.startsWith('library-book:'));
+  const cushion = zones.find((zone) => zone.id.startsWith('library-sit:'));
+  if (owl) {
+    // Each visit is asked what it was for, not only whether her chip was up: a press mid-script does
+    // nothing, so the card's visit lasts as long as her four card lines take to say (`lineSeconds`, the
+    // one owner of a line's hold) — at 10 s the next press landed mid-ceremony and recommended nothing.
+    const cardScript = LIBRARY_LINES.owl.card.reduce((sum, line) => sum + lineSeconds(line), 0);
+    if (visit(owl, true, cardScript + 0.5)) owlSelected += 1; // her card
+    cardGiven = hasLibraryCard(gameStore.get());
+    // The recommendation, to its last line and the camera home after it: while the owl names her book and
+    // says it is glowing, the camera draws back to show it (`bookGlance.ts`), so the whole glance is laid out.
+    if (visit(owl, true, 0.5)) owlSelected += 1; // a book recommended
+    const pick = world.library.owl.recommendedBookId;
+    const naming = pick === null ? null : LIBRARY_LINES.owl.recommend(bookById(pick)?.title ?? '');
+    for (let i = 0; i < Math.round(20 / DT) && world.library.owl.speaking; i += 1) {
+      step();
+      if (naming !== null && world.library.owl.speaking && world.library.owl.lastSaid === naming) {
+        namingFrames += 1;
+        if (isDrawn(world.library.owl.bubble)) namingDrawnFrames += 1;
+      }
+    }
+    run(2);
+    recommended = world.library.owl.recommendedBookId !== null;
+  }
+  if (firstRead) libraryRead = visit(firstRead, false, 3);
+  // Story time, called with her at the owl's desk — the owl says the call there, before she flies, so it
+  // is in shot — and then, while the owl flies over the stacks, on to her cushion to sit through the
+  // gathering and the first of the reading.
+  const owlNow = world.library.owl;
+  /** One frame of story time, counted: what this scene is for, measured, not assumed. */
+  const storyFrame = (): void => {
+    step();
+    if (world.library.storyPhase !== 'idle') storyFrames += 1;
+    const bubbleUp = isDrawn(owlNow.bubble);
+    if (world.library.storyPhase === 'reading') {
+      readingFrames += 1;
+      const chipUp = cushion !== undefined && isDrawn(chips) && selection.selected?.id === cushion.id;
+      if (bubbleUp) readingBubbleFrames += 1;
+      if (chipUp) readingChipFrames += 1;
+      if (bubbleUp && chipUp) readingBothFrames += 1;
+    }
+    if (world.library.storyPhase === 'gathering' && owlNow.atDesk && owlNow.speaking) {
+      callSpeakingFrames += 1;
+      if (bubbleUp) callBubbleFrames += 1;
+    }
+    if (owlNow.flying && owlNow.speaking) wingSpeakingFrames += 1;
+  };
+  if (owl) visit(owl, false, 0.2);
+  quietly(() => world.library.requestStoryTime());
+  // At the desk until she takes off (whatever she was saying is finished first, then the call).
+  for (let i = 0; i < Math.round(20 / DT) && !owlNow.flying; i += 1) storyFrame();
+  if (cushion) {
+    visit(cushion, true, 0.5);
+    seatedForStory = world.library.playerIsSeated;
+  }
+  for (let i = 0; i < Math.round(30 / DT); i += 1) storyFrame();
+  quietly(() => world.library.standUp());
+  run(0.5);
+}
+
 // --- the verdict ---------------------------------------------------------------------------
 
 const seconds = ((performance.now() - started) / 1000).toFixed(1);
@@ -615,7 +754,13 @@ process.stderr.write(
     `${coverage.ctaPutAwayForItsAction} frames a call to action was put away for its own action's answer; ` +
     `${coverage.feedbackShownOverItsItem} frames an answer was up over its item.\n` +
     `  Reptile House: ${reptileVisited} chips pressed; castle: ${shopsVisited} shop counters; ` +
-    `hotel: receptionist ${receptionTalked ? 'talked' : 'NOT reached'}. ` +
+    `hotel: receptionist ${receptionTalked ? 'talked' : 'NOT reached'}; ` +
+    `library: the owl selected ${owlSelected} of 2 visits (her card ${cardGiven ? 'handed over' : 'NOT handed over'}, a book ${recommended ? 'recommended' : 'NOT recommended'}), ` +
+    `a shelf book's chip ${libraryRead ? 'up' : 'NOT up'}, story time on ${storyFrames} frames (${readingFrames} reading) with her ${seatedForStory ? 'sat on her cushion' : 'NOT seated'}: ` +
+    `while the owl read, her bubble drawn on ${readingBubbleFrames}, the cushion's Get up chip on ${readingChipFrames}, both on ${readingBothFrames}; ` +
+    `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
+    `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them; ` +
+    `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -629,6 +774,33 @@ if (coverage.ctaPutAwayForItsAction < 60) {
 if (reptileVisited < 10) coverageGaps.push(`only ${reptileVisited} Reptile House chips were pressed`);
 if (shopsVisited < 3) coverageGaps.push(`only ${shopsVisited} castle shop counters were stood at`);
 if (!receptionTalked) coverageGaps.push('the hotel reception was never reached');
+if (owlSelected < 2) coverageGaps.push(`the library owl was selected on only ${owlSelected} of her 2 visits`);
+if (!cardGiven) coverageGaps.push('the library owl never handed over her card');
+if (!recommended) coverageGaps.push('the library owl never recommended a book');
+if (glanceFrames === 0) coverageGaps.push("the owl's glance at the book she recommended never took the camera, so no label was laid out under it");
+if (namingFrames === 0) coverageGaps.push('the owl never said the line naming the book she recommended, so whether it can be read was never asked');
+if (namingDrawnFrames < namingFrames) {
+  fail(
+    'F the owl\'s words',
+    `the line naming the book she recommends was drawn on only ${namingDrawnFrames} of the ${namingFrames} frames she said it — every one wanted: ` +
+      'a child who cannot read the title never learns which book the owl meant (the glance must not take her bubble while she names it)',
+  );
+}
+if (glanceChipFrames > 0) {
+  fail(
+    'C precedence',
+    `a chip was drawn on ${glanceChipFrames} of the ${glanceFrames} frames the owl's glance held the camera — the owl is mid-script and nothing may be selected then ` +
+      `(Game.selectionBlocked), and her "Say hello!" would be a press that does nothing`,
+  );
+}
+if (!libraryRead) coverageGaps.push("no library shelf book's chip was ever up");
+if (!seatedForStory) coverageGaps.push('she never sat on a story cushion for story time');
+if (storyFrames === 0) coverageGaps.push('library story time never ran');
+if (readingFrames === 0) coverageGaps.push('library story time never reached its reading');
+if (readingBubbleFrames === 0) coverageGaps.push("the library owl's bubble was never drawn while she read the story");
+if (readingChipFrames === 0) coverageGaps.push("the story cushion's Get up chip was never drawn while the owl read");
+if (readingBothFrames === 0) coverageGaps.push("the owl's bubble and the cushion's Get up chip were never drawn together while she read");
+if (callBubbleFrames === 0) coverageGaps.push(`the owl's bubble was never drawn while she called story time from her desk (${callSpeakingFrames} frames she said it)`);
 for (const gap of coverageGaps) fail('E coverage', `${gap} — the assertions above would be vacuous`);
 
 if (failures.size > 0) {
