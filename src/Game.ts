@@ -2075,7 +2075,7 @@ export class Game {
     // mid-drag cannot inherit an offset.
     if (this.lookAroundBlocked()) this.camera.cancelLook();
 
-    this.camera.update(this.frameContext, this.player.position, this.player.velocity);
+    this.camera.update(this.frameContext, this.player.position, this.player.velocity, this.player.framePath);
     // Straight after the camera moves and before the sky is drawn: the stars,
     // the moon and the sun all slide with the park so the night sky reads as a
     // place a long way off rather than as wallpaper stuck to the screen. Fed

@@ -86,6 +86,7 @@ import {
 } from '../src/entities/tapDash.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../src/core/constants.ts';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../src/entities/TapNavigator.ts';
+import { bandWalkedThrough, type PortalBand } from '../src/world/tapSpacing.ts';
 
 /** The seeds walked: the canonical park and three more from the pool. */
 const SEEDS = [5, 0, 9, 13];
@@ -99,6 +100,17 @@ const LONGEST_AT_LEAST = 3.6;
 const REST_SLACK = 0.1;
 /** Metres inside something solid, at her centre, that count as a tunnel. */
 const TUNNEL_DEPTH = 0.1;
+/** A phone held upright: the narrowest view the game ever has. */
+const PHONE = { width: 390, height: 844 };
+/**
+ * How far she may drift from where she stands on screen at rest, in NDC
+ * (1 = half the screen), on a dash of 250 m or more on the phone above. 0.35
+ * keeps her inside the middle third of a portrait phone at 85 m/s. Before
+ * `cameraLead` she was 6 m behind the focus there, about 1.1 of a 5.5 m half.
+ */
+const CAMERA_DRIFT_LIMIT = 0.35;
+/** Routes at least this long have the on-screen camera clause asserted. */
+const CAMERA_ROUTE_METRES = 250;
 
 const run = promisify(execFile);
 const HERE = fileURLToPath(import.meta.url);
@@ -123,6 +135,14 @@ interface JourneyRun {
   readonly maxStrides: number;
   readonly tunnels: number;
   readonly firstTunnel: string | null;
+  /** Frames after which `previousPosition` / the frame path did not span the frame. */
+  readonly contractBroken: number;
+  readonly firstContract: string | null;
+  /** Whether a door-sized band was stood across this route, and whether she walked through it. */
+  readonly bandTested: boolean;
+  readonly bandFired: boolean;
+  /** Furthest she drifted from her resting place on a 390×844 screen, in NDC (1 = the screen's half). */
+  readonly cameraWorst: number;
 }
 
 interface JourneyReport {
@@ -141,6 +161,7 @@ interface SeedReport {
   readonly journeys: readonly JourneyReport[];
   readonly controlTunnels: number;
   readonly controlSamples: number;
+  readonly interior: readonly JourneyReport[];
 }
 
 async function child(seed: number): Promise<void> {
@@ -166,6 +187,11 @@ async function child(seed: number): Promise<void> {
   const { terrainHeight } = await import('../src/world/terrain.ts');
   const { PLAYER_RADIUS } = await import('../src/core/constants.ts');
   const { KID_HEIGHT } = await import('../src/art/models/kidHeight.ts');
+  const { NavGrid } = await import('../src/world/NavGrid.ts');
+  const { circleBoundary } = await import('../src/world/boundary.ts');
+  const { HOTEL_PLAY_RADIUS } = await import('../src/core/constants.ts');
+  const { LOBBY } = await import('../src/world/hotel/layout.ts');
+  const { JUMP_APEX_HEIGHT } = await import('../src/entities/Player.ts');
 
   const park = quietly(() => buildHeadlessPark());
   const world = park.world;
@@ -224,7 +250,11 @@ async function child(seed: number): Promise<void> {
     remainingRoute(): number;
     cruiseBoost: number;
     target: { x: number; y: number; z: number };
+    route: Float32Array;
+    routeLength: number;
   };
+  // The hotel tower door's own band: the size every check below stands across a route.
+  const doorBand = world.hotel.towerDoorBand();
   const body = player as unknown as { groundHeight: number; hopClearance: number };
 
   // ---- the journeys, from the park's own routes
@@ -300,14 +330,82 @@ async function child(seed: number): Promise<void> {
 
   // `LGP_TAP_DASH_DEBUG=x,z` prints every stride within 1.5 m of a point.
   const debugAt = process.env['LGP_TAP_DASH_DEBUG']?.split(',').map(Number) ?? null;
-  const runJourney = (pair: Pair, dt: number, mode: Mode): { run: JourneyRun; metres: number; cruise: number; samples: number } => {
+  // The camera measured on screen, at the size a phone held upright gives it:
+  // the narrowest view the game has (`CAMERA_MIN_VIEW_WIDTH` across).
+  camera.resize(PHONE.width, PHONE.height);
+  const onScreen = new Vector3();
+  const ndcOf = (): { x: number; y: number } => {
+    camera.camera.updateMatrixWorld();
+    onScreen.copy(player.position).project(camera.camera);
+    return { x: onScreen.x, y: onScreen.y };
+  };
+
+  interface Journey {
+    from: { x: number; z: number; y?: number };
+    to: { x: number; z: number; y?: number };
+    metres: number;
+  }
+
+  /**
+   * One journey from a clean start. **Every run starts from the same state**
+   * (#745's review): a dash that went wrong used to leave her airborne, with a
+   * hop clearance or a boost, and the next run — the walk control — inherited
+   * it. So the navigator is cancelled, the boost dropped and she is put down
+   * fresh before every run, whatever the last one did.
+   */
+  const runJourney = (pair: Journey, dt: number, mode: Mode, steer = navigator) => {
+    navigator.cancel();
+    steer.cancel();
+    player.setTravelBoost = realBoost;
+    realBoost(1);
+    input.moveX = 0;
+    input.moveY = 0;
+    input.sprint = false;
+    player.poseThisUpdate = true;
     player.setTravelBoost = mode === 'walk' ? () => realBoost(1) : realBoost;
 
-    quietly(() => player.teleport(pair.from.x, pair.from.z));
-    quietly(() => navigator.navigateTo(pair.to.x, terrainHeight(pair.to.x, pair.to.z), pair.to.z));
-    const metres = nav.remainingRoute();
-    const cruise = nav.cruiseBoost;
-    const target = { x: nav.target.x, z: nav.target.z };
+    if (pair.from.y === undefined) quietly(() => player.teleport(pair.from.x, pair.from.z));
+    else quietly(() => player.teleportTo(pair.from.x, pair.from.y as number, pair.from.z));
+    quietly(() => steer.navigateTo(pair.to.x, pair.to.y ?? terrainHeight(pair.to.x, pair.to.z), pair.to.z));
+    const steerState = steer as unknown as typeof nav;
+    const metres = steerState.remainingRoute();
+    const cruise = steerState.cruiseBoost;
+    const target = { x: steerState.target.x, z: steerState.target.z };
+
+    // **A door across her route, at full speed** — the band the hotel's own
+    // tower door is, stood across the middle of the planned route, narrow side
+    // along her travel. `bandWalkedThrough` is the very question every door in
+    // the game asks once a frame (Hotel, Library, Reptile House); a dash must
+    // be seen walking through it on some frame.
+    let band: PortalBand | null = null;
+    if (mode === 'dash' && metres >= 30) {
+      const route = steerState.route;
+      const legs = steerState.routeLength;
+      let px = player.position.x;
+      let pz = player.position.z;
+      let walked = 0;
+      for (let i = 0; i < legs && !band; i += 1) {
+        const qx = route[i * 2] ?? px;
+        const qz = route[i * 2 + 1] ?? pz;
+        const leg = Math.hypot(qx - px, qz - pz);
+        if (walked + leg >= metres / 2 && leg > 2) {
+          const t = (metres / 2 - walked) / leg;
+          band = {
+            what: 'a door-sized band across the route',
+            centreX: px + (qx - px) * t,
+            centreZ: pz + (qz - pz) * t,
+            halfAlong: Math.min(doorBand.halfAlong, doorBand.halfAcross),
+            halfAcross: Math.max(doorBand.halfAlong, doorBand.halfAcross),
+            yaw: Math.atan2(qx - px, qz - pz),
+            y: player.position.y,
+          };
+        }
+        walked += leg;
+        px = qx;
+        pz = qz;
+      }
+    }
+
     const trace: Stride[] = [];
     const record = (): void => {
       trace.push({
@@ -321,23 +419,60 @@ async function child(seed: number): Promise<void> {
     };
     record();
     context.dt = dt;
+    camera.snapTo(player.position);
+    camera.update(context, player.position, player.velocity);
+    const rest = ndcOf();
+    let cameraWorst = 0;
     let seconds = 0;
     let arrived = false;
     let maxStrides = 1;
-    while (navigator.isNavigating && seconds < 90) {
+    let contractBroken = 0;
+    let firstContract: string | null = null;
+    let bandFired = false;
+    while (steer.isNavigating && seconds < 90) {
       context.elapsed += dt;
       context.frame += 1;
-      strides.step(context, navigator, player, null, record);
+      const beforeX = player.position.x;
+      const beforeZ = player.position.z;
+      strides.step(context, steer, player, null, record);
       maxStrides = Math.max(maxStrides, strides.lastStrides);
+      // **The frame's line, as every door reads it.** After a frame cut into
+      // strides, `previousPosition` must be where the frame began and the
+      // frame path must run from there to where she is, stride by stride.
+      if (strides.lastStrides > 1) {
+        const path = player.framePath;
+        const xz = path.xz;
+        const ok =
+          player.previousPosition.x === beforeX &&
+          player.previousPosition.z === beforeZ &&
+          path.count === strides.lastStrides + 1 &&
+          xz[0] === beforeX &&
+          xz[1] === beforeZ &&
+          xz[path.count * 2 - 2] === player.position.x &&
+          xz[path.count * 2 - 1] === player.position.z;
+        if (!ok) {
+          contractBroken += 1;
+          firstContract ??=
+            `frame ${context.frame}: started at (${beforeX.toFixed(2)}, ${beforeZ.toFixed(2)}), previousPosition ` +
+            `(${player.previousPosition.x.toFixed(2)}, ${player.previousPosition.z.toFixed(2)}), path of ${path.count} point(s) for ${strides.lastStrides} strides`;
+        }
+      }
+      if (band && bandWalkedThrough(band, player)) bandFired = true;
+      camera.update(context, player.position, player.velocity, player.framePath);
+      const here = ndcOf();
+      cameraWorst = Math.max(cameraWorst, Math.abs(here.x - rest.x), Math.abs(here.y - rest.y));
+      if (process.env['LGP_TAP_DASH_CAMERA'] && metres > 280 && mode === 'dash') {
+        process.stderr.write(`cam dt=${dt.toFixed(3)} t=${seconds.toFixed(2)} v=${Math.hypot(player.velocity.x, player.velocity.z).toFixed(1)} dx=${(here.x - rest.x).toFixed(3)} dy=${(here.y - rest.y).toFixed(3)}\n`);
+      }
       seconds += dt;
-      if (!navigator.isNavigating) {
+      if (!steer.isNavigating) {
         arrived = Math.hypot(target.x - player.position.x, target.z - player.position.z) <= ARRIVE_RADIUS + 1e-6;
       }
     }
     // Hands off: she comes to rest wherever she comes to rest.
     for (let i = 0; i < Math.ceil(1.5 / dt); i += 1) {
       context.elapsed += dt;
-      strides.step(context, navigator, player, null, record);
+      strides.step(context, steer, player, null, record);
     }
     const restDistance = Math.hypot(target.x - player.position.x, target.z - player.position.z);
     let tunnels = 0;
@@ -358,13 +493,25 @@ async function child(seed: number): Promise<void> {
         firstTunnel ??= hit;
       }
     }
+    steer.cancel();
     player.setTravelBoost = realBoost;
-    return {
-      run: { arrived, seconds, restDistance, maxSpeed, maxStride, maxStrides, tunnels, firstTunnel },
-      metres,
-      cruise,
-      samples: trace.length,
+    realBoost(1);
+    const run: JourneyRun = {
+      arrived,
+      seconds,
+      restDistance,
+      maxSpeed,
+      maxStride,
+      maxStrides,
+      tunnels,
+      firstTunnel,
+      contractBroken,
+      firstContract,
+      bandTested: band !== null,
+      bandFired,
+      cameraWorst,
     };
+    return { run, metres, cruise, samples: trace.length };
   };
 
   const journeys: JourneyReport[] = [];
@@ -383,6 +530,32 @@ async function child(seed: number): Promise<void> {
       });
     }
   }
+  // **Indoors** (#745's review): the park's journeys never leave the park, and
+  // a hotel lobby or a castle deck is where a route can still be long enough
+  // to dash. The lobby, with its own play bounds exactly as `Hotel.boundTo`
+  // sets them and its own lattice, as `check:nav-routes` builds it: the lobby
+  // floor to the gallery deck up the stairs, and the floor to the landing.
+  // Last, so nothing after it runs inside the hotel's bounds.
+  collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, LOBBY.originX, LOBBY.originZ));
+  const lobbyGrid = quietly(() => new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, () => world.building.surfaces.connectors));
+  const indoors = quietly(() => new TapNavigator(player, camera, input as never, lobbyGrid));
+  const plan = LOBBY.mezzanine;
+  if (!plan) throw new Error('check:tap-dash: the lobby declares no mezzanine — choose another interior journey');
+  const lobby = (x: number, z: number, y: number) => ({ x: LOBBY.originX + x, z: LOBBY.originZ + z, y });
+  const lobbyFloor = lobby(0, LOBBY.halfZ - 4, 0);
+  const interiorTrips: Journey[] = [
+    { from: lobbyFloor, to: lobby(6, (plan.minZ + plan.maxZ) / 2, plan.height), metres: 0 },
+    { from: lobby(-LOBBY.halfX + 3, LOBBY.halfZ - 3, 0), to: lobby(LOBBY.halfX - 3, LOBBY.halfZ - 3, 0), metres: 0 },
+  ];
+  const interior: JourneyReport[] = [];
+  for (const trip of interiorTrips) {
+    for (const dt of FRAME_STEPS) {
+      const dash = runJourney(trip, dt, 'dash', indoors);
+      const walk = runJourney(trip, dt, 'walk', indoors);
+      interior.push({ from: [trip.from.x, trip.from.z], to: [trip.to.x, trip.to.z], metres: dash.metres, cruise: dash.cruise, dt, dash: dash.run, walk: walk.run });
+    }
+  }
+
   // **The instrument's control.** A child walked straight across the park at
   // foot level, through whatever stands in the way, in 0.5 m strides — what a
   // dash with no collision at all would trace. The sweep must find tunnels in
@@ -409,6 +582,7 @@ async function child(seed: number): Promise<void> {
     journeys,
     controlTunnels: control.run.tunnels,
     controlSamples: control.samples,
+    interior,
   };
   console.log(JSON.stringify(report));
 }
@@ -503,6 +677,7 @@ async function parent(): Promise<void> {
     }),
   );
 
+  let cameraCovered = 0;
   for (const seed of SEEDS) {
     const report = reports.get(seed);
     if (!report) {
@@ -575,9 +750,58 @@ async function parent(): Promise<void> {
     );
     check(tunnelled.length === 0, `seed ${seed}: no tunnelling on any of ${report.journeys.length} dashes${listed(tunnelled)}`);
     check(longStride.length === 0, `seed ${seed}: no stride longer than PLAYER_LONGEST_STEP (${PLAYER_LONGEST_STEP.toFixed(3)} m)${listed(longStride)}`);
+    // **The frame's line** — `previousPosition` and the frame path span every
+    // frame a dash was cut into strides. Deleting the restore in
+    // `frameStrides.ts` is what this is red against.
+    const strided = report.journeys.filter((j) => j.dash.maxStrides > 1);
+    const broken = report.journeys.filter((j) => j.dash.contractBroken > 0);
+    check(
+      strided.length > 0 && broken.length === 0,
+      `seed ${seed}: on all ${strided.length} dashes cut into strides, every frame's previousPosition and stride path span the whole frame${listed(broken.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: ${j.dash.contractBroken} frame(s), first ${j.dash.firstContract}`))}`,
+    );
+    // **A door across the route, at full speed.**
+    const banded = report.journeys.filter((j) => j.dash.bandTested);
+    const missed = banded.filter((j) => !j.dash.bandFired);
+    check(
+      banded.length > 0 && missed.length === 0,
+      `seed ${seed}: a door-sized band stood across the middle of ${banded.length} dash routes fires on every one (bandWalkedThrough)${listed(missed.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: never fired`))}`,
+    );
+    // **She stays on screen** — a phone held upright, routes of 250 m or more.
+    const filmed = report.journeys.filter((j) => j.metres >= CAMERA_ROUTE_METRES);
+    const drifted = filmed.filter((j) => j.dash.cameraWorst > CAMERA_DRIFT_LIMIT);
+    cameraCovered += filmed.length;
+    if (filmed.length === 0) {
+      process.stderr.write(`check:tap-dash: seed ${seed}: no route of ${CAMERA_ROUTE_METRES} m or more — the on-screen clause asserts nothing here\n`);
+    } else {
+      const worst = Math.max(...filmed.map((j) => j.dash.cameraWorst));
+      check(
+        drifted.length === 0,
+        `seed ${seed}: on ${filmed.length} dashes of ${CAMERA_ROUTE_METRES} m+ at ${PHONE.width}x${PHONE.height}, she never drifts more than ${CAMERA_DRIFT_LIMIT} of the half-screen from where she stands at rest (worst ${worst.toFixed(3)})${listed(drifted.map((j) => `${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}: ${j.dash.cameraWorst.toFixed(3)}`))}`,
+      );
+    }
+    // **Indoors.**
+    for (const j of report.interior) {
+      const label = `seed ${seed}: hotel lobby, ${j.metres.toFixed(1)} m at dt 1/${Math.round(1 / j.dt)}`;
+      const ok =
+        j.cruise > 1 &&
+        j.walk.arrived &&
+        j.dash.arrived &&
+        j.dash.restDistance <= Math.max(j.walk.restDistance, ARRIVE_RADIUS) + REST_SLACK &&
+        j.dash.tunnels === 0 &&
+        j.dash.contractBroken === 0 &&
+        j.dash.maxStride <= PLAYER_LONGEST_STEP + 1e-6;
+      check(
+        ok,
+        `${label}: dashes (${j.cruise.toFixed(2)}x), arrives with the walk (${j.dash.seconds.toFixed(2)} s against ${j.walk.seconds.toFixed(2)} s; ` +
+          `${j.dash.arrived ? 'arrived' : 'GAVE UP'}/${j.walk.arrived ? 'arrived' : 'walk gave up'}), rests ${j.dash.restDistance.toFixed(2)} m (walk ${j.walk.restDistance.toFixed(2)} m), ` +
+          `${j.dash.tunnels} tunnel(s), ${j.dash.contractBroken} broken frame(s), longest stride ${j.dash.maxStride.toFixed(3)} m${j.dash.firstTunnel ? ` — ${j.dash.firstTunnel}` : ''}`,
+      );
+    }
     const skipped = report.journeys.filter((j) => !j.walk.arrived).length;
     process.stderr.write(`check:tap-dash: seed ${seed}: ${skipped} of ${report.journeys.length} runs the walk itself could not finish — their arrival clauses assert nothing\n`);
   }
+
+  check(cameraCovered > 0, `the on-screen camera clause covered ${cameraCovered} dash(es) of ${CAMERA_ROUTE_METRES} m+ across the seeds`);
 
   if (failures.length > 0) {
     console.log(`\ncheck:tap-dash: ${failures.length} failure(s)`);
