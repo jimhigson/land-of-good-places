@@ -1879,16 +1879,16 @@ if (inPart('park')) {
             sim.step(1 / 60, 0, 0, false);
             top = Math.max(top, sim.position.y);
             const soffit = bridges.map((bridge) => bridge.soffitYAt(sim.position.x, sim.position.z)).find((y) => y !== null) ?? null;
-            if (soffit !== null) headOver = Math.max(headOver, sim.position.y + KID_HEIGHT - soffit);
+            if (soffit !== null) headOver = Math.max(headOver, sim.position.y + KID_HEIGHT - soffit); // flat-ok: her head and the drawn soffit in one column, in the same frame
           }
-          const rose = top - ground;
+          const rose = top - ground; // flat-ok: her head and the drawn soffit in one column, in the same frame
           const link = `/spawn?pos=${x.toFixed(1)},${z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
-          nearest = Math.min(nearest, soffitHere - (ground + apex + KID_HEIGHT));
+          nearest = Math.min(nearest, soffitHere - (ground + apex + KID_HEIGHT)); // flat-ok: her head and the drawn soffit in one column, in the same frame
           if (headOver > 0.02) bad.push(`at ${link}: her head ${headOver.toFixed(2)} m through the soffit`);
           else if (rose < apex - 0.02) {
             capped += 1;
             // Capped: by the drawn arch, her head at it.
-            const under = soffitHere - (top + KID_HEIGHT);
+            const under = soffitHere - (top + KID_HEIGHT); // flat-ok: her head and the drawn soffit in one column, in the same frame
             if (under > 0.05) bad.push(`at ${link}: a ceiling ${under.toFixed(2)} m under the drawn soffit capped her jump at ${rose.toFixed(2)} m`);
           }
         }
@@ -2699,7 +2699,7 @@ if (inPart('park')) {
             if (!headroom) continue;
             asked.add(under);
             route.pointAt(route.distanceNear(x, z), rails);
-            spots.push({ what: `${carNames[car]} (its top ${(top - rails.y).toFixed(2)} m over the rails)`, x, z, top });
+            spots.push({ what: `${carNames[car]} (its top ${(altitudeAt(x, top, z) - altitudeAt(rails.x, rails.y, rails.z)).toFixed(2)} m over the rails)`, x, z, top });
           }
         }
         return spots;
@@ -2795,7 +2795,7 @@ if (inPart('park')) {
               if (player.isAirborne && !wasUp) jumps += 1;
               wasUp = player.isAirborne;
               route.pointAt(route.distanceNear(player.position.x, player.position.z), rails);
-              feet = Math.max(feet, player.position.y - rails.y);
+              feet = Math.max(feet, altitudeAt(player.position.x, player.position.y, player.position.z) - altitudeAt(rails.x, rails.y, rails.z));
             });
             play(1);
             const jumped = route.forwardGap(jumpFrom, train.noseDistance());
