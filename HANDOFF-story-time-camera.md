@@ -157,3 +157,17 @@ frame; visibility unchanged. Exhibits unaffected (no `contain`, so `zoomFrom` re
 - [ ] CI green; look on the newest preview (`node .claude/scratch/look.mjs <preview-url> <out>` — cushion 1 gets up
   mid-reading, cushion 3 stays to the end); one frame sheet (`node .claude/scratch/sheet.mjs <spec.json> <out.png>`),
   frames to the `qa-screenshots` branch under `pr736/` (plumbing with a temporary index; no checkout).
+
+## 11 Nov 2026 (new engineer, Opus 5.5) — owl fade + sway everywhere
+
+- c3b5d0b1 (flat-ok) recovered and pushed.
+- **Sway everywhere** (Jim 11 Nov "yes to camera sway everywhere"): `IsoCamera.breath` (default `cameraBreath`,
+  test hook; `STILL_BREATH` in cameraBreath.ts) applied last in `applyTransform`, turned about the eye, sized on the
+  screen (`tan(fov/2)/tan(33°)`, `CAMERA_BREATH_REFERENCE_FOV` 66), lens breath as fov share of 5 m. Clock = game dt.
+  Story shot passes `breath: STILL_BREATH` (aim held), the park camera breathes it. IsoCamera is in the park
+  closure → the park hash changes (CI rebuilds parks). `check:camera-breath` (new, shard 4): 18 ✓; reds still /
+  wild / degrees all exit 1.
+- **Owl fade**: `world/library/owlLensFade.ts`, swaps her materials for faded copies only around `render()` in
+  `Game.tick`; sphere clearance smoothstep(0.75, 3). check:library: `owl-no-fade` mutation; cover weighted by
+  opacity (control: quarter-opaque sheet). First run at 0.25/1.5 m: phone cushion 1 14.7%, step 22.9% → widened.
+- Local: `LGP_PARK_FILE=.parks/5.json pnpm run check:library` hydrates the old-hash park (1:42).

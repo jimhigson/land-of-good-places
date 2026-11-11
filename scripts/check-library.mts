@@ -5828,15 +5828,17 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
     const owlPass = { clock: 0, nearest: Infinity, nearestAt: Number.NaN, within1: 0, within05: 0, within025: 0, cut: 0, cover: 0, coverAt: Number.NaN, overQuarter: 0, overHalf: 0, seen: 0, seenAt: Number.NaN, faded: 0, least: 1, step: 0, alpha: 1 };
     const owlWatch = (): void => {
       owlPass.clock += CHILD_DT;
-      const alpha = fading ? owlFade.apply(camera.camera.getWorldPosition(new Vector3())) : 1;
+      // Her shape, whole — what she would cover with no fade — and then as drawn, faded.
       const pass = lensPass(lensMeshes(owl.handle.root));
+      const alpha = fading ? owlFade.apply(camera.camera.getWorldPosition(new Vector3())) : 1;
+      const drawn = fading ? lensPass(lensMeshes(owl.handle.root)) : pass;
       if (fading) owlFade.restore();
       owlPass.step = Math.max(owlPass.step, Math.abs(alpha - owlPass.alpha));
       owlPass.alpha = alpha;
       owlPass.least = Math.min(owlPass.least, alpha);
       if (alpha < 1) owlPass.faded += CHILD_DT;
-      if (pass.seen > owlPass.seen) {
-        owlPass.seen = pass.seen;
+      if (drawn.seen > owlPass.seen) {
+        owlPass.seen = drawn.seen;
         owlPass.seenAt = owlPass.clock;
       }
       if (pass.nearest < owlPass.nearest) {

@@ -122,6 +122,6 @@ export interface OwlLensFadeOwl {
 }
 
 /** Metres from the eye to the sphere round her at which she is wholly drawn — further than any wingtip can reach the lens from. */
-export const OWL_FADE_FULL = 1.5;
+export const OWL_FADE_FULL = 3;
 /** Metres from the eye to that sphere at which she is gone — the lens is then inside her reach. */
-export const OWL_FADE_GONE = 0.25;
+export const OWL_FADE_GONE = 0.75;
