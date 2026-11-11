@@ -517,10 +517,8 @@ async function child(seed: number): Promise<void> {
       if (band && bandWalkedThrough(band, player)) bandFired = true;
       camera.update(context, player.position, player.velocity, player.framePath);
       const here = ndcOf();
+      // flat-ok: NDC — a position on the phone's screen, not a height in the world
       cameraWorst = Math.max(cameraWorst, Math.abs(here.x - rest.x), Math.abs(here.y - rest.y));
-      if (process.env['LGP_TAP_DASH_CAMERA'] && metres > 280 && mode === 'dash') {
-        process.stderr.write(`cam dt=${dt.toFixed(3)} t=${seconds.toFixed(2)} v=${Math.hypot(player.velocity.x, player.velocity.z).toFixed(1)} dx=${(here.x - rest.x).toFixed(3)} dy=${(here.y - rest.y).toFixed(3)}\n`);
-      }
       seconds += dt;
       if (!steer.isNavigating) {
         arrived = Math.hypot(target.x - player.position.x, target.z - player.position.z) <= ARRIVE_RADIUS + 1e-6;
