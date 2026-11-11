@@ -93,3 +93,11 @@ Jim's decisions (all recorded as comments on #722; read them with `gh pr view 72
 - [~] station bench = one solid to the seat (hotel sofa precedent); clause 13 "up onto a station's bench".
 - Scratch runners: scratchpad bin/park.sh <tag> [ENV=..] (check-solids park part, census skipped), bin/run.sh
   <tag> <pnpm script> [ENV=..]; restamp after every src edit (bin/restamp.mjs).
+
+### State, 11 Nov ~11:50
+- PR **#742** (draft), branch feat/engine-followup. Every finding fixed and proved red (see the PR body table).
+- Issues filed: #740 (fireplace), #741 (seeds 6/9/11/15), comment on #205 (Get on at canopy corner).
+- Local gate at 2f-ish head (after the cat-bus invariant commit): `pnpm run check` exit 0 (3531 s, loaded Mac);
+  test:procgen + build running → scratchpad gate-procgen.log / gate-build.log.
+- Next: CI green; preview plays with scratchpad plays/plays.mjs <previewRoot> <outDir> (playwright-core,
+  chromium-1234 headless, fresh context each); open every frame; fill the PR body; report.
