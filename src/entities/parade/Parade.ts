@@ -335,7 +335,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   }
 
   private embark(holder: RideHolder): void {
-    const ride = holder.companion ?? null;
+    const ride = holder.companion;
     if (ride === 'not a ride') {
       // Nothing carries her anywhere, and the place looks after her line.
       this.aboard = { holder, ride, companion: null, stays: true };

@@ -420,11 +420,12 @@ export interface RideHolder {
    */
   letGo(): void;
   /**
-   * **How her companion rides with her** — see {@link CompanionRide}. Omitted,
-   * it is `'in her backpack'`: a ride that has not said where its seat beside
-   * her is has none.
+   * **How her companion rides with her** — see {@link CompanionRide}. Every
+   * holder says, so the compiler asks it of every one: a seat that forgot to
+   * say `'not a ride'` once stowed her whole line in her backpack with every
+   * check green (PR #722's review), because the default was the backpack.
    */
-  readonly companion?: CompanionRide;
+  readonly companion: CompanionRide;
 }
 
 /**

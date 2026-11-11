@@ -11,7 +11,7 @@ import {
 import { altitudeAt, liftFromGround, terrainHeight } from '../terrain';
 import { eyeForFocus, faceOnGround } from '../up';
 import type { FrameContext } from '../../core/types';
-import type { Player, RideHolder } from '../../entities/Player';
+import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
 import { GATE_ARCH_CLEAR_WIDTH } from '../../art/models/gateArch';
@@ -238,10 +238,12 @@ export const ARRIVAL_CONTROL_AT =
 /**
  * How many other children ride in with her.
  *
- * Every seat is filled and one of them is hers, so this is simply the rest.
- * Derived from the bus's own seat count — the bus owns how many seats it has.
+ * Every seat is filled: one is hers, the one across the gangway is her
+ * companion's (`CatBusHandle.companionSeat` — Jim, 19 Oct 2026: *"one rides on
+ * the seat alongside the player"*), and the children have the rest. Derived
+ * from the bus's own seat count — the bus owns how many seats it has.
  */
-export const ARRIVAL_KID_COUNT = CAT_BUS_SEAT_COUNT - 1;
+export const ARRIVAL_KID_COUNT = CAT_BUS_SEAT_COUNT - 2;
 
 
 
@@ -1646,10 +1648,10 @@ export class ArrivalSequence {
   private readonly holder: RideHolder = {
     holding: 'the cat bus',
     letGo: () => this.finish(),
-    // No room beside her: every other seat on the bus is one of the children
-    // coming in with her (`ARRIVAL_KID_COUNT`). Her companion rides in her
-    // backpack, and hops out when she is handed over at the gate.
-    companion: 'in her backpack',
+    // Her companion rides in the seat across the gangway from hers
+    // (`CatBusHandle.companionSeat`), while she sits; walking in through the
+    // gate it is back in her line behind her.
+    companion: { beside: (seat) => this.companionSeatPose(seat) },
   };
 
   /**
@@ -1760,7 +1762,7 @@ export class ArrivalSequence {
     const door = this.bus.doorDrop;
     this.bus.root.updateMatrixWorld(true);
     const free = this.bus.seats
-      .filter((seat) => seat !== this.bus.passengerSeat)
+      .filter((seat) => seat !== this.bus.passengerSeat && seat !== this.bus.companionSeat)
       .map((seat) => {
         const at = this.bus.root.worldToLocal(seat.getWorldPosition(new Vector3()));
         return { seat, distance: Math.hypot(at.x - door.x, at.z - door.z) };
@@ -2126,6 +2128,23 @@ export class ArrivalSequence {
     pose.gait = gait;
     pose.live = true;
     this.reassertPlayerPose();
+  }
+
+  /**
+   * Where her companion sits this frame: on the cushion across the gangway
+   * from hers, facing the front of the bus as every rider does — while she
+   * sits. Walking in through the gate, it walks with her.
+   */
+  private companionSeatPose(seat: CompanionSeat): boolean {
+    if (!this.playerPose.live || this.playerPose.walking) return false;
+    const anchor = this.bus.companionSeat;
+    anchor.getWorldPosition(SCRATCH);
+    seat.x = SCRATCH.x;
+    seat.y = SCRATCH.y;
+    seat.z = SCRATCH.z;
+    seat.facing = this.stopFacing;
+    anchor.getWorldQuaternion(seat.turn);
+    return true;
   }
 
   /** Puts the player in her seat, wherever the bus currently is. */
