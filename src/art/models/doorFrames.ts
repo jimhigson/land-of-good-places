@@ -64,7 +64,10 @@ export const DOOR_FRAME_STYLES: readonly DoorFrameStyle[] = ['hotel', 'library',
  */
 const DOORFRAME_NODE_STYLES: Readonly<Record<string, { readonly colour: number; readonly outline?: number }>> = {
   // The lobby: painted cream trim, a pink fan bonnet, a gold star.
-  'doorframe-hotel-post': { colour: ART.cream, outline: 0.018 },
+  // No outline on the two posts built of stepped blocks (plinth, shaft and
+  // capital; long and short quoins): a hull round one block lies within
+  // millimetres of its neighbour's face, which `check:coplanar` reports.
+  'doorframe-hotel-post': { colour: ART.cream },
   'doorframe-hotel-lintel': { colour: ART.cream, outline: 0.018 },
   'doorframe-hotel-crest': { colour: PALETTE.markerPink, outline: 0.018 },
   'doorframe-hotel-crest-star': { colour: PALETTE.flowerYellow },
@@ -87,7 +90,7 @@ const DOORFRAME_NODE_STYLES: Readonly<Record<string, { readonly colour: number; 
   'doorframe-reptile-crest-pupils': { colour: PALETTE.ink },
   'doorframe-reptile-crest-tongue': { colour: PALETTE.flowerRed },
   // The castle: pale grey stone, a darker keystone.
-  'doorframe-castle-post': { colour: PALETTE.stoneGreyLight, outline: 0.018 },
+  'doorframe-castle-post': { colour: PALETTE.stoneGreyLight },
   'doorframe-castle-lintel': { colour: PALETTE.stoneGreyLight, outline: 0.018 },
   'doorframe-castle-crest': { colour: PALETTE.stoneGreyMid, outline: 0.018 },
 };
