@@ -167,3 +167,11 @@ without part 4.
   check:labels pets the cat before the card: purr drawn on 120 frames; RED with the call commented out: "FAIL C
   precedence … the cat's purr was never drawn".
 - Local: check:library 465 ✓ exit 0, check:labels exit 0 on fcb749dc; full shards + procgen running (run5 logs).
+
+## QA round 2 (keys): Say hi! from every side
+- InteractZone.reachX/reachZ + interact.reachDistance (Selection withinReach/pickNearby). Dragon zone reach = 3 m ring
+  round the nest (DRAGON_REACH_RADIUS); DRAGON_MEET_RADIUS is the same constant; LibraryDen throws if a tapped walk to the
+  stand could land outside it.
+- check:library: keys approaches from every bearing with a clear start (the den's corner leaves 0°–90°, 5 of 16).
+  RED on the head's reach (0.55 m round the stand), starts 3.4 m out: "from 4 bearings … chip up at 0 of them, each
+  stopped 1.45 m from the nest's middle". GREEN at 2.6 m: 5 of 5, check:library "All clauses passed", exit 0.
