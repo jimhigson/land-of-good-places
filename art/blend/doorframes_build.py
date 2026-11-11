@@ -17,7 +17,8 @@ Four styles, one per interior with a way out to the park:
 * ``reptile`` — the Reptile House: mossy stacked stones, a lintel that is a
   fat snake's body, and the snake's head resting on the front, looking out.
 * ``castle``  — the castle's ground floor: ashlar quoins, a lintel of stone
-  blocks and a keystone, all under the castle's own ceiling.
+  blocks and a keystone under the castle's own ceiling, and a crenellated
+  gatehouse top with a shield standing over it, above the porch roof.
 
 **The kit knows no opening.** Every doorway's width belongs to its room's own
 owner (``hotel/layout.ts``'s ``DOOR_HALF``, ``reptileDoorGap()``,
@@ -84,6 +85,13 @@ CONTRACT = {
 }
 # The castle's lintel fills the band between its posts' tops and its ceiling.
 CONTRACT["castle"]["L"] = round(CASTLE_CEILING - CEILING_GAP - CONTRACT["castle"]["H"], 4)
+#: The castle's gatehouse top over the lintel: width, depth, block height, merlon height.
+PARAPET_W, PARAPET_D, PARAPET_H, MERLON_H = 3.0, 0.6, 0.62, 0.42
+#: The top of the castle porch roof just outside the door — the line the
+#: parapet must clear to be seen. Read from `Shell.ts`, never typed.
+PORCH_ROOF_TOP = kit.ts_const("src/world/building/Shell.ts", "INTERIOR_PORCH_ROOF_Y") + kit.ts_const(
+    "src/world/building/Shell.ts", "INTERIOR_PORCH_ROOF_THICKNESS"
+) / 2
 
 
 def box_at(part, sx, sy, sz, x=0.0, y=0.0, z0=0.0, radius=0.05, segments=2):
@@ -324,6 +332,29 @@ def build_castle(coll):
     crest.add(verts, faces, Matrix.Translation((0.0, -DL / 2 - 0.08, -L)))
     crest.emit(coll)
 
+    # **The gatehouse top.** From the game's camera the castle's porch roof,
+    # just outside, hides everything at the doorway lower than its own top
+    # (3.21 m) — posts, lintel and keystone included — so on its own the frame
+    # was a strip of stone a child could not find. This stands on the lintel,
+    # in the gap the walls leave over the door, and rises clear above the
+    # porch roof and the wall's own top: a crenellated block with a pink
+    # shield, the one part of the frame the camera always sees.
+    parapet = kit.Part("doorframe-castle-crest-parapet")
+    flat_box_at(parapet, PARAPET_W, PARAPET_D, PARAPET_H, radius=0.06)
+    merlons = 3
+    pitch = PARAPET_W / merlons
+    for i in range(merlons):
+        x = -PARAPET_W / 2 + pitch * (i + 0.5)
+        box_at(parapet, pitch * 0.62, PARAPET_D * 0.9, MERLON_H, x=x, z0=PARAPET_H - 0.02, radius=0.06)
+    parapet.emit(coll)
+    shield = kit.Part("doorframe-castle-crest-shield")
+    sw, sh = 0.72, 0.62
+    outline = [(-sw / 2, sh), (sw / 2, sh), (sw / 2, sh * 0.45), (0.0, 0.0), (-sw / 2, sh * 0.45)]
+    verts, faces = kit.extrude_outline(outline, 0.16, centre=(0.0, sh * 0.55))
+    # On the parapet's camera face, proud of it; its back buried in the block.
+    shield.add(verts, faces, Matrix.Translation((0.0, -PARAPET_D / 2 - 0.04, (PARAPET_H - sh) / 2 + 0.02)))
+    shield.emit(coll)
+
 
 # =============================================================================
 # Assertions on what was emitted
@@ -380,11 +411,14 @@ def check_contract():
         assert abs(size.y - c["D"]) > 0.02, f"{style} lintel ({size.y:.3f} m deep) is as deep as its post ({c['D']})"
         lo, hi = union_bounds(crests)
         assert abs(lo.x + hi.x) < 0.02, f"{style} crest is not centred across"
-    # The castle's frame, crest and all, fits under its own ceiling.
+    # The castle's posts, lintel and keystone fit under its ceiling; the
+    # gatehouse top stands in the gap over the door and clears the porch roof.
     c = CONTRACT["castle"]
-    _, hi = union_bounds([o for n, o in by_name.items() if n.startswith("doorframe-castle-crest")])
+    _, hi = union_bounds([by_name["doorframe-castle-crest"]])
     top = c["H"] + c["L"] + hi.z
-    assert top <= CASTLE_CEILING - CEILING_GAP + 1e-6, f"castle frame tops out at {top:.3f}, ceiling {CASTLE_CEILING}"
+    assert top <= CASTLE_CEILING - CEILING_GAP + 1e-6, f"castle keystone tops out at {top:.3f}, ceiling {CASTLE_CEILING}"
+    lo, _ = union_bounds([by_name["doorframe-castle-crest-parapet"]])
+    assert c["H"] + c["L"] + lo.z > PORCH_ROOF_TOP, "the castle's gatehouse top starts under the porch roof's top"
     for obj in by_name.values():
         assert "." not in obj.name, f"{obj.name}: a dotted name loads back renamed"
     print("  contract holds:", ", ".join(f"{s} post {c['W']}×{c['D']}×{c['H']:.3f}" for s, c in CONTRACT.items()))

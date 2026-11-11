@@ -1746,6 +1746,15 @@ function buildEntranceSteps(): InstancedMesh {
 }
 
 /**
+ * The interior porch roof's centre height and thickness. Exported for the
+ * doorway frame (`art/blend/doorframes_build.py` reads both): from the game's
+ * camera this roof hides everything at the door lower than its top, so the
+ * castle frame's gatehouse top is built to stand clear of it.
+ */
+export const INTERIOR_PORCH_ROOF_Y = 3.05;
+export const INTERIOR_PORCH_ROOF_THICKNESS = 0.32;
+
+/**
  * The way back out of the interior: a little porch outside its own south door,
  * with a sign so a child knows which way home is.
  */
@@ -1762,9 +1771,10 @@ function buildInteriorPorch(plan: ShellPlan, parent: Group): void {
   porch.add(mat);
 
   const roof = castAndReceive(
-    new Mesh(new BoxGeometry(9, 0.32, 4.2), softMaterial(PALETTE.markerPink, 0.7)),
+    new Mesh(new BoxGeometry(9, INTERIOR_PORCH_ROOF_THICKNESS, 4.2), softMaterial(PALETTE.markerPink, 0.7)),
   );
-  roof.position.y = 3.05;
+  roof.name = 'interior-porch-roof';
+  roof.position.y = INTERIOR_PORCH_ROOF_Y;
   porch.add(roof);
 
   const posts = new InstancedMesh(

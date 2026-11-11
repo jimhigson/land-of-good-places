@@ -93,6 +93,10 @@ const DOORFRAME_NODE_STYLES: Readonly<Record<string, { readonly colour: number; 
   'doorframe-castle-post': { colour: PALETTE.stoneGreyLight },
   'doorframe-castle-lintel': { colour: PALETTE.stoneGreyLight, outline: 0.018 },
   'doorframe-castle-crest': { colour: PALETTE.stoneGreyMid, outline: 0.018 },
+  // The gatehouse top over the door, above the porch roof: the castle's own
+  // pink on a pale stone block, so it reads from across the hall.
+  'doorframe-castle-crest-parapet': { colour: PALETTE.stoneGreyLight },
+  'doorframe-castle-crest-shield': { colour: PALETTE.markerPink, outline: 0.016 },
 };
 
 /** Dressing on a post — drawn and solid, but not what the lintel sits on. */
@@ -206,6 +210,8 @@ export interface DoorFrame {
   readonly lintelTop: number;
   /** The lintel's half-depth about the wall line. */
   readonly lintelHalfZ: number;
+  /** The crest's drawn box, plan in the opening's frame, heights over the floor. */
+  readonly crest: { readonly minX: number; readonly maxX: number; readonly minZ: number; readonly maxZ: number; readonly bottom: number; readonly top: number };
   /** The highest anything in the frame reaches over the floor, crest included. */
   readonly top: number;
 }
@@ -262,14 +268,22 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
   }
 
   const middle = (opening.minX + opening.maxX) / 2;
-  let crestTop = 0;
+  const seat = k.seat + k.lintelHeight;
   for (const part of k.crests) {
     const mesh = partMesh(part);
-    mesh.position.set(middle, opening.floorY + k.seat + k.lintelHeight, opening.z);
+    mesh.position.set(middle, opening.floorY + seat, opening.z);
     group.add(mesh);
-    part.geometry.computeBoundingBox();
-    crestTop = Math.max(crestTop, part.geometry.boundingBox?.max.y ?? 0); // flat-ok: the crest part's own object-local geometry box
   }
+  const c = boundsOf(k.crests);
+  const crest = {
+    minX: middle + c.minX,
+    maxX: middle + c.maxX,
+    minZ: opening.z + c.minZ,
+    maxZ: opening.z + c.maxZ,
+    // flat-ok: the crest parts' own object-local geometry box, over the floor
+    bottom: seat + c.minY,
+    top: seat + c.maxY, // flat-ok: the crest parts' own object-local geometry box, over the floor
+  };
 
   return {
     style,
@@ -279,7 +293,8 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
     clearHeight: k.seat,
     lintelTop: k.seat + k.lintelHeight,
     lintelHalfZ: k.lintelHalfZ,
-    top: k.seat + k.lintelHeight + Math.max(0, crestTop),
+    crest,
+    top: Math.max(seat, crest.top),
   };
 }
 
@@ -287,6 +302,7 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
 export interface DoorFrameSolids {
   readonly posts: readonly BoxCollider[];
   readonly lintel: BoxCollider;
+  readonly crest: BoxCollider;
 }
 
 /**
@@ -294,7 +310,8 @@ export interface DoorFrameSolids {
  * frame's local metres to the world (the room's origin, `originY` its height). Each post a crisp box
  * over its drawn footprint to the lintel's top, which is what stands over it;
  * the lintel a box over the opening **banded** from its underside — inert to
- * anyone on the floor, a walk or a jump (`baseHeight`).
+ * anyone on the floor, a walk or a jump (`baseHeight`) — and the crest a box
+ * banded over its own drawn box.
  */
 export function registerDoorFrameSolids(collision: CollisionWorld, frame: DoorFrame, originX: number, originZ: number, originY = 0): DoorFrameSolids {
   const floor = originY + frame.opening.floorY;
@@ -324,7 +341,22 @@ export function registerDoorFrameSolids(collision: CollisionWorld, frame: DoorFr
       true,
       floor + frame.clearHeight,
     );
-    return { posts, lintel };
+    // The crest, banded over its own drawn box: out of every walker's and
+    // jumper's reach, there for a flier exactly where it is drawn.
+    const c = frame.crest;
+    const crest = collision.addBox(
+      originX + (c.minX + c.maxX) / 2,
+      originZ + (c.minZ + c.maxZ) / 2,
+      (c.maxX - c.minX) / 2,
+      (c.maxZ - c.minZ) / 2,
+      0,
+      0,
+      floor + c.top,
+      false,
+      true,
+      floor + c.bottom,
+    );
+    return { posts, lintel, crest };
   });
 }
 

@@ -149,7 +149,7 @@ function lanesThrough(room: Room): Set<string> {
 }
 
 function solidsOf(placed: PlacedDoorFrame): BoxCollider[] {
-  return [...placed.solids.posts, placed.solids.lintel];
+  return [...placed.solids.posts, placed.solids.lintel, placed.solids.crest];
 }
 
 for (const room of rooms) {
@@ -212,8 +212,39 @@ for (const room of rooms) {
   if (clear < TALLEST_CHILD_HEIGHT) fail(`${room.name}: the lintel is ${clear.toFixed(3)} m over the floor, under the tallest child (${TALLEST_CHILD_HEIGHT})`);
   const everything = union(frameMeshes(placed, '').map(drawnBounds));
   const frameTall = everything.max.y - floorY; // flat-ok: the interiors are flat plates at their own far origins, off the planet
-  if (frame.style === 'castle' && frameTall > CASTLE_CEILING_CLEAR) {
-    fail(`castle: the frame reaches ${frameTall.toFixed(3)} m, the ceiling is at ${CASTLE_CEILING_CLEAR}`);
+  if (frame.style === 'castle' && lintelTopDrawn - floorY > CASTLE_CEILING_CLEAR) {
+    fail(`castle: the lintel reaches ${(lintelTopDrawn - floorY).toFixed(3)} m, the ceiling is at ${CASTLE_CEILING_CLEAR}`);
+  }
+  // The crest's collider is its drawn box.
+  {
+    const drawn = union(frameMeshes(placed, 'crest').map(drawnBounds));
+    const box = placed.solids.crest;
+    // flat-ok: the interiors are flat plates at their own far origins, off the planet
+    const [drawnBottom, drawnTop] = [drawn.min.y, drawn.max.y];
+    const off = Math.max(
+      Math.abs(box.cx - box.halfX - drawn.min.x),
+      Math.abs(box.cx + box.halfX - drawn.max.x),
+      Math.abs(box.cz - box.halfZ - drawn.min.z),
+      Math.abs(box.cz + box.halfZ - drawn.max.z),
+      Math.abs(box.baseHeight - drawnBottom),
+      Math.abs(box.topHeight - drawnTop),
+    );
+    if (off > TOL) fail(`${room.name}: the crest's collider is ${off.toFixed(3)} m off its drawn box`);
+  }
+  // **The castle's way out must be seen past its porch roof.** From the game's
+  // camera the roof just outside hides everything at the door lower than its
+  // own top, so the frame's gatehouse top must start above it — measured off
+  // both meshes in the scene.
+  if (frame.style === 'castle') {
+    let roofTop = Number.NaN;
+    scene.traverse((node) => {
+      if (node instanceof Mesh && node.name === 'interior-porch-roof') roofTop = drawnBounds(node).max.y; // flat-ok: the interior's flat far-off plate
+    });
+    const parapet = union(frameMeshes(placed, 'crest-parapet').map(drawnBounds));
+    const parapetBottom = parapet.min.y; // flat-ok: the interior's flat far-off plate
+    if (!Number.isFinite(roofTop)) fail('castle: no interior-porch-roof mesh in the scene to measure the gatehouse top against');
+    else if (parapetBottom <= roofTop) fail(`castle: the gatehouse top starts at ${parapetBottom.toFixed(3)}, under the porch roof's top ${roofTop.toFixed(3)} — the camera cannot see it`);
+    else say(`  gatehouse top from ${(parapetBottom - floorY).toFixed(2)} m, over the porch roof's top at ${(roofTop - floorY).toFixed(2)} m`);
   }
   say(`  posts' colliders on their drawn footprints; lintel ${clear.toFixed(2)} m clear (tallest child ${TALLEST_CHILD_HEIGHT}), frame ${frameTall.toFixed(2)} m tall`);
 
@@ -281,7 +312,7 @@ for (const room of rooms) {
     const narrowed = buildDoorFrame(frame.style, { ...frame.opening, minX: frame.opening.minX + 0.3, maxX: frame.opening.maxX - 0.3 });
     const control = registerDoorFrameSolids(collision, narrowed, ox, oz, placed.originY);
     const throughNarrow = lanesThrough(room);
-    for (const solid of [...control.posts, control.lintel]) collision.removeBox(solid);
+    for (const solid of [...control.posts, control.lintel, control.crest]) collision.removeBox(solid);
     for (const solid of solidsOf(placed)) collision.restoreBox(solid);
     const lostNarrow = [...without].filter((lane) => !throughNarrow.has(lane)).length;
     if (lostNarrow === 0) fail(`${room.name}: CONTROL — a frame 0.6 m narrower lost no lanes; the walk cannot see a narrowed opening`);
