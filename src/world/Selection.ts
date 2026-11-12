@@ -5,6 +5,7 @@ import type { Player } from '../entities/Player';
 import { highlightKey, type HighlightTarget } from './highlight';
 import {
   PRIMARY_ACTION,
+  reachDistance,
   standRadiusOf,
   ZONE_HEIGHT_TOLERANCE,
   type InteractZone,
@@ -465,7 +466,7 @@ export class Selection implements GameSystem {
   private withinReach(zone: InteractZone): boolean {
     const { position } = this.player;
     if (Math.abs(position.y - zone.y) > ZONE_HEIGHT_TOLERANCE) return false;
-    return Math.hypot(position.x - zone.standX, position.z - zone.standZ) <= standRadiusOf(zone);
+    return reachDistance(zone, position.x, position.z) <= standRadiusOf(zone);
   }
 
   /**
@@ -520,7 +521,7 @@ export class Selection implements GameSystem {
     for (const zone of zones) {
       if (!this.selectable(zone)) continue;
       if (Math.abs(position.y - zone.y) > ZONE_HEIGHT_TOLERANCE) continue;
-      const distance = Math.hypot(position.x - zone.standX, position.z - zone.standZ);
+      const distance = reachDistance(zone, position.x, position.z);
       if (distance > standRadiusOf(zone)) continue;
 
       const rank = zone.selectRank ?? 0;

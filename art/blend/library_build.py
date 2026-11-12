@@ -129,7 +129,11 @@ BLEND = os.path.join(REPO, "art", "blend", "library.blend")
 # =============================================================================
 
 KID_MODULE = "src/art/models/kid.ts"
-CHILD_HEIGHT = ts_const(KID_MODULE, "KID_HEIGHT")
+# `KID_HEIGHT` moved to a leaf of its own on the engine branch (so the
+# collision engine can ask without loading the whole kid model); kid.ts only
+# re-exports it, and a re-export is not a declaration this regex can read.
+KID_HEIGHT_MODULE = "src/art/models/kidHeight.ts"
+CHILD_HEIGHT = ts_const(KID_HEIGHT_MODULE, "KID_HEIGHT")
 TALLEST_CHILD = ts_const(KID_MODULE, "TALLEST_CHILD_HEIGHT")
 # **The one seat height at which a child's feet reach the floor.** The rig has
 # no knee (kid.ts, `KID_HIP_HEIGHT`'s own doc): sat on a seat of height H her
@@ -1057,6 +1061,13 @@ def build_secret_shelf() -> None:
     −0.6..0: placed with its root on the hinge, ``rotation.y`` from 0 towards
     −π/2 swings it open out into the room (+Z), clear of the wall behind it.
     ``check_secret_shelf`` proves the shape is the shelf's, vertex for vertex.
+
+    **The game does not use this hinge** (#719, plan Decision 21): a
+    front-left hinge swings the case out into the reading room, through
+    whoever stands there. ``secretShelf.ts`` re-originates the leaf on its
+    **back-left** vertical edge, by the depth it measures off the built case,
+    and swings it +π/2 **into** the den, away from the room. The glb is
+    unchanged; only this note was stale.
     """
     a = register(Asset("secretShelf"))
     shelf_parts(a)
@@ -2212,7 +2223,7 @@ def main() -> None:
     print(report_extras())
     print(f"\n  read from the game: KID_HEIGHT {CHILD_HEIGHT}, TALLEST_CHILD_HEIGHT "
           f"{TALLEST_CHILD}, KID_HIP_HEIGHT {CHILD_HIP}, KID_REACH_HEIGHT {CHILD_REACH} "
-          f"({KID_MODULE}); COUNTER_TOP_Y {COUNTER_TOP} ({COUNTER_MODULE})")
+          f"({KID_MODULE}; KID_HEIGHT from {KID_HEIGHT_MODULE}); COUNTER_TOP_Y {COUNTER_TOP} ({COUNTER_MODULE})")
     tris = total_triangles()
     assert tris <= TRIANGLE_BUDGET, f"{tris} triangles against a budget of {TRIANGLE_BUDGET}"
     print(f"\n  {len(bpy.data.objects)} nodes, {tris} triangles (budget {TRIANGLE_BUDGET})")
