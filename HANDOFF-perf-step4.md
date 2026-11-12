@@ -29,5 +29,13 @@ harness runs the park acceptance loop (~4 min/restart) because src changed.
 - Old check bugs fixed: box-vs-frustum truth (conservative corners) -> use spheres;
   float32 slot comparison at 600 m; interiors hidden headless -> show crowd ancestors.
 
+- After (ROUNDS=1, seed 5): park 31.6 draws/pose, 131,898 crowd tris, 0 non-shadow off screen,
+  86,986 shadow-casting off screen; interior (4234 poses, banquet-heavy) 1,252,327 tris,
+  0 non-shadow off screen, 435,527 shadow. PASS (exit 0, 208 s).
+- Red proofs: --mutate=centre exit 1 (27,160 failures: missing on-screen instances),
+  --mutate=stale exit 1 (16,108: culled from main pass), --mutate=uncull exit 1
+  (293,565 non-shadow off-screen tris/pose park).
+
 ## Status
-- [x] before numbers (check)  - [ ] after numbers  - [ ] red proofs  - [ ] browser A/B  - [ ] PR
+- [x] check numbers  - [x] red proofs  - [ ] browser A/B (build base + branch, harness run.mjs)
+- [x] PR #756 (draft)
