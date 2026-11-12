@@ -14,12 +14,14 @@
  * a line here fails every headless check at once rather than leaving them
  * measuring an empty shell.
  */
-import { FERRIS_SHOW, LAZY_INTERIORS, REPTILE_HALL } from '../../src/world/interiors.ts';
+import { FERRIS_SHOW, HOTEL_INTERIOR, LAZY_INTERIORS, REPTILE_HALL } from '../../src/world/interiors.ts';
 import * as reptileHall from '../../src/world/reptileHouse/hall.ts';
 import * as ferrisShow from '../../src/world/ferrisWheel/show.ts';
+import * as hotelInterior from '../../src/world/hotel/interior.ts';
 
 REPTILE_HALL.provide(reptileHall);
 FERRIS_SHOW.provide(ferrisShow);
+HOTEL_INTERIOR.provide(hotelInterior);
 
 const missing = LAZY_INTERIORS.filter((part) => part.loaded === null).map((part) => part.name);
 if (missing.length > 0) {

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { readGlbParts, base64ToArrayBuffer } from '../../src/art/style/glb';
 import { HOTEL_GLB_BASE64 } from '../../src/art/assets/hotelGlb';
@@ -11,8 +10,13 @@ import { isHotelBootPart } from '../../src/art/models/hotelKitSplit';
  * lost, duplicated or garbled by the cut would be furniture missing, doubled or
  * wrong in the hotel, and nothing else reads the cut against its source.
  */
+// Node's `fs`, typed by hand: this project deliberately has no Node types
+// (`tsconfig.test.json`), the same way `parkChangingSwitches.test.ts` reads files.
+const FS = 'node:fs';
+const fs = (await import(/* @vite-ignore */ FS)) as { readFileSync(path: string): Uint8Array };
+
 describe('the hotel kit split', () => {
-  const whole = readGlbParts(new Uint8Array(readFileSync('src/art/assets/hotel.glb')).buffer);
+  const whole = readGlbParts(new Uint8Array(fs.readFileSync('src/art/assets/hotel.glb')).buffer);
   const boot = readGlbParts(base64ToArrayBuffer(HOTEL_GLB_BASE64));
   const inside = readGlbParts(base64ToArrayBuffer(HOTEL_INSIDE_GLB_BASE64));
 

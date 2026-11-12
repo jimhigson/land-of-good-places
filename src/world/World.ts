@@ -464,6 +464,10 @@ export class World implements GameSystem {
       this.building.shops.stands,
     );
 
+    // A hotel interior fetched later, when she first walks in, brings its
+    // guests then: they join the same crowd (`NpcSystem.addResidents`).
+    this.hotel.onLateResidents = (residents) => this.npcs.addResidents(residents);
+
     // …and now that both exist, introduce them. `Entrance` is built before
     // `NpcSystem` (the waypoint graph needs the finished collision world), so
     // this cannot be a constructor argument in either direction — it is the
