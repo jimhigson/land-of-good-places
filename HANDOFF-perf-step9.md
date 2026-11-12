@@ -15,8 +15,12 @@ Spec: docs/perf/FRAME-DROPS-2026-11.md (PR #746 branch), item 19 / step 9.
   (pointerdown/up, touchend, mousedown, keydown, click) that `resume()` it and
   play one silent sample on first unlock (old iOS). Modules call `audioContext()`.
 
+## Measured (headless Chrome 1234, M4 Pro, /spawn?seed=0, 45 s, key press at 20 s)
+- before (local main build): worst frame 158.6 / 166.7 ms at 4.8 s = puff ctor 149.6 / 160.3 ms inRaf; prod 208.6 ms (ctor 203.7).
+- after: ctor once at -3 s (before first park frame), not in rAF; worst frame 50.5 / 49.7 ms, 0 frames > 100 ms.
+- autoplay policy on: after build ctx suspended pre-gesture, running for all 40 post-gesture sound starts (before build had some post-gesture starts on a still-suspended 2nd ctx).
+
 ## State
-- Code done, tsc clean. Next: measure before/after (scratchpad harness
-  measure.mjs + probe.js wrap the ctor, record inRaf + long frames on /spawn?seed=0),
-  run check + test:procgen, open PR. Needs `LGP_SEEDS=0 pnpm run build:parks` for preview.
-- main is red on precache limit until #749 lands; merge main then.
+- Code + measurement done. Running `check`, then `test:procgen`, then PR.
+- main red on precache limit until #749 lands; merge main then.
+- Harness: scratchpad measure.mjs/probe.js/unlock.mjs (copied into PR body text).
