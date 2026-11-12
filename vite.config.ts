@@ -243,8 +243,13 @@ export default defineConfig({
         // offline without solving.
         globPatterns: ['**/*.{js,css,html,svg,ico}', 'parks/*.json'],
         // Raised from workbox's 2 MiB default so that a future asset cannot
-        // silently drop out of the precache and break offline play.
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // silently drop out of the precache and break offline play. The build
+        // fails rather than drop one, which is the point — and it did, on
+        // 12 Nov 2026: #745 took the Game chunk to 4,196,878 bytes, 2.5 KB over
+        // the old 4 MiB, and every build on main failed. 8 MiB leaves room to
+        // grow; splitting Game into smaller chunks is the better fix and is
+        // tracked in docs/perf/FRAME-DROPS-2026-11.md (load hitches).
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
         // Both **false**, the opposite of the old `autoUpdate` setup: this is
