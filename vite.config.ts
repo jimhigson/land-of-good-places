@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { VERSION_FILE_NAME } from './src/version-file';
+import { PRECACHE_FILE_LIMIT_BYTES } from './src/boot/precacheLimit';
 import {
   PARK_FILE_FORMAT,
   PREBUILT_PARKS_MANIFEST,
@@ -243,8 +244,10 @@ export default defineConfig({
         // offline without solving.
         globPatterns: ['**/*.{js,css,html,svg,ico}', 'parks/*.json'],
         // Raised from workbox's 2 MiB default so that a future asset cannot
-        // silently drop out of the precache and break offline play.
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // silently drop out of the precache and break offline play. Owned by
+        // `src/boot/precacheLimit.ts`, which says why it must not be raised
+        // again; `check:boot-chunk` holds the boot chunks well under it.
+        maximumFileSizeToCacheInBytes: PRECACHE_FILE_LIMIT_BYTES,
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
         // Both **false**, the opposite of the old `autoUpdate` setup: this is
