@@ -580,7 +580,7 @@ const STEP_OFF_REACH = 4;
 /** A hop down off a seat, and a hop's height; a fling is metres. */
 const STEP_OFF_RISE = 1.5;
 let wasSeated = false;
-let steppingOff: { what: string; left: number; far: number; high: number; moved: boolean } | null = null;
+let steppingOff: { what: string; left: number; far: number; high: number; moved: boolean; watched: number } | null = null;
 const herLast = new Vector3();
 /** Every ride her companion stepped off, with the furthest and highest it got from her. */
 const steppedOff = new Map<string, string>();
@@ -592,13 +592,14 @@ function watchSteppingOff(dt: number): void {
   const leftNow = wasSeated && !seated;
   const jumped = leftNow ? 0 : Math.hypot(her.x - herLast.x, her.z - herLast.z);
   herLast.copy(her);
-  if (leftNow) steppingOff = { what: player.rideHolder?.holding ?? boarding?.holder.holding ?? 'a ride just left', left: STEP_OFF_SECONDS, far: 0, high: -Infinity, moved: false };
+  if (leftNow) steppingOff = { what: player.rideHolder?.holding ?? boarding?.holder.holding ?? 'a ride just left', left: STEP_OFF_SECONDS, far: 0, high: -Infinity, moved: false, watched: STEP_OFF_SECONDS };
   wasSeated = seated;
   if (!steppingOff) return;
   // This check moving her on (a walk-away, Next day, the next exit) ends the
   // window: from there her line catches up with a teleport of hers, which is
   // not her companion stepping off anything.
   if (jumped > 1) {
+    steppingOff.watched = STEP_OFF_SECONDS - steppingOff.left;
     steppingOff.left = 0;
     steppingOff.moved = true;
   }
@@ -611,10 +612,12 @@ function watchSteppingOff(dt: number): void {
   }
   steppingOff.left -= dt;
   if (steppingOff.left > 0) return;
-  const { what, far, high, moved } = steppingOff;
+  const { what, far, high, moved, watched } = steppingOff;
+  // How long each was actually watched, said where a passing run shows it.
+  if (moved) process.stderr.write(`check:exits — 4c: her companion off ${what} was watched ${watched.toFixed(2)} s of ${STEP_OFF_SECONDS} before this check moved her on; what it asserts covers those ${watched.toFixed(2)} s only\n`);
   steppingOff = null;
   const ok = far <= STEP_OFF_REACH && high <= STEP_OFF_RISE;
-  steppedOff.set(what, `${what}: off its seat, her companion ${far.toFixed(2)} m from her at the furthest and ${high.toFixed(2)} m over her feet at the highest ${moved ? 'until this check moved her on' : `in ${STEP_OFF_SECONDS} s`}${ok ? '' : ' — FLUNG'}`);
+  steppedOff.set(what, `${what}: off its seat, her companion ${far.toFixed(2)} m from her at the furthest and ${high.toFixed(2)} m over her feet at the highest in ${moved ? `${watched.toFixed(2)} s, when this check moved her on` : `${STEP_OFF_SECONDS} s`}${ok ? '' : ' — FLUNG'}`);
   if (!ok) fail(`her companion stepping off ${what}: ${far.toFixed(2)} m from her (${STEP_OFF_REACH} allowed) and ${high.toFixed(2)} m over her feet (${STEP_OFF_RISE} allowed) within ${STEP_OFF_SECONDS} s of leaving its seat`);
 }
 

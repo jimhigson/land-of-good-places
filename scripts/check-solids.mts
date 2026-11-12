@@ -3025,6 +3025,7 @@ if (inPart('park')) {
     {
       const hops: string[] = [];
       const hatsThrough: string[] = [];
+      const hatSamples = { platform: 0, top: 0, tightest: Infinity, tightestOnTop: Infinity, onTrain: 0 };
       let askedHere = 0;
       // Under every station canopy —
       // (whose canopies are now tall enough for every hat — see below);
@@ -3053,14 +3054,33 @@ if (inPart('park')) {
           for (let dz = -3; dz <= 3; dz += 0.2) {
             const x = stop.standX + dx;
             const z = stop.standZ + dz;
-            if (!collision.isClearCircle(x, z, PLAYER_RADIUS)) continue;
             const floor = sample(x, z, 50);
             const feet = standingHeight(floor, collision, x, z, floor + BUILDING_STEP_UP);
+            // **Everything she wears fits under a station's canopy, wherever her
+            // feet can be under it** — the platform, and the top of anything on
+            // it she stands on (its bench): asked before any test of whether her
+            // body is clear there, since standing on the bench is standing in a
+            // solid's footprint. (Asked after it, the bench was never measured —
+            // PR #742's second review lowered the canopy by the bench's height
+            // and this stayed green.)
+            // Not up on the train standing under it: that moves on (noted below).
+            const onTrain = pieces.some((piece) => piece.standsAt(x, z) && Math.abs(piece.topAt(x, z) - feet) < 0.02);
+            if (onTrain) hatSamples.onTrain += 1;
+            if (stop.name.includes('station canopy') && !onTrain) {
+              const headroom = collision.ceilingAt(x, z, feet + 0.05) - feet;
+              if (Number.isFinite(headroom) && headroom > 0) {
+                const onTop = feet > floor + 0.05;
+                hatSamples.platform += onTop ? 0 : 1;
+                hatSamples.top += onTop ? 1 : 0;
+                if (onTop) hatSamples.tightestOnTop = Math.min(hatSamples.tightestOnTop, headroom);
+                hatSamples.tightest = Math.min(hatSamples.tightest, headroom);
+                if (headroom < TALLEST_CHILD_HEIGHT && hatsThrough.length < 4) hatsThrough.push(`under ${stop.name} at (${x.toFixed(2)}, ${z.toFixed(2)}), feet on ${onTop ? 'a top' : 'the platform'} at ${feet.toFixed(2)}: ${headroom.toFixed(2)} m of room against the tallest child's ${TALLEST_CHILD_HEIGHT.toFixed(2)}`);
+              }
+            }
+            if (!collision.isClearCircle(x, z, PLAYER_RADIUS) && feet <= floor + 0.05) continue;
             if (train.onTheLine(x, feet, z, PLAYER_RADIUS)) continue;
             if (collision.deepestSolidOverlap(new Vector3(x, feet, z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT, feet) > 0.01) continue;
             const room = collision.ceilingAt(x, z, feet + 0.05) - feet;
-            // Everything she wears fits under a station's canopy, wherever she stands under it.
-            if (stop.name.includes('station canopy') && Number.isFinite(room) && room > KID_HEIGHT && room < TALLEST_CHILD_HEIGHT && hatsThrough.length < 4) hatsThrough.push(`under ${stop.name} at (${x.toFixed(2)}, ${z.toFixed(2)}), feet on ${feet.toFixed(2)}: ${room.toFixed(2)} m of room against the tallest child's ${TALLEST_CHILD_HEIGHT.toFixed(2)}`);
             if (room > KID_HEIGHT + 0.02 && room < KID_HEIGHT + JUMP_APEX_HEIGHT - 0.3 && (!found || room < found.room)) found = { x, z, feet, room };
           }
         }
@@ -3092,7 +3112,11 @@ if (inPart('park')) {
       }
       const bad = hops.filter((line) => !line.startsWith('ok: '));
       collision.removeBox(lowCanopy);
-      say(canopies.some((c) => c.name.includes('station canopy')) && hatsThrough.length === 0, `nothing she wears goes through a station's canopy: standing anywhere under one — the platform or its bench — the tallest child the park builds (${TALLEST_CHILD_HEIGHT.toFixed(2)} m, hat and hair) fits under its underside${hatsThrough.length ? ` — ${hatsThrough.join('; ')}` : ''}`);
+      if (hatSamples.onTrain > 0) note(`clause 13: ${hatSamples.onTrain} places under a station canopy were up on the train standing there, and are not in "nothing she wears goes through a canopy": on a carriage's rim the tallest hat comes within a few centimetres of the canopy, and on the engine's cab roof through it — her body fits, her hat is taller than her body (PR #742 lists it as a gap)`);
+      say(
+        hatSamples.platform > 0 && hatSamples.top > 0 && hatsThrough.length === 0,
+        `nothing she wears goes through a station's canopy: under every one, ${hatSamples.platform} places on the platform and ${hatSamples.top} on its bench, the tallest child the park builds (${TALLEST_CHILD_HEIGHT.toFixed(2)} m, hat and hair) fits under its underside — the least room ${hatSamples.tightest.toFixed(2)} m, on the bench ${hatSamples.tightestOnTop.toFixed(2)} m${hatSamples.top ? '' : ' (NO BENCH SAMPLED)'}${hatsThrough.length ? ` — ${hatsThrough.join('; ')}` : ''}`,
+      );
       say(askedHere > 0 && bad.length === 0, `hopping under a canopy: under ${askedHere} canopies, a jump each time she lands for 8 s, capped by the canopy — no hover rescue — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
       awayWithHerLine();
     }
