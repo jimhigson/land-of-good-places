@@ -20,3 +20,9 @@ Spec: docs/perf/FRAME-DROPS-2026-11.md on PR #746 (step 6, item 16).
 - Browser before/after (alloc MB/s, cpu ms) on seed 0 /spawn; park-file
   identity: build:parks seed 0 on main vs branch, diff .parks/0.json.
 - Open PR.
+
+## PR #755 (opened). Since: sin/cos/tan are tiny inlinable shells over
+sinInto/cosInto/tanInto; x in reduced[0]. Microbench 5.3 B/call, 136 ms.
+Park alloc 127 -> 82 MB/s mean of 3 pairs. Still 188M calls 0 diff.
+- TODO: park-digest seeds 0,1,2 base vs branch (scratchpad digest-*.txt);
+  pnpm run check + test:procgen; merge main when #749 lands.
