@@ -28,6 +28,7 @@ import { KID_HIP_HEIGHT } from '../../art/models/kid';
 import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { kitBounds } from '../../art/models/libraryKit';
 import { LibraryLighting } from './lighting';
+import { buildLibraryDenShell, buildReadingRoomShell, type LibraryDenShell } from './roomShell';
 import { LibraryProps, type LibrarySolid, type LibraryStandable } from './props';
 import { furnishReadingRoom, StackFader, type FurnishedShelfBook } from './furnish';
 import { LIBRARY_CHIPS } from './libraryLines';
@@ -42,9 +43,6 @@ import { SecretLeaf } from './secretShelf';
 import { DRAGON_STAND_RADIUS, DRAGON_ZONE_ID, LibraryDen } from './LibraryDen';
 import { CAT_ZONE_ID, LibraryCat } from './LibraryCat';
 import {
-  buildLibraryDenShell,
-  buildReadingRoomShell,
-  type LibraryDenShell,
   libraryDenDoorway,
   libraryEntryBand,
   libraryExitBand,
