@@ -3,6 +3,7 @@ import { chunkPart } from './lazyChunks';
 import { SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
 import type * as ReptileHallModule from './reptileHouse/hall';
 import type * as FerrisShowModule from './ferrisWheel/show';
+import type * as CastleInteriorModule from './building/castleInterior';
 
 /**
  * **Every room that is fetched when she goes into it** — the one list.
@@ -25,8 +26,11 @@ export const REPTILE_HALL = chunkPart<typeof ReptileHallModule>('the Reptile Hou
 /** The Space Ferris Wheel's sky show: clouds, space, the four friends and the sparks — built on boarding. */
 export const FERRIS_SHOW = chunkPart<typeof FerrisShowModule>('the ferris wheel sky show', 'src/world/ferrisWheel/show.ts', () => import('./ferrisWheel/show'));
 
+/** The castle's interior: fire, cloth and clutter on every storey, the great hall's banquet, and `castle.glb`. */
+export const CASTLE_INTERIOR = chunkPart<typeof CastleInteriorModule>('the castle interior', 'src/world/building/castleInterior.ts', () => import('./building/castleInterior'));
+
 /** Every lazy room, for the boot's preloading and Node's providing. */
-export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW];
+export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW, CASTLE_INTERIOR];
 
 /**
  * The rooms a boot must load before the game is built: the one a restored save
@@ -41,5 +45,7 @@ export function interiorsToPreload(space: SpaceId | undefined, pathname: string)
   if (space === SPACE_REPTILE_HOUSE) parts.add(REPTILE_HALL);
   if (pathname === '/reptile-house' || pathname === '/tortoise-ride') parts.add(REPTILE_HALL);
   if (pathname === '/ferris') parts.add(FERRIS_SHOW);
+  // A save never restores inside the castle (`Game.ts`'s `resolveSpawn`), so only its link.
+  if (pathname === '/castle') parts.add(CASTLE_INTERIOR);
   return [...parts];
 }

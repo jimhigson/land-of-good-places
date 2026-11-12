@@ -79,6 +79,14 @@ const LAZY_MODULES = [
   'src/minigames/ferrisWheel/space.ts',
   'src/minigames/ferrisWheel/sparks.ts',
   'src/world/ferrisWheel/clouds.ts',
+  // The castle's interior and the kit it alone is drawn from (`world/interiors.ts`'s `CASTLE_INTERIOR`).
+  'src/world/building/castleInterior.ts',
+  'src/world/building/castleFurniture.ts',
+  'src/world/building/castleDecor.ts',
+  'src/world/building/castleLighting.ts',
+  'src/world/building/greatHallBanquet.ts',
+  'src/art/models/castleAssets.ts',
+  'src/art/assets/castleGlb.ts',
   // Mini-games behind a stall's curtain (`MiniGameHost`).
   'src/minigames/dodgems/Dodgems.ts',
   'src/minigames/waterFight/WaterFight.ts',

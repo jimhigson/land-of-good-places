@@ -63,13 +63,12 @@ import { BuildingShell } from '../src/world/building/Shell.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import {
   registerBenchCollision,
-  registerDecorCollision,
   registerInteriorCollision,
-  registerHallCollision,
   registerPavilionCollision,
   registerPlanterCollision,
   registerRoofTurretCollision,
 } from '../src/world/building/Building.ts';
+import { registerDecorCollision, registerHallCollision } from '../src/world/building/castleInterior.ts';
 import { dressCastle } from '../src/world/building/castleDecor.ts';
 import type { CastleDecorSolid } from '../src/world/building/castleFurniture.ts';
 import {

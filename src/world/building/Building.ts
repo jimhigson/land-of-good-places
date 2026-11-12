@@ -59,17 +59,12 @@ import {
   keepOutsFor,
   planterRing,
 } from './dressing';
-import { CastleFire } from './castleLighting';
-import { dressCastle } from './castleDecor';
-import { GreatHallBanquet, type PetTableLink } from './greatHallBanquet';
-import {
-  CASTLE_GREAT_HALL_DECK,
-  greatHallPetPlaces,
-  greatHallSeats,
-  greatHallSolids,
-  type CastleDecorSolid,
-} from './castleFurniture';
-import { CASTLE_TABLE_TOP, createCastleFeastProp, type FeastProp } from '../../art/models/castleAssets';
+import type { PetTableLink } from './greatHallBanquet';
+import type { GreatHallSeat } from './castleFurniture';
+import type { FeastProp } from '../../art/models/castleAssets';
+import type { CastleInteriorContent } from './castleInterior';
+import { CASTLE_INTERIOR } from '../interiors';
+import { SpeechBubble } from '../../ui/SpeechBubble';
 import { WildPets } from './WildPets';
 import { createRoofClouds, type RoofClouds } from './roofClouds';
 
@@ -82,6 +77,20 @@ import { createRoofClouds, type RoofClouds } from './roofClouds';
  * for the same job at a round table she sits further back from.
  */
 const FEAST_DISH_REACH = 0.5;
+
+/**
+ * How near the front door she must be for the interior's chunk to be fetched
+ * ahead of it, in metres — the Reptile House's figure. Only fetched, not
+ * built: walking up costs nothing, and the door then builds it behind its iris
+ * without waiting on the network.
+ */
+const CASTLE_PREFETCH_RADIUS = 18;
+
+/** What the door says when the interior could not be fetched (offline before it was ever cached). */
+const DOOR_REFUSED_LINE = 'The knights are still laying the tables — try again in a moment!';
+
+/** How high over the doorstep that line hangs, in metres — over her head. */
+const DOOR_LINE_HEIGHT = 2.6;
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
@@ -699,23 +708,31 @@ export class Building implements GameSystem {
   private readonly trampoline = new Trampoline();
 
   /**
-   * Every torch, brazier and hearth in the castle, and the one number per
-   * storey that makes them flicker (issue #376).
+   * **The castle's interior, furnished** — every torch, brazier and hearth
+   * (#376), the cloth and clutter on every storey, the great hall's banquet
+   * (#413) and the solids they all stand as — or `null` until she first goes
+   * in.
    *
-   * Owned here rather than by `dressing.ts` because it is the only piece of the
-   * decoration with a per-frame life.
+   * A lazy chunk (`castleInterior.ts`, `world/interiors.ts`'s
+   * `CASTLE_INTERIOR`): `castle.glb` and everything measured off it load when
+   * she walks through the door, behind its iris, not at boot. Held here
+   * because the fire and the feast have a per-frame life. Their groups go
+   * into each storey's own **floor group**, never `interiorRoot` — see
+   * `greatHallBanquet.ts` on why that is the difference between a child at a
+   * table and a child 589 m away in the air (#412).
    */
-  private readonly castleFire = new CastleFire();
+  private castle: CastleInteriorContent | null = null;
   /**
-   * The children eating at the great hall's banquet (#413).
-   *
-   * A field beside {@link castleFire} and for the same reason: they have a
-   * per-frame life, so somebody has to hold them. Their group is added to the
-   * hall's own **floor group**, never to `interiorRoot` — see
-   * `greatHallBanquet.ts` on why that distinction is now the difference
-   * between a child at a table and a child 589 m away in the air (#412).
+   * The interior failed to load at the door, so the door stays shut until she
+   * has stepped out of its band — one clear try per approach, never an iris
+   * opening and closing under her once a second (QA on #749, the Reptile
+   * House's door).
    */
-  private readonly banquet = new GreatHallBanquet();
+  private doorRefused = false;
+  /** The door's one line, said when it could not open — see {@link refuseDoor}. */
+  private readonly doorBubble = new SpeechBubble({ id: 'castle-door-say', item: '', kind: 'actionFeedback' }, PALETTE.markerMint);
+  private doorBubbleFor = 0;
+  private readonly camera: IsoCamera;
   private readonly grownUp = new GrownUp();
   private readonly toilets: Toilets;
   /** The ginormous slide itself, so `test/procgen` can measure what was built. */
@@ -763,17 +780,6 @@ export class Building implements GameSystem {
   private banquetSeat: number | null = null;
   /** What she chose to eat, on the table in front of her. See `eatAtFeast`. */
   private feastDish: Object3D | null = null;
-  /**
-   * Where the pets eat, in world metres — the hall's own floor-local plan
-   * mapped once rather than every frame, because {@link sendPetsToTheirTable}
-   * re-asserts it while she is at the table.
-   */
-  private readonly petTablePlaces = greatHallPetPlaces(CASTLE_GREAT_HALL_DECK).map((place) => ({
-    x: floorX(CASTLE_HALL, place.x),
-    y: BUILDING_BASE_Y,
-    z: floorZ(CASTLE_HALL, place.z),
-    facing: place.facing,
-  }));
   private grownUpComing = false;
   private wasOnPad = false;
   private wasAirborne = false;
@@ -806,6 +812,7 @@ export class Building implements GameSystem {
   ) {
     this.collision = collision;
     this.controls = controls;
+    this.camera = camera;
     // ---------------------------------------------------------- the interior
     this.interiorRoot.name = 'the-big-building-inside';
     this.interiorRoot.position.set(INTERIOR_ORIGIN_X, BUILDING_BASE_Y, INTERIOR_ORIGIN_Z);
@@ -871,19 +878,14 @@ export class Building implements GameSystem {
     addRideEntrances(this.shell.floorGroups);
     // Roundels, planters and benches, so sixty metres of floor plate reads as a
     // place rather than a car park. Must be before the fader claims materials.
-    const decorSolids: CastleDecorSolid[][] = [];
-    this.shell.floorGroups.forEach((floor, deck) => {
-      dressDeck(deck, floor);
-      // Fire, cloth, paint and the things that reward looking twice (#376).
-      this.castleFire.dress(deck, floor);
-      decorSolids[deck] = dressCastle(deck, floor);
-      // After `dressCastle`, because the benches the diners sit on are placed
-      // by it — `greatHallSeats` reads the same bench list, so a hall that laid
-      // out no furniture seats nobody rather than seating people in mid-air.
-      this.banquet.dress(deck, floor);
-    });
-    // The wild animals in the roof garden's long grass (#406). Built after
-    // `dressCastle` so the burrows it asks for already exist, and parented to
+    // The rest of each storey's dressing — fire, cloth, clutter, the banquet —
+    // is drawn from the castle kit and comes with the interior's lazy chunk
+    // (`furnishIfLoaded`, below).
+    this.shell.floorGroups.forEach((floor, deck) => dressDeck(deck, floor));
+    // The wild animals in the roof garden's long grass (#406). The burrows
+    // they live in are `roofMeadow.ts`'s pure answer, the same one
+    // `dressCastle` builds the mounds from when the interior is furnished, and
+    // they are parented to
     // the roof's own floor group — which since #377/#380 is what puts them in
     // the roof's *space*, 600 m along +X from the mall, rather than what hid
     // them behind a cutaway. Their positions are floor-local and unchanged by
@@ -914,19 +916,12 @@ export class Building implements GameSystem {
     // great hall.
     for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
 
-    // **And the banquet is solid** (#453). Jim, having walked the hall: *"you
-    // can walk straight through the tables — they should be solid."*
-    //
-    // Registered per floor through the same loop as the shell, off
-    // `greatHallSolids`, which returns nothing on a storey that is not the
-    // great hall — so this is one call rather than a special case, and a hall
-    // that ever moves storey brings its own collision with it.
-    for (const floor of CASTLE_FLOORS) registerHallCollision(collision, floor);
-
-    // Her feet land on the wood because the wood is solid: a run is one filled
-    // box at the tables' height (`registerHallCollision`), and a solid's top
-    // is where a jump over it comes down (`world/standing.ts`). There is no
-    // plate laid over it any more.
+    // The banquet's runs (#453) and everything the dressing stands on the
+    // floor (17 Oct 2026) are solid too — registered by `castleInterior.ts` in
+    // the same call that builds them, when the interior is furnished. Her feet
+    // land on the wood because the wood is solid: a run is one filled box at
+    // the tables' height, and a solid's top is where a jump over it comes down
+    // (`world/standing.ts`).
 
     // **And the benches are solid** (#459). Jim, on the roof garden: *"benches
     // need to be solid (can't walk through them) on the roof garden and
@@ -950,11 +945,11 @@ export class Building implements GameSystem {
     for (const floor of CASTLE_FLOORS) registerPlanterCollision(collision, floor);
     for (const floor of CASTLE_FLOORS) registerPavilionCollision(collision, floor);
     for (const floor of CASTLE_FLOORS) registerRoofTurretCollision(collision, floor);
-    // **And everything the dressing stood on the floor** (17 Oct 2026): the
-    // crates in the corners, the woodpile, the roof's troughs, the throne on
-    // its dais, the armour on its plinths, the chest, the fireside bench.
-    // Each solid is the one its drawer handed back — see `CastleDecorSolid`.
-    for (const floor of CASTLE_FLOORS) registerDecorCollision(collision, floor, decorSolids[floor.index] ?? []);
+
+    // The interior's furnishings, if their chunk is already here: Node's checks
+    // provide it up front (`scripts/lib/eagerInteriors.mts`), and `main.ts`
+    // loads it before the game for `/castle`. Otherwise the door fetches it.
+    this.furnishIfLoaded();
 
     // `buildShaftGuards` was called here. There are no shafts to guard.
     //
@@ -1120,7 +1115,7 @@ export class Building implements GameSystem {
 
   /** The building's world labels, for `World` to register with the park's `LabelManager`. */
   get screenLabels(): readonly ManagedLabel[] {
-    return this.wildPets.screenLabels;
+    return [...this.wildPets.screenLabels, this.doorBubble];
   }
 
   private buildingZones(): InteractZone[] {
@@ -1142,6 +1137,8 @@ export class Building implements GameSystem {
       // building owns the geometry and `Game` owns the join. See
       // `InteriorControls.openShop`.
       openShop: (unitId) => this.controls.openShop(unitId),
+      banquetSeats: this.hallSeats(),
+      banquetSeatPickRadius: this.castle?.seatPickRadius ?? 0,
       banquetSeat: this.banquetSeat,
       sitAtFeast: (index) => this.sitAtFeast(index),
       eatAtFeast: (kind) => this.eatAtFeast(kind),
@@ -1176,7 +1173,7 @@ export class Building implements GameSystem {
    */
   private sitAtFeast(index: number): void {
     const player = this.player;
-    const seat = greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    const seat = this.hallSeats()[index];
     if (!player || !seat || player.riding) return;
 
     player.beginRide(this.feastHolder);
@@ -1214,7 +1211,8 @@ export class Building implements GameSystem {
    * re-asserting costs a comparison per companion.
    */
   private sendPetsToTheirTable(): void {
-    this.petParade?.sendPetsToTable(this.petTablePlaces);
+    const castle = this.castle;
+    if (castle) this.petParade?.sendPetsToTable(castle.petTablePlaces);
   }
 
   /**
@@ -1231,24 +1229,18 @@ export class Building implements GameSystem {
   private eatAtFeast(kind: FeastProp): void {
     const player = this.player;
     const index = this.banquetSeat;
-    const seat = index === null ? undefined : greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    const seat = index === null ? undefined : this.hallSeats()[index];
     if (!player || !seat) return;
     player.model.setExpression('happy');
 
     const floor = this.shell.floorGroups[CASTLE_HALL.index];
-    if (!floor) return;
+    if (!floor || !this.castle) return;
     this.feastDish?.removeFromParent();
-    const dish = createCastleFeastProp(kind);
     // On the table's measured top, half a stride towards it from her seat —
-    // which is where she is looking, because `seat.yaw` is the way she turned
-    // to sit down.
-    dish.root.position.set(
-      seat.x + Math.sin(seat.yaw) * FEAST_DISH_REACH,
-      CASTLE_TABLE_TOP,
-      seat.z + Math.cos(seat.yaw) * FEAST_DISH_REACH,
-    );
-    floor.add(dish.root);
-    this.feastDish = dish.root;
+    // which is where she is looking (`castleInterior.ts`'s `feastDish`).
+    const dish = this.castle.feastDish(kind, seat, FEAST_DISH_REACH);
+    floor.add(dish);
+    this.feastDish = dish;
   }
 
   /** Whoever sits at the banquet is held by this, and let go by leaving it. */
@@ -1270,7 +1262,7 @@ export class Building implements GameSystem {
   private leaveFeast(): void {
     const player = this.player;
     const index = this.banquetSeat;
-    const seat = index === null ? undefined : greatHallSeats(CASTLE_GREAT_HALL_DECK)[index];
+    const seat = index === null ? undefined : this.hallSeats()[index];
     this.banquetSeat = null;
     this.feastDish?.removeFromParent();
     this.feastDish = null;
@@ -1381,12 +1373,12 @@ export class Building implements GameSystem {
     this.ballPit.update(dt, elapsed);
     // Deliberately above the `!player` return: the fire burns whether or not
     // anybody is standing in the room, which is also what makes it screenshot.
-    this.castleFire.update(elapsed);
+    this.castle?.fire.update(elapsed);
     // Above the `!player` return with the fire, and for the identical reason:
     // the feast is in progress whether or not she has walked in yet, which is
     // the whole of #413's brief ("a feast in progress, not a set waiting for
     // one") and is also what makes it screenshot.
-    this.banquet.update(elapsed);
+    this.castle?.banquet.update(elapsed);
     // Above the `!player` return for the same reason the fire is: the roof
     // garden's animals live their lives whether or not she is up there, so she
     // arrives to a park that was already going rather than one that starts
@@ -1402,8 +1394,26 @@ export class Building implements GameSystem {
     // `sendPetsToTheirTable`.
     if (this.banquetSeat !== null) this.sendPetsToTheirTable();
 
+    if (this.doorBubbleFor > 0) {
+      this.doorBubbleFor -= dt;
+      if (this.doorBubbleFor <= 0) this.doorBubble.setText(null);
+      else this.doorBubble.updateScreenSize(this.camera);
+    }
+
     const player = this.player;
     if (!player) return;
+
+    // **Fetch the interior's chunk on approach** — only fetch, not build; the
+    // door builds it behind its iris. Entering is still what furnishes it.
+    if (
+      !this.castle &&
+      !this.inside &&
+      Math.hypot(player.position.x - facadeX(1.5), player.position.z - facadeZ(BUILDING_HALF_Z + 1.4)) < CASTLE_PREFETCH_RADIUS
+    ) {
+      CASTLE_INTERIOR.load().catch(() => {
+        // The door asks again, and says so if it still cannot.
+      });
+    }
 
     // Unconditionally, not inside the branch below: the whole point is that it
     // runs on the frames just *after* a ride, and it must not be skipped
@@ -1453,9 +1463,14 @@ export class Building implements GameSystem {
     const { x, z } = player.position;
 
     if (!this.inside) {
-      if (bandContains(castleEntranceBand(), x, z)) {
-        this.spaces.changeTo(() => this.enterInterior());
+      const inBand = bandContains(castleEntranceBand(), x, z);
+      // A door whose interior could not be fetched stays shut until she has
+      // stepped out of it (`refuseDoor`).
+      if (this.doorRefused) {
+        if (!inBand) this.doorRefused = false;
+        return;
       }
+      if (inBand) this.changeToInterior(() => this.enterInterior());
       return;
     }
 
@@ -1632,7 +1647,7 @@ export class Building implements GameSystem {
     // camera and a set of play bounds as much as it is a position — so this
     // takes the whole door sequence rather than the one part of it that looked
     // like the important one.
-    this.spaces.changeTo(() => {
+    this.changeToInterior(() => {
       // **`stepThroughDoor`, not a teleport by height.** This used to call
       // `enterInterior()` and then raise her by `deck * BUILDING_FLOOR_HEIGHT`,
       // because the storeys were stacked and height was what picked one. Since
@@ -1657,6 +1672,60 @@ export class Building implements GameSystem {
       );
     });
     return true;
+  }
+
+  /** True once the interior's furnishings are built (`castleInterior.ts`). */
+  get furnished(): boolean {
+    return this.castle !== null;
+  }
+
+  /**
+   * Fetches the interior's furnishings and builds them, if nobody has. The
+   * door and `/castle` do this behind their iris; anything else that wants the
+   * castle furnished can ask directly.
+   */
+  furnish(): Promise<void> {
+    if (this.castle) return Promise.resolve();
+    return CASTLE_INTERIOR.load().then(() => this.furnishIfLoaded());
+  }
+
+  /** Builds the interior's furnishings if their chunk is here and nobody has yet. */
+  private furnishIfLoaded(): void {
+    const module = CASTLE_INTERIOR.loaded;
+    if (this.castle || !module) return;
+    this.castle = this.collision.ownedBy('castle', () => module.furnishCastle(this.collision, this.shell.floorGroups));
+  }
+
+  /** Every place at the banquet — none until the interior is furnished, when she cannot be in the hall. */
+  private hallSeats(): readonly GreatHallSeat[] {
+    return this.castle?.seats ?? [];
+  }
+
+  /**
+   * Into the castle, fetching and building its furnishings behind the iris
+   * first if they are not here yet. If they cannot be fetched she stays where
+   * she was, and the door says why ({@link refuseDoor}).
+   */
+  private changeToInterior(midpoint: () => void): void {
+    this.spaces.changeToFurnished(() => this.castle !== null, () => this.furnish(), midpoint, () => this.refuseDoor());
+  }
+
+  /**
+   * The interior could not be fetched (offline before it was ever cached, or
+   * a dropped connection): she is still outside, so say why over the door, and
+   * keep the door from firing again under her until she has stepped out of it
+   * (`checkDoorways`). The next try fetches afresh once `LazyPart`'s short
+   * back-off has passed.
+   */
+  private refuseDoor(): void {
+    this.doorRefused = true;
+    const x = facadeX(1.5);
+    const z = facadeZ(BUILDING_HALF_Z + 1.4);
+    const y = this.surfaces.sample(x, z, castleWorldY(1.5, 1, BUILDING_HALF_Z + 1.4));
+    if (this.doorBubble.sprite.parent !== this.parkRoot) this.parkRoot.add(this.doorBubble.sprite);
+    this.doorBubble.anchorAt(x, y + DOOR_LINE_HEIGHT, z);
+    this.doorBubble.setText(DOOR_REFUSED_LINE);
+    this.doorBubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
   }
 
   private leaveInterior(): void {
@@ -2596,57 +2665,6 @@ export function registerBenchCollision(collision: CollisionWorld, floor: CastleF
 }
 
 /**
- * Half-thickness of the walls a solid banquet footprint is built from.
- *
- * The same 0.2 m `hotel/place.ts` uses, and for its reason rather than for
- * symmetry: `CollisionWorld.maxSafeStep` divides the **thinnest** collider in
- * the whole world into sub-steps for every mover in it, so a hair-thin table
- * edge would make the park's collision loop run more sub-steps per frame for
- * ever. 0.2 m is already the park's own thinnest (the entrance's rope posts),
- * so nothing here lowers it.
- */
-const HALL_SOLID_HALF_THICKNESS = 0.2;
-
-/**
- * **The banquet's furniture is solid** (#453) — the tables, the benches either
- * side of them, and the pets' table.
- *
- * `castleFurniture.ts`'s {@link greatHallSolids} owns the footprints (and says
- * at length why they may exist at all now, and why one rectangle per *run*);
- * this owns only the registration. Two details are load-bearing:
- *
- * - **The half-extents are inset by the wall's own half-thickness**, so the
- *   face a child's body meets is the footprint she can see rather than 0.2 m
- *   outside it. `hotel/place.ts`'s rule: generous-light, never generous-heavy.
- * - **`topIsAbsolute`, with the prop's real top.** Solid to feet on the
- *   flagstones, air to feet in a jump, and still there beneath the feet
- *   standing on it. The default `Infinity` would make a 0.675 m table an
- *   invisible pillar to the ceiling — the bug the hotel's furniture already
- *   paid for once.
- */
-export function registerHallCollision(collision: CollisionWorld, floor: CastleFloor): void {
-  for (const solid of greatHallSolids(floor.index)) {
-    const cx = floorX(floor, solid.x);
-    const cz = floorZ(floor, solid.z);
-    const top = BUILDING_BASE_Y + solid.top;
-
-    // The edges, crisp: four thin walls on the footprint the eye can see.
-    collision.kinded(solid.kind, () =>
-      collision.addRectangle(
-        cx,
-        cz,
-        solid.halfX - HALL_SOLID_HALF_THICKNESS,
-        solid.halfZ - HALL_SOLID_HALF_THICKNESS,
-        HALL_SOLID_HALF_THICKNESS,
-        top,
-        false,
-        true,
-      ),
-    );
-  }
-}
-
-/**
  * **The planters are solid** (#459) — the pots, not the bushes.
  *
  * A circle each, at the pot's own rim radius, with an **absolute** top at the
@@ -2670,35 +2688,6 @@ export function registerPlanterCollision(collision: CollisionWorld, floor: Castl
         floorZ(floor, planter.z),
         PLANTER_RADIUS,
         BUILDING_BASE_Y + PLANTER_TOP,
-        false,
-        true,
-      ),
-    );
-  }
-}
-
-/**
- * **The castle's dressing is solid** — whatever `dressCastle` stood on this
- * floor and handed back ({@link CastleDecorSolid}), one filled box each at its
- * real top, so a crate is a crate she climbs and the armour a knight she
- * bumps. A filled box has no hollow middle (`Collision.ts`'s `BoxCollider`),
- * so nothing here can trap a body inside it.
- */
-export function registerDecorCollision(
-  collision: CollisionWorld,
-  floor: CastleFloor,
-  solids: readonly CastleDecorSolid[],
-): void {
-  for (const solid of solids) {
-    collision.kinded(solid.kind, () =>
-      collision.addBox(
-        floorX(floor, solid.x),
-        floorZ(floor, solid.z),
-        solid.halfX,
-        solid.halfZ,
-        -solid.yaw,
-        0,
-        BUILDING_BASE_Y + solid.top,
         false,
         true,
       ),
