@@ -58,7 +58,7 @@ import { SPACE_GARDEN, SPACE_LIBRARY } from './world/spaces';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
-import { BookReader } from './world/library/reader/BookReader';
+import { LazyBookReader } from './world/library/reader/LazyBookReader';
 import { markBookRead } from './world/library/readBooks';
 import { BookGlance } from './world/library/bookGlance';
 import { StoryCamera } from './world/library/storyCamera';
@@ -162,7 +162,7 @@ export class Game {
   readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
   /** The library's picture-book reader (#717) — a mode over the paused park. */
-  readonly bookReader: BookReader;
+  readonly bookReader: LazyBookReader;
   readonly whatsNew: WhatsNew;
   readonly parkMap: ParkMap;
   readonly saveSystem: SaveSystem;
@@ -604,7 +604,7 @@ export class Game {
     // to its last page is filed in the Cute-o-dex as a bookmark, and a read
     // bookmark opens its book again — the dex closes itself first, so the
     // reader is never opened on top of another pause.
-    this.bookReader = new BookReader({
+    this.bookReader = new LazyBookReader({
       renderer: this.engine.renderer,
       container: uiRoot,
       onFinished: (book) => markBookRead(book),

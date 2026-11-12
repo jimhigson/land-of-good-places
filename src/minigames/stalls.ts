@@ -8,9 +8,6 @@ import { addBoothCollision, MINI_GAME_BOOTH_BOX } from './boothFootprint';
 import { pressZone, type InteractZone } from '../world/interact';
 import { standOnSphere, terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
-import { createDodgems } from './dodgems/Dodgems';
-import { createSpookyHouse } from './spookyHouse/SpookyHouse';
-import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, type StallProp } from './stallProp';
 import { STALL_PICK_RADIUS, STALL_PLACEMENTS, STALL_STANDS_BY_ID } from './stallPlacement';
 import type { StallDefinition } from './types';
@@ -95,7 +92,7 @@ function stallsNow(): readonly StallDefinition[] {
     // absolute direction everywhere on the map, not a direction relative to
     // wherever a child is walking from.
 
-    create: createSpookyHouse,
+    create: () => import('./spookyHouse/SpookyHouse').then((m) => m.createSpookyHouse()),
   },
   {
     id: 'waterFight',
@@ -121,7 +118,7 @@ function stallsNow(): readonly StallDefinition[] {
     // path and the booth, so walking up is a straight line that never scrapes
     // along the side of it.
 
-    create: createWaterFight,
+    create: () => import('./waterFight/WaterFight').then((m) => m.createWaterFight()),
   },
   {
     id: 'spaceFerrisWheel',
@@ -162,7 +159,7 @@ function stallsNow(): readonly StallDefinition[] {
     // and the stand point in front of it ends up between the kiosk and the
     // ride's doorway rather than inside the rink.
 
-    create: createDodgems,
+    create: () => import('./dodgems/Dodgems').then((m) => m.createDodgems()),
   },
   ];
 }
