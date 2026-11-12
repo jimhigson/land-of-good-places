@@ -112,3 +112,14 @@ Jim's decisions (all recorded as comments on #722; read them with `gh pr view 72
   scripts object identical to main's (step sets parsed: union == main's, check:camera-breath present).
   Re-gate after the merge: targeted check:solids (core, park), check:exits, then full check + test:procgen.
 - Issues: #740 fireplace, #741 seeds 6/9/11/15, #205 comment. Next: gh pr ready 742, review + QA.
+
+### Review + QA round 1 (12 Nov) — fixed at 3437abb4
+- Review: clause 13 cases stow her line (and sync the parade: the store notifies in a microtask);
+  proofs single-fix (train-blind-mid-jump red 6.06 m; train-band-two-metres red; train-ignores-her-line
+  red 9.05 m). The gap-1-2 "defect" = the hover rescue putting her on the platform touching the side
+  (#722 platform rule), check now counts "beside" as the train does. catBus seat fallback throws.
+- QA: cat bus companion stays seated until the gate handover (outside the bounds its line was clamped 14 m);
+  Parade.stepOffSeat; check:exits 4c step-off bound + proof bus-lets-go-early (red 18.38 m).
+  Player: no coasting off a top's edge with no input (Sunny Side bench). Station canopy derived from
+  TALLEST_CHILD_HEIGHT (3.77 m); clause 13 hat clause; canopy-hop under the check's own low canopy.
+- Local gate at 3437abb4: check exit 0 (2821 s), test:procgen exit 0 (48/2168), solids core+park, exits 0.
