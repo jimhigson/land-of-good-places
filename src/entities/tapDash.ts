@@ -102,6 +102,14 @@ export const DASH_MAX_SECONDS = 4;
 export const DASH_BRAKE_SECONDS = 0.3;
 
 /**
+ * How long a dash walks after it runs into something, in seconds — reset on
+ * every stride that is still blocked. Long enough for a walk's own grind round
+ * a corner or along a fence to take her clear; short enough that a brush with
+ * a lamp post costs a fraction of a second. See `TapNavigator.recovering`.
+ */
+export const DASH_RECOVER_SECONDS = 0.35;
+
+/**
  * The longest single stride of a dash, in metres.
  *
  * A frame of dashing is split into strides no longer than this

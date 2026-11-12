@@ -8,10 +8,22 @@ import { addBoothCollision, MINI_GAME_BOOTH_BOX } from './boothFootprint';
 import { pressZone, type InteractZone } from '../world/interact';
 import { standOnSphere, terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
-import { createDodgems } from './dodgems/Dodgems';
-import { createSpookyHouse } from './spookyHouse/SpookyHouse';
-import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, type StallProp } from './stallProp';
+import { chunkPart } from '../world/lazyChunks';
+import type * as DodgemsModule from './dodgems/Dodgems';
+import type * as SpookyHouseModule from './spookyHouse/SpookyHouse';
+import type * as WaterFightModule from './waterFight/WaterFight';
+
+/**
+ * The three curtain games, each its own lazy chunk — fetched behind the closing
+ * curtain (`MiniGameHost.begin`), never at boot. A `LazyPart` rather than a bare
+ * `import()` for its timeout: a fetch that hangs becomes the curtain's existing
+ * failure path (it opens back onto the park) instead of a curtain held shut for
+ * ever.
+ */
+const DODGEMS = chunkPart<typeof DodgemsModule>('the dodgems', 'src/minigames/dodgems/Dodgems.ts', () => import('./dodgems/Dodgems'));
+const SPOOKY_HOUSE = chunkPart<typeof SpookyHouseModule>('the spooky house', 'src/minigames/spookyHouse/SpookyHouse.ts', () => import('./spookyHouse/SpookyHouse'));
+const WATER_FIGHT = chunkPart<typeof WaterFightModule>('the water fight', 'src/minigames/waterFight/WaterFight.ts', () => import('./waterFight/WaterFight'));
 import { STALL_PICK_RADIUS, STALL_PLACEMENTS, STALL_STANDS_BY_ID } from './stallPlacement';
 import type { StallDefinition } from './types';
 
@@ -95,7 +107,7 @@ function stallsNow(): readonly StallDefinition[] {
     // absolute direction everywhere on the map, not a direction relative to
     // wherever a child is walking from.
 
-    create: createSpookyHouse,
+    create: () => SPOOKY_HOUSE.load().then((m) => m.createSpookyHouse()),
   },
   {
     id: 'waterFight',
@@ -121,7 +133,7 @@ function stallsNow(): readonly StallDefinition[] {
     // path and the booth, so walking up is a straight line that never scrapes
     // along the side of it.
 
-    create: createWaterFight,
+    create: () => WATER_FIGHT.load().then((m) => m.createWaterFight()),
   },
   {
     id: 'spaceFerrisWheel',
@@ -162,7 +174,7 @@ function stallsNow(): readonly StallDefinition[] {
     // and the stand point in front of it ends up between the kiosk and the
     // ride's doorway rather than inside the rink.
 
-    create: createDodgems,
+    create: () => DODGEMS.load().then((m) => m.createDodgems()),
   },
   ];
 }

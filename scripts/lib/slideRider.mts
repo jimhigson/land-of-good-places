@@ -40,6 +40,8 @@ export async function slideRider(
   };
   await import('../headless-canvas.mjs');
   const { Scene } = await import('three');
+  // Every lazy room furnished up front, as the browser does on the way in.
+  await import('./eagerInteriors.mts');
   const { World } = await import('../../src/world/World.ts');
   const { Sky } = await import('../../src/world/Sky.ts');
   const { Player } = await import('../../src/entities/Player.ts');
