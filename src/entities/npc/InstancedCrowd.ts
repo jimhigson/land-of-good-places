@@ -1,5 +1,7 @@
 import {
   Color,
+  Frustum,
+  type Camera,
   Group,
   InstancedMesh,
   Matrix4,
@@ -56,6 +58,11 @@ import {
  *   bounds, so it can never be a frame behind them. `check:crowd-cull` holds
  *   both halves of that: nobody on screen culled, nobody off screen drawn.
  *
+ *   Then, immediately before a draw, `cullCrowdsFor` trims every part that
+ *   casts no shadow to the children whose own sphere touches that camera's
+ *   frustum — per child, so a child half over the edge is drawn whole. The
+ *   shadow-casting parts keep everybody (see {@link InstancedCrowd.cullTo}).
+ *
  *   The cost of packing is that **slot ≠ member**: an instance id from a
  *   raycast or `getMatrixAt` does not name a child. Nothing asks today; ask the
  *   crowd, not the buffer, if something ever needs to.
@@ -110,6 +117,12 @@ const ZERO_MATRIX = new Matrix4().makeScale(0, 0, 0);
 const scratchColour = new Color();
 const scratchMatrix = new Matrix4();
 const scratchSphere = new Sphere();
+const memberScratch = new Sphere();
+const cullSphere = new Sphere();
+const cullFrustum = new Frustum();
+const cullMatrix = new Matrix4();
+/** Every crowd not yet disposed — what {@link cullCrowdsFor} walks. */
+const LIVE_CROWDS = new Set<InstancedCrowd>();
 /**
  * Metres added to each part's packed bounding sphere. The sphere is exact for
  * the geometry as committed; this is slack for nothing in particular — no crowd
@@ -144,6 +157,10 @@ export class InstancedCrowd {
   private readonly slotMember = new Map<InstancedMesh, Int32Array>();
   /** A colour changed since the last flush, so every packed colour is rewritten. */
   private coloursDirty = true;
+  /** Each member's committed sphere in the crowd's frame: x, y, z, radius (-1: shows nothing). */
+  private readonly memberSphere: Float32Array;
+  /** Scratch for {@link cullTo}: whether each member is kept for this draw. */
+  private readonly keep: Uint8Array;
 
   constructor(prototype: Object3D, capacity: number, options: CrowdOptions) {
     this.capacity = capacity;
@@ -184,6 +201,9 @@ export class InstancedCrowd {
     this.committedChoice = new Int16Array(capacity * parts.length).fill(-1);
     this.committedMatrix = new Float32Array(capacity * parts.length * 16);
     this.colour = new Float32Array(capacity * parts.length * 3).fill(1);
+    this.memberSphere = new Float32Array(capacity * 4).fill(-1);
+    this.keep = new Uint8Array(capacity);
+    LIVE_CROWDS.add(this);
     this.partCount = parts.reduce((total, part) => total + part.variants.length, 0);
   }
 
@@ -256,56 +276,134 @@ export class InstancedCrowd {
    * Packs every part variant's buffer with the members wearing it, rebuilds its
    * bounding sphere from exactly those instances, and flags the upload. Call
    * once, after every `commit`.
+   *
+   * This alone is always correct to draw: every committed member is in. A
+   * renderer that then calls {@link cullTo} with the camera it is about to draw
+   * through gets the non-shadow parts trimmed to the children on screen.
    */
   flush(): void {
     if (!this.dirty) return;
     const partTotal = this.parts.length;
     const memberTotal = this.members.length;
-    const coloursDirty = this.coloursDirty;
+    // Each member's own sphere, in the crowd's frame: the union of its parts.
+    for (let m = 0; m < memberTotal; m += 1) {
+      let any = false;
+      for (let p = 0; p < partTotal; p += 1) {
+        const at = m * partTotal + p;
+        if (this.committedChoice[at]! < 0) continue;
+        const part = this.parts[p];
+        if (!part) continue;
+        scratchMatrix.fromArray(this.committedMatrix, at * 16);
+        scratchSphere.copy(geometrySphereOf(part.source)).applyMatrix4(scratchMatrix);
+        if (!any) memberScratch.copy(scratchSphere);
+        else memberScratch.union(scratchSphere);
+        any = true;
+      }
+      const o = m * 4;
+      this.memberSphere[o] = memberScratch.center.x;
+      this.memberSphere[o + 1] = memberScratch.center.y;
+      this.memberSphere[o + 2] = memberScratch.center.z;
+      this.memberSphere[o + 3] = any ? memberScratch.radius + BOUNDS_MARGIN : -1;
+    }
     for (let p = 0; p < partTotal; p += 1) {
       const part = this.parts[p];
       if (!part) continue;
-      const geometrySphere = part.source.geometry.boundingSphere ?? computeSphere(part.source);
-      for (let v = 0; v < part.variants.length; v += 1) {
-        const mesh = part.variants[v];
-        const slots = mesh ? this.slotMember.get(mesh) : undefined;
-        if (!mesh || !slots) continue;
-        const matrices = mesh.instanceMatrix.array as Float32Array;
-        const colours = mesh.instanceColor?.array as Float32Array | undefined;
-        const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
-        let count = 0;
-        let recoloured = false;
-        for (let m = 0; m < memberTotal; m += 1) {
-          const at = m * partTotal + p;
-          if (this.committedChoice[at] !== v) continue;
-          // Element by element: a `subarray` view here would allocate per instance per frame.
-          for (let e = 0; e < 16; e += 1) matrices[count * 16 + e] = this.committedMatrix[at * 16 + e]!;
-          if (colours && (coloursDirty || slots[count] !== m)) {
-            colours[count * 3] = this.colour[at * 3]!;
-            colours[count * 3 + 1] = this.colour[at * 3 + 1]!;
-            colours[count * 3 + 2] = this.colour[at * 3 + 2]!;
-            recoloured = true;
-          }
-          slots[count] = m;
-          scratchMatrix.fromArray(matrices, count * 16);
-          scratchSphere.copy(geometrySphere).applyMatrix4(scratchMatrix);
-          if (count === 0) sphere.copy(scratchSphere);
-          else sphere.union(scratchSphere);
-          count += 1;
-        }
-        if (count > 0) sphere.radius += BOUNDS_MARGIN;
-        else sphere.makeEmpty();
-        mesh.count = count;
-        mesh.visible = count > 0;
-        mesh.instanceMatrix.needsUpdate = true;
-        if (recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      }
+      for (let v = 0; v < part.variants.length; v += 1) this.pack(p, v, null);
     }
     this.coloursDirty = false;
     this.dirty = false;
   }
 
+  /**
+   * **Trims the crowd to the children `camera` can see**, for the draw about
+   * to happen through it. Call after `flush`, immediately before
+   * `renderer.render` — `cullCrowdsFor` is how `Game` does it.
+   *
+   * A child is kept whole if her own sphere (every part she shows, plus
+   * {@link BOUNDS_MARGIN}) touches the frustum, so a child half over the screen
+   * edge is drawn complete — culling is per child, never per part.
+   *
+   * **Shadow-casting parts are left alone.** The same buffer feeds the shadow
+   * pass, and a child just off the screen still throws her shadow onto it; the
+   * shadow camera is not the view camera and there is more than one shadow
+   * light (the sun, the castle's key). Those parts keep every member and their
+   * union sphere, which three.js culls per pass on its own.
+   */
+  cullTo(frustum: Frustum): void {
+    const memberTotal = this.members.length;
+    const toWorld = this.group.matrixWorld;
+    const scale = toWorld.getMaxScaleOnAxis();
+    for (let m = 0; m < memberTotal; m += 1) {
+      const o = m * 4;
+      const radius = this.memberSphere[o + 3]!;
+      if (radius < 0) {
+        this.keep[m] = 0;
+        continue;
+      }
+      cullSphere.center
+        .set(this.memberSphere[o]!, this.memberSphere[o + 1]!, this.memberSphere[o + 2]!)
+        .applyMatrix4(toWorld);
+      cullSphere.radius = radius * scale;
+      this.keep[m] = frustum.intersectsSphere(cullSphere) ? 1 : 0;
+    }
+    for (let p = 0; p < this.parts.length; p += 1) {
+      const part = this.parts[p];
+      if (!part) continue;
+      for (let v = 0; v < part.variants.length; v += 1) {
+        if (part.variants[v]?.castShadow) continue;
+        this.pack(p, v, this.keep);
+      }
+    }
+  }
+
+  /**
+   * Writes one part variant's buffer: the members wearing it (and, given
+   * `keep`, only those kept) into slots `0..count-1`, its bounding sphere the
+   * union of exactly those instances.
+   */
+  private pack(p: number, v: number, keep: Uint8Array | null): void {
+    const part = this.parts[p];
+    const mesh = part?.variants[v];
+    const slots = mesh ? this.slotMember.get(mesh) : undefined;
+    if (!part || !mesh || !slots) return;
+    const partTotal = this.parts.length;
+    const memberTotal = this.members.length;
+    const coloursDirty = this.coloursDirty;
+    const geometrySphere = geometrySphereOf(part.source);
+    const matrices = mesh.instanceMatrix.array as Float32Array;
+    const colours = mesh.instanceColor?.array as Float32Array | undefined;
+    const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
+    let count = 0;
+    let recoloured = false;
+    for (let m = 0; m < memberTotal; m += 1) {
+      const at = m * partTotal + p;
+      if (this.committedChoice[at] !== v) continue;
+      if (keep && !keep[m]) continue;
+      // Element by element: a `subarray` view here would allocate per instance per frame.
+      for (let e = 0; e < 16; e += 1) matrices[count * 16 + e] = this.committedMatrix[at * 16 + e]!;
+      if (colours && (coloursDirty || slots[count] !== m)) {
+        colours[count * 3] = this.colour[at * 3]!;
+        colours[count * 3 + 1] = this.colour[at * 3 + 1]!;
+        colours[count * 3 + 2] = this.colour[at * 3 + 2]!;
+        recoloured = true;
+      }
+      slots[count] = m;
+      scratchMatrix.fromArray(this.committedMatrix, at * 16);
+      scratchSphere.copy(geometrySphere).applyMatrix4(scratchMatrix);
+      if (count === 0) sphere.copy(scratchSphere);
+      else sphere.union(scratchSphere);
+      count += 1;
+    }
+    if (count > 0) sphere.radius += BOUNDS_MARGIN;
+    else sphere.makeEmpty();
+    mesh.count = count;
+    mesh.visible = count > 0;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
   dispose(): void {
+    LIVE_CROWDS.delete(this);
     for (const part of this.parts) {
       for (const variant of part.variants) variant.dispose();
     }
@@ -315,9 +413,38 @@ export class InstancedCrowd {
 // ------------------------------------------------------------------ helpers
 
 /** A prototype mesh's geometry sphere, computed once and cached on the geometry. */
-function computeSphere(source: Mesh): Sphere {
-  source.geometry.computeBoundingSphere();
-  return source.geometry.boundingSphere ?? new Sphere();
+function geometrySphereOf(source: Mesh): Sphere {
+  if (!source.geometry.boundingSphere) source.geometry.computeBoundingSphere();
+  return source.geometry.boundingSphere ?? EMPTY_SPHERE;
+}
+const EMPTY_SPHERE = new Sphere();
+
+/**
+ * **Trim every crowd drawn in `scene` to what `camera` sees** — call it
+ * immediately before `renderer.render(scene, camera)`, as `Game.render` does.
+ *
+ * Crowds in another scene (a preview, a mini-game) are left exactly as their
+ * own `flush` packed them, which is always correct to draw. A crowd whose
+ * `flush` has not run since its last `commit` is trimmed against its last
+ * flush, which is the buffer the renderer would upload anyway.
+ */
+export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
+  // Parents too: a ride's camera rides on something. Both of these repeat work
+  // `render` is about to do anyway, so they cannot disagree with it.
+  camera.updateWorldMatrix(true, false);
+  cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  cullFrustum.setFromProjectionMatrix(cullMatrix, camera.coordinateSystem, camera.reversedDepth);
+  for (const crowd of LIVE_CROWDS) {
+    if (rootOf(crowd.group) !== scene) continue;
+    crowd.group.updateWorldMatrix(true, false);
+    crowd.cullTo(cullFrustum);
+  }
+}
+
+function rootOf(object: Object3D): Object3D {
+  let root = object;
+  while (root.parent) root = root.parent;
+  return root;
 }
 
 /**

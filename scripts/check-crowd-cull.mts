@@ -3,7 +3,8 @@
  *
  * ```
  * pnpm run check:crowd-cull                     # part of check:crowd
- * pnpm run check:crowd-cull -- --mutate=stale   # prove the "nobody culled" half red
+ * pnpm run check:crowd-cull -- --mutate=centre  # prove the "nobody culled" half red (pop-in)
+ * pnpm run check:crowd-cull -- --mutate=stale   # … and again (bounds computed once)
  * pnpm run check:crowd-cull -- --mutate=uncull  # prove the "nobody wasted" half red
  * ```
  *
@@ -59,7 +60,7 @@ import {
 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
-import { InstancedCrowd } from '../src/entities/npc/InstancedCrowd.ts';
+import { InstancedCrowd, cullCrowdsFor } from '../src/entities/npc/InstancedCrowd.ts';
 import { CAMERA_ZOOM_MAX } from '../src/core/constants.ts';
 import { CASTLE_FLOORS } from '../src/world/building/floors.ts';
 import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
@@ -144,13 +145,14 @@ if (mutation === 'uncull') {
 }
 if (mutation === 'stale') {
   // The obvious wrong fix the class comment always warned about: culling on,
-  // with a bounding sphere computed once and never again.
+  // with a bounding sphere computed once and never again. Every read hands
+  // back a fresh copy of that first sphere, so nothing can update it.
   for (const crowd of crowds) {
     for (const part of insides(crowd).parts) {
       for (const mesh of part.variants) {
         mesh.frustumCulled = true;
-        mesh.computeBoundingSphere();
-        Object.defineProperty(mesh, 'boundingSphere', { value: mesh.boundingSphere, writable: false });
+        const stale = (mesh.boundingSphere ?? new Sphere()).clone();
+        Object.defineProperty(mesh, 'boundingSphere', { get: () => stale.clone(), set: () => {} });
       }
     }
   }
@@ -347,6 +349,25 @@ function frameOn(focus: Vector3, width: number, height: number, zoomedOut: boole
   else iso.snapZoomTarget(1);
   iso.snapTo(focus);
   iso.update(context, focus, zero);
+  // Exactly what `Game.render` does before it draws.
+  if (mutation !== 'uncull') cullForThisDraw();
+}
+
+/** `cullCrowdsFor`, or under `--mutate=centre` the classic pop-in bug: a child kept only if her middle is on screen. */
+function cullForThisDraw(): void {
+  if (mutation !== 'centre') {
+    cullCrowdsFor(scene, iso.camera);
+    return;
+  }
+  const real = Frustum.prototype.intersectsSphere;
+  Frustum.prototype.intersectsSphere = function (this: Frustum, sphere: Sphere): boolean {
+    return this.containsPoint(sphere.center);
+  };
+  try {
+    cullCrowdsFor(scene, iso.camera);
+  } finally {
+    Frustum.prototype.intersectsSphere = real;
+  }
 }
 
 const ASPECTS: readonly (readonly [string, number, number])[] = [
