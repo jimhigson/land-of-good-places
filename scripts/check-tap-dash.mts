@@ -135,6 +135,8 @@ interface Stride {
   ground: number;
   hop: number;
   speed: number;
+  /** How far her own speed carried her this stride: speed × the stride's time. */
+  step: number;
 }
 
 interface JourneyRun {
@@ -142,7 +144,10 @@ interface JourneyRun {
   readonly seconds: number;
   readonly restDistance: number;
   readonly maxSpeed: number;
+  /** The longest stride her own speed made (speed × stride time). */
   readonly maxStride: number;
+  /** The furthest she moved in one stride by any means — put-downs included. Reported, not asserted. */
+  readonly maxMoved: number;
   readonly maxStrides: number;
   readonly tunnels: number;
   readonly firstTunnel: string | null;
@@ -463,6 +468,7 @@ async function child(seed: number): Promise<void> {
         ground: body.groundHeight,
         hop: body.hopClearance,
         speed: Math.hypot(player.velocity.x, player.velocity.z),
+        step: (Math.hypot(player.velocity.x, player.velocity.z) * strides.lastMoveDt) / Math.max(1, strides.lastStrides),
       });
     };
     record();
@@ -546,11 +552,21 @@ async function child(seed: number): Promise<void> {
     let tunnels = 0;
     let firstTunnel: string | null = null;
     let maxStride = 0;
+    let maxMoved = 0;
     let maxSpeed = 0;
     for (let i = 1; i < trace.length; i += 1) {
       const a = trace[i - 1] as Stride;
       const b = trace[i] as Stride;
-      maxStride = Math.max(maxStride, Math.hypot(b.x - a.x, b.z - a.z));
+      // **The integration step, not the displacement.** What sub-stepping
+      // promises is that her own speed never carries her further than
+      // `PLAYER_LONGEST_STEP` in one `Player.update`. Her displacement can
+      // exceed that legitimately: squeezed at the tip of two knee-high walls,
+      // `nearestFit` sets her down at the nearest place she fits — 0.98 m in
+      // one stride on seed 9 (main, 12 Nov), on a stride her speed moved 0.45
+      // m. Where she ends up is the tunnel sweep's question, asked below of
+      // every stride whatever moved her.
+      maxStride = Math.max(maxStride, b.step);
+      maxMoved = Math.max(maxMoved, Math.hypot(b.x - a.x, b.z - a.z));
       maxSpeed = Math.max(maxSpeed, b.speed);
       const hit = tunnelAt(a, b);
       if (debugAt && Math.hypot(b.x - debugAt[0], b.z - debugAt[1]) < 1.5) {
@@ -570,6 +586,7 @@ async function child(seed: number): Promise<void> {
       restDistance,
       maxSpeed,
       maxStride,
+      maxMoved,
       maxStrides,
       tunnels,
       firstTunnel,
@@ -645,7 +662,7 @@ async function child(seed: number): Promise<void> {
     const x = across.from.x + ((across.to.x - across.from.x) * d) / acrossMetres;
     const z = across.from.z + ((across.to.z - across.from.z) * d) / acrossMetres;
     const ground = terrainHeight(x, z);
-    straight.push({ x, y: ground, z, ground, hop: 0, speed: 0 });
+    straight.push({ x, y: ground, z, ground, hop: 0, speed: 0, step: 0 });
   }
   let controlTunnels = 0;
   for (let i = 1; i < straight.length; i += 1) {
@@ -787,7 +804,7 @@ async function parent(): Promise<void> {
       const { dash, walk } = journey;
       const label = `${journey.metres.toFixed(1)} m at dt 1/${Math.round(1 / journey.dt)}`;
       console.log(
-        `   ${journey.metres.toFixed(1).padStart(7)} m 1/${String(Math.round(1 / journey.dt)).padEnd(3)} ${journey.cruise.toFixed(2).padStart(6)}x ${dashSeconds(journey.metres).toFixed(2).padStart(7)} s ${dash.seconds.toFixed(2).padStart(6)} ${walk.seconds.toFixed(2).padStart(7)} ${dash.restDistance.toFixed(2).padStart(8)}/${walk.restDistance.toFixed(2)} ${dash.maxStride.toFixed(2).padStart(9)} m ${String(dash.maxStrides).padStart(5)}`,
+        `   ${journey.metres.toFixed(1).padStart(7)} m 1/${String(Math.round(1 / journey.dt)).padEnd(3)} ${journey.cruise.toFixed(2).padStart(6)}x ${dashSeconds(journey.metres).toFixed(2).padStart(7)} s ${dash.seconds.toFixed(2).padStart(6)} ${walk.seconds.toFixed(2).padStart(7)} ${dash.restDistance.toFixed(2).padStart(8)}/${walk.restDistance.toFixed(2)} ${dash.maxStride.toFixed(2).padStart(9)} m (moved ${dash.maxMoved.toFixed(2)}) ${String(dash.maxStrides).padStart(5)}`,
       );
       if (journey.metres <= DASH_THRESHOLD_METRES) {
         shortCount += 1;
