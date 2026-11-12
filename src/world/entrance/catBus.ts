@@ -1992,9 +1992,11 @@ export function createCatBus(): CatBusHandle {
       passengerSeat = seat;
     }
   }
-  // Across the gangway from hers, in her row.
-  const companionSeat =
-    seats.find((seat) => seat !== passengerSeat && Math.abs(seat.position.z - passengerSeat.position.z) < 1e-6) ?? (seats[1] as Group);
+  // Across the gangway from hers, in her row — never hers: with no seat
+  // beside hers the bus is built wrong, and saying so beats seating her
+  // companion in her lap.
+  const companionSeat = seats.find((seat) => seat !== passengerSeat && Math.abs(seat.position.z - passengerSeat.position.z) < 1e-6);
+  if (!companionSeat) throw new Error('createCatBus: no seat across the gangway from hers for her companion');
 
   // --- tiger stripes ---------------------------------------------------------
   // **One pass, one owner of the drape's parameters.** Every striped mesh's UVs
