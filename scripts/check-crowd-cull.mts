@@ -69,6 +69,21 @@ InstancedCrowd.prototype.flush = function (this: InstancedCrowd): void {
   realFlush.call(this);
 };
 
+/**
+ * What each member showed at its last `commit`, per part (-1 for nothing) —
+ * recorded by watching `commit`, so "what should be drawn" is what was last
+ * committed and never the buffer. A member never committed is drawn by nobody
+ * (a banquet diner on a storey nobody has visited yet), and is not expected.
+ */
+const committed = new WeakMap<object, Int16Array>();
+const realCommit = InstancedCrowd.prototype.commit;
+InstancedCrowd.prototype.commit = function (this: InstancedCrowd, member): void {
+  realCommit.call(this, member);
+  const choice = committed.get(member) ?? new Int16Array(member.proxies.length);
+  for (let p = 0; p < member.proxies.length; p += 1) choice[p] = member.shown[p] ? member.variant[p]! : -1;
+  committed.set(member, choice);
+};
+
 /** The fields this check reads; present before and after step 4. */
 interface CrowdInsides {
   readonly parts: readonly { readonly source: { geometry: import('three').BufferGeometry }; readonly variants: readonly InstancedMesh[] }[];
@@ -211,10 +226,13 @@ function measure(label: string, kind: 'park' | 'interior'): void {
   for (const crowd of crowds) {
     const { parts, members } = insides(crowd);
     for (const member of members) {
+      const choice = committed.get(member);
+      if (!choice) continue;
       for (let p = 0; p < parts.length; p += 1) {
-        if (!member.shown[p]) continue;
+        const chosen = choice[p]!;
+        if (chosen < 0) continue;
         const part = parts[p]!;
-        const mesh = part.variants[member.variant[p]!];
+        const mesh = part.variants[chosen];
         const proxy = member.proxies[p];
         if (!mesh || !proxy || !visibleChain(mesh)) continue;
         const geometry = part.source.geometry;
