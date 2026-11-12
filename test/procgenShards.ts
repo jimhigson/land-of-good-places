@@ -95,6 +95,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/library/pageCurl.test.ts',
     'test/library/big-reader.test.ts',
     'test/library/chapter-books.test.ts',
+    'test/library/faces-on-heads.test.ts',
   ],
 ];
 

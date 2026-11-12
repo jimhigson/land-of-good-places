@@ -27,6 +27,14 @@ import { glowTexture } from '../../core/textures';
  * construction, a puff reuses the oldest slot, and nothing is `new`'d per
  * puff or per frame. Sprites live in `parent`'s coordinates.
  */
+/** How long a puffed sprite lives, seconds, and how fast it rises, m/s — so a speaker can hang its bubble clear of the whole rise ({@link PUFF_RISE}). */
+export const PUFF_LIFE = 1.2;
+export const PUFF_RISE_SPEED = 0.8;
+/** How far a puffed sprite's middle rises over its life, metres. */
+export const PUFF_RISE = PUFF_LIFE * PUFF_RISE_SPEED;
+/** The smallest a sprite gets, as a share of its puff's scale (at the end of its life). */
+export const PUFF_END_SCALE = 0.6;
+
 export class SpritePuffs {
   private readonly pool: Sprite[] = [];
   private readonly life: number[] = [];
@@ -58,7 +66,7 @@ export class SpritePuffs {
       const sprite = this.pool[index]!;
       sprite.position.set(x + rng.range(-0.3, 0.3), y, z + rng.range(-0.3, 0.3));
       sprite.visible = true;
-      this.life[index] = 1.2;
+      this.life[index] = PUFF_LIFE;
     }
   }
 
@@ -69,9 +77,9 @@ export class SpritePuffs {
       if (life <= 0) return;
       const remaining = Math.max(0, life - dt);
       this.life[index] = remaining;
-      sprite.position.y += dt * 0.8;
-      sprite.scale.setScalar(this.scale * (0.6 + remaining / 1.2));
-      (sprite.material as SpriteMaterial).opacity = remaining / 1.2;
+      sprite.position.y += dt * PUFF_RISE_SPEED;
+      sprite.scale.setScalar(this.scale * (PUFF_END_SCALE + remaining / PUFF_LIFE));
+      (sprite.material as SpriteMaterial).opacity = remaining / PUFF_LIFE;
       sprite.visible = remaining > 0;
     });
   }

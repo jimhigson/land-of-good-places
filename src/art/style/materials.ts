@@ -284,6 +284,11 @@ function addOutlineFromGeometry(
   return outline;
 }
 
+/** Is this mesh an ink outline — an inverted hull, drawn back-faced in a basic material ({@link addOutline})? */
+export function isOutlineMesh(mesh: Mesh): boolean {
+  return mesh.material instanceof MeshBasicMaterial && mesh.material.side === BackSide;
+}
+
 /** Marks a mesh as a solid, shadow-casting part of the world. */
 export function solid<T extends Mesh>(mesh: T): T {
   mesh.castShadow = true;

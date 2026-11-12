@@ -682,6 +682,11 @@ let readingFrames = 0;
 let readingBubbleFrames = 0;
 let readingChipFrames = 0;
 let readingBothFrames = 0;
+/** The den's creatures (#719): the cat petted and the dragon said hi to, each answering in the creatures' bubble. */
+let catPetted = false;
+/** Frames the cat's purr was drawn after the first pet, with the owl's invitation still standing. */
+let purrDrawnFrames = 0;
+let dragonGreeted = false;
 /** The call, said from her desk before she flies: the frames she spoke it, and the frames her bubble was drawn. */
 let callSpeakingFrames = 0;
 let callBubbleFrames = 0;
@@ -701,6 +706,20 @@ let storyShotBothFrames = 0;
   const owl = zones.find((zone) => zone.id === OWL_ZONE_ID);
   const firstRead = zones.find((zone) => zone.id.startsWith('library-book:'));
   const cushion = zones.find((zone) => zone.id.startsWith('library-sit:'));
+  // The cat first, before the owl has given her a card: the owl's invitation
+  // is up beside her desk, and the cat's purr, the answer to a press, must
+  // still be drawn (PR #739's QA: on a phone the incumbent invitation held it
+  // off the screen) — the owl's one-liner gives way to a press.
+  const firstCat = zones.find((zone) => zone.id === 'library-cat');
+  if (firstCat) {
+    const before = world.library.lastCreatureLine;
+    if (visit(firstCat, true, 0)) {
+      for (let i = 0; i < Math.round(2 / DT); i += 1) {
+        step();
+        if (world.library.lastCreatureLine !== before && isDrawn(world.library.creatureBubble)) purrDrawnFrames += 1;
+      }
+    }
+  }
   if (owl) {
     // Each visit is asked what it was for, not only whether her chip was up: a press mid-script does
     // nothing, so the card's visit lasts as long as her four card lines take to say (`lineSeconds`, the
@@ -761,6 +780,22 @@ let storyShotBothFrames = 0;
   for (let i = 0; i < Math.round(30 / DT); i += 1) storyFrame();
   quietly(() => world.library.standUp());
   run(0.5);
+  // The den's creatures (#719): the cat by the desk, petted; then the secret
+  // shelf opened and the baby dragon said hi to — each answer in the
+  // creatures' bubble, laid out with everything else up in the room.
+  const creatureZone = (id: string): InteractZone | undefined => world.library.interactZones().find((zone) => zone.id === id);
+  const catZone = creatureZone('library-cat');
+  if (catZone) {
+    const before = world.library.lastCreatureLine;
+    catPetted = visit(catZone, true, 3) && world.library.lastCreatureLine !== before;
+  }
+  quietly(() => world.library.openDenInstantly());
+  run(1);
+  const dragonZone = creatureZone('library-dragon');
+  if (dragonZone) {
+    const before = world.library.lastCreatureLine;
+    dragonGreeted = visit(dragonZone, true, 3) && world.library.lastCreatureLine !== before;
+  }
 }
 
 // --- the verdict ---------------------------------------------------------------------------
@@ -783,7 +818,8 @@ process.stderr.write(
     `her call drawn on ${callBubbleFrames} of the ${callSpeakingFrames} frames she said it at her desk; she spoke on ${wingSpeakingFrames} frames on the wing; ` +
     `the owl's glance at her book held the camera on ${glanceFrames} frames, a chip drawn on ${glanceChipFrames} of them; ` +
     `story time's camera held over her shoulder on ${storyShotFrames} frames of the reading, her bubble and the Get up chip both drawn on ${storyShotBothFrames}; ` +
-    `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it. ` +
+    `the line naming her book drawn on ${namingDrawnFrames} of the ${namingFrames} frames she said it; ` +
+    `the cat's purr drawn on ${purrDrawnFrames} frames past the owl's invitation; the cat ${catPetted ? 'petted' : 'NOT petted'} and the baby dragon ${dragonGreeted ? 'said hi to' : 'NOT said hi to'}. ` +
     `${coverage.instrumentChecks} drawn rectangles measured twice.\n` +
     `  The chip row's size is a layout model (Node has no layout) — see chipRowModel.\n`,
 );
@@ -817,6 +853,11 @@ if (glanceChipFrames > 0) {
   );
 }
 if (!libraryRead) coverageGaps.push("no library shelf book's chip was ever up");
+if (purrDrawnFrames === 0) {
+  fail('C precedence', "the cat's purr was never drawn after her first pet with the owl's invitation up — a child pets the cat and sees no answer");
+}
+if (!catPetted) coverageGaps.push('the library cat was never selected and petted (no answer in the creatures\' bubble)');
+if (!dragonGreeted) coverageGaps.push('the baby dragon in the den was never selected and said hi to (no answer in the creatures\' bubble)');
 if (!seatedForStory) coverageGaps.push('she never sat on a story cushion for story time');
 if (storyFrames === 0) coverageGaps.push('library story time never ran');
 if (readingFrames === 0) coverageGaps.push('library story time never reached its reading');

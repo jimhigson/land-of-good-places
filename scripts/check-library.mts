@@ -24,6 +24,16 @@
  * LIBRARY_CHECK_MUTATE=tap-loses pnpm run check:library      # a tap dropped while proximity holds anything else (before #734): SHELF WALK's taps must go red
  * LIBRARY_CHECK_MUTATE=no-glance pnpm run check:library      # the owl's glance at her book never wired (main before it): FOUND FROM THE DESK must go red, book by book
  * LIBRARY_CHECK_MUTATE=glance-stays pnpm run check:library   # the glance's focus kept after it lets go: RECOMMEND's "the camera comes home" must go red
+ * LIBRARY_CHECK_MUTATE=seal-den pnpm run check:library        # a wall across the doorway once the leaf has landed: SECRET SHELF's open fills must go red
+ * LIBRARY_CHECK_MUTATE=open-leaf-hollow pnpm run check:library  # the open leaf's collider out once it has landed: its middle is reachable, must go red
+ * LIBRARY_CHECK_REMOVE='dragon' pnpm run check:library        # the baby dragon and its nest not solid: CREATURES must go red
+ * LIBRARY_CHECK_REMOVE='cat' pnpm run check:library           # the library cat and her pile not solid: CREATURES must go red
+ * LIBRARY_CHECK_REMOVE='the baby dragon' pnpm run check:library  # the dragon alone not solid, its nest still there: CREATURES must go red
+ * LIBRARY_CHECK_REMOVE='the library cat' pnpm run check:library  # the cat alone not solid, her pile still there: CREATURES must go red
+ * LIBRARY_CHECK_MUTATE=wide-creature-tops pnpm run check:library  # the dragon's and the cat's tops made whole: a jump lands her on one, must go red
+ * LIBRARY_CHECK_REMOVE='den wall (north)' pnpm run check:library  # the den's north wall's body out: THE DEN, DRAWN and DEN WALLS must go red
+ * LIBRARY_CHECK_MUTATE=undrawn-den-wall pnpm run check:library  # the Artist's north wall taken out of the drawn den: THE DEN, DRAWN must go red
+ * LIBRARY_CHECK_MUTATE=resident-in-den pnpm run check:library  # a waypoint at the den's middle in a child's circuit: KIDS' den avoidance must go red
  * LIBRARY_CHECK_MUTATE=no-story-camera pnpm run check:library      # story time's camera never wired (main before it): STORY CAMERA must go red
  * LIBRARY_CHECK_MUTATE=story-camera-stays pnpm run check:library   # its focus kept after it lets go: STORY CAMERA's "home" must go red
  * LIBRARY_CHECK_MUTATE=story-camera-low pnpm run check:library     # an eye straight behind her at 2.5 m: STORY CAMERA's occlusion must go red (the control)
@@ -65,9 +75,13 @@
  *     past the corner rounding its capsules leave. Every box is the **model's**
  *     drawn footprint (`libraryAssets.ts`), never the collider's own. Then
  *     DEN WALLS — bodies in the den marched at its three walls never leave it
- *     but by its doorway — and LINTEL — a flier over the shut secret shelf
- *     stops at the lintel, at every height, and with the shelf's colliders out
- *     a walker passes under it.
+ *     but by its doorway — THE DEN, DRAWN — the den is the Artist's Blender
+ *     kit, every drawn wall stands on its body (solid just behind its drawn
+ *     face, clear just in front), the lintel inside its band, the floor slab
+ *     the room's paint and under her feet, every niche book behind a wall's
+ *     face and the lanterns out of every reach — and LINTEL — a flier over the
+ *     shut secret shelf stops at the lintel, at every height, and with the
+ *     shelf's colliders out a walker passes under it.
  *  6. LANDING — her feet, asked the way `Player` asks them
  *     (`world/standing.ts`), find every solid's top under them everywhere
  *     across its drawn footprint (the chairs, the desk, the bins, the
@@ -134,6 +148,34 @@
  *     and E opens it, and a sway midway between two stands never changes the
  *     selection (no flicker). Its three mutations put back each half of the
  *     old rule.
+ * 18. SECRET SHELF, GUARD, FRESH VISIT (#719, plan Step 12) — the real child
+ *     presses **Pull the book!** at the pull stand: the gold book slides out,
+ *     the leaf swings monotonically to π/2 in 1.8–2.0 s with the shut
+ *     collider holding to the last frame, and open, the fill reaches every
+ *     keep-out (the den's included) with zero pockets, the den is leavable, the
+ *     open leaf is solid and landable, the walls hold in room ∪ den, a walker
+ *     passes under the lintel, the swing sweeps no other solid, and the west
+ *     wall and the leaf fade while she is in the den. Found in the den with the
+ *     leaf shut, the guard opens it in one frame; a link into the den opens it
+ *     in the same call; and out through the door and back in from the park,
+ *     the leaf is shut and the den sealed again.
+ * 19. CREATURES (#719, plan Step 13) — the baby dragon on its nest of books
+ *     and the library cat on her pile: four bodies, each in its own shape,
+ *     every drawn point of each inside its body at rest and on every frame of
+ *     its life; the dragon's and the cat's tops too narrow for her feet; their
+ *     middles unreached and each marched at from sixteen bearings (the nest
+ *     and the pile from the floor, the dragon and the cat from up on them);
+ *     and the real child's jumps at both, standing by and from a sprint,
+ *     never stand her on either, never wedge her and never leave her in the
+ *     air. The Dragon friend card on meeting it, with a control; its hello,
+ *     then "Hello again" on a visit after; Say hi's answers and one discovery;
+ *     the idle puff (with a vacuity guard), the belly's glow up and back, the
+ *     warm sprites, and the head turning to her side. The cat: Pet the cat!
+ *     twitches her ears, lifts her face, makes her happy and then asleep,
+ *     purrs, and a second press inside the guard changes nothing.
+ * 20. THE DEN AT STORY TIME (#719, the join) — a story called with her in the
+ *     den is read to its end and the clock counts there; a jump and a sprint
+ *     in the den never get a "Shhh!" (CONTROL: the same jump in the room does).
  *
  * **One seed, and why that is the whole of it.** The reading room stands at its
  * own origin, built from `layout.ts`'s tables and the kit's meshes, and nothing
@@ -146,18 +188,36 @@
  * Coverage notes go to stderr, so a passing run says what it measured.
  */
 import './headless-canvas.mjs';
-import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshToonMaterial, Raycaster, Sphere, SphereGeometry, Triangle, Vector2, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Side, type Texture } from 'three';
+import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshToonMaterial, Raycaster, Sphere, SphereGeometry, Sprite, Triangle, Vector2, Vector3, type BufferAttribute, type Light, type Material, type Object3D, type Side, type SpriteMaterial, type Texture } from 'three';
+import { isOutlineMesh } from '../src/art/style/materials.ts';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { Player } from '../src/entities/Player.ts';
+import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
+import { LIBRARY_DEN_LANTERN_NODES, LIBRARY_DEN_ROOM_NODES, libraryDenPart } from '../src/art/models/libraryDenKit.ts';
 import type { WornHat } from '../src/entities/WornHat.ts';
 import { defaultCharacterChoice } from '../src/ui/CharacterCreation.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { saveFlags } from '../src/state/flags.ts';
-import { CollisionWorld, JUMP_CLEARANCE_GRACE } from '../src/world/Collision.ts';
+import { CollisionWorld, JUMP_CLEARANCE_GRACE, type BoxCollider } from '../src/world/Collision.ts';
+import { FOOT_HALF_WIDTH } from '../src/world/measuredTop.ts';
+import { WEDGE_DEPTH, wedgeDepth } from '../src/world/standing.ts';
+import { DRAGON_BELLY_REST_GLOW } from '../src/art/models/libraryCreatures.ts';
+import {
+  DRAGON_FRIEND_SECRET,
+  DRAGON_HEAD_TURN_LIMIT,
+  DRAGON_LOOK_RADIUS,
+  DRAGON_MEET_RADIUS,
+  DRAGON_NEST_SOLID,
+  DRAGON_PUFF_GLOW,
+  DRAGON_PUFF_SECONDS,
+  DRAGON_SOLID,
+  DRAGON_ZONE_ID,
+} from '../src/world/library/LibraryDen.ts';
+import { CAT_PILE_SOLID, CAT_SOLID, CAT_ZONE_ID, PET_GUARD_SECONDS, PET_SECONDS } from '../src/world/library/LibraryCat.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { standingAt, walkableAt } from './lib/standable.mts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS, BUILDING_STEP_UP, PLAYER_DECELERATION, PLAYER_MAX_SPEED, NPC_RADIUS } from '../src/core/constants.ts';
 import { PALETTE } from '../src/core/palette.ts';
+import { glowTexture } from '../src/core/textures.ts';
 import { KID_REACH_HEIGHT } from '../src/art/models/kid.ts';
 import { BLINK_DURATION } from '../src/art/style/faceLife.ts';
 import { gameStore, type CuteThing } from '../src/state/index.ts';
@@ -212,7 +272,9 @@ import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/libr
 import { SHELF_BOOK_ZONE_PREFIX, SHELF_BOOKS, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
 import { Selection } from '../src/world/Selection.ts';
 import { InteractRouter } from '../src/world/InteractRouter.ts';
-import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/shell.ts';
+import { buildLibraryDenShell, buildReadingRoomShell, libraryDenGap, LIBRARY_SECRET_BOOK_ZONE } from '../src/world/library/shell.ts';
+import { SECRET_LEAF_OPEN, SLIDE, SLIDE_SECONDS, SWING_END, SWING_SECONDS, TWINKLE_PERIOD } from '../src/world/library/secretShelf.ts';
+import { ART } from '../src/art/style/artPalette.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
 import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
 import {
@@ -237,11 +299,16 @@ import {
   LIBRARY_AISLES,
   LIBRARY_ARRIVAL,
   LIBRARY_BOOKCASES,
+  LIBRARY_CAT_PILE,
+  LIBRARY_CAT_STAND,
   LIBRARY_DEN_DOOR_HALF,
+  LIBRARY_DEN_DOORWAY_STAND,
   LIBRARY_DEN_INNER,
   LIBRARY_DESK_STAND,
   LIBRARY_DOOR_HALF,
   LIBRARY_DOOR_X,
+  LIBRARY_DRAGON_NEST,
+  LIBRARY_DRAGON_STAND,
   LIBRARY_FLOOR_Y,
   LIBRARY_FURNITURE,
   LIBRARY_HALF_X,
@@ -254,8 +321,10 @@ import {
   LIBRARY_ORIGIN_Z,
   LIBRARY_PLAYER_SEATS,
   LIBRARY_READABLE_SLOTS,
+  LIBRARY_SECRET_BOOK,
   LIBRARY_SECRET_BOOKCASE,
   LIBRARY_STORY_CHAIR,
+  LIBRARY_SECRET_STAND,
   LIBRARY_WALL_HALF,
   libraryCushion,
   libraryFacingStoryChair,
@@ -269,7 +338,8 @@ import {
 } from '../src/world/library/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
 import { LIBRARY_CHIPS, LIBRARY_LINES } from '../src/world/library/libraryLines.ts';
-import { PRIMARY_ACTION, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
+import { PRIMARY_ACTION, reachDistance, standRadiusOf, type InteractZone, type ZoneAction } from '../src/world/interact.ts';
+import { ARRIVE_RADIUS } from '../src/entities/TapNavigator.ts';
 import { FLOOR_TOLERANCE, SEAT_TOLERANCE, seatedErrors } from './lib/seatedPose.mts';
 
 const OX = LIBRARY_ORIGIN_X;
@@ -307,7 +377,14 @@ const note = (line: string): void => {
  * A clause arms its mutation by asking {@link mutating}.
  *
  * `block-walk` is the real child's own (the WITH A REAL CHILD harness clause,
- * added with the harness); the rest are the plan's (Steps 3-14).
+ * added with the harness); `wide-creature-tops` is CREATURES' (#719, plan
+ * Step 13 on the engine: the dragon's and the cat's measured narrow tops made
+ * whole, so the real child's jumps must land her on them — the control that
+ * the jump sweep can see a child standing on a creature at all);
+ * `undrawn-den-wall` is THE DEN, DRAWN's (#719, the den from the Artist's
+ * kit: the drawn north wall taken out of the den, its body left, so the clause
+ * that holds every drawn wall to its body must see one missing); the rest are
+ * the plan's (Steps 3-14).
  */
 const MUTATIONS = [
   '',
@@ -327,6 +404,8 @@ const MUTATIONS = [
   'tap-loses',
   'no-glance',
   'glance-stays',
+  'wide-creature-tops',
+  'undrawn-den-wall',
   'no-story-camera',
   'story-camera-stays',
   'story-camera-low',
@@ -514,7 +593,7 @@ console.log('CONTROL — the fill instrument:');
   const control = new CollisionWorld();
   const controlSurfaces = new WalkSurfaces();
   const shell = buildReadingRoomShell(new Group(), control, controlSurfaces);
-  buildLibraryDenShell(new Group(), new LibraryProps(control, OX, OZ), controlSurfaces, shell.fabric);
+  buildLibraryDenShell(new Group(), new LibraryProps(control, OX, OZ), control, controlSurfaces, shell);
   // A pen: four walls round an empty square, the one kind of sealed pocket
   // there can be now a rectangle is a filled box.
   for (const [ax, az, bx, bz] of [
@@ -797,7 +876,17 @@ console.log("\nDEN WALLS — bodies in the secret den, marched at its three wall
   let marches = 0;
   let escaped = 0;
   const deepest = headings.map(() => -Infinity);
+  // The baby dragon on its nest (#719, plan Step 13) fills the den's far
+  // corner: a grid spot whose body would stand in one of those two solids is
+  // set apart by name, never by a rectangle of this clause's own — and only
+  // those; a body that cannot stand anywhere else still fails.
+  const creatureSolids = library.solids.filter((solid) => solid.what === DRAGON_SOLID || solid.what === DRAGON_NEST_SOLID);
+  const underCreatures: string[] = [];
   for (const body of bodies) {
+    if (libraryDenContains(body.x, body.z) && creatureSolids.some((solid) => depthInSolid(solid, body) > -PLAYER_RADIUS)) {
+      underCreatures.push(`(${body.x.toFixed(2)}, ${body.z.toFixed(2)})`);
+      continue;
+    }
     if (!libraryDenContains(body.x, body.z) || !collision.isClearCircle(OX + body.x, OZ + body.z, PLAYER_RADIUS)) {
       say(false, `a body could not be stood in the den at (${body.x.toFixed(2)}, ${body.z.toFixed(2)}) — nothing is measured from there`);
       continue;
@@ -819,8 +908,9 @@ console.log("\nDEN WALLS — bodies in the secret den, marched at its three wall
     }
   }
   say(
-    placed === bodies.length && escaped === 0,
-    `${placed} of ${bodies.length} bodies stood in the den, ${marches} marches (${headings.length} headings, 5 cm and the sprint stride): ${escaped} ended outside the den and the room`,
+    placed === bodies.length - underCreatures.length && underCreatures.length <= 2 && creatureSolids.length === 2 && escaped === 0,
+    `${placed} of ${bodies.length} bodies stood in the den (${underCreatures.length} spot(s) under the baby dragon and its nest set apart, at most 2: ${underCreatures.join(' ') || 'none'}), ` +
+      `${marches} marches (${headings.length} headings, 5 cm and the sprint stride): ${escaped} ended outside the den and the room`,
   );
   // Against each wall's drawn inner face: no deeper than the resolver's slack,
   // and some body got within 5 cm of it — so each heading measured its wall,
@@ -831,6 +921,298 @@ console.log("\nDEN WALLS — bodies in the secret den, marched at its three wall
       `(at most ${RESOLVER_SLACK}, and some body within 0.05 of every face)`,
   );
   note(`the den's floor x ${x0.toFixed(2)}..${x1.toFixed(2)}, z ${z0.toFixed(2)}..${z1.toFixed(2)} (body centres); its walls' inner faces x ${inner.west.toFixed(2)}, z ${inner.north.toFixed(2)} and ${inner.south.toFixed(2)}`);
+}
+
+/**
+ * **THE DEN, DRAWN** (#719, the den from the Artist's Blender kit) — what is
+ * drawn of the den is `libraryDen.glb`'s, and it stands on its bodies:
+ *
+ * - every mesh of the drawn den, and the lintel hung in the west wall, is a
+ *   node of the kit (its own geometry, not a copy, not a primitive), its ink
+ *   outline, or the niche books;
+ * - each of the three walls, measured off its own mesh in the room: its face
+ *   to the den is the layout's inner face, and at stations along it a point
+ *   just behind the drawn face is solid and one just in front is clear — the
+ *   wall is where it is drawn, and drawn where it is;
+ * - the lintel's drawn box lies inside its body's band and plan;
+ * - the floor slab's top is the room's floor, its paint the room floor's own
+ *   (LIGHT measures the den's floor with that paint), and her feet find it
+ *   all across the den;
+ * - every niche book stands behind a far wall's drawn face, none in the open
+ *   den; the lanterns hang over her head at the top of her highest jump, and
+ *   nothing in the den is a light.
+ *
+ * `LIBRARY_CHECK_REMOVE='den wall (north)'` takes the north wall's body out
+ * (the drawn wall stands on nothing); `LIBRARY_CHECK_MUTATE=undrawn-den-wall`
+ * takes the drawn north wall out of the den (the body stands for nothing).
+ */
+console.log("\nTHE DEN, DRAWN — the Artist's den, every drawn wall on its body, the lintel in its band, the floor under her feet, the books in the walls, the lanterns out of reach:");
+{
+  const shellOfDen = library.denShell;
+  const model = shellOfDen.model;
+  if (mutating('undrawn-den-wall')) {
+    model.walls.north.removeFromParent();
+    note("TOOK the Artist's drawn north wall out of the den, its body left, on purpose — this run must go red");
+  }
+  library.roomRoot.updateMatrixWorld(true);
+  // Every mesh drawn for the den is the kit's own.
+  const kitNodes = new Set<string>([...LIBRARY_DEN_ROOM_NODES, ...LIBRARY_DEN_LANTERN_NODES]);
+  let kitMeshes = 0;
+  let outlines = 0;
+  const strangers: string[] = [];
+  const drawnOf = new Map<string, Mesh>();
+  /** How many times each kit node is drawn — the room's once each, the lantern's once per lantern. */
+  const timesDrawn = new Map<string, number>();
+  for (const root of [model.root, model.lintel]) {
+    root.traverse((part) => {
+      if (!(part instanceof Mesh)) return;
+      if (part === shellOfDen.books) return;
+      if (isOutlineMesh(part)) {
+        outlines += 1;
+        return;
+      }
+      if (kitNodes.has(part.name) && part.geometry === libraryDenPart(part.name).geometry) {
+        kitMeshes += 1;
+        timesDrawn.set(part.name, (timesDrawn.get(part.name) ?? 0) + 1);
+        if (!drawnOf.has(part.name)) drawnOf.set(part.name, part);
+        return;
+      }
+      strangers.push(part.name || '(unnamed)');
+    });
+  }
+  say(
+    strangers.length === 0 && kitMeshes >= LIBRARY_DEN_ROOM_NODES.length && model.lintel.parent === library.westWall,
+    `the den is drawn from the Artist's kit: ${kitMeshes} meshes, each a libraryDen.glb node's own geometry (${LIBRARY_DEN_ROOM_NODES.length} room nodes, ${shellOfDen.lanterns.length} lanterns), ` +
+      `${outlines} ink outline(s), the niche books, and ${strangers.length} anything else${strangers.length > 0 ? ` (${strangers.slice(0, 4).join(', ')})` : ''}; ` +
+      `the lintel hangs in the west wall's group (${model.lintel.parent === library.westWall})`,
+  );
+
+  // Every room node drawn exactly once, and both lantern nodes once per
+  // lantern — counted off the drawn den, never the constant lists.
+  const roomCounts = LIBRARY_DEN_ROOM_NODES.map((name) => `${name} ${timesDrawn.get(name) ?? 0}`);
+  const roomWrong = LIBRARY_DEN_ROOM_NODES.filter((name) => timesDrawn.get(name) !== 1);
+  const lanternCounts = LIBRARY_DEN_LANTERN_NODES.map((name) => `${name} ${timesDrawn.get(name) ?? 0}`);
+  const lanternWrong = LIBRARY_DEN_LANTERN_NODES.filter((name) => timesDrawn.get(name) !== shellOfDen.lanterns.length);
+  say(
+    roomWrong.length === 0 && lanternWrong.length === 0 && shellOfDen.lanterns.length === 2,
+    `every node of the den kit is drawn as often as it should be, counted off the drawn den: room nodes once each (${roomCounts.join(', ')}), ` +
+      `lantern nodes once per lantern for ${shellOfDen.lanterns.length} lanterns (${lanternCounts.join(', ')})` +
+      (roomWrong.length + lanternWrong.length > 0 ? ` — WRONG: ${[...roomWrong, ...lanternWrong].join(', ')}` : ''),
+  );
+  // Seen: visible all the way up to the den's root (the lintel to the west
+  // wall's group, which it hangs in), and the south wall the one wall hidden
+  // — the camera's near side — so a swapped hide goes red either way.
+  const shownUpTo = (mesh: Mesh | undefined, top: Object3D): boolean => {
+    if (!mesh) return false;
+    for (let at: Object3D | null = mesh; at && at !== top.parent; at = at.parent) if (!at.visible) return false;
+    return true;
+  };
+  const seen = [
+    { node: 'den-wallWest', top: model.root },
+    { node: 'den-wallNorth', top: model.root },
+    { node: 'den-floor', top: model.root },
+    { node: 'den-lintel', top: library.westWall },
+  ].map(({ node, top }) => ({ node, shown: shownUpTo(drawnOf.get(node), top) }));
+  const southHidden = drawnOf.get('den-wallSouth') !== undefined && !shownUpTo(drawnOf.get('den-wallSouth'), model.root);
+  say(
+    seen.every((one) => one.shown) && southHidden,
+    `the den is seen: ${seen.map((one) => `${one.node} ${one.shown ? 'visible' : 'HIDDEN'}`).join(', ')} up their parent chains; ` +
+      `den-wallSouth ${southHidden ? 'hidden' : 'NOT hidden'} (the camera's near side, the one wall the game hides)`,
+  );
+
+  /** A mesh's own geometry, room-local — its outline and children left out. */
+  const roomBox = (mesh: Mesh): Box3 => {
+    mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld);
+    box.min.x -= OX;
+    box.max.x -= OX;
+    box.min.y -= LIBRARY_FLOOR_Y; // flat-ok: heights over the reading room's own flat floor, off the sphere
+    box.max.y -= LIBRARY_FLOOR_Y; // flat-ok: as above
+    box.min.z -= OZ;
+    box.max.z -= OZ;
+    return box;
+  };
+  const inner = LIBRARY_DEN_INNER;
+  const PROBE_IN = 0.05;
+  const PROBE_R = 0.02;
+  // Each wall: its face to the den, off its own mesh; the stretch of that face
+  // the den sees (between the other walls' faces, or the room wall's); which
+  // way is into the den.
+  const walls = [
+    { node: 'den-wallWest', what: 'west', axis: 'x' as const, face: (b: Box3): number => b.max.x, laidOut: inner.west, intoDen: 1, from: inner.north, to: inner.south },
+    { node: 'den-wallNorth', what: 'north', axis: 'z' as const, face: (b: Box3): number => b.max.z, laidOut: inner.north, intoDen: 1, from: inner.west, to: -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) },
+    { node: 'den-wallSouth', what: 'south', axis: 'z' as const, face: (b: Box3): number => b.min.z, laidOut: inner.south, intoDen: -1, from: inner.west, to: -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) },
+  ];
+  let stations = 0;
+  for (const wall of walls) {
+    const mesh = drawnOf.get(wall.node);
+    if (!mesh) {
+      say(false, `the den's ${wall.what} wall is not drawn (no '${wall.node}' in the den) — its body stands for nothing a child can see`);
+      continue;
+    }
+    const box = roomBox(mesh);
+    const face = wall.face(box);
+    const behindSolid: string[] = [];
+    const frontClear: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const along = wall.from + 0.4 + ((wall.to - wall.from - 0.8) * i) / 4;
+      const at = (offset: number): [number, number] => (wall.axis === 'x' ? [face + offset * wall.intoDen, along] : [along, face + offset * wall.intoDen]);
+      const [bx, bz] = at(-PROBE_IN);
+      const [fx, fz] = at(PROBE_IN);
+      stations += 1;
+      if (collision.isClearCircle(OX + bx, OZ + bz, PROBE_R)) behindSolid.push(`(${bx.toFixed(2)}, ${bz.toFixed(2)})`);
+      if (!collision.isClearCircle(OX + fx, OZ + fz, PROBE_R)) frontClear.push(`(${fx.toFixed(2)}, ${fz.toFixed(2)})`);
+    }
+    say(
+      Math.abs(face - wall.laidOut) <= 0.005 && behindSolid.length === 0 && frontClear.length === 0,
+      `the den's ${wall.what} wall, drawn: its face to the den at ${wall.axis} ${face.toFixed(3)} (the layout's ${wall.laidOut.toFixed(3)}, within 5 mm); at 5 stations along it ` +
+        `${PROBE_IN} m behind the drawn face is solid (${behindSolid.length === 0 ? 'every one' : `NOT at ${behindSolid.join(' ')}`}) ` +
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
+        `and ${PROBE_IN} m in front is clear (${frontClear.length === 0 ? 'every one' : `NOT at ${frontClear.join(' ')}`}); drawn ${box.max.y.toFixed(2)} m tall`,
+    );
+  }
+  // The lintel: its drawn box inside its body — the band from its base to its
+  // top, the capsule's flat run over the doorway, its half-thickness either
+  // side of the wall's centre line.
+  {
+    const lintelMesh = drawnOf.get('den-lintel');
+    const body = library.lintel;
+    if (!lintelMesh) {
+      say(false, "the lintel over the den's doorway is not drawn (no 'den-lintel')");
+    } else {
+      const box = roomBox(lintelMesh);
+      const centreX = body.x1 - OX;
+      const [z1, z2] = [Math.min(body.z1, body.z2) - OZ, Math.max(body.z1, body.z2) - OZ];
+      const over = Math.max(
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
+        body.baseHeight - LIBRARY_FLOOR_Y - box.min.y,
+        // flat-ok: as above
+        box.max.y - (body.topHeight - LIBRARY_FLOOR_Y),
+        Math.abs(box.min.x - centreX) - body.halfThickness,
+        Math.abs(box.max.x - centreX) - body.halfThickness,
+        z1 - box.min.z,
+        box.max.z - z2,
+      );
+      say(
+        over <= 0.005,
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
+        `the lintel, drawn y ${box.min.y.toFixed(2)}..${box.max.y.toFixed(2)}, x ${box.min.x.toFixed(2)}..${box.max.x.toFixed(2)}, z ${box.min.z.toFixed(2)}..${box.max.z.toFixed(2)}, ` +
+          `lies inside its body's band ${(body.baseHeight - LIBRARY_FLOOR_Y).toFixed(2)}..${(body.topHeight - LIBRARY_FLOOR_Y).toFixed(2)} m over z ${z1.toFixed(2)}..${z2.toFixed(2)} ` +
+          `(the furthest any drawn edge stands outside it ${over.toFixed(3)} m, at most 0.005)`,
+      );
+    }
+  }
+  // The floor: the room's own boards, at the room's floor, under her feet all across the den.
+  {
+    const slab = drawnOf.get('den-floor');
+    const roomFloor = library.roomRoot.getObjectByName('library.floor');
+    if (!slab || !(roomFloor instanceof Mesh)) {
+      say(false, `the den's floor slab (${slab ? 'drawn' : 'NOT drawn'}) or the room's floor (${roomFloor ? 'found' : 'NOT found'}) is missing — nothing measured`);
+    } else {
+      const box = roomBox(slab);
+      let feet = 0;
+      let off = 0;
+      for (let i = 0; i < 3; i += 1) {
+        for (let j = 0; j < 3; j += 1) {
+          const x = inner.west + 0.3 + ((-(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - inner.west - 0.6) * i) / 2;
+          const z = inner.north + 0.3 + ((inner.south - inner.north - 0.6) * j) / 2;
+          feet += 1;
+          if (Math.abs(surfaces.sample(OX + x, OZ + z, LIBRARY_FLOOR_Y + 1) - LIBRARY_FLOOR_Y) > 1e-6) off += 1;
+        }
+      }
+      say(
+        // flat-ok: heights over the reading room's own flat floor, off the sphere
+        Math.abs(box.max.y) <= 0.001 && slab.material === roomFloor.material && off === 0,
+        // flat-ok: as above
+        `the den's floor slab is drawn with its top at the room's floor (${box.max.y.toFixed(4)} m), in the room floor's own paint (${slab.material === roomFloor.material}: LIGHT's den cells measure that paint), ` +
+          `x ${box.min.x.toFixed(2)}..${box.max.x.toFixed(2)}, z ${box.min.z.toFixed(2)}..${box.max.z.toFixed(2)}; her feet find it at ${feet - off} of ${feet} points across the den`,
+      );
+    }
+  }
+  // The niche books: behind a far wall's drawn face, every one.
+  {
+    const books = shellOfDen.books;
+    books.geometry.computeBoundingBox();
+    const instance = new Matrix4();
+    let inOpen = 0;
+    let nearest = -Infinity;
+    for (let i = 0; i < books.count; i += 1) {
+      books.getMatrixAt(i, instance);
+      const box = books.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(books.matrixWorld, instance));
+      const maxX = box.max.x - OX;
+      const maxZ = box.max.z - OZ;
+      // How far past its wall's drawn face the book reaches into the den (negative: behind it).
+      const past = Math.min(maxX - inner.west, maxZ - inner.north);
+      nearest = Math.max(nearest, past);
+      if (past > 0) inOpen += 1;
+    }
+    say(
+      books.count >= 300 && inOpen === 0,
+      `${books.count} books line the den's niches (at least 300 wanted), ${inOpen} standing in the open den: the nearest any comes to its wall's drawn face is ${(-nearest).toFixed(3)} m behind it`,
+    );
+  }
+  // The lanterns: over her head at the top of her highest jump, so only a
+  // flier meets one — and each is solid where it is drawn, from its lowest
+  // point to its top (anything drawn is solid); nothing in the den is a light.
+  {
+    const head = JUMP_APEX_HEIGHT + KID_HEIGHT;
+    // flat-ok: heights over the reading room's own flat floor, off the sphere
+    const lowest = Math.min(...shellOfDen.lanterns.map((lantern) => new Box3().setFromObject(lantern).min.y - LIBRARY_FLOOR_Y));
+    let lights = 0;
+    library.denRoot.traverse((part) => {
+      if ((part as { isLight?: boolean }).isLight) lights += 1;
+    });
+    say(
+      shellOfDen.lanterns.length === 2 && lowest > head && lights === 0,
+      `${shellOfDen.lanterns.length} lanterns hang with their lowest point ${lowest.toFixed(2)} m up, over her head at the top of her highest jump (${JUMP_APEX_HEIGHT.toFixed(2)} + ${KID_HEIGHT.toFixed(2)} = ${head.toFixed(2)} m); ` +
+        `${lights} light(s) in the den (the room's pools are spent)`,
+    );
+    shellOfDen.lanterns.forEach((lantern, index) => {
+      const body = shellOfDen.lanternBodies[index];
+      const drawn = new Box3().setFromObject(lantern, true);
+      if (!body) {
+        say(false, `lantern ${index + 1} has no body — drawn, and a flier passes through it`);
+        return;
+      }
+      // Its drawn box (outline and all) inside its body.
+      const out = Math.max(
+        body.baseHeight - drawn.min.y, // flat-ok: absolute heights in the library's flat space, both sides alike
+        drawn.max.y - body.topHeight, // flat-ok: as above
+        Math.abs((drawn.min.x + drawn.max.x) / 2 - body.cx) + (drawn.max.x - drawn.min.x) / 2 - body.halfX,
+        Math.abs((drawn.min.z + drawn.max.z) / 2 - body.cz) + (drawn.max.z - drawn.min.z) / 2 - body.halfZ,
+      );
+      // A flier at the lantern's height, marched at it, stops at its front; the CONTROL, over its top by the jump grace, does
+      // not — so the march can tell a lantern from none, and the body is a
+      // band, not a pillar to the floor.
+      // Straight at its wall from 1.5 m out in front of it: the west wall's
+      // lanterns are marched west, the north wall's north.
+      const centre = { x: (drawn.min.x + drawn.max.x) / 2 - OX, z: (drawn.min.z + drawn.max.z) / 2 - OZ };
+      const onWest = Math.abs(centre.x - inner.west) < Math.abs(centre.z - inner.north);
+      const dx = onWest ? -1 : 0;
+      const dz = onWest ? 0 : -1;
+      const from = (feet: number): Vector3 =>
+        new Vector3(OX + centre.x - dx * 1.5, LIBRARY_FLOOR_Y + feet, OZ + centre.z - dz * 1.5);
+      /** How far her edge is from the lantern's drawn plan (negative: inside it). */
+      const gapTo = (p: Vector3): number => {
+        const qx = Math.max(drawn.min.x - p.x, 0, p.x - drawn.max.x);
+        const qz = Math.max(drawn.min.z - p.z, 0, p.z - drawn.max.z);
+        return Math.hypot(qx, qz) - PLAYER_RADIUS;
+      };
+      // flat-ok: the lantern's own drawn heights over the reading room's flat floor
+      const atHeight = drawn.min.y - LIBRARY_FLOOR_Y + 0.05;
+      // flat-ok: as above
+      const overTop = drawn.max.y - LIBRARY_FLOOR_Y + JUMP_CLEARANCE_GRACE + 0.05;
+      const ends = [0.05, PLAYER_LONGEST_STEP].map((step) => gapTo(marchAt(from(atHeight), dx, dz, step, atHeight)));
+      const control = gapTo(marchAt(from(overTop), dx, dz, 0.05, overTop));
+      say(
+        out <= 0.001 && ends.every((gap) => gap >= -RESOLVER_SLACK) && control < -RESOLVER_SLACK,
+        `lantern ${index + 1}: drawn inside its body (furthest out ${out.toFixed(3)} m, at most 0.001; band ${(body.baseHeight - LIBRARY_FLOOR_Y).toFixed(2)}..${(body.topHeight - LIBRARY_FLOOR_Y).toFixed(2)} m); ` +
+          `a flier at ${atHeight.toFixed(2)} m marched straight at it stops ${ends.map((gap) => gap.toFixed(3)).join(' and ')} m short of its drawn plan (5 cm and the sprint stride); ` +
+          `CONTROL: over its top at ${overTop.toFixed(2)} m she passes over it (${control.toFixed(3)} m, inside its plan)`,
+      );
+    });
+  }
+  note(`THE DEN, DRAWN: ${stations} face stations on 3 walls; the walls' bodies are the layout's (libraryDenPlacement holds the kit to it within 5 mm as it loads)`);
 }
 
 console.log("\nLINTEL — over the den's doorway: a flier stops at it, at every height nobody slips between it and the shut shelf, and a walker passes under it:");
@@ -966,6 +1348,17 @@ console.log('\nLANDING — her feet find every solid top across its drawn footpr
   for (const line of firstMiss) say(false, line);
   say(standables.length >= 10 && missed === 0, `${standables.length} tops, ${points} landings across their drawn footprints: ${missed} fell through`);
   say(controls > 0 && controlWrong === 0, `CONTROL: ${controls} landings 0.1 m outside a footprint found the floor (${controlWrong} found a top in the air)`);
+  // The secret shelf (#719) registers two tops and only one is ever in the
+  // world: shut, the case's is somewhere to land and the open leaf's is den
+  // floor nobody can reach. `Library.standables` says so, or the landings
+  // above would have asked the air to hold her.
+  const shutTop = standables.some((s) => s.what === `bookcase ${LIBRARY_SECRET_BOOKCASE.id}`);
+  const openTop = standables.some((s) => s.what === SECRET_LEAF_OPEN);
+  const openRegistered = library.solids.some((s) => s.what === SECRET_LEAF_OPEN);
+  say(
+    shutTop && !openTop && openRegistered,
+    `the secret shelf's shut top is in the world and its open one (registered: ${openRegistered}) is not — only the state the leaf is in is somewhere to land`,
+  );
   note(`${shared} point(s) shared by two solids (a lamp on a desk or a table) left to the higher one; the tops: ${standables.map((s) => `${s.what} ${s.top.toFixed(2)}`).join(', ')}`);
 }
 
@@ -1870,6 +2263,8 @@ let glanceKept: Vector3 | null = null;
  */
 let storyCamera: StoryCamera | null = null;
 let storyKept: Vector3 | null = null;
+/** Whether story time's camera claimed the frame on the last step — THE DEN AT STORY TIME reads it. */
+let storyClaimed = false;
 const glanceFrame = (player: Player): void => {
   if (mutating('no-glance')) {
     camera.clearFocusOverride();
@@ -1887,6 +2282,7 @@ const glanceFrame = (player: Player): void => {
       else story = storyKept;
     }
     if (story && mutating('story-camera-low')) story = lowShot(player);
+    storyClaimed = story !== null;
     if (story) claim = story;
   }
   if (claim) camera.setFocusOverride(claim);
@@ -3249,6 +3645,32 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       legs.push({ who: plan.name, way: 'way back', from: to, to: from, ownSeat: plan.seat, until: 1 });
     }
   }
+  // `resident-in-den`: a waypoint at the den's middle, as if a child's route
+  // went in there — the den-avoidance clause below must go red naming it.
+  const denMiddle = { x: (LIBRARY_DEN_INNER.west - LIBRARY_INNER_X) / 2, z: (LIBRARY_DEN_INNER.north + LIBRARY_DEN_INNER.south) / 2 };
+  if (mutating('resident-in-den')) {
+    const first = plans[0];
+    const from = first ? libraryKidCircuit(first)[0] : undefined;
+    if (first && from) {
+      legs.push({ who: first.name, way: 'circuit', from, to: denMiddle, ownSeat: first.seat, until: 1 });
+      note(`INJECTED a waypoint at the den's middle ${label(denMiddle)} into ${first.name}'s circuit on purpose — this run must go red`);
+    }
+  }
+  /** How far room-local (x, z) is from the secret den — the region `libraryDenContains` owns — in plan; 0 inside it. */
+  const denBox = {
+    minX: LIBRARY_DEN_INNER.west - LIBRARY_WALL_HALF,
+    maxX: -LIBRARY_INNER_X,
+    minZ: LIBRARY_DEN_INNER.north - LIBRARY_WALL_HALF,
+    maxZ: LIBRARY_DEN_INNER.south + LIBRARY_WALL_HALF,
+  };
+  const fromDen = (x: number, z: number): number =>
+    Math.hypot(Math.max(denBox.minX - x, 0, x - denBox.maxX), Math.max(denBox.minZ - z, 0, z - denBox.maxZ));
+  // The control on that ruler: the den's middle is in it, and its own box agrees with the owner.
+  if (!libraryDenContains(denMiddle.x, denMiddle.z) || fromDen(denMiddle.x, denMiddle.z) !== 0 || libraryDenContains(denBox.maxX + 0.01, denMiddle.z)) {
+    throw new Error("KIDS: the den-avoidance ruler disagrees with libraryDenContains — fix the ruler before trusting the clause");
+  }
+  const DEN_KEEP = NPC_RADIUS + 0.2;
+  let nearestDen = { apart: Infinity, who: '' };
   let stations = 0;
   let blockedLegs = 0;
   let nearestPlayerSeat = { apart: Infinity, who: '' };
@@ -3266,6 +3688,8 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
       const z = leg.from.z + (leg.to.z - leg.from.z) * t;
       stations += 1;
       if (!collision.isClearCircle(OX + x, OZ + z, SWEEP_RADIUS) && !blockedAt) blockedAt = { x, z };
+      const apartFromDen = fromDen(x, z);
+      if (apartFromDen < nearestDen.apart) nearestDen = { apart: apartFromDen, who: `${leg.who}'s ${leg.way} ${label(leg.from)} → ${label(leg.to)} at ${label({ x, z })}` };
       for (const id of LIBRARY_PLAYER_SEATS) {
         const seat = libraryCushion(id).at;
         const apart = Math.hypot(x - seat.x, z - seat.z);
@@ -3287,6 +3711,11 @@ console.log("\nKIDS — the library's three children: their aisles, their ways t
     blockedLegs === 0 && stations > 0,
     `${legs.length} legs (${circuitLegs} circuit legs, the wraps included; ${rugLegs} to the rug, the last of each only to ${seatArrive.toFixed(2)} m from the seat; ${rugLegs} back) ` +
       `swept every ${SWEEP_STEP} m with a ${SWEEP_RADIUS.toFixed(2)} m body: ${stations} stations, ${blockedLegs} legs blocked`,
+  );
+  say(
+    stations > 0 && nearestDen.apart >= DEN_KEEP,
+    `the children keep out of the secret den: every one of ${legs.length} legs (circuits, ways to the rug and back) stays ${DEN_KEEP.toFixed(2)} m (NPC_RADIUS + 0.2) ` +
+      `from the region libraryDenContains owns — the leaf swings inside it — the nearest ${nearestDen.apart.toFixed(2)} m, ${nearestDen.who}`,
   );
   say(
     nearestPlayerSeat.apart >= PLAYER_SEPARATION - PLAYER_SEAT_BRUSH,
@@ -6191,6 +6620,1352 @@ console.log("\nSTORY CAMERA — while the owl reads, the camera comes down over 
 }
 
 // ── Track C (#719: the den's walls, the secret shelf, the dragon and the cat, plan Steps 11-13) adds its clauses below this line. ──
+
+/**
+ * **How deep room-local `p` is inside a registered solid**, metres (negative:
+ * outside) — a disc by its radius, a capsule by its half-thickness about its
+ * segment, a box by the least inward distance to its four edges, whichever way
+ * they are wound. For the SWEEP clause, which asks it of every solid the
+ * swinging leaf passes over.
+ */
+function depthInSolid(solid: LibrarySolid, p: LocalPoint): number {
+  if (solid.shape === 'disc') return solid.radius - Math.hypot(p.x - solid.points[0]!.x, p.z - solid.points[0]!.z);
+  if (solid.shape === 'wall') return solid.radius - segmentDistance(solid.points[0]!, solid.points[1]!, p);
+  const corners = solid.points;
+  let area = 0;
+  for (let i = 0; i < corners.length; i += 1) {
+    const a = corners[i]!;
+    const b = corners[(i + 1) % corners.length]!;
+    area += a.x * b.z - b.x * a.z;
+  }
+  const orientation = Math.sign(area) || 1;
+  let depth = Infinity;
+  for (let i = 0; i < corners.length; i += 1) {
+    const a = corners[i]!;
+    const b = corners[(i + 1) % corners.length]!;
+    const ex = b.x - a.x;
+    const ez = b.z - a.z;
+    const cross = (ex * (p.z - a.z) - ez * (p.x - a.x)) / Math.hypot(ex, ez);
+    depth = Math.min(depth, cross * orientation);
+  }
+  return depth;
+}
+
+/** How far a point of the swinging leaf may reach into another solid's footprint and still be a graze, not a sweep: a centimetre, under the leaf's own ink. */
+const SWEEP_GRAZE = 0.01;
+/** The plan's accepted clip north of the doorway's edge by the leaf's front-free corner (4.5 cm at about 8.5°, plan Step 12), as the most it may be. */
+const JAMB_CLIP_ACCEPTED = 0.05;
+/** A point-sized probe for "is this exact spot bare floor" — where a body of her size would be in a wall either way. */
+const POINT_PROBE = 0.05;
+
+/**
+ * **SECRET SHELF** (#719, plan Step 12) — the real child, at the pull stand,
+ * presses **Pull the book!** and the leaf swings open into the den.
+ *
+ * Measured on every frame of the swing: the angle never falls back, never
+ * steps further than the ease-out cubic's steepest rate, lands at exactly
+ * `SWING_END` 1.8–2.0 s after the press (the slide, then the swing), and the
+ * shut case's middle is solid on every turning frame — the swap is on landing.
+ * Open: the fill from the arrival reaches every keep-out, the den's included,
+ * with zero pockets; the case's old middle is clear and the open leaf's is not;
+ * a fill seeded beside the dragon reaches the arrival and the way out
+ * (enterable *and* leavable); the open leaf is marched at from sixteen bearings
+ * and landed on across its footprint; the walls still hold, in room ∪ den; a
+ * walker passes under the lintel; and the pull zone offers nothing. SWEEP:
+ * the leaf's rectangle, sampled through every angle, passes over no other
+ * solid and no keep-out outside the den, and its front-free corner clips the
+ * north jamb's drawn edge by no more than the plan accepts. FADE: in the den
+ * the west wall and the leaf go translucent; in the central aisle nothing does.
+ *
+ * `seal-den` walls the doorway up once the leaf has landed (the open fills go
+ * red); `open-leaf-hollow` takes the open collider out once it has landed (the
+ * open leaf's middle is reachable). `LIBRARY_CHECK_REMOVE='bookcase west-2'`
+ * is REACHABILITY's red above: the den reachable while shut.
+ */
+console.log('\nSECRET SHELF — the real child pulls the gold book; the leaf swings open into the den, the shut collider holding to the last frame:');
+{
+  const leaf = library.secretShelf;
+  const spec = LIBRARY_SECRET_BOOKCASE;
+  const size = libraryBookcaseSize(spec.kind);
+  const [gapNorth, gapSouth] = libraryDenGap();
+  const shut = leaf.shutFootprint;
+  const open = leaf.openFootprint;
+  const player = child.player;
+  const middleClear = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, PLAYER_RADIUS);
+  /**
+   * Is a footprint's middle bare floor, asked with a point-sized probe: the
+   * open footprint lies 0.3 m off the den's south wall, so a body of her size
+   * at its middle is in that wall whether or not the leaf is there, and only a
+   * point can say which.
+   */
+  const middleBare = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, POINT_PROBE);
+  const zones = (): InteractZone[] => library.interactZones();
+  const pullZone = (): InteractZone | undefined => zones().find((zone) => zone.id === LIBRARY_SECRET_BOOK_ZONE);
+  const pullChip = (): ZoneAction | undefined => pullZone()?.actions?.().find((action) => action.id === PRIMARY_ACTION);
+  const denSpots = libraryKeepOuts().filter((spot) => spot.den);
+
+  // Shut to begin with: SIT left her standing in the room, and nothing has pulled the book.
+  say(!leaf.open && !leaf.swinging && leaf.angle === 0 && !library.denOpen && !library.denRoot.visible, `shut to begin with: angle ${leaf.angle}, open ${leaf.open}, the den hidden (${library.denRoot.visible})`);
+  say(
+    !middleClear(shut) && !middleBare(shut) && middleBare(open),
+    `shut, the case's middle (${shut.x.toFixed(2)}, ${shut.z.toFixed(2)}) is solid and the open footprint's middle (${open.x.toFixed(2)}, ${open.z.toFixed(2)}) is bare den floor (a ${POINT_PROBE} m probe is clear there)`,
+  );
+  // The open footprint, read back against the layout: along the den's south
+  // wall's inner face, the leaf's own length and depth, facing into the den.
+  say(
+    Math.abs(open.x - (spec.at.x - size.length / 2)) < 1e-9 &&
+      Math.abs(open.z + open.halfDepth - LIBRARY_DEN_INNER.south) < 1e-9 &&
+      Math.abs(open.z - (gapSouth - size.depth / 2)) < 1e-9 &&
+      open.facing === 180 &&
+      Math.abs(open.halfLength - size.length / 2) < 1e-9 &&
+      Math.abs(open.halfDepth - size.depth / 2) < 1e-9,
+    `the open footprint lies flush along the den's south wall (its back on z ${(open.z + open.halfDepth).toFixed(2)}, the wall's inner face ${LIBRARY_DEN_INNER.south.toFixed(2)}), ` +
+      `x ${(open.x - open.halfLength).toFixed(2)}..${(open.x + open.halfLength).toFixed(2)}, facing ${open.facing} (into the den), the case's own ${size.length.toFixed(2)} x ${size.depth.toFixed(2)}`,
+  );
+
+  // At the pull stand; the twinkle, over one period shut.
+  child.stand(LIBRARY_SECRET_STAND.x, LIBRARY_SECRET_STAND.z, LIBRARY_SECRET_STAND.facing);
+  camera.snapTo(player.position);
+  let peak = 0;
+  let trough = 1;
+  for (let i = 0; i < Math.round(TWINKLE_PERIOD / CHILD_DT) + 2; i += 1) {
+    child.step();
+    const opacity = (leaf.twinkle.material as SpriteMaterial).opacity;
+    peak = Math.max(peak, opacity);
+    trough = Math.min(trough, opacity);
+  }
+  say(peak > 0.9 && trough === 0, `shut, the gold book twinkles: over ${TWINKLE_PERIOD} s its sprite's opacity peaks at ${peak.toFixed(2)} and rests at ${trough.toFixed(2)}`);
+
+  // The chip: on the gold book where it stands shut, stood at the pull stand, the rainbow round the book itself.
+  library.roomRoot.updateMatrixWorld(true);
+  const bookWorld = leaf.pullBook.getWorldPosition(new Vector3());
+  const zone = pullZone();
+  const chip = pullChip();
+  const reach = zone ? Math.hypot(player.position.x - zone.standX, player.position.z - zone.standZ) : Infinity;
+  const zoneOffBook = zone ? Math.hypot(zone.x - bookWorld.x, zone.z - bookWorld.z) : Infinity;
+  const standOff = zone ? Math.hypot(zone.standX - (OX + LIBRARY_SECRET_STAND.x), zone.standZ - (OZ + LIBRARY_SECRET_STAND.z)) : Infinity;
+  say(
+    !!zone && chip?.label === LIBRARY_CHIPS.pull && reach <= standRadiusOf(zone) && zoneOffBook < 1e-6 && standOff < 1e-9 && zone.highlight?.object === leaf.pullBook && zone.verb === 'Pull',
+    `standing at ${LIBRARY_SECRET_STAND.what} (${LIBRARY_SECRET_STAND.x.toFixed(2)}, ${LIBRARY_SECRET_STAND.z.toFixed(2)}), '${LIBRARY_SECRET_BOOK_ZONE}' offers '${chip?.label ?? 'nothing'}' ` +
+      `(wanted '${LIBRARY_CHIPS.pull}'), ${reach.toFixed(2)} m from its stand (reach ${zone ? standRadiusOf(zone) : '?'}), the zone ${zoneOffBook.toFixed(3)} m off the book, ` +
+      `its stand ${standOff.toFixed(3)} m off the layout's, verb '${zone?.verb ?? '?'}', the rainbow ${zone?.highlight?.object === leaf.pullBook ? 'rings' : 'does NOT ring'} the gold book`,
+  );
+  // The gold book itself: inside its case's drawn box (drawn implies solid), on its shelf, in gold.
+  const bookLocal = { x: bookWorld.x - OX, z: bookWorld.z - OZ };
+  const shelfTop = size.shelfTops[LIBRARY_SECRET_BOOK.shelf] ?? Number.NaN;
+  const bookBase = bookWorld.y - LIBRARY_FLOOR_Y; // flat-ok: height over the reading room's own flat floor, off the sphere
+  const cover = leaf.pullBook.getObjectByName('secretBook-cover');
+  const gold = cover instanceof Mesh && (cover.material as MeshToonMaterial).color.equals(new Color(ART.helmetGold));
+  say(
+    outsideBox(shut, bookLocal.x, bookLocal.z) < 0 && Math.abs(bookBase - shelfTop) <= 0.02 && gold && leaf.pullBook.name === 'library.secretBook',
+    `the gold book '${leaf.pullBook.name}' stands ${(-outsideBox(shut, bookLocal.x, bookLocal.z)).toFixed(3)} m inside the shut case's drawn box at (${bookLocal.x.toFixed(2)}, ${bookLocal.z.toFixed(2)}), ` +
+      `its base at ${bookBase.toFixed(3)} m on shelf ${LIBRARY_SECRET_BOOK.shelf} (${shelfTop.toFixed(3)}), painted ${gold ? 'helmetGold' : 'NOT gold'}`,
+  );
+
+  // The gold book stands alone in its gap: no book of the row it stands in
+  // passes through it. The furnisher leaves the gap (`shelveFace`'s
+  // `pullBookGap`); nothing else would notice it gone — the row's books and the
+  // gold one are drawn by different owners, and both draw happily through each
+  // other. Measured in the leaf's own frame, off the drawn geometry: every row
+  // book whose height range meets the gold book's is on its shelf. And the
+  // whole drawn book stands inside the leaf's own box — the box both of its
+  // colliders are — so drawn is solid, shut and open.
+  {
+    leaf.leaf.updateMatrixWorld(true);
+    const toLeaf = new Matrix4().copy(leaf.leaf.matrixWorld).invert();
+    /** An ink outline — an inverted hull, drawn back-faced — is a line round a shape, not the shape. */
+    /** The leaf-frame box round an object's drawn bodies, its ink outlines left out. */
+    const boxInLeaf = (object: Object3D): Box3 => {
+      const box = new Box3();
+      object.traverse((part) => {
+        if (!(part instanceof Mesh) || part instanceof InstancedMesh || isOutlineMesh(part)) return;
+        part.geometry.computeBoundingBox();
+        box.union(part.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(toLeaf, part.matrixWorld)));
+      });
+      return box;
+    };
+    const goldBox = boxInLeaf(leaf.pullBook);
+    const row = leaf.leaf.getObjectByName('library.secretShelf.books');
+    const sameShelf: Box3[] = [];
+    if (row instanceof InstancedMesh) {
+      row.geometry.computeBoundingBox();
+      const instance = new Matrix4();
+      for (let i = 0; i < row.count; i += 1) {
+        row.getMatrixAt(i, instance);
+        const book = row.geometry.boundingBox!.clone().applyMatrix4(new Matrix4().multiplyMatrices(new Matrix4().multiplyMatrices(toLeaf, row.matrixWorld), instance));
+        if (book.max.y > goldBox.min.y + 1e-6 && book.min.y < goldBox.max.y - 1e-6) sameShelf.push(book); // flat-ok: heights in the secret leaf's own frame, object-local
+      }
+    }
+    /** How far apart along the row (leaf +X) a book and the gold book stand: negative where they pass through each other. */
+    const apart = (book: Box3): number => Math.max(book.min.x - goldBox.max.x, goldBox.min.x - book.max.x);
+    const through = sameShelf.filter((book) => book.intersectsBox(goldBox) && apart(book) < -1e-4);
+    const nearest = sameShelf.reduce((least, book) => Math.min(least, apart(book)), Infinity);
+    say(
+      !goldBox.isEmpty() && sameShelf.length >= 10 && through.length === 0 && nearest >= 0,
+      `the gold book stands alone in its gap: ${sameShelf.length} book(s) of its row on shelf ${LIBRARY_SECRET_BOOK.shelf} (at least 10 wanted), ` +
+        `${through.length} pass(es) through it (x ${goldBox.min.x.toFixed(3)}..${goldBox.max.x.toFixed(3)} in the leaf's frame); the nearest stands ${nearest.toFixed(3)} m beside it`,
+    );
+    // Inside the leaf's own box: x along its length, y up its height, z
+    // through its depth to the front its colliders stop at.
+    // flat-ok: heights in the secret leaf's own frame, object-local
+    const inside = Math.min(goldBox.min.x, size.length - goldBox.max.x, goldBox.min.y, size.height - goldBox.max.y, goldBox.min.z, size.depth - goldBox.max.z);
+    say(
+      !goldBox.isEmpty() && inside >= 0,
+      `the whole drawn gold book stands inside the leaf's own ${size.length.toFixed(2)} x ${size.height.toFixed(2)} x ${size.depth.toFixed(2)} box, the box its shut and open colliders are: ` +
+        // flat-ok: heights in the secret leaf's own frame, object-local
+        `y ${goldBox.min.y.toFixed(3)}..${goldBox.max.y.toFixed(3)}, z ${goldBox.min.z.toFixed(3)}..${goldBox.max.z.toFixed(3)} (its front ${(size.depth - goldBox.max.z).toFixed(3)} m inside the case's), ` +
+        `${inside.toFixed(3)} m clear of the box at its nearest`,
+    );
+  }
+
+  // Press. The swing, frame by frame.
+  const homeZ = leaf.pullBook.position.z;
+  const pressedAt = child.frames;
+  chip?.run();
+  let lastAngle = leaf.angle;
+  let monotone = true;
+  let maxStep = 0;
+  let landedFrame = -1;
+  let turningFrames = 0;
+  let heldThrough = true;
+  let slidOut = 0;
+  for (let i = 0; i < 150; i += 1) {
+    child.step();
+    const angle = leaf.angle;
+    if (angle < lastAngle - 1e-9) monotone = false;
+    maxStep = Math.max(maxStep, angle - lastAngle);
+    slidOut = Math.max(slidOut, leaf.pullBook.position.z - homeZ);
+    if (angle > 0 && !leaf.open) {
+      turningFrames += 1;
+      if (middleClear(shut)) heldThrough = false;
+    }
+    if (landedFrame < 0 && leaf.open) landedFrame = child.frames - pressedAt;
+    lastAngle = angle;
+  }
+  const steepest = (SWING_END * 3) / SWING_SECONDS;
+  const landedAfter = landedFrame * CHILD_DT;
+  say(
+    leaf.swinging === false && leaf.open && monotone && maxStep <= steepest * CHILD_DT + 1e-6,
+    `the swing is monotone (never falls back) and never steps more than its steepest rate: the largest frame step ${maxStep.toFixed(4)} rad ` +
+      `(the ease-out cubic's ${(steepest * CHILD_DT).toFixed(4)} at most)`,
+  );
+  say(
+    Math.abs(leaf.angle - SWING_END) <= 1e-6 && landedFrame > 0 && landedAfter >= 1.8 && landedAfter <= 2.0,
+    `it lands at ${leaf.angle.toFixed(6)} rad (π/2 wanted) ${landedAfter.toFixed(3)} s after the press (1.8–2.0: the slide's ${SLIDE_SECONDS} s then the swing's ${SWING_SECONDS} s)`,
+  );
+  say(
+    turningFrames >= 60 && heldThrough,
+    `during the swing (${turningFrames} turning frames) the shut case's middle was never clear floor: she can never walk through a half-open leaf; the swap is the landing frame`,
+  );
+  say(
+    slidOut >= SLIDE - 0.005 && Math.abs(leaf.pullBook.position.z - homeZ) < 1e-3,
+    `the gold book slid ${slidOut.toFixed(3)} m out of its row (${SLIDE} wanted) and has eased home (${(leaf.pullBook.position.z - homeZ).toFixed(4)} m out now)`,
+  );
+
+  // The mutations: once the leaf has landed, wall the doorway up, or take the open collider out.
+  const sealing = mutating('seal-den') ? collision.addWall(OX - LIBRARY_HALF_X, OZ + gapNorth, OX - LIBRARY_HALF_X, OZ + gapSouth, LIBRARY_WALL_HALF) : null;
+  if (sealing) note(`WALLED the den's doorway up (x ${-LIBRARY_HALF_X}, z ${gapNorth}..${gapSouth}, half ${LIBRARY_WALL_HALF}) once the leaf landed, on purpose — this run must go red`);
+  const openSolid = library.solids.find((solid) => solid.what === SECRET_LEAF_OPEN);
+  const hollow = mutating('open-leaf-hollow') ? openSolid : undefined;
+  if (hollow) {
+    takeOut(hollow);
+    note(`TOOK the open leaf's collider ('${SECRET_LEAF_OPEN}') out once it landed, on purpose — this run must go red`);
+  }
+
+  // OPEN: the doorway is clear, the open leaf solid, the den enterable and leavable.
+  say(middleClear(shut) && !middleBare(open), `open: the case's old middle is clear floor for a body of her size and the open leaf's middle is solid to a ${POINT_PROBE} m probe`);
+  const pullOffer = pullZone()?.actions?.().length ?? -1;
+  say(pullOffer === 0, `open, the pull zone offers ${pullOffer} action(s): unselectable, so Selection's cached box for a book that has swung away is never consulted`);
+  say(library.denOpen && library.denRoot.visible, `the Library says the den is open (${library.denOpen}) and draws it (${library.denRoot.visible})`);
+  const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  const keepOuts = libraryKeepOuts();
+  const unreached = keepOuts.filter((spot) => !reachedAt(seen, OX + spot.x, OZ + spot.z));
+  for (const spot of unreached.slice(0, 4)) say(false, `${spot.what} at (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) is not reachable from the arrival with the leaf open`);
+  say(
+    unreached.length === 0 && denSpots.length > 0,
+    `from the arrival the fill reaches every keep-out, the den's ${denSpots.length} included: ${keepOuts.length - unreached.length} of ${keepOuts.length}`,
+  );
+  const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
+  say(pockets.length === 0, `zero pockets with the leaf open: ${pockets.length} clear cell(s) unreached of ${seen.clear.size}${pockets.length > 0 ? `, e.g. (${cellCentre(pockets[0]!).x.toFixed(2)}, ${cellCentre(pockets[0]!).z.toFixed(2)})` : ''}`);
+  say(
+    reachedAt(seen, OX + shut.x, OZ + shut.z) && !reachedAt(seen, OX + open.x, OZ + open.z),
+    `the fill reaches the case's old middle (${shut.x.toFixed(2)}, ${shut.z.toFixed(2)}) and not the open leaf's (${open.x.toFixed(2)}, ${open.z.toFixed(2)})`,
+  );
+  const fromDen = fill(collision, OX + LIBRARY_DRAGON_STAND.x, OZ + LIBRARY_DRAGON_STAND.z);
+  say(
+    reachedAt(fromDen, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z) && reachedAt(fromDen, OX + LIBRARY_DOOR_X, OZ + LIBRARY_HALF_Z),
+    `a fill seeded ${LIBRARY_DRAGON_STAND.what} reaches the arrival and the way out's centre: the den is enterable and leavable (${fromDen.reached.size} cells)`,
+  );
+
+  // MARCHED at the open leaf, 16 bearings, both strides: her edge never gets into its drawn footprint past the corner allowance.
+  {
+    let marches = 0;
+    let skipped = 0;
+    let deepest = 0;
+    const reachOut = Math.hypot(open.halfLength, open.halfDepth) + 2.2;
+    for (let b = 0; b < 16; b += 1) {
+      const angle = (b / 16) * Math.PI * 2;
+      const start = new Vector3(OX + open.x + Math.cos(angle) * reachOut, 0, OZ + open.z + Math.sin(angle) * reachOut);
+      if (!onFloor(start.x - OX, start.z - OZ) || !collision.isClearCircle(start.x, start.z, PLAYER_RADIUS)) {
+        skipped += 1;
+        continue;
+      }
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        const end = march(collision, start, new Vector3(OX + open.x, 0, OZ + open.z), step, reachOut + 1);
+        deepest = Math.max(deepest, PLAYER_RADIUS - outsideBox(open, end.x - OX, end.z - OZ));
+      }
+    }
+    say(
+      marches >= 8 && deepest <= CORNER_ALLOWANCE,
+      `${marches} marches at the open leaf from 16 bearings at 5 cm and the sprint stride (${skipped} starts skipped: off the floor or inside a solid): ` +
+        `deepest a body's edge got into its drawn footprint ${deepest.toFixed(3)} m, allowance ${CORNER_ALLOWANCE.toFixed(3)}`,
+    );
+  }
+
+  // LANDING on the open leaf: her feet find its top across its footprint; a
+  // ring outside finds the floor — or another top where another standable
+  // stands (west-3's, the case south of the doorway, at the leaf's hinge end),
+  // as LANDING's own control leaves those to the higher one.
+  {
+    const present = library.standables;
+    const standable = present.find((s) => s.what === SECRET_LEAF_OPEN);
+    const shutStill = present.some((s) => s.what === `bookcase ${spec.id}`);
+    if (!standable) {
+      say(false, `the open leaf's top ('${SECRET_LEAF_OPEN}') is not in the world's tops now it has landed — nothing landed on`);
+    } else {
+      let points = 0;
+      let missed = 0;
+      let controls = 0;
+      let controlWrong = 0;
+      let covered = 0;
+      for (const [u, v] of grid(standable.footprint, 0)) {
+        points += 1;
+        const y = standingAt(collision, surfaces.sample.bind(surfaces), OX + u, OZ + v, standable.top + 0.1);
+        if (Math.abs(y - standable.top) > FEET_TOLERANCE) missed += 1;
+      }
+      for (const [u, v] of grid(standable.footprint, 0.1)) {
+        if (present.some((other) => other !== standable && footprintCovers(other.footprint, u, v))) {
+          covered += 1;
+          continue;
+        }
+        controls += 1;
+        const y = standingAt(collision, surfaces.sample.bind(surfaces), OX + u, OZ + v, standable.top + 0.1);
+        if (Math.abs(y) > FEET_TOLERANCE) controlWrong += 1;
+      }
+      say(
+        !shutStill && points > 100 && missed === 0 && controls > 40 && controlWrong === 0,
+        `her feet find the open leaf's top (${standable.top.toFixed(2)} m) at ${points - missed} of ${points} landings across its footprint, and the floor at ${controls - controlWrong} of ${controls} ` +
+          `points 0.1 m outside it (${covered} under another top, left to it); the shut case's top is ${shutStill ? 'STILL' : 'no longer'} somewhere to land`,
+      );
+    }
+  }
+
+  // The walls hold with the leaf open: the same 48 marches end in the room or the den, or through the door.
+  {
+    let escaped = 0;
+    let intoDen = 0;
+    for (let i = 0; i < 12; i += 1) {
+      const t = -0.9 + (1.8 * i) / 11;
+      for (const [from, to] of [
+        [new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ - 6), new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ - 30)],
+        [new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ + 9), new Vector3(OX + t * LIBRARY_INNER_X, 0, OZ + 30)],
+        [new Vector3(OX - 12, 0, OZ + t * LIBRARY_INNER_Z), new Vector3(OX - 40, 0, OZ + t * LIBRARY_INNER_Z)],
+        [new Vector3(OX + 12, 0, OZ + t * LIBRARY_INNER_Z), new Vector3(OX + 40, 0, OZ + t * LIBRARY_INNER_Z)],
+      ] as const) {
+        const end = march(collision, from, to, PLAYER_LONGEST_STEP, 30);
+        const lx = end.x - OX;
+        const lz = end.z - OZ;
+        const inRoom = Math.abs(lx) <= LIBRARY_HALF_X + 0.05 && Math.abs(lz) <= LIBRARY_HALF_Z + 0.05;
+        const inDen = libraryDenContains(lx, lz);
+        const throughDoor = Math.abs(lx - LIBRARY_DOOR_X) < LIBRARY_DOOR_HALF && lz > LIBRARY_INNER_Z;
+        if (inDen) intoDen += 1;
+        if (!inRoom && !inDen && !throughDoor) escaped += 1;
+      }
+    }
+    say(escaped === 0 && intoDen > 0, `the walls hold with the leaf open: ${escaped} of 48 marches left the room and the den other than through the door (${intoDen} ended in the den, through its doorway)`);
+  }
+
+  // Under the lintel, open: a walker passes into the den, a flier over the case's height still stops.
+  {
+    const caseTop = size.height;
+    const throughZ = OZ + spec.at.z;
+    const atLintel = -LIBRARY_INNER_X + PLAYER_RADIUS - RESOLVER_SLACK;
+    const outside = -(LIBRARY_HALF_X + LIBRARY_WALL_HALF) - PLAYER_RADIUS;
+    const walker = marchAt(new Vector3(OX - 16, LIBRARY_FLOOR_Y, throughZ), -1, 0, 0.05, 0).x - OX;
+    const flier = marchAt(new Vector3(OX - 16, LIBRARY_FLOOR_Y + caseTop + 0.8, throughZ), -1, 0, 0.05, caseTop + 0.8).x - OX;
+    say(
+      libraryDenContains(walker, spec.at.z) && walker < outside && flier >= atLintel,
+      `with the leaf open a walker on the floor passes under the lintel into the den (to x ${walker.toFixed(2)}) and a flier at ${(caseTop + 0.8).toFixed(2)} m still stops at it (x ${flier.toFixed(2)}, at least ${atLintel.toFixed(2)})`,
+    );
+  }
+
+  // The mutations' traces come out, so what follows measures the game.
+  if (sealing) collision.removeWall(sealing);
+  if (hollow) putBack(hollow);
+
+  // SWEEP: the leaf's rectangle, sampled through every angle of its swing, in the room's frame.
+  {
+    const hinge = { x: spec.at.x, z: gapSouth };
+    const yaw = (spec.facing * Math.PI) / 180;
+    const L = size.length;
+    const D = size.depth;
+    /** Leaf-local (u along its length, v through its depth) at swing angle `a`, room-local. */
+    const leafPoint = (a: number, u: number, v: number): LocalPoint => {
+      const hx = u * Math.cos(a) + v * Math.sin(a);
+      const hz = -u * Math.sin(a) + v * Math.cos(a);
+      return { x: hinge.x + hx * Math.cos(yaw) + hz * Math.sin(yaw), z: hinge.z - hx * Math.sin(yaw) + hz * Math.cos(yaw) };
+    };
+    // CONTROL on the sweep's own geometry: shut, the leaf's middle is the shut footprint's; open, the open one's.
+    const shutMiddle = leafPoint(0, L / 2, D / 2);
+    const openMiddle = leafPoint(SWING_END, L / 2, D / 2);
+    say(
+      Math.hypot(shutMiddle.x - shut.x, shutMiddle.z - shut.z) < 1e-9 && Math.hypot(openMiddle.x - open.x, openMiddle.z - open.z) < 1e-9,
+      `CONTROL: the sweep's leaf at 0 is the shut footprint (middle ${shutMiddle.x.toFixed(2)}, ${shutMiddle.z.toFixed(2)}) and at π/2 the open one (${openMiddle.x.toFixed(2)}, ${openMiddle.z.toFixed(2)})`,
+    );
+    const others = library.solids.filter((solid) => solid.handle !== leaf.shutColliders[0] && solid.handle !== leaf.openColliders[0]);
+    const roomKeepOuts = libraryKeepOuts().filter((spot) => !spot.den);
+    let deepestSolid = { what: 'none', depth: -Infinity, at: { x: 0, z: 0 }, angle: 0 };
+    let deepestInClip = { what: 'none', depth: -Infinity, angle: 0 };
+    let deepestKeepOut = { what: 'none', depth: -Infinity };
+    let clip = { over: -Infinity, angle: 0 };
+    let samples = 0;
+    let inClip = 0;
+    const steps = 180;
+    for (let ai = 0; ai <= steps; ai += 1) {
+      const a = (ai / steps) * SWING_END;
+      for (let u = 0; u <= L + 1e-9; u += 0.05) {
+        for (const v of [0, D / 2, D]) {
+          const p = leafPoint(a, u, v);
+          samples += 1;
+          // North of the doorway's north edge is the accepted clip: the
+          // front-free corner's swing past the shut case's own north end, into
+          // the jamb's drawn edge and the drawn end of the case beside it
+          // (west-1). It is measured by itself below, and bounded; here it is
+          // set apart so that bound, not this clause, is what accepts it.
+          const over = gapNorth - p.z;
+          if (over > 0) {
+            inClip += 1;
+            if (over > clip.over) clip = { over, angle: a };
+            for (const solid of others) {
+              const depth = depthInSolid(solid, p);
+              if (depth > deepestInClip.depth) deepestInClip = { what: solid.what, depth, angle: a };
+            }
+            continue;
+          }
+          for (const solid of others) {
+            const depth = depthInSolid(solid, p);
+            if (depth > deepestSolid.depth) deepestSolid = { what: solid.what, depth, at: p, angle: a };
+          }
+          for (const spot of roomKeepOuts) {
+            const depth = spot.radius - Math.hypot(p.x - spot.x, p.z - spot.z);
+            if (depth > deepestKeepOut.depth) deepestKeepOut = { what: spot.what, depth };
+          }
+        }
+      }
+    }
+    say(
+      others.length > 50 && samples - inClip > 40000 && deepestSolid.depth <= SWEEP_GRAZE,
+      `the swing sweeps no other solid: ${samples - inClip} leaf points through ${steps + 1} angles against ${others.length} solids, the deepest any gets into one ` +
+        `${deepestSolid.depth.toFixed(3)} m (${deepestSolid.what}, at (${deepestSolid.at.x.toFixed(2)}, ${deepestSolid.at.z.toFixed(2)}), ${((deepestSolid.angle * 180) / Math.PI).toFixed(1)}°; a graze of ${SWEEP_GRAZE} allowed)`,
+    );
+    say(
+      roomKeepOuts.length > 50 && deepestKeepOut.depth <= 0,
+      `and no keep-out outside the den: the nearest the leaf comes to one is ${(-deepestKeepOut.depth).toFixed(3)} m short of ${deepestKeepOut.what} (${roomKeepOuts.length} room keep-outs)`,
+    );
+    say(
+      clip.over > 0 && clip.over <= JAMB_CLIP_ACCEPTED,
+      `the front-free corner swings ${Math.max(0, clip.over).toFixed(3)} m north of the doorway's edge at ${((clip.angle * 180) / Math.PI).toFixed(1)}° — through the jamb's drawn edge and ` +
+        `${deepestInClip.depth.toFixed(3)} m into ${deepestInClip.what} at ${((deepestInClip.angle * 180) / Math.PI).toFixed(1)}° (${inClip} leaf points) — ` +
+        `the plan's accepted clip, up to ${JAMB_CLIP_ACCEPTED}: a slit beside the shut case would give the secret away`,
+    );
+  }
+
+  // FADE: in the den, the west wall (its spans and the lintel) and the open leaf go translucent; in the central aisle, nothing does.
+  child.stand(LIBRARY_DEN_DOORWAY_STAND.x, LIBRARY_DEN_DOORWAY_STAND.z, LIBRARY_DEN_DOORWAY_STAND.facing);
+  camera.snapTo(player.position);
+  for (let i = 0; i < 60; i += 1) child.step();
+  say(library.westMaterial.opacity < 0.5, `in the den (${LIBRARY_DEN_DOORWAY_STAND.what}), the west wall fades to ${library.westMaterial.opacity.toFixed(2)} within 60 frames`);
+  const behindLeaf = { x: open.x, z: open.z - open.halfDepth - PLAYER_RADIUS - 0.3 };
+  child.stand(behindLeaf.x, behindLeaf.z, 0);
+  camera.snapTo(player.position);
+  for (let i = 0; i < 60; i += 1) child.step();
+  say(leaf.fader.alpha < 0.5, `standing in the den just north of the open leaf at (${behindLeaf.x.toFixed(2)}, ${behindLeaf.z.toFixed(2)}), the leaf hides her and fades to ${leaf.fader.alpha.toFixed(2)}`);
+  child.stand(0.6, 1.2, 180);
+  camera.snapTo(player.position);
+  for (let i = 0; i < 90; i += 1) child.step();
+  const fadedStacks = library.stacks.filter((stack) => stack.alpha < 0.999).map((stack) => stack.id);
+  say(
+    library.westMaterial.opacity === 1 && leaf.fader.alpha === 1 && fadedStacks.length === 0,
+    `CONTROL: in the open central aisle the west wall (${library.westMaterial.opacity.toFixed(2)}) and the leaf (${leaf.fader.alpha.toFixed(2)}) are solid again and no stack fades (${fadedStacks.join(', ') || 'none'})`,
+  );
+  note(
+    `SECRET SHELF: hinge at (${spec.at.x.toFixed(2)}, ${gapSouth.toFixed(2)}), the leaf ${size.length.toFixed(2)} x ${size.depth.toFixed(2)} x ${size.height.toFixed(2)}; ` +
+      `shut footprint (${shut.x.toFixed(2)}, ${shut.z.toFixed(2)}) facing ${shut.facing}, open (${open.x.toFixed(2)}, ${open.z.toFixed(2)}) facing ${open.facing}; ` +
+      `the gold book at (${bookLocal.x.toFixed(2)}, ${bookLocal.z.toFixed(2)}) shut; landed ${landedAfter.toFixed(3)} s after the press; ${child.frames} frames stepped so far`,
+  );
+}
+
+/**
+ * **GUARD** (plan Decision 24) — found in the den with the leaf shut (what a
+ * jet pack over the west wall, or a hand-typed link, amounts to), the leaf is
+ * open one frame later, silently; and `requestEnter` into the den opens it in
+ * the same call. Proved red by hand: the guard's lines deleted from
+ * `Library.updateSecretLeaf`.
+ */
+/** Where GUARD stands her in the den with the leaf shut — CREATURES asks whether that visit met the dragon too. */
+const GUARD_DEN_SPOT: LocalPoint = { x: -21, z: -5 };
+
+console.log('\nGUARD — found in the den with the leaf shut, it opens at once; a link into the den opens it in the same call:');
+{
+  const leaf = library.secretShelf;
+  const shut = leaf.shutFootprint;
+  const open = leaf.openFootprint;
+  const middleClear = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, PLAYER_RADIUS);
+  const middleBare = (box: BoxFootprint): boolean => collision.isClearCircle(OX + box.x, OZ + box.z, POINT_PROBE);
+  child.enter();
+  say(!leaf.open && leaf.angle === 0 && !library.denRoot.visible, `in at the arrival the leaf is shut (angle ${leaf.angle}) and the den hidden (drawn: ${library.denRoot.visible})`);
+  const inDen = GUARD_DEN_SPOT;
+  child.stand(inDen.x, inDen.z, 270);
+  const before = leaf.open;
+  child.step();
+  say(
+    !before && leaf.open && Math.abs(leaf.angle - SWING_END) < 1e-9 && library.denRoot.visible && middleClear(shut) && !middleBare(open),
+    `stood in the den at (${inDen.x}, ${inDen.z}) with the leaf shut, one frame later it is open (angle ${leaf.angle.toFixed(4)}), the den drawn (${library.denRoot.visible}), ` +
+      `the doorway clear (${middleClear(shut)}) and the open leaf solid (${!middleBare(open)})`,
+  );
+  child.enter();
+  const shutBetween = !leaf.open && leaf.angle === 0;
+  child.enter({ x: inDen.x, z: inDen.z, facing: 270 });
+  const where = child.room();
+  say(
+    shutBetween && leaf.open && libraryDenContains(where.x, where.z) && library.denRoot.visible,
+    `shut again at the arrival (${shutBetween}); /library?at=${inDen.x},${inDen.z} (requestEnter into the den) opens it in the same call, before any frame: open ${leaf.open}, she stands at (${where.x.toFixed(2)}, ${where.z.toFixed(2)})`,
+  );
+  child.enter({ x: LIBRARY_SECRET_STAND.x, z: LIBRARY_SECRET_STAND.z, facing: LIBRARY_SECRET_STAND.facing });
+  say(!leaf.open && leaf.angle === 0 && !library.denRoot.visible, `a link to the pull stand shuts it again (angle ${leaf.angle}, den drawn ${library.denRoot.visible})`);
+}
+
+/**
+ * **FRESH VISIT** — pulled open, then out through the door link and back in
+ * from the park at a sprint through the front door: the leaf is shut, the den
+ * hidden, and its spots unreached again — every visit from the park starts
+ * with the trick there to find.
+ */
+console.log('\nFRESH VISIT — out through the door and back in from the park, the leaf is shut again and the den sealed:');
+{
+  const leaf = library.secretShelf;
+  const player = child.player;
+  const denSpots = libraryKeepOuts().filter((spot) => spot.den);
+  library
+    .interactZones()
+    .find((zone) => zone.id === LIBRARY_SECRET_BOOK_ZONE)
+    ?.actions?.()
+    .find((action) => action.id === PRIMARY_ACTION)
+    ?.run();
+  child.run(2.2);
+  say(leaf.open, `pulled open again from the pull stand before leaving (open ${leaf.open})`);
+  say(library.requestEnterDoor(), '/library-door puts her outside');
+  child.run(1.2);
+  say(!library.playerIsInside && !leaf.open && leaf.angle === 0, `outside (inside ${library.playerIsInside}), the leaf shut behind her (angle ${leaf.angle})`);
+  // A sprint in through the front door, on the stick, from the foot of the steps.
+  const frame = library.frame;
+  const start = frame.foot(0, library.plan.stepFrontZ + 2.5);
+  player.teleportTo(start.x, onGround(start.x, start.z).y, start.z, frame.yaw + Math.PI);
+  camera.snapTo(player.position);
+  const inward = child.towards(-Math.sin(frame.yaw), -Math.cos(frame.yaw), true);
+  for (let i = 0; i < Math.round(4 / CHILD_DT) && !library.playerIsInside; i += 1) child.step(inward);
+  child.run(0.5);
+  const at = child.room();
+  say(
+    library.playerIsInside && Math.hypot(at.x - LIBRARY_ARRIVAL.x, at.z - LIBRARY_ARRIVAL.z) < 0.01 && !leaf.open && leaf.angle === 0 && !library.denRoot.visible,
+    `a sprint through the front door enters at the arrival (${at.x.toFixed(2)}, ${at.z.toFixed(2)}) with the leaf shut (angle ${leaf.angle}) and the den hidden (drawn: ${library.denRoot.visible})`,
+  );
+  const sealed = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  const leaked = denSpots.filter((spot) => reachedAt(sealed, OX + spot.x, OZ + spot.z)).length;
+  say(denSpots.length > 0 && leaked === 0, `and the den is sealed again: ${denSpots.length - leaked} of ${denSpots.length} den spots unreached from the arrival`);
+}
+
+/**
+ * **CREATURES** (#719, plan Step 13) — the baby dragon on its nest of books in
+ * the secret den, and the library cat asleep on her pile by the desk.
+ *
+ * - **Solid in their own shapes** (PR #722: one body per solid, its real top —
+ *   the plan's "nobody jumps onto a dragon" disc to the ceiling went with the
+ *   ceiling flag). Four bodies, registered by name: the nest a disc a step
+ *   high; the dragon, the pile and the cat boxes. Every drawn point of each —
+ *   the model's own vertices, outlines included, never the collider's own
+ *   description — lies inside its body now and on every sampled frame of its
+ *   life (the dragon's head turning to her, its tail, its breath, its puffs;
+ *   the cat's ears and head as she is petted). The dragon's and the cat's tops
+ *   measure under `FOOT_HALF_WIDTH`: they hold nobody.
+ * - **Unreached and marched**: the open-state fill reaches neither creature's
+ *   middle nor the nest's nor the pile's; a body marched at each drawn plan
+ *   from sixteen bearings, at 5 cm and the sprint stride — the nest and the
+ *   pile from the floor, the dragon from up on the nest's top, the cat from up
+ *   on the pile's — never gets into it past the corner allowance.
+ * - **Nobody stands on a dragon or a cat** — the real child jumps at each from
+ *   sixteen bearings, from beside it and from a sprint run-up: never standing
+ *   on its top, never wedged, never left in the air, never inside it.
+ *   `wide-creature-tops` makes both tops whole: the same jumps must then land
+ *   her on them (the control that this can see a child on a creature).
+ * - **DEX**: GUARD's walk into the den already met it, when GUARD's spot is
+ *   inside the meeting radius; taken back out of the collection, the CONTROL
+ *   — 60 frames at the arrival, the leaf shut — leaves it unmet and its zone
+ *   unoffered, and one frame at the dragon's stand meets it: Dragon friend,
+ *   "Oh, a visitor for me!", a puff, the leaf open. Say hi twice: two of its
+ *   answers in order and still one discovery. A visit later, "Hello again,
+ *   friend!".
+ * - **PUFF**: the belly glows past 1.0 within 0.7 s of a puff and is back at
+ *   rest within 3 s; warm sprites rise; an idle puff comes by itself inside
+ *   20 s (the vacuity guard); the head turns to her side within its look
+ *   radius, and straight ahead beyond it.
+ * - **CAT**: Pet the cat! twitches her ears and lifts her face within half a
+ *   second, she is happy at 1 s and asleep by 3 s, hearts rise, she purrs, and
+ *   a second press inside the guard changes nothing.
+ *
+ * Reds: `LIBRARY_CHECK_REMOVE='dragon'` / `'cat'` (both bodies of one),
+ * `'the baby dragon'` / `'the library cat'` (the creature alone, its seat
+ * still there), `LIBRARY_CHECK_MUTATE=wide-creature-tops`; by hand,
+ * `DRAGON_MEET_RADIUS = 0.5` (DEX) and `PET_SECONDS = 0` (CAT).
+ */
+console.log('\nCREATURES — the baby dragon on its nest and the cat on her pile: solid in their own shapes, nobody stands on them, met, puffing and petted:');
+{
+  const den = library.den;
+  const cat = library.cat;
+  const player = child.player;
+  const nest = LIBRARY_DRAGON_NEST;
+  const lines = LIBRARY_LINES;
+  /** How far outside its body a drawn point may stand: the posed bodies are measured off these same vertices, so this is float noise. */
+  const DRAWN_INSIDE = 0.002;
+  const zoneById = (id: string): InteractZone | undefined => library.interactZones().find((candidate) => candidate.id === id);
+  const chipOf = (id: string): ZoneAction | undefined => zoneById(id)?.actions?.().find((action) => action.id === PRIMARY_ACTION);
+  const dex = (): { readonly discovered: boolean; readonly count: number } => {
+    const entry = gameStore.get().collection[DRAGON_FRIEND_SECRET];
+    return { discovered: entry?.discovered === true, count: entry?.count ?? 0 };
+  };
+  /** Every drawn point of a model this frame, room-local, outlines included. */
+  const drawn = (root: Object3D, visit: (point: Vector3) => void): void => visiblePoints(root, visit, library.roomRoot);
+  /**
+   * How far the furthest drawn point of `root` stands outside `box` — negative:
+   * every one is inside, by that much. **+Infinity when nothing was drawn to
+   * measure** (a hidden root, a detached model): an empty sample must fail,
+   * never pass as "nothing outside" (the Step-13 re-review).
+   */
+  const furthestOut = (root: Object3D, box: BoxFootprint): number => {
+    let worst = -Infinity;
+    let points = 0;
+    drawn(root, (point) => {
+      points += 1;
+      worst = Math.max(worst, outsideBox(box, point.x, point.z));
+    });
+    return points > 0 ? worst : Infinity;
+  };
+  /** The furthest a drawn point of `root` reaches from `at` in plan — +Infinity when nothing was drawn to measure. */
+  const reachFrom = (root: Object3D, at: LocalPoint): number => {
+    let reach = 0;
+    let points = 0;
+    drawn(root, (point) => {
+      points += 1;
+      reach = Math.max(reach, Math.hypot(point.x - at.x, point.z - at.z));
+    });
+    return points > 0 ? reach : Infinity;
+  };
+  /** Sampled frames each "drawn is solid" clause must have measured, at the least. */
+  const MIN_SAMPLES = 10;
+  /** A model's drawn plan this frame, as a box turned to `facing` about `at` — measured off its vertices, never its collider. */
+  const drawnBox = (root: Object3D, at: LocalPoint, facing: number): BoxFootprint => {
+    const yaw = (facing * Math.PI) / 180;
+    let minA = Infinity;
+    let maxA = -Infinity;
+    let minO = Infinity;
+    let maxO = -Infinity;
+    drawn(root, (point) => {
+      const dx = point.x - at.x;
+      const dz = point.z - at.z;
+      const along = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+      const out = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+      minA = Math.min(minA, along);
+      maxA = Math.max(maxA, along);
+      minO = Math.min(minO, out);
+      maxO = Math.max(maxO, out);
+    });
+    const ca = (minA + maxA) / 2;
+    const co = (minO + maxO) / 2;
+    return { x: at.x + ca * Math.cos(yaw) + co * Math.sin(yaw), z: at.z - ca * Math.sin(yaw) + co * Math.cos(yaw), facing, halfLength: (maxA - minA) / 2, halfDepth: (maxO - minO) / 2 };
+  };
+  /** Glowing sprites showing under `parent` in `colour` — the dragon's warm puffs, the cat's pink hearts. */
+  const spritesUp = (parent: Object3D, colour: number): number =>
+    parent.children.filter((object) => object instanceof Sprite && object.visible && (object.material as SpriteMaterial).map === glowTexture(colour)).length;
+  let worstDragonDrawn = -Infinity;
+  let dragonSamples = 0;
+  const sampleDragon = (): void => {
+    dragonSamples += 1;
+    worstDragonDrawn = Math.max(worstDragonDrawn, furthestOut(den.dragon.root, den.dragonFootprint));
+  };
+
+  // ------------------------------------------------------------- DEX first: a child who has never met it.
+  const guardDistance = Math.hypot(GUARD_DEN_SPOT.x - nest.x, GUARD_DEN_SPOT.z - nest.z);
+  if (guardDistance <= DRAGON_MEET_RADIUS) {
+    say(
+      dex().discovered,
+      `GUARD's walk into the den at (${GUARD_DEN_SPOT.x}, ${GUARD_DEN_SPOT.z}), ${guardDistance.toFixed(2)} m from the nest (the meeting's ${DRAGON_MEET_RADIUS}), already met the baby dragon: Dragon friend is in the collection (${dex().discovered})`,
+    );
+  } else {
+    note(`GUARD's den spot is ${guardDistance.toFixed(2)} m from the nest, outside the meeting's ${DRAGON_MEET_RADIUS}: nothing asked of that visit`);
+  }
+  // Taken back out of the collection — check-side, the store's own entry — so
+  // the CONTROL and the meeting below start from a child who never met it.
+  delete (gameStore.get().collection as Record<string, unknown>)[DRAGON_FRIEND_SECRET];
+  child.enter();
+  const lineBefore = library.lastCreatureLine;
+  for (let i = 0; i < 60; i += 1) child.step();
+  const unoffered = zoneById(DRAGON_ZONE_ID) === undefined;
+  say(
+    !dex().discovered && !library.denOpen && unoffered && library.lastCreatureLine === lineBefore && !den.metThisVisit,
+    `CONTROL: 60 frames at the arrival with the leaf shut, the baby dragon is not met (Dragon friend: ${dex().discovered}), says nothing new, and its Say hi zone is ${unoffered ? 'not offered' : 'OFFERED'}`,
+  );
+  // CONTROL 2, one variable from the meeting: the den open and she in it, at
+  // its doorway stand — outside the meeting's radius. Not met, so the
+  // meeting below is the radius's doing, not the den's being open.
+  library.openDenInstantly();
+  child.stand(LIBRARY_DEN_DOORWAY_STAND.x, LIBRARY_DEN_DOORWAY_STAND.z, LIBRARY_DEN_DOORWAY_STAND.facing);
+  for (let i = 0; i < 60; i += 1) child.step();
+  const doorwayDistance = Math.hypot(LIBRARY_DEN_DOORWAY_STAND.x - nest.x, LIBRARY_DEN_DOORWAY_STAND.z - nest.z);
+  say(
+    library.denOpen && doorwayDistance > DRAGON_MEET_RADIUS && !dex().discovered && !den.metThisVisit,
+    `CONTROL 2: 60 frames in the open den at its doorway stand, ${doorwayDistance.toFixed(2)} m from the nest (the meeting's ${DRAGON_MEET_RADIUS}): ` +
+      `the den is open (${library.denOpen}) and the dragon is not met (Dragon friend: ${dex().discovered}, met this visit: ${den.metThisVisit})`,
+  );
+  // "Say hi!" and the meeting share one owner (`dragonCanMeet`): no chip at the
+  // doorway stand, none a step outside the meeting's radius (where the stand's
+  // 2.2 m reach once offered it, PR #739's QA), and both on the same frame.
+  /** "Say hi!" drawn for her where she stands: offered, and her feet within the zone's reach of its stand (`Selection.withinReach`). */
+  const sayHiUp = (): boolean => {
+    const zone = zoneById(DRAGON_ZONE_ID);
+    if (!zone || !chipOf(DRAGON_ZONE_ID)) return false;
+    return reachDistance(zone, player.position.x, player.position.z) <= standRadiusOf(zone);
+  };
+  const doorwayChip = sayHiUp() ? 'up' : undefined;
+  const outside = { x: nest.x + DRAGON_MEET_RADIUS + 0.1, z: nest.z };
+  child.stand(outside.x, outside.z, 270);
+  for (let i = 0; i < 10; i += 1) child.step();
+  const outsideChip = sayHiUp() ? 'up' : undefined;
+  const outsideMet = den.metThisVisit;
+  // And the geometry that makes it so for every spot, not just these two:
+  // the chip's whole reach round its stand lies inside the meeting's circle.
+  const zoneNow = zoneById(DRAGON_ZONE_ID);
+  const reachCentreOff = zoneNow ? reachDistance(zoneNow, OX + nest.x, OZ + nest.z) : Infinity;
+  const reachEdge = zoneNow ? reachCentreOff + standRadiusOf(zoneNow) : Infinity;
+  const standInReach = zoneNow ? reachDistance(zoneNow, zoneNow.standX, zoneNow.standZ) + ARRIVE_RADIUS <= standRadiusOf(zoneNow) : false;
+  say(
+    reachEdge <= DRAGON_MEET_RADIUS + 1e-9 && standInReach,
+    `the chip's reach lies inside the meeting: measured ${reachCentreOff.toFixed(2)} m from the nest's middle, ${zoneNow ? standRadiusOf(zoneNow).toFixed(2) : '?'} m round it, ` +
+      `so out to ${reachEdge.toFixed(2)} m, within the meeting's ${DRAGON_MEET_RADIUS.toFixed(2)} m; and a tapped walk to its stand lands in reach (${standInReach})`,
+  );
+  say(
+    doorwayChip === undefined && outsideChip === undefined && !outsideMet && libraryDenContains(outside.x, outside.z),
+    `no "Say hi!" before the meeting: at the doorway stand ${doorwayChip ? 'OFFERED' : 'none'}; at (${outside.x.toFixed(2)}, ${outside.z.toFixed(2)}), ` +
+      `${(DRAGON_MEET_RADIUS + 0.1).toFixed(2)} m from the nest (a step past the meeting's ${DRAGON_MEET_RADIUS.toFixed(2)}), ${outsideChip ? 'OFFERED' : 'none'} and not met (${outsideMet})`,
+  );
+  child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+  const puffsBefore = den.puffsSoFar;
+  child.step();
+  const standDistance = Math.hypot(LIBRARY_DRAGON_STAND.x - nest.x, LIBRARY_DRAGON_STAND.z - nest.z);
+  say(
+    dex().discovered && dex().count === 1 && library.lastCreatureLine === lines.dragon.firstHello && den.puffsSoFar === puffsBefore + 1 && library.denOpen,
+    `stood ${LIBRARY_DRAGON_STAND.what} (${standDistance.toFixed(2)} m from the nest, inside ${DRAGON_MEET_RADIUS}), one frame later it is met: Dragon friend discovered (count ${dex().count}), ` +
+      `it says '${library.lastCreatureLine}' (wanted '${lines.dragon.firstHello}') and puffs (${den.puffsSoFar - puffsBefore}); the guard opened the leaf the same frame (${library.denOpen})`,
+  );
+  const dragonZone = zoneById(DRAGON_ZONE_ID);
+  const sayHi = chipOf(DRAGON_ZONE_ID);
+  const dragonStandOff = dragonZone ? Math.hypot(dragonZone.standX - (OX + LIBRARY_DRAGON_STAND.x), dragonZone.standZ - (OZ + LIBRARY_DRAGON_STAND.z)) : Infinity;
+  const dragonReach = dragonZone ? Math.hypot(player.position.x - dragonZone.standX, player.position.z - dragonZone.standZ) : Infinity;
+  say(
+    !!dragonZone && sayHi?.label === LIBRARY_CHIPS.sayHi && dragonZone.verb === 'Say hi' && dragonZone.highlight?.object === den.dragon.root && dragonStandOff < 1e-9 && dragonReach <= standRadiusOf(dragonZone),
+    `with the leaf open '${DRAGON_ZONE_ID}' offers '${sayHi?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.sayHi}'), verb '${dragonZone?.verb ?? '?'}', its stand ${dragonStandOff.toFixed(3)} m off the layout's, ` +
+      `she ${dragonReach.toFixed(2)} m from it (reach ${dragonZone ? standRadiusOf(dragonZone) : '?'}), the rainbow ${dragonZone?.highlight?.object === den.dragon.root ? 'rings' : 'does NOT ring'} the dragon`,
+  );
+
+  // ------------------------------------------------------------- Say hi on the keys, from every side.
+  // A child walks up to the dragon on the stick from every bearing the den
+  // has room for, until she is pressed against its nest or its body, and the
+  // chip must be up there — not only at its one stand (PR #739's QA round 2:
+  // on arrow keys it almost never came). Starts 2.6 m out, on the den's floor
+  // and clear of everything; a bearing with no such start is counted, not run.
+  {
+    const startOut = 2.6;
+    const approaches: string[] = [];
+    const missed: string[] = [];
+    let skipped = 0;
+    for (let k = 0; k < 16; k += 1) {
+      const angle = (k / 16) * 2 * Math.PI;
+      // The farthest clear start on this bearing, from startOut in towards the nest.
+      let from: LocalPoint | null = null;
+      for (let out = startOut; out >= 1.6 && !from; out -= 0.2) {
+        const at = { x: nest.x + Math.sin(angle) * out, z: nest.z + Math.cos(angle) * out };
+        if (libraryDenContains(at.x, at.z) && walkableAt(collision, OX + at.x, OZ + at.z, PLAYER_RADIUS, LIBRARY_FLOOR_Y)) from = at;
+      }
+      if (!from) {
+        skipped += 1;
+        continue;
+      }
+      child.stand(from.x, from.z);
+      child.step();
+      for (let i = 0; i < Math.round(2.5 / CHILD_DT); i += 1) {
+        const at = child.room();
+        child.step(child.towards(nest.x - at.x, nest.z - at.z, false));
+      }
+      for (let i = 0; i < 10; i += 1) child.step();
+      const at = child.room();
+      const off = Math.hypot(at.x - nest.x, at.z - nest.z);
+      const label = `${Math.round((k * 360) / 16)}° (stopped ${off.toFixed(2)} m from the nest's middle)`;
+      approaches.push(label);
+      if (!sayHiUp() || !den.metThisVisit) missed.push(`${label}: chip ${sayHiUp() ? 'up' : 'NOT up'}, met ${den.metThisVisit}`);
+    }
+    say(
+      approaches.length >= 5 && missed.length === 0,
+      `walked up to the dragon on the keys from ${approaches.length} bearings (${skipped} had no clear start in the den — the nest is in its corner; at least 5 wanted), each until pressed against it, ${approaches.join(", ")}: ` +
+        `"Say hi!" up and the dragon met at ${approaches.length - missed.length} of them${missed.length ? ` — NOT at ${missed.join('; ')}` : ''}`,
+    );
+    child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+    for (let i = 0; i < 10; i += 1) child.step();
+  }
+
+  // ------------------------------------------------------------- Say hi, and the puff it brings.
+  sayHi?.run();
+  const firstHi = library.lastCreatureLine;
+  const pressedAt = child.frames;
+  let peakEarly = 0;
+  let warmUp = 0;
+  for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+    child.step();
+    if ((child.frames - pressedAt) * CHILD_DT <= 0.7) peakEarly = Math.max(peakEarly, den.bellyGlow);
+    warmUp = Math.max(warmUp, spritesUp(library.denRoot, PALETTE.fairyWarm));
+    if (i % 6 === 0) sampleDragon();
+  }
+  const settled = den.bellyGlow;
+  chipOf(DRAGON_ZONE_ID)?.run();
+  const secondHi = library.lastCreatureLine;
+  say(
+    firstHi === lines.dragon.hi[0] && secondHi === lines.dragon.hi[1] && dex().discovered && dex().count === 1,
+    `Say hi twice: '${firstHi}', then '${secondHi}' (its answers, in order), and still one discovery (count ${dex().count})`,
+  );
+  say(
+    peakEarly > 1.0 && Math.abs(settled - DRAGON_BELLY_REST_GLOW) <= 0.01,
+    `the puff: the belly's warm glow reaches ${peakEarly.toFixed(3)} within 0.7 s (over 1.0: ${DRAGON_BELLY_REST_GLOW} + ${DRAGON_PUFF_GLOW} at the height of its ${DRAGON_PUFF_SECONDS} s) ` +
+      `and is back to ${settled.toFixed(3)} 3 s on (${DRAGON_BELLY_REST_GLOW} ± 0.01)`,
+  );
+  say(warmUp >= 1, `warm sprites rise from its mouth: up to ${warmUp} showing at once during the puff`);
+  const beforeIdle = den.puffsSoFar;
+  let idleAfter = Number.NaN;
+  for (let i = 0; i < Math.round(20 / CHILD_DT); i += 1) {
+    child.step();
+    if (Number.isNaN(idleAfter) && den.puffsSoFar > beforeIdle) idleAfter = (i + 1) * CHILD_DT;
+    if (i % 6 === 0) sampleDragon();
+  }
+  say(
+    den.puffsSoFar > beforeIdle,
+    `left alone, it puffs by itself: the first idle puff ${Number.isNaN(idleAfter) ? 'NEVER came' : `${idleAfter.toFixed(1)} s after the last`}, ${den.puffsSoFar - beforeIdle} in 20 s (its stream draws 9–14 s)`,
+  );
+
+  // ------------------------------------------------------------- The head turns to her side, within its look radius.
+  const yaw = (nest.facing * Math.PI) / 180;
+  const sideSpot = (side: number): LocalPoint => ({ x: nest.x + Math.sin(yaw + side * 0.5) * 2, z: nest.z + Math.cos(yaw + side * 0.5) * 2 });
+  const turnAt = (spot: LocalPoint): number => {
+    child.stand(spot.x, spot.z, ((yaw + Math.PI) * 180) / Math.PI);
+    for (let i = 0; i < Math.round(1.5 / CHILD_DT); i += 1) {
+      child.step();
+      if (i % 6 === 0) sampleDragon();
+    }
+    return den.headTurn;
+  };
+  const toLeft = sideSpot(1);
+  const toRight = sideSpot(-1);
+  const spotsFit = [toLeft, toRight].every((spot) => libraryDenContains(spot.x, spot.z) && walkableAt(collision, OX + spot.x, OZ + spot.z, PLAYER_RADIUS, LIBRARY_FLOOR_Y));
+  const turnLeft = turnAt(toLeft);
+  const turnRight = turnAt(toRight);
+  const farDistance = Math.hypot(LIBRARY_DEN_DOORWAY_STAND.x - nest.x, LIBRARY_DEN_DOORWAY_STAND.z - nest.z);
+  const turnFar = turnAt(LIBRARY_DEN_DOORWAY_STAND);
+  say(
+    spotsFit && 0.5 <= DRAGON_HEAD_TURN_LIMIT && 2 <= DRAGON_LOOK_RADIUS && Math.abs(turnLeft - 0.5) < 0.05 && Math.abs(turnRight + 0.5) < 0.05 && farDistance > DRAGON_LOOK_RADIUS && Math.abs(turnFar) < 0.05,
+    `its head follows her: 2 m off its nose 0.5 rad to one side it turns ${turnLeft.toFixed(3)} rad, to the other ${turnRight.toFixed(3)} (±0.5 wanted, its limit ${DRAGON_HEAD_TURN_LIMIT}); ` +
+      `${farDistance.toFixed(2)} m away (${LIBRARY_DEN_DOORWAY_STAND.what}, past its ${DRAGON_LOOK_RADIUS} m) it looks straight ahead (${turnFar.toFixed(3)})`,
+  );
+
+  // ------------------------------------------------------------- SOLID: four bodies, each its own shape.
+  const solidNamed = (what: string): LibrarySolid | undefined => library.solids.find((solid) => solid.what === what);
+  const nestSolid = solidNamed(DRAGON_NEST_SOLID);
+  const dragonSolid = solidNamed(DRAGON_SOLID);
+  const pileSolid = solidNamed(CAT_PILE_SOLID);
+  const catSolid = solidNamed(CAT_SOLID);
+  /** A box solid's top width (`topHalf`): how much of its top a foot could stand on — NaN for none, or for a disc. */
+  const topHalfOf = (solid: LibrarySolid | undefined): number =>
+    solid && typeof solid.handle !== 'number' && 'halfX' in solid.handle ? (solid.handle as BoxCollider).topHalf : Number.NaN;
+  say(
+    nestSolid?.shape === 'disc' && dragonSolid?.shape === 'box' && pileSolid?.shape === 'box' && catSolid?.shape === 'box',
+    `four bodies, each its own shape: '${DRAGON_NEST_SOLID}' ${nestSolid?.shape ?? 'MISSING'}, '${DRAGON_SOLID}' ${dragonSolid?.shape ?? 'MISSING'}, ` +
+      `'${CAT_PILE_SOLID}' ${pileSolid?.shape ?? 'MISSING'}, '${CAT_SOLID}' ${catSolid?.shape ?? 'MISSING'}`,
+  );
+  say(
+    den.nestTop <= BUILDING_STEP_UP &&
+      Math.abs((nestSolid?.top ?? Number.NaN) - den.nestTop) < 1e-9 &&
+      (dragonSolid?.top ?? 0) > BUILDING_STEP_UP &&
+      topHalfOf(dragonSolid) < FOOT_HALF_WIDTH &&
+      cat.pileTop > BUILDING_STEP_UP &&
+      topHalfOf(pileSolid) >= FOOT_HALF_WIDTH &&
+      topHalfOf(catSolid) < FOOT_HALF_WIDTH &&
+      Math.abs((catSolid?.top ?? Number.NaN) - cat.catTop) < 1e-9,
+    `their tops, measured off the models: the nest's books ${den.nestTop.toFixed(3)} m (a step: ${BUILDING_STEP_UP}); the dragon ${(dragonSolid?.top ?? Number.NaN).toFixed(3)} m to its horns, ` +
+      `its crest ${topHalfOf(dragonSolid).toFixed(3)} m either side; the pile ${cat.pileTop.toFixed(3)} m, ${topHalfOf(pileSolid).toFixed(3)} either side; the cat ${cat.catTop.toFixed(3)} m to her ears, ` +
+      `${topHalfOf(catSolid).toFixed(3)} either side — the dragon's and the cat's under the ${FOOT_HALF_WIDTH} her feet need, so neither holds anybody`,
+  );
+  sampleDragon();
+  const nestReach = reachFrom(den.nest.root, nest);
+  const pileOut = furthestOut(cat.pile.root, cat.pileFootprint);
+  const catOut = furthestOut(cat.cat.root, cat.catFootprint);
+  say(
+    dragonSamples >= MIN_SAMPLES && worstDragonDrawn <= DRAWN_INSIDE && nestReach <= den.nestRadius + DRAWN_INSIDE && pileOut <= DRAWN_INSIDE && catOut <= DRAWN_INSIDE,
+    `drawn is solid: the dragon's furthest drawn point over ${dragonSamples} sampled frames of its life (turning, flicking, breathing, puffing) is ${worstDragonDrawn.toFixed(4)} m outside its body; ` +
+      `the nest reaches ${nestReach.toFixed(3)} m (its disc ${den.nestRadius.toFixed(3)}); the pile ${pileOut.toFixed(4)} and the cat ${catOut.toFixed(4)} m outside theirs (at most ${DRAWN_INSIDE})`,
+  );
+  const seen = fill(collision, OX + LIBRARY_ARRIVAL.x, OZ + LIBRARY_ARRIVAL.z);
+  const middles: { readonly what: string; readonly at: LocalPoint }[] = [
+    { what: 'the baby dragon', at: den.dragonFootprint },
+    { what: "the dragon's nest", at: nest },
+    { what: "the cat's pile", at: cat.pileFootprint },
+    { what: 'the library cat', at: cat.catFootprint },
+  ];
+  const reachedMiddles = middles.filter((middle) => reachedAt(seen, OX + middle.at.x, OZ + middle.at.z));
+  say(
+    reachedMiddles.length === 0,
+    `with the leaf open the fill from the arrival reaches none of their middles: ${reachedMiddles.map((middle) => `${middle.what} IS reached`).join(', ') || `${middles.length} of ${middles.length} unreached`}`,
+  );
+  /**
+   * Bodies marched at a drawn plan from sixteen bearings at both strides, with
+   * her feet at `feet`: the deepest a body's edge got into it, by `depth`,
+   * **at any step of the way** — not only where the march ended. These plans
+   * are small: a body that walks straight through a missing solid ends a
+   * metre past it, clear on its far side, and an end-only reading would call
+   * that a pass (it did, the first time `LIBRARY_CHECK_REMOVE='the library
+   * cat'` was run).
+   */
+  const marchedAt = (centre: LocalPoint, reach: number, feet: number, depth: (at: LocalPoint) => number): { marches: number; skipped: number; deepest: number } => {
+    let marches = 0;
+    let skipped = 0;
+    let deepest = -Infinity;
+    const out = reach + 2.2;
+    for (let b = 0; b < 16; b += 1) {
+      const angle = (b / 16) * Math.PI * 2;
+      const sx = centre.x + Math.cos(angle) * out;
+      const sz = centre.z + Math.sin(angle) * out;
+      if (!onFloor(sx, sz) || !walkableAt(collision, OX + sx, OZ + sz, PLAYER_RADIUS, LIBRARY_FLOOR_Y + feet)) {
+        skipped += 1;
+        continue;
+      }
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        const body = new Vector3(OX + sx, LIBRARY_FLOOR_Y + feet, OZ + sz);
+        const ux = (centre.x - sx) / out;
+        const uz = (centre.z - sz) / out;
+        for (let t = 0; t < out + 1; t += step) {
+          collision.resolveMovement(body, ux * step, uz * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+          deepest = Math.max(deepest, depth({ x: body.x - OX, z: body.z - OZ }));
+        }
+      }
+    }
+    return { marches, skipped, deepest };
+  };
+  const dragonDrawn = drawnBox(den.dragon.root, nest, nest.facing);
+  const pileDrawn = drawnBox(cat.pile.root, LIBRARY_CAT_PILE, LIBRARY_CAT_PILE.facing);
+  const catDrawn = drawnBox(cat.cat.root, LIBRARY_CAT_PILE, LIBRARY_CAT_PILE.facing);
+  const atNest = marchedAt(nest, nestReach, 0, (end) => PLAYER_RADIUS - (Math.hypot(end.x - nest.x, end.z - nest.z) - nestReach));
+  const atDragon = marchedAt(dragonDrawn, Math.hypot(dragonDrawn.halfLength, dragonDrawn.halfDepth), den.nestTop, (end) => PLAYER_RADIUS - outsideBox(dragonDrawn, end.x, end.z));
+  const atPile = marchedAt(pileDrawn, Math.hypot(pileDrawn.halfLength, pileDrawn.halfDepth), 0, (end) => PLAYER_RADIUS - outsideBox(pileDrawn, end.x, end.z));
+  const atCat = marchedAt(catDrawn, Math.hypot(catDrawn.halfLength, catDrawn.halfDepth), cat.pileTop, (end) => PLAYER_RADIUS - outsideBox(catDrawn, end.x, end.z));
+  const marched = [
+    { what: "the dragon's nest, from the floor", run: atNest, least: 4 },
+    { what: `the dragon, up on its nest's top (${den.nestTop.toFixed(2)} m)`, run: atDragon, least: 4 },
+    { what: "the cat's pile, from the floor", run: atPile, least: 16 },
+    { what: `the cat, up on her pile's top (${cat.pileTop.toFixed(2)} m)`, run: atCat, least: 16 },
+  ];
+  for (const { what, run, least } of marched) {
+    say(
+      run.marches >= least && run.deepest <= CORNER_ALLOWANCE,
+      `${run.marches} marches at ${what} from 16 bearings at 5 cm and the sprint stride (${run.skipped} starts skipped: off the floor or in a solid; at least ${least} wanted): ` +
+        `deepest a body's edge got into its drawn plan ${run.deepest.toFixed(3)} m, allowance ${CORNER_ALLOWANCE.toFixed(3)}`,
+    );
+  }
+
+  // ------------------------------------------------------------- Nobody stands on a dragon or a cat: the real child jumps at both.
+  const narrowTops = [den.dragonCollider[0], cat.catCollider[0]];
+  const kept = narrowTops.map((box) => box.topHalf);
+  const wide = mutating('wide-creature-tops');
+  if (wide) {
+    for (const box of narrowTops) box.topHalf = Number.NaN;
+    note("MADE the dragon's and the cat's tops whole (topHalf NaN) on purpose — the jumps must land her on them, and this run must go red");
+  }
+  interface Jumps {
+    tried: number;
+    skipped: number;
+    onTop: number;
+    wedged: number;
+    aloft: number;
+    inside: number;
+    leftRoom: number;
+    seatTrials: number;
+    seatFrames: number;
+    first: string;
+  }
+  const jumpAt = (centre: LocalPoint, seatReach: number, seatTop: number, onSeat: (at: LocalPoint) => boolean, body: BoxFootprint, top: number): Jumps => {
+    const jumps: Jumps = { tried: 0, skipped: 0, onTop: 0, wedged: 0, aloft: 0, inside: 0, leftRoom: 0, seatTrials: 0, seatFrames: 0, first: '' };
+    const inDen = libraryDenContains(centre.x, centre.z);
+    const touch = seatReach + PLAYER_RADIUS + 0.05;
+    for (const sprint of [false, true]) {
+      for (let b = 0; b < 16; b += 1) {
+        const angle = (b / 16) * Math.PI * 2;
+        const from = sprint ? touch + 1.5 : touch;
+        const sx = centre.x + Math.cos(angle) * from;
+        const sz = centre.z + Math.sin(angle) * from;
+        if (libraryDenContains(sx, sz) !== inDen || !onFloor(sx, sz) || !walkableAt(collision, OX + sx, OZ + sz, PLAYER_RADIUS, LIBRARY_FLOOR_Y)) {
+          jumps.skipped += 1;
+          continue;
+        }
+        jumps.tried += 1;
+        child.stand(sx, sz, (Math.atan2(centre.x - sx, centre.z - sz) * 180) / Math.PI);
+        for (let i = 0; i < 6; i += 1) child.step();
+        const go = child.towards(centre.x - sx, centre.z - sz, sprint);
+        let jumpedAt = -1;
+        let onTop = 0;
+        let seat = 0;
+        for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+          const here = child.room();
+          if (jumpedAt < 0 && (!sprint || Math.hypot(here.x - centre.x, here.z - centre.z) <= touch + 0.4)) {
+            child.input.pressVirtual('jump');
+            jumpedAt = i;
+          }
+          child.step(jumpedAt < 0 || i - jumpedAt < Math.round(0.5 / CHILD_DT) ? go : undefined);
+          const feetNow = player.position.y - LIBRARY_FLOOR_Y; // flat-ok: her height over the reading room's own flat floor, off the sphere
+          const at = child.room();
+          if (!player.isAirborne && feetNow >= top - 0.05) onTop += 1;
+          if (!player.isAirborne && Math.abs(feetNow - seatTop) < 0.02 && onSeat(at)) seat += 1;
+        }
+        const end = child.room();
+        const stuck = wedgeDepth(collision, player.position, player.position.y);
+        if (onTop > 0) jumps.onTop += 1;
+        if (stuck > WEDGE_DEPTH) jumps.wedged += 1;
+        if (player.isAirborne) jumps.aloft += 1;
+        if (outsideBox(body, end.x, end.z) < 0) jumps.inside += 1;
+        if (seat > 0) {
+          jumps.seatTrials += 1;
+          jumps.seatFrames += seat;
+        }
+        if (!jumps.first && (onTop > 0 || stuck > WEDGE_DEPTH || player.isAirborne || outsideBox(body, end.x, end.z) < 0)) {
+          jumps.first = `${sprint ? 'a sprint' : 'a jump from beside it'} from (${sx.toFixed(2)}, ${sz.toFixed(2)}): ${onTop} frame(s) standing on its top, ended at (${end.x.toFixed(2)}, ${end.z.toFixed(2)}) wedged ${stuck.toFixed(3)} m, airborne ${player.isAirborne}`;
+        }
+        if (!library.playerIsInside) {
+          jumps.leftRoom += 1;
+          child.enter();
+          if (inDen) library.openDenInstantly();
+        }
+      }
+    }
+    return jumps;
+  };
+  const dragonJumps = jumpAt(nest, den.nestRadius, den.nestTop, (at) => Math.hypot(at.x - nest.x, at.z - nest.z) <= den.nestRadius, den.dragonFootprint, den.dragonTop);
+  const pileReach = Math.hypot(cat.pileFootprint.halfLength, cat.pileFootprint.halfDepth);
+  const catJumps = jumpAt(LIBRARY_CAT_PILE, pileReach, cat.pileTop, (at) => outsideBox(cat.pileFootprint, at.x, at.z) <= 0, cat.catFootprint, cat.catTop);
+  if (wide) narrowTops.forEach((box, i) => {
+    box.topHalf = kept[i]!;
+  });
+  for (const [what, jumps, least] of [
+    ['the baby dragon', dragonJumps, 8],
+    ['the library cat', catJumps, 20],
+  ] as const) {
+    say(
+      jumps.tried >= least && jumps.onTop === 0 && jumps.wedged === 0 && jumps.aloft === 0 && jumps.inside === 0,
+      `nobody stands on ${what}: ${jumps.tried} real jumps at it from 16 bearings, from beside it and from a sprint (${jumps.skipped} starts skipped: in a wall or another solid; at least ${least} wanted) — ` +
+        `${jumps.onTop} stood her on its top, ${jumps.wedged} left her wedged, ${jumps.aloft} left her in the air, ${jumps.inside} ended inside it${jumps.first ? `; first: ${jumps.first}` : ''}`,
+    );
+  }
+  note(
+    `the jumps' seats: the dragon's nest held her ${dragonJumps.seatFrames} frame(s) in ${dragonJumps.seatTrials} of ${dragonJumps.tried} jumps before its dragon pushed her off; ` +
+      `the cat's pile ${catJumps.seatFrames} frame(s) in ${catJumps.seatTrials} of ${catJumps.tried}; ${dragonJumps.leftRoom + catJumps.leftRoom} jump(s) carried her out of the room`,
+  );
+
+  // ------------------------------------------------------------- CAT: Pet the cat!
+  child.stand(LIBRARY_CAT_STAND.x, LIBRARY_CAT_STAND.z, LIBRARY_CAT_STAND.facing);
+  child.run(0.4);
+  const catZone = zoneById(CAT_ZONE_ID);
+  const pet = chipOf(CAT_ZONE_ID);
+  const catStandOff = catZone ? Math.hypot(catZone.standX - (OX + LIBRARY_CAT_STAND.x), catZone.standZ - (OZ + LIBRARY_CAT_STAND.z)) : Infinity;
+  const catReach = catZone ? Math.hypot(player.position.x - catZone.standX, player.position.z - catZone.standZ) : Infinity;
+  say(
+    !!catZone && pet?.label === LIBRARY_CHIPS.pet && catZone.verb === 'Pet' && catZone.highlight?.object === cat.group && catStandOff < 1e-9 && catReach <= standRadiusOf(catZone),
+    `stood ${LIBRARY_CAT_STAND.what}, '${CAT_ZONE_ID}' offers '${pet?.label ?? 'nothing'}' (wanted '${LIBRARY_CHIPS.pet}'), verb '${catZone?.verb ?? '?'}', its stand ${catStandOff.toFixed(3)} m off the layout's, ` +
+      `she ${catReach.toFixed(2)} m from it (reach ${catZone ? standRadiusOf(catZone) : '?'}), the rainbow ${catZone?.highlight?.object === cat.group ? 'rings' : 'does NOT ring'} the cat and her pile`,
+  );
+  const { earL, earR, head } = cat.cat;
+  const restEarL = earL.rotation.z;
+  const restEarR = earR.rotation.z;
+  // Her face: the head's front-most drawn point, in the head's own frame, followed into the room.
+  const nose = new Vector3(0, 0, -Infinity);
+  visiblePoints(head, (point) => {
+    if (point.z > nose.z) nose.copy(point);
+  }, head);
+  const faceY = (): number => {
+    head.updateWorldMatrix(true, false);
+    return head.localToWorld(nose.clone()).y;
+  };
+  let restFace = -Infinity;
+  for (let i = 0; i < 30; i += 1) {
+    child.step();
+    restFace = Math.max(restFace, faceY());
+  }
+  const restFaceShown = cat.cat.face;
+  const petsBefore = cat.pets;
+  pet?.run();
+  const purred = library.lastCreatureLine;
+  let earMoved = 0;
+  let faceRise = -Infinity;
+  let happyAt1 = false;
+  let asleepBy3 = false;
+  let hearts = 0;
+  let secondPressChanged = true;
+  let worstCatDrawn = -Infinity;
+  let catSamples = 0;
+  let heartTop = -Infinity;
+  let heartFrames = 0;
+  for (let i = 0; i < Math.round(3.2 / CHILD_DT); i += 1) {
+    if (i === Math.round(0.2 / CHILD_DT)) {
+      const pets = cat.pets;
+      const line = library.lastCreatureLine;
+      chipOf(CAT_ZONE_ID)?.run();
+      secondPressChanged = cat.pets !== pets || library.lastCreatureLine !== line;
+    }
+    child.step();
+    const t = (i + 1) * CHILD_DT;
+    if (t <= 0.5) {
+      earMoved = Math.max(earMoved, Math.abs(earL.rotation.z - restEarL), Math.abs(earR.rotation.z - restEarR));
+      faceRise = Math.max(faceRise, faceY() - restFace); // flat-ok: her face's height over its own rest, both in the reading room's flat space
+    }
+    if (Math.abs(t - 1) < CHILD_DT / 2) happyAt1 = cat.cat.face === 'happy';
+    if (Math.abs(t - 3) < CHILD_DT / 2) asleepBy3 = cat.cat.face === 'asleep';
+    hearts = Math.max(hearts, spritesUp(library.roomRoot, PALETTE.markerPink));
+    for (const heart of cat.hearts.sprites) {
+      if (!heart.visible) continue;
+      heartTop = Math.max(heartTop, heart.position.y + heart.scale.y / 2);
+      heartFrames += 1;
+    }
+    if (i % 3 === 0) {
+      catSamples += 1;
+      worstCatDrawn = Math.max(worstCatDrawn, furthestOut(cat.cat.root, cat.catFootprint));
+    }
+  }
+  say(
+    restFaceShown === 'asleep' && cat.pets === petsBefore + 1 && earMoved > 0.1 && faceRise > 0.02,
+    `asleep before (${restFaceShown}); Pet the cat! counts (${cat.pets - petsBefore}) and within 0.5 s an ear twitches ${earMoved.toFixed(3)} rad off its rest (over 0.1) ` +
+      `and she lifts her face ${(faceRise * 100).toFixed(1)} cm (over 2) — the head's lift, ${PET_SECONDS} s of pet`,
+  );
+  say(happyAt1 && asleepBy3, `she is happy at 1.0 s (${happyAt1}) and asleep again by 3 s (${asleepBy3})`);
+  say(
+    (lines.cat.purr as readonly string[]).includes(purred ?? '') && hearts >= 1,
+    `she purrs '${purred}' (one of ${lines.cat.purr.map((line) => `'${line}'`).join(', ')}) and pink hearts rise (up to ${hearts} at once)`,
+  );
+  // Her hearts rise clear of her bubble: the bubble's tail tip (its anchor,
+  // `cat.bubbleAt`) over the top of every heart on every frame of their rise.
+  const tailTip = cat.bubbleAt.y;
+  say(
+    heartFrames > 0 && heartTop < tailTip,
+    `her hearts rise clear of her purr's bubble: the highest a heart's top reached over ${heartFrames} heart-frames is ${heartTop.toFixed(2)} m, ` +
+      `under the bubble's tail tip at ${tailTip.toFixed(2)} m (${(tailTip - heartTop).toFixed(2)} m clear)`,
+  );
+  say(!secondPressChanged, `a second press 0.2 s in, inside her ${PET_GUARD_SECONDS} s guard, changes nothing (no second pet, no second line)`);
+  say(catSamples >= MIN_SAMPLES && worstCatDrawn <= DRAWN_INSIDE, `drawn is solid while she is petted: her furthest drawn point over ${catSamples} sampled frames (at least ${MIN_SAMPLES}) is ${worstCatDrawn.toFixed(4)} m outside her body (at most ${DRAWN_INSIDE})`);
+
+  // ------------------------------------------------------------- A visit later: hello again.
+  say(library.requestEnterDoor(), 'out through /library-door');
+  child.run(1.2);
+  child.enter();
+  child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+  child.step();
+  say(
+    library.lastCreatureLine === lines.dragon.hello && dex().count === 1,
+    `a visit later, at its stand again, it says '${library.lastCreatureLine}' (wanted '${lines.dragon.hello}') — still one discovery (count ${dex().count})`,
+  );
+  // Leave as found: in at the arrival, the leaf shut, the den hidden.
+  child.enter();
+  note(
+    `CREATURES: the dragon's body (${den.dragonFootprint.x.toFixed(3)}, ${den.dragonFootprint.z.toFixed(3)}) ${(2 * den.dragonFootprint.halfLength).toFixed(3)} x ${(2 * den.dragonFootprint.halfDepth).toFixed(3)} facing ${den.dragonFootprint.facing}, ` +
+      `top ${den.dragonTop.toFixed(3)} (crest ${den.dragonTopHalf.toFixed(3)}); its nest a disc r ${den.nestRadius.toFixed(3)} at (${nest.x}, ${nest.z}), top ${den.nestTop.toFixed(3)}; ` +
+      `the pile (${cat.pileFootprint.x.toFixed(3)}, ${cat.pileFootprint.z.toFixed(3)}) ${(2 * cat.pileFootprint.halfLength).toFixed(3)} x ${(2 * cat.pileFootprint.halfDepth).toFixed(3)}, top ${cat.pileTop.toFixed(3)}; ` +
+      `the cat (${cat.catFootprint.x.toFixed(3)}, ${cat.catFootprint.z.toFixed(3)}) ${(2 * cat.catFootprint.halfLength).toFixed(3)} x ${(2 * cat.catFootprint.halfDepth).toFixed(3)}, top ${cat.catTop.toFixed(3)} (crest ${cat.catTopHalf.toFixed(3)}); ` +
+      `${child.frames} frames stepped so far`,
+  );
+}
+
+/**
+ * **THE DEN AT STORY TIME** (#719, the join; plan items 8 and 18) — the owl
+ * cannot see into the hidden room, and the library's clock does not stop at
+ * its doorway:
+ *
+ * 1. Story time carries on while she is in the den: a story called with her
+ *    standing there is read to its end (gathering → reading → dispersing →
+ *    idle, `told` one more, never aborted), she never leaves the den, and the
+ *    clock counts down there afterwards.
+ * 2. No "Shhh!" in the den: a jump and a sprint there (the den is too small to
+ *    hold a run for long; stderr says how long), the owl at her desk and
+ *    her cooldown run out, never shush. CONTROL: the same jump back in the
+ *    room does.
+ *
+ * Proved red by hand: `Library.update` handing `false` for `unseen` (the
+ * den's jump shushes: "1 shush").
+ */
+console.log('\nTHE DEN AT STORY TIME — a story read to its end while she is in the den, and no "Shhh!" in there:');
+{
+  const story = library.storyTime;
+  if (!library.denOpen) library.openDenInstantly();
+  const inDen = (): boolean => libraryDenContains(child.room().x, child.room().z);
+  child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z, LIBRARY_DRAGON_STAND.facing);
+  child.step();
+  // Story time: called now, read through, with her in the den the whole time.
+  untilQuiet(10);
+  story.holdClock(false);
+  const toldBefore = story.told;
+  library.requestStoryTime();
+  const phases: StoryPhase[] = [];
+  let leftDen = false;
+  let frames = 0;
+  const limit = Math.round(600 / CHILD_DT);
+  for (; frames < limit; frames += 1) {
+    child.step();
+    leftDen ||= !inDen();
+    if (phases[phases.length - 1] !== library.storyPhase) phases.push(library.storyPhase);
+    if (story.told > toldBefore && library.storyPhase === 'idle') break;
+  }
+  const readThrough = ['gathering', 'reading', 'dispersing'].every((phase) => phases.includes(phase as StoryPhase));
+  say(
+    story.told === toldBefore + 1 && readThrough && !leftDen,
+    `a story called with her in the den is read to its end: phases ${phases.join(' → ')} over ${(frames * CHILD_DT).toFixed(1)} s, ` +
+      `stories told ${toldBefore} → ${story.told}; she stayed in the den throughout (left it: ${leftDen})`,
+  );
+  const clockFrom = story.nextIn;
+  child.run(2);
+  const counted = clockFrom - story.nextIn;
+  say(
+    inDen() && library.storyPhase === 'idle' && Math.abs(counted - 2) <= 2 * CHILD_DT,
+    `and the clock counts in the den: ${counted.toFixed(2)} s off it over 2 s (in the den: ${inDen()})`,
+  );
+
+  // Mid-story she gets up off her cushion and walks into the den: the story
+  // goes on to its end, story time's over-the-shoulder camera lets go the
+  // frame she stands, and the camera comes home to her in the den.
+  {
+    child.enter();
+    child.step();
+    untilQuiet(10);
+    for (let i = 0; i < Math.round(30 / CHILD_DT) && !owl.atDesk; i += 1) child.step();
+    const seat = LIBRARY_PLAYER_SEATS[0]!;
+    const toldBefore2 = story.told;
+    library.requestStoryTime();
+    quietly(() => library.requestEnter(undefined, seat));
+    camera.snapTo(child.player.position);
+    let heldWhileSat = false;
+    for (let i = 0; i < Math.round(120 / CHILD_DT) && library.storyPhase !== 'reading'; i += 1) {
+      child.step();
+    }
+    for (let i = 0; i < Math.round(2 / CHILD_DT); i += 1) {
+      child.step();
+      heldWhileSat ||= storyClaimed && library.playerIsSeated;
+    }
+    const readingWhenUp = library.storyPhase === 'reading';
+    library.standUp();
+    if (!library.denOpen) library.openDenInstantly();
+    child.stand(LIBRARY_DRAGON_STAND.x, LIBRARY_DRAGON_STAND.z + 1, 0);
+    // It eases home after she stands (the director's own cancel ease), and
+    // is gone within HOME_WITHIN_CANCEL — STORY CAMERA's own limit.
+    let lastClaim = -1;
+    for (let i = 0; i < Math.round((HOME_WITHIN_CANCEL + 1) / CHILD_DT); i += 1) {
+      child.step();
+      if (storyClaimed) lastClaim = i + 1;
+    }
+    const claimedFor = lastClaim * CHILD_DT;
+    const home = Math.hypot(camera.focusPoint.x - child.player.position.x, camera.focusPoint.z - child.player.position.z);
+    const shushesBefore = owl.shushes;
+    const phases2: StoryPhase[] = [];
+    let leftDen2 = false;
+    for (let i = 0; i < Math.round(600 / CHILD_DT); i += 1) {
+      child.step();
+      leftDen2 ||= !inDen();
+      if (phases2[phases2.length - 1] !== library.storyPhase) phases2.push(library.storyPhase);
+      if (story.told > toldBefore2 && library.storyPhase === 'idle') break;
+    }
+    say(
+      heldWhileSat && readingWhenUp && claimedFor <= HOME_WITHIN_CANCEL && home < 1.5,
+      `sat on ${seat} at story time, story time's camera held the frame (${heldWhileSat}); she got up mid-reading (${readingWhenUp}) and walked into the den: ` +
+        `the story camera let go ${Math.max(0, claimedFor).toFixed(2)} s after she stood (within STORY CAMERA's ${HOME_WITHIN_CANCEL.toFixed(2)} s), and the camera came home to her, its focus ${home.toFixed(2)} m from her feet (under 1.5)`,
+    );
+    say(
+      story.told === toldBefore2 + 1 && !leftDen2 && owl.shushes === shushesBefore,
+      `and the story went on to its end with her in the den: ${phases2.join(' → ')}, stories told ${toldBefore2} → ${story.told}; ` +
+        `she stayed in the den (${!leftDen2}) and was shushed ${owl.shushes - shushesBefore} time(s)`,
+    );
+  }
+
+  // No shush in the den. The owl back at her desk, her cooldown run out.
+  for (let i = 0; i < Math.round(30 / CHILD_DT) && !owl.atDesk; i += 1) child.step();
+  child.run(SHUSH_COOLDOWN_SECONDS + 0.5);
+  untilQuiet(10);
+  const player = child.player;
+  const before = owl.shushes;
+  let tookOff = false;
+  child.input.pressVirtual('jump');
+  for (let i = 0; i < 40; i += 1) {
+    child.step();
+    tookOff ||= player.isAirborne;
+  }
+  // A sprint round and round the open middle of the den — it is too small to
+  // sprint across for long — clear of the nest, the dragon and the open leaf.
+  const ring = { x: LIBRARY_DRAGON_STAND.x + 0.6, z: LIBRARY_DRAGON_STAND.z + 1.4, r: 1.4 };
+  child.stand(ring.x + ring.r, ring.z, 180);
+  let runFor = 0;
+  let longestRun = 0;
+  let sprintLeftDen = false;
+  for (let i = 0; i < Math.round(3 / CHILD_DT); i += 1) {
+    const at = child.room();
+    const rx = at.x - ring.x;
+    const rz = at.z - ring.z;
+    const out = Math.hypot(rx, rz) || 1;
+    // Round the ring (its tangent), pulled back onto it.
+    const pull = (out - ring.r) * 2;
+    child.step(child.towards(-rz / out - (rx / out) * pull, rx / out - (rz / out) * pull, true));
+    sprintLeftDen ||= !inDen();
+    runFor = player.isRunning ? runFor + CHILD_DT : 0;
+    longestRun = Math.max(longestRun, runFor);
+  }
+  say(
+    owl.atDesk && tookOff && !sprintLeftDen && owl.shushes === before,
+    `no "Shhh!" in the den: with the owl at her desk (${owl.atDesk}), a jump (took off: ${tookOff}) and a sprint round the den ` +
+      `(she stayed in it: ${!sprintLeftDen}) — ${owl.shushes - before} shush(es)`,
+  );
+  // Said on every run: the den is too small for a sprint to stay a run for
+  // long, so it is the jump that this clause rests on (its CONTROL below).
+  process.stderr.write(
+    `  note: THE DEN AT STORY TIME: the longest run the den allowed was ${longestRun.toFixed(2)} s against the shush's ${SHUSH_RUN_SECONDS} s — ` +
+      `${longestRun >= SHUSH_RUN_SECONDS ? 'long enough, so the sprint is asked too' : 'too short to shush anywhere, so only the jump is asked'}\n`,
+  );
+  // CONTROL: the same jump in the reading room shushes.
+  child.run(SHUSH_COOLDOWN_SECONDS + 0.5);
+  child.stand(0, 4, 270);
+  child.step();
+  const beforeRoom = owl.shushes;
+  child.input.pressVirtual('jump');
+  for (let i = 0; i < 40; i += 1) child.step();
+  say(owl.shushes === beforeRoom + 1, `CONTROL: the same jump in the reading room at (0, 4) shushes her: ${owl.shushes - beforeRoom} shush(es), "${owl.lastSaid ?? ''}"`);
+  // Left as found: a fresh visit, the shelf shut and the den hidden again.
+  child.enter();
+  child.run(0.5);
+}
 
 console.log('\nHOUSEKEEPING:');
 {
