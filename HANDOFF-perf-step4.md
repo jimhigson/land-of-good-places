@@ -59,3 +59,11 @@ Parks are source-hash gated: rebuild with `LGP_SEEDS=5 LGP_RESTART_LANES=2 pnpm 
   a-b mean +0.08 ms; 4x stand-in order-balanced +0.8 ms (+-2 ms noise). Node bench is the
   controlled figure: park crowd 0.103 vs 0.109 ms; banquet hidden in park 0.732 vs 0.641 ms.
 - PR body draft: scratchpad pr-body.md. Remaining: CI green, report.
+
+## Review round 1 (changes requested: evidence) — answered
+- v3 A/B (ABBA, 4/side, main f3e0b6b8 vs e6bb019d): CPU p50 paired park -0.62, phone -0.05, reptile -0.13,
+  library +0.10, castle hall -1.10, castle mall -0.45, hotel -0.20 ms. Tris: park 3.66->1.48 M, hall 14.49->2.02 M.
+- Red proofs at e6bb019d (seed 5 restart 1 ROUNDS=1): none 0 (83 s), centre 1 (9,324), stale 1 (16,347), uncull 1.
+- PR body source: /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/pr756-body.md (outside the worktree).
+- NEXT: when #752 (check:render-budget) merges, merge main here, lower its BUDGETS draw/tri ceilings
+  for the spaces the crowd touches, prove the check, push.
