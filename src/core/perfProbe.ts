@@ -181,18 +181,23 @@ export interface PerfWindowApi {
   reset(): void;
   /** Frames recorded since the probe started; never reset, so a waiter can count. */
   readonly frameCount: number;
+  /** Where and on what: the space she is in, the GPU, the pixel ratio. */
+  context(): Record<string, unknown>;
 }
 
 export class PerfProbe {
   private readonly renderer: WebGLRenderer;
+  /** Context the probe cannot know itself — supplied by `Game`. */
+  readonly describe: () => Record<string, unknown>;
   private readonly ring: PerfFrame[] = [];
   private worst = 0;
   private framesSeen = 0;
   private frameStart = -1;
   private previousStart = -1;
 
-  constructor(renderer: WebGLRenderer) {
+  constructor(renderer: WebGLRenderer, describe: () => Record<string, unknown>) {
     this.renderer = renderer;
+    this.describe = describe;
     // Summed per frame, not per render call — see the header.
     renderer.info.autoReset = false;
     renderer.info.reset();
@@ -201,6 +206,7 @@ export class PerfProbe {
       frames: () => [...probe.ring],
       summary: (n) => probe.summary(n),
       reset: () => probe.reset(),
+      context: () => probe.describe(),
       get frameCount() {
         return probe.framesSeen;
       },

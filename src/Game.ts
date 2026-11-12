@@ -1140,8 +1140,8 @@ export class Game {
     // `core/perfProbe.ts`). Without the flag the loop calls `tick` directly,
     // exactly as it always has: nothing is constructed, nothing is wrapped.
     if (perfRequested()) {
-      const probe = new PerfProbe(this.engine.renderer);
-      this.perfOverlay = new PerfOverlay(probe, () => this.perfContext());
+      const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
+      this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
         probe.begin();
         this.tick(tick);

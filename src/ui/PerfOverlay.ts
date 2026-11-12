@@ -29,16 +29,10 @@ export class PerfOverlay {
   private readonly element: HTMLElement;
   private readonly text: HTMLElement;
   private readonly button: HTMLButtonElement;
-  private readonly describe: () => Record<string, unknown>;
   private timer = 0;
 
-  /**
-   * @param describe — context for the copied JSON that the probe cannot know:
-   *   the space she is in, the device, the renderer string.
-   */
-  constructor(probe: PerfProbe, describe: () => Record<string, unknown>) {
+  constructor(probe: PerfProbe) {
     this.probe = probe;
-    this.describe = describe;
     this.element = document.createElement('div');
     this.element.className = 'perf-overlay';
     this.element.setAttribute('aria-hidden', 'true');
@@ -86,7 +80,7 @@ export class PerfOverlay {
     return {
       at: new Date().toISOString(),
       url: location.href,
-      ...this.describe(),
+      ...this.probe.describe(),
       budgetMs: FRAME_BUDGET_MS,
       session: this.probe.summary(),
       lastTwoSeconds: this.probe.summary(WINDOW_FRAMES),
@@ -100,7 +94,7 @@ export class PerfOverlay {
 
   private redraw(): void {
     const s = this.probe.summary(WINDOW_FRAMES);
-    const context = this.describe();
+    const context = this.probe.describe();
     this.text.textContent = formatSummary(s, String(context['space'] ?? '?'));
     // Green under budget, amber when CPU alone is over it, red when frames are being missed.
     this.element.style.color =
