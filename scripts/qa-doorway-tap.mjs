@@ -36,11 +36,17 @@ const save = {
   flags: { createdCharacter: true, arrivedByBus: true, hotelKey: true, dexPrizeSeen: true },
 };
 
+const only = process.env.QA_ROOMS?.split(',');
 const rooms = [
   { name: 'hotel', path: '/hotel', frame: 'hotel' },
   { name: 'reptile', path: '/reptile-house', frame: 'reptileHouse' },
   { name: 'library', path: '/library', frame: 'library' },
   { name: 'castle', path: '/castle?deck=0', frame: 'building' },
+  // From the far side of the room: a journey long enough to be a dash
+  // (`tapDash.ts`, #745), so its arrival brake and the per-stride door
+  // crossing are exercised against the doorway steer.
+  { name: 'library-dash', path: '/library?at=-8.5,4.5&facing=135', frame: 'library', far: true },
+  { name: 'castle-dash', path: '/castle?deck=0&at=-8,8.5&facing=135', frame: 'building', far: true },
 ];
 
 const browser = await chromium.launch({
@@ -48,11 +54,12 @@ const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 });
 let failed = 0;
-for (const room of rooms) {
+for (const room of rooms.filter((r) => !only || only.includes(r.name))) {
   // Positive is metres in from the wall line, negative out past it: the
   // castle's porch runs well past its door, the other rooms' floor 0.6 m.
   const spots = [['wall line', 0], ['0.5 m inside', 0.5], ['0.3 m outside', -0.3]];
   if (room.name === 'castle') spots.push(['1.0 m outside', -1.0], ['1.6 m outside', -1.6]);
+  if (room.far) spots.splice(1);
   for (const [where, inset] of spots) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, serviceWorkers: 'block' });
     await context.addInitScript((file) => window.localStorage.setItem('lgp:save', JSON.stringify(file)), save);
@@ -92,7 +99,7 @@ for (const room of rooms) {
       const wallZ = placed.originZ + placed.frame.opening.z;
       const n = game.tapNavigator;
       const f = (v) => (v ? `${(v.x - placed.originX).toFixed(2)}, ${(v.y - placed.originY).toFixed(2)}, ${(wallZ - v.z).toFixed(2)} in` : 'none');
-      return `hit ${f(n.hit)} -> walk to ${f(n.target)}; selected ${game.selection?.selected?.id ?? 'nothing'}`;
+      return `hit ${f(n.hit)} -> walk to ${f(n.target)}${n.dashing ? ' (dashing)' : ''}; selected ${game.selection?.selected?.id ?? 'nothing'}`;
     }, room.frame);
     await page.waitForTimeout(20000);
     const after = await page.evaluate(() => [window.game.player.position.x, window.game.player.position.z]);
