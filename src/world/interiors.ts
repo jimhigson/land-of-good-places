@@ -1,4 +1,5 @@
-import { LazyPart } from './LazyPart';
+import type { LazyPart } from './LazyPart';
+import { chunkPart } from './lazyChunks';
 import { SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
 import type * as ReptileHallModule from './reptileHouse/hall';
 import type * as FerrisShowModule from './ferrisWheel/show';
@@ -19,10 +20,10 @@ import type * as FerrisShowModule from './ferrisWheel/show';
  */
 
 /** The Reptile House's hall floor: cases, enclosures, planting, the stall and the tortoise. */
-export const REPTILE_HALL = new LazyPart<typeof ReptileHallModule>('the Reptile House hall', () => import('./reptileHouse/hall'));
+export const REPTILE_HALL = chunkPart<typeof ReptileHallModule>('the Reptile House hall', 'src/world/reptileHouse/hall.ts', () => import('./reptileHouse/hall'));
 
 /** The Space Ferris Wheel's sky show: clouds, space, the four friends and the sparks — built on boarding. */
-export const FERRIS_SHOW = new LazyPart<typeof FerrisShowModule>('the ferris wheel sky show', () => import('./ferrisWheel/show'));
+export const FERRIS_SHOW = chunkPart<typeof FerrisShowModule>('the ferris wheel sky show', 'src/world/ferrisWheel/show.ts', () => import('./ferrisWheel/show'));
 
 /** Every lazy room, for the boot's preloading and Node's providing. */
 export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW];

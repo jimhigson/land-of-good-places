@@ -33,17 +33,56 @@
  */
 export const LAZY_PART_TIMEOUT_MS = 20_000;
 
+/**
+ * After a failed fetch, how long before another `load()` may try again, in
+ * milliseconds. Until then `load()` answers with the same failure at once.
+ *
+ * Callers ask freely — the Reptile House asks every frame she is near its
+ * door — so without this a failed room would refetch sixty times a second.
+ */
+export const LAZY_PART_RETRY_AFTER_MS = 4_000;
+
+/** How a `LazyPart` is built. */
+export interface LazyPartOptions<T> {
+  /** {@link LAZY_PART_TIMEOUT_MS} unless a test needs it shorter. */
+  readonly timeoutMs?: number;
+  /** {@link LAZY_PART_RETRY_AFTER_MS} unless a test needs it shorter. */
+  readonly retryAfterMs?: number;
+  /**
+   * **How to fetch it again after a failure, so the fetch really happens.**
+   *
+   * A browser remembers a failed `import()` for the life of the page and
+   * answers every later `import()` of that URL with the same failure, without
+   * a request (QA on #749: Chromium 151 and WebKit 26.5 both, three imports and
+   * one request). So retrying the same `loader` can never recover — a room
+   * that failed once was gone until a reload. This is called instead for every
+   * attempt after a real failure, with the attempt number, and must fetch the
+   * module under a URL the browser has not seen: `lazyChunks.ts`'s
+   * `refetchChunk` does, from the module's source path.
+   */
+  readonly refetch?: (attempt: number) => Promise<T>;
+}
+
 export class LazyPart<T> {
   readonly name: string;
   private readonly loader: () => Promise<T>;
   private readonly timeoutMs: number;
+  private readonly retryAfterMs: number;
+  private readonly refetch: ((attempt: number) => Promise<T>) | null;
   private value: T | null = null;
   private pending: Promise<T> | null = null;
+  /** Fetches that have failed so far; the next attempt after one goes through {@link refetch}. */
+  private failures = 0;
+  /** The last failure, and when another attempt may be made. */
+  private lastError: unknown = null;
+  private retryAt = 0;
 
-  constructor(name: string, loader: () => Promise<T>, timeoutMs: number = LAZY_PART_TIMEOUT_MS) {
+  constructor(name: string, loader: () => Promise<T>, options: LazyPartOptions<T> = {}) {
     this.name = name;
     this.loader = loader;
-    this.timeoutMs = timeoutMs;
+    this.timeoutMs = options.timeoutMs ?? LAZY_PART_TIMEOUT_MS;
+    this.retryAfterMs = options.retryAfterMs ?? LAZY_PART_RETRY_AFTER_MS;
+    this.refetch = options.refetch ?? null;
   }
 
   /** The module, once it is here; `null` until then. */
@@ -52,33 +91,49 @@ export class LazyPart<T> {
   }
 
   /**
-   * Fetches the module (once — every later call gets the same promise). A
-   * failed fetch, or one still not here after {@link LAZY_PART_TIMEOUT_MS},
-   * rejects, and can be retried.
+   * Fetches the module, once: every caller while it is on its way gets the
+   * same promise. It rejects on a failed fetch or one still not here after
+   * {@link LAZY_PART_TIMEOUT_MS}. A later call tries again — but not until
+   * {@link LAZY_PART_RETRY_AFTER_MS} has passed (before that it rejects at
+   * once with the same failure), and then under a fresh URL ({@link
+   * LazyPartOptions.refetch}), because the browser will not fetch the old one
+   * again.
    */
   load(): Promise<T> {
     if (this.value) return Promise.resolve(this.value);
-    if (!this.pending) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${this.name} did not arrive within ${this.timeoutMs} ms`)),
-          this.timeoutMs,
-        );
-      });
-      const pending = Promise.race([Promise.resolve().then(this.loader), timeout]).finally(() => clearTimeout(timer)).then(
+    if (this.pending) return this.pending;
+    if (this.failures > 0 && Date.now() < this.retryAt) return Promise.reject(this.lastError);
+    const attempt = this.failures;
+    // After a timeout the first fetch may still be on its way, and the plain
+    // loader then joins it rather than fetching a second copy; after a real
+    // failure it rejects at once and the fresh URL is tried.
+    const fetchIt = (): Promise<T> => {
+      if (attempt === 0 || !this.refetch) return this.loader();
+      const refetch = this.refetch;
+      return this.loader().catch(() => refetch(attempt));
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${this.name} did not arrive within ${this.timeoutMs} ms`)), this.timeoutMs);
+    });
+    const pending = Promise.race([Promise.resolve().then(fetchIt), timeout])
+      .finally(() => clearTimeout(timer))
+      .then(
         (value) => {
           this.value = value;
+          this.pending = null;
           return value;
         },
         (error: unknown) => {
           this.pending = null;
+          this.failures += 1;
+          this.lastError = error;
+          this.retryAt = Date.now() + this.retryAfterMs;
           throw error;
         },
       );
-      this.pending = pending;
-    }
-    return this.pending;
+    this.pending = pending;
+    return pending;
   }
 
   /** Hands over a module imported statically — Node's checks, which build every room up front. */

@@ -59,6 +59,18 @@ import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
 import { LazyBookReader } from './world/library/reader/LazyBookReader';
+// **In the boot on purpose, though nothing here calls them.** Each is shared
+// by two lazy chunks (the tortoise by the Reptile House hall and the book
+// reader's pictures; the space friends by the ferris wheel's show and the
+// reader), so left alone the bundler makes each a lazy chunk of its own that
+// both import. A lazy chunk whose own import fails is lost for the session —
+// the browser refuses that URL again and no fresh query can reach an import
+// named inside another chunk (`world/lazyChunks.ts`). In the boot they are
+// loaded before anything can be entered, so every lazy chunk imports only
+// what is already here, and a retry under a fresh URL always recovers it.
+// `check:boot-chunk` fails if a lazy chunk imports another lazy one.
+import './art/models/reptiles';
+import './minigames/ferrisWheel/friends';
 import { markBookRead } from './world/library/readBooks';
 import { BookGlance } from './world/library/bookGlance';
 import { StoryCamera } from './world/library/storyCamera';

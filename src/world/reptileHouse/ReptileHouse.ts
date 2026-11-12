@@ -128,6 +128,13 @@ export interface ReptileHouseDeps {
 /** How near the building she must be for its hall's chunk to be fetched ahead of the door, in metres. */
 const REPTILE_PREFETCH_RADIUS = 18;
 
+/** What she is told when the hall could not be fetched — the room is fine, it just is not here yet. */
+const DOOR_REFUSED_LINE = 'The snakes are still waking up — try again in a moment!';
+/** How high over the door that line hangs, in metres — over her head, under Sunny's eyes. */
+const REPTILE_DOOR_LINE_HEIGHT = 3.2;
+/** How far past the door band she must step before a refused door will try again, in metres. */
+const DOOR_STEP_AWAY = 1.5;
+
 /** The exit chip and the tail-tickle chip's ids. */
 const ENTRANCE_ZONE = 'reptile-entrance';
 
@@ -161,6 +168,8 @@ export class ReptileHouse implements GameSystem {
    * through the door on the first frame, once it is.
    */
   private restoreInto: { readonly x: number; readonly z: number; readonly facing: number } | null = null;
+  /** The door just failed to open because the hall could not be fetched; it waits until she steps away (`refuseDoor`). */
+  private doorRefused = false;
   /** Everything the hall's floor is built with but the props, which it makes itself. */
   private readonly hallContext: Omit<HallContext, 'props'>;
   /** The over-the-shoulder shot an exhibit's chip brings the camera down to. */
@@ -498,11 +507,12 @@ export class ReptileHouse implements GameSystem {
         hall.ride.update(dt, elapsed, context.input);
       }
       this.hearts.update(dt);
-      if (this.bubbleFor > 0) {
-        this.bubbleFor -= dt;
-        if (this.bubbleFor <= 0) this.bubble.setText(null);
-        else this.bubble.updateScreenSize(this.deps.camera);
-      }
+    }
+    // In the hall or, after a door that could not open, outside it.
+    if (this.bubbleFor > 0) {
+      this.bubbleFor -= dt;
+      if (this.bubbleFor <= 0) this.bubble.setText(null);
+      else this.bubble.updateScreenSize(this.deps.camera);
     }
 
     if (this.onForecourt || this.deps.plot) {
@@ -564,7 +574,19 @@ export class ReptileHouse implements GameSystem {
       // immediately pushes down used to walk off the plate and be popped back
       // to the arrival (the solidity review, 2 October 2026).
       if (this.spaces.settling) return;
-      if (bandWalkedThrough(reptileEntryBand(this.frame), player)) {
+      const band = reptileEntryBand(this.frame);
+      // **A door that could not open stays shut until she has stepped away
+      // from it.** Its floor failed to load (`refuseDoor`): firing again every
+      // time the cooldown ran out, while she stood in the mouth or pushed into
+      // it, closed and opened the iris about once a second — a flashing
+      // screen, QA on #749. One clear try per approach.
+      if (this.doorRefused) {
+        if (Math.hypot(player.position.x - band.centreX, player.position.z - band.centreZ) > band.halfAlong + DOOR_STEP_AWAY) {
+          this.doorRefused = false;
+        }
+        return;
+      }
+      if (bandWalkedThrough(band, player)) {
         this.changeToHall(() => this.enterHall());
       }
       return;
@@ -726,6 +748,8 @@ export class ReptileHouse implements GameSystem {
   }
 
   private say(item: string, text: string, at: LocalPoint, y: number): void {
+    // Back in the hall if the door last borrowed it (`refuseDoor`).
+    if (this.bubble.sprite.parent !== this.hallRoot) this.hallRoot.add(this.bubble.sprite);
     this.lastSaid = text;
     this.bubble.identity.item = item;
     this.bubble.anchorAt(at.x, y, at.z);
@@ -753,7 +777,26 @@ export class ReptileHouse implements GameSystem {
 
   /** Into the hall, fetching and building its floor behind the iris first if it is not here yet. */
   private changeToHall(midpoint: () => void): void {
-    this.spaces.changeToFurnished(() => this.hall !== null, () => this.furnish(), midpoint);
+    this.spaces.changeToFurnished(() => this.hall !== null, () => this.furnish(), midpoint, () => this.refuseDoor());
+  }
+
+  /**
+   * The hall's floor could not be fetched (offline before it was ever cached,
+   * or a dropped connection): she is still outside, so say why over the door,
+   * and keep the door from firing again under her until she has stepped away
+   * from it (`checkDoorways`). The next approach tries again — `LazyPart`
+   * fetches it afresh once its short back-off has passed.
+   */
+  private refuseDoor(): void {
+    this.doorRefused = true;
+    const door = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER, 0);
+    const root = this.deps.plot ? this.parkRoot : this.forecourtRoot;
+    root.add(this.bubble.sprite);
+    this.lastSaid = DOOR_REFUSED_LINE;
+    this.bubble.identity.item = ENTRANCE_ZONE;
+    this.bubble.anchorAt(door.x - this.frame.x, REPTILE_DOOR_LINE_HEIGHT, door.z - this.frame.z);
+    this.bubble.setText(DOOR_REFUSED_LINE);
+    this.bubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
   }
 }
 

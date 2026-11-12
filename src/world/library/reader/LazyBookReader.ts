@@ -2,10 +2,10 @@ import type { Mesh, PerspectiveCamera, WebGLRenderer } from 'three';
 import { bookById, type LibraryBook } from '../books';
 import type { BookReader, BookReaderOptions, ReaderFraming } from './BookReader';
 import type * as BookReaderModule from './BookReader';
-import { LazyPart } from '../../LazyPart';
+import { chunkPart } from '../../lazyChunks';
 
 /** The reader's chunk — a `LazyPart` for its timeout, so a hung fetch lets the held park go. */
-const READER = new LazyPart<typeof BookReaderModule>('the book reader', () => import('./BookReader'));
+const READER = chunkPart<typeof BookReaderModule>('the book reader', 'src/world/library/reader/BookReader.ts', () => import('./BookReader'));
 import type { PaintedFace } from './pageFaces';
 
 /**

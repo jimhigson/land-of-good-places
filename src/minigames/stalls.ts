@@ -9,7 +9,7 @@ import { pressZone, type InteractZone } from '../world/interact';
 import { standOnSphere, terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
 import { createStallProp, type StallProp } from './stallProp';
-import { LazyPart } from '../world/LazyPart';
+import { chunkPart } from '../world/lazyChunks';
 import type * as DodgemsModule from './dodgems/Dodgems';
 import type * as SpookyHouseModule from './spookyHouse/SpookyHouse';
 import type * as WaterFightModule from './waterFight/WaterFight';
@@ -21,9 +21,9 @@ import type * as WaterFightModule from './waterFight/WaterFight';
  * failure path (it opens back onto the park) instead of a curtain held shut for
  * ever.
  */
-const DODGEMS = new LazyPart<typeof DodgemsModule>('the dodgems', () => import('./dodgems/Dodgems'));
-const SPOOKY_HOUSE = new LazyPart<typeof SpookyHouseModule>('the spooky house', () => import('./spookyHouse/SpookyHouse'));
-const WATER_FIGHT = new LazyPart<typeof WaterFightModule>('the water fight', () => import('./waterFight/WaterFight'));
+const DODGEMS = chunkPart<typeof DodgemsModule>('the dodgems', 'src/minigames/dodgems/Dodgems.ts', () => import('./dodgems/Dodgems'));
+const SPOOKY_HOUSE = chunkPart<typeof SpookyHouseModule>('the spooky house', 'src/minigames/spookyHouse/SpookyHouse.ts', () => import('./spookyHouse/SpookyHouse'));
+const WATER_FIGHT = chunkPart<typeof WaterFightModule>('the water fight', 'src/minigames/waterFight/WaterFight.ts', () => import('./waterFight/WaterFight'));
 import { STALL_PICK_RADIUS, STALL_PLACEMENTS, STALL_STANDS_BY_ID } from './stallPlacement';
 import type { StallDefinition } from './types';
 

@@ -37,9 +37,9 @@
  * `--report` prints the twenty-five biggest modules in the boot set, which is
  * where to look next when the budget bites.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { globSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { build, type Plugin } from 'vite';
 import { PRECACHE_FILE_LIMIT_BYTES } from '../src/boot/precacheLimit.ts';
 
@@ -97,6 +97,7 @@ interface ChunkFacts {
   readonly imports: readonly string[];
   readonly dynamicImports: readonly string[];
   readonly isEntry: boolean;
+  readonly isDynamicEntry: boolean;
   readonly modules: ReadonlyMap<string, number>;
 }
 
@@ -114,6 +115,7 @@ function capture(into: Map<string, ChunkFacts>): Plugin {
           imports: output.imports,
           dynamicImports: output.dynamicImports,
           isEntry: output.isEntry,
+          isDynamicEntry: output.isDynamicEntry,
           modules: new Map(
             Object.entries(output.modules).map(([id, info]) => [relative(root, id), info.renderedLength]),
           ),
@@ -195,6 +197,41 @@ try {
     failures.push(`the boot set is ${kb(bootBytes)}, over the ${kb(BOOT_SET_BUDGET)} budget`);
   }
 
+  // --------------------------- 4. every lazy chunk can be fetched again
+  // A lazy chunk is retried under a fresh URL after a failed fetch
+  // (`src/world/lazyChunks.ts`), which only recovers it if nothing it imports
+  // can have failed too: so it may import only boot chunks, which are loaded
+  // before anything is entered. A chunk shared by two lazy ones breaks that.
+  for (const chunk of chunks.values()) {
+    if (boot.has(chunk.fileName) || !chunk.isDynamicEntry) continue;
+    for (const dep of chunk.imports) {
+      if (!boot.has(dep)) {
+        failures.push(
+          `lazy chunk ${chunk.fileName} imports ${dep}, which is not in the boot — if ${dep} ever fails to fetch, ` +
+            `${chunk.fileName} can never be loaded again that session (put what ${dep} holds in the boot)`,
+        );
+      }
+    }
+  }
+  // Every `chunkPart(name, source, () => import(spec))` names, as `source`, the
+  // module it imports, and the build wrote a chunk for it into the map a retry
+  // reads (`lazy-chunks-<version>.json`).
+  const mapFile = readdirSync(outDir).find((name) => /^lazy-chunks-.*\.json$/.test(name));
+  const lazyMap: Record<string, string> = mapFile ? JSON.parse(readFileSync(join(outDir, mapFile), 'utf8')) : {};
+  if (!mapFile) failures.push('control: the build wrote no lazy-chunks-<version>.json — a retry would find no chunk');
+  const CALL = /chunkPart<[^>]*>\(\s*'[^']*',\s*'([^']+)',\s*\(\)\s*=>\s*import\('([^']+)'\)/g;
+  let calls = 0;
+  for (const file of globSync('src/**/*.ts', { cwd: root })) {
+    for (const match of readFileSync(join(root, file), 'utf8').matchAll(CALL)) {
+      calls += 1;
+      const [, source, spec] = match as unknown as [string, string, string];
+      const imported = relative(root, resolve(dirname(join(root, file)), spec)) + '.ts';
+      if (imported !== source) failures.push(`${file}: chunkPart names ${source} but imports ${imported}`);
+      if (!lazyMap[source]) failures.push(`${file}: chunkPart ${source} has no chunk in the build's lazy chunk map`);
+    }
+  }
+  if (calls === 0) failures.push('control: found no chunkPart call in src/ — the clause above asserts nothing');
+
   // ---------------------------------------------------- 3. all precached
   const sw = readFileSync(join(outDir, 'sw.js'), 'utf8');
   let lazyBytes = 0;
@@ -211,7 +248,8 @@ try {
   process.stderr.write(
     `check:boot-chunk: boot set ${boot.size} chunks, ${kb(bootBytes)} (budget ${kb(BOOT_SET_BUDGET)}); ` +
       `largest ${bootList[0]?.fileName} ${kb(bootList[0]?.bytes ?? 0)} (budget ${kb(BOOT_CHUNK_BUDGET)}); ` +
-      `${chunks.size - boot.size} lazy chunks, ${kb(lazyBytes)}; ${LAZY_MODULES.length} lazy modules asserted\n`,
+      `${chunks.size - boot.size} lazy chunks, ${kb(lazyBytes)}; ${LAZY_MODULES.length} lazy modules asserted; ` +
+      `${calls} chunkPart sources matched to the build's map\n`,
   );
   for (const chunk of bootList) process.stderr.write(`  boot  ${kb(chunk.bytes).padStart(8)}  ${chunk.fileName}\n`);
   if (process.argv.includes('--report')) {

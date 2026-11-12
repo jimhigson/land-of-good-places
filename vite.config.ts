@@ -4,6 +4,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { VERSION_FILE_NAME } from './src/version-file';
 import { PRECACHE_FILE_LIMIT_BYTES } from './src/boot/precacheLimit';
+import { lazyChunkMapFile } from './src/world/lazyChunks';
 import {
   PARK_FILE_FORMAT,
   PREBUILT_PARKS_MANIFEST,
@@ -65,6 +66,30 @@ function versionFilePlugin(version: string): Plugin {
     apply: 'build',
     writeBundle(options) {
       writeFileSync(`${options.dir ?? 'dist'}/${VERSION_FILE_NAME}`, version);
+    },
+  };
+}
+
+/**
+ * **Where every lazy chunk ended up** — `lazy-chunks-<version>.json`, each
+ * dynamically imported module's source path to its hashed file. Read only by
+ * `src/world/lazyChunks.ts`'s `refetchChunk`, to import a chunk again under a
+ * fresh URL after the browser has failed (and remembered failing) the first
+ * one. Named by version so a page only ever reads its own build's map; not
+ * precached, because it is only wanted once the network is back.
+ */
+function lazyChunksPlugin(version: string): Plugin {
+  return {
+    name: 'land-of-good-places-lazy-chunks',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const map: Record<string, string> = {};
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'chunk' || !output.isDynamicEntry || !output.facadeModuleId) continue;
+        const source = output.facadeModuleId.slice(process.cwd().length + 1).split('\\').join('/');
+        map[source] = output.fileName;
+      }
+      this.emitFile({ type: 'asset', fileName: lazyChunkMapFile(version), source: JSON.stringify(map) });
     },
   };
 }
@@ -202,6 +227,7 @@ export default defineConfig({
   },
   plugins: [
     versionFilePlugin(APP_VERSION),
+    lazyChunksPlugin(APP_VERSION),
     prebuiltParksPlugin(APP_VERSION),
     devParksPlugin(APP_VERSION),
     VitePWA({
