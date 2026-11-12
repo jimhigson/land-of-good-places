@@ -39,3 +39,14 @@ harness runs the park acceptance loop (~4 min/restart) because src changed.
 ## Status
 - [x] check numbers  - [x] red proofs  - [ ] browser A/B (build base + branch, harness run.mjs)
 - [x] PR #756 (draft)
+
+## Browser A/B v1 (head 974b8bea, before the bounds optimisation)
+Harness: PR #746's run.mjs + my ab.sh (scratchpad), Chrome for Testing 1234 headless, M4 Pro,
+vite preview of base (9b5e89e3) on :5871 and branch on :5872, seed 5.
+Tris p50: park 3.66 M -> 1.47 M; reptile 2.09 -> 0.45; library 1.99 -> 0.35;
+castle hall 14.47 -> 1.67; castle mall 2.63 -> 0.19. Draws -40..-95.
+CPU p50 park went UP ~0.5 ms: node bench showed flush on the 111-seat banquet (0.28 ms) +
+culling the hidden banquet (0.08 ms). Fixed in "per-child boxes" commit: banquet flush 0.059,
+cull skipped when hidden; park crowd total 0.103 ms vs main 0.109. Re-measuring (v2).
+Note: `pnpm run build` exits 1 on main and here (PWA precache limit, #749); dist is complete.
+Parks are source-hash gated: rebuild with `LGP_SEEDS=5 LGP_RESTART_LANES=2 pnpm run build:parks`.
