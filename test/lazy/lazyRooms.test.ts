@@ -90,13 +90,17 @@ describe('a save restored inside the Reptile House hall before its floor is load
     const player = new Player(collision, camera, new Vector3(REPTILE_HOUSE_ORIGIN_X + saved.x, 0, REPTILE_HOUSE_ORIGIN_Z + saved.z));
     house.attachPlayer(player);
     house.adoptRestoredPlayer();
+    // What `Game` does next, after every adoption: puts her back on the spot
+    // she saved at. A fix that moved her out during adoption alone was undone
+    // by this and left her in the empty hall (QA's browser run).
+    player.teleportTo(REPTILE_HOUSE_ORIGIN_X + saved.x, 0, REPTILE_HOUSE_ORIGIN_Z + saved.z, 0);
+    expect(house.playerIsInside, 'not counted as inside a hall whose floor is not there').toBe(false);
 
     const inHall = (): boolean =>
       Math.hypot(player.position.x - REPTILE_HOUSE_ORIGIN_X, player.position.z - REPTILE_HOUSE_ORIGIN_Z) < 200;
-    expect(house.playerIsInside || inHall(), 'she must not be in the hall while its floor is not there').toBe(false);
-
     const frame = { dt: 1 / 60, elapsed: 0, frame: 1, playerPosition: player.position, input: { manualMoveActive: false, moveAmount: 0, justPressed: () => false } } as unknown as FrameContext;
     house.update(frame);
+    expect(house.playerIsInside || inHall(), 'after the first frame she must not be in the hall while its floor is not there').toBe(false);
     expect(wipes.length, 'the first frame starts the walk in through the door').toBe(1);
     expect(house.playerIsInside, 'still outside while the floor is fetched').toBe(false);
 

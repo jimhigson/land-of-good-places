@@ -130,8 +130,12 @@ const REPTILE_PREFETCH_RADIUS = 18;
 
 /** What she is told when the hall could not be fetched — the room is fine, it just is not here yet. */
 const DOOR_REFUSED_LINE = 'The snakes are still waking up — try again in a moment!';
-/** How high over the door that line hangs, in metres — over her head, under Sunny's eyes. */
-const REPTILE_DOOR_LINE_HEIGHT = 3.2;
+/**
+ * Where that line hangs: over the doormat, out in front of the mouth, at
+ * this height in metres — over her head. Hung in the doorway itself it was
+ * half hidden by the mouth's own arch (QA's frame of the first try).
+ */
+const REPTILE_DOOR_LINE_HEIGHT = 2.6;
 /** How far past the door band she must step before a refused door will try again, in metres. */
 const DOOR_STEP_AWAY = 1.5;
 
@@ -409,9 +413,11 @@ export class ReptileHouse implements GameSystem {
       // that restores in here (`interiorsToPreload`), so it is furnished by
       // now. If it is not — that load failed, or timed out — she is **never**
       // put in the hall to have its floor built round her: a prop's collider
-      // registered on top of her is a box she can never leave. She waits on
-      // the doormat instead, and goes in through the door, behind its iris,
-      // to the spot she saved at, once the floor is built (`update`).
+      // registered on top of her is a box she can never leave. On the first
+      // frame (`update`) she is put on the doormat and taken in through the
+      // door, behind its iris, to the spot she saved at, once the floor is
+      // built. Not here: `Game` puts her back on her saved spot after every
+      // adoption, so a move made now would be undone.
       if (!this.hall) {
         console.error('Land of Good Places: restored into the Reptile House hall before its floor was loaded — see interiorsToPreload in world/interiors.ts. She waits at the door.');
         this.restoreInto = {
@@ -419,7 +425,6 @@ export class ReptileHouse implements GameSystem {
           z: player.position.z - REPTILE_HOUSE_ORIGIN_Z,
           facing: (player.facing * 180) / Math.PI,
         };
-        this.standAtDoor();
         return;
       }
       this.inside = true;
@@ -538,6 +543,10 @@ export class ReptileHouse implements GameSystem {
     const restore = this.restoreInto;
     if (restore && !this.spaces.isChanging) {
       this.restoreInto = null;
+      // Out of the empty hall at once, onto the doormat — where she stays,
+      // told why, if the floor cannot be fetched (`refuseDoor`).
+      this.standAtDoor();
+      this.controls.snapCamera();
       this.changeToHall(() => this.enterHall(restore));
     }
     // **Fetch the hall's chunk on approach** — only fetch, not build, so
@@ -789,7 +798,7 @@ export class ReptileHouse implements GameSystem {
    */
   private refuseDoor(): void {
     this.doorRefused = true;
-    const door = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER, 0);
+    const door = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 0);
     const root = this.deps.plot ? this.parkRoot : this.forecourtRoot;
     root.add(this.bubble.sprite);
     this.lastSaid = DOOR_REFUSED_LINE;
