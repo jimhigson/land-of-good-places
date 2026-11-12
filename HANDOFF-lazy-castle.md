@@ -26,8 +26,19 @@ Carts are built at construction and visible on the walk-past ring, and
 `barReach` measures the cart kit to pose the duck bars of both rings, so
 `cartGlb` must stay in the boot (task: carts visible in the park stay).
 
+## After castle split (commit on branch)
+`check:boot-chunk`: boot set 39 chunks, 4547 KB (-195 KB); 10 lazy chunks 1675 KB;
+27 lazy modules asserted.
+
+## Rail race finding
+Every cart part (hopper, frame, lamps, wheels, seats, pet seat) is drawn on the
+rivals' carts on the walk-past ring, so no part of cart.glb is ride-only. The only
+module used solely while riding is `railRace/camera.ts` (RaceCamera, ~11 KB of
+code before minification). simulate.ts runs the idle rivals too. Not moved: the
+async-boarding risk is not worth ~6 KB; reported instead.
+
 ## Status
-- [ ] castle split
+- [x] castle split
 - [ ] rail race race-only split (assess)
 - [ ] guard red proof
 - [ ] browser verify
