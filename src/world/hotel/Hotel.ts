@@ -185,7 +185,7 @@ import {
 } from './layout';
 import {
   bandContains,
-  bandCrossed,
+  bandWalkedThrough,
   distanceToBand,
   TAP_FINGER_METRES,
   type PortalBand,
@@ -2470,12 +2470,11 @@ export class Hotel implements GameSystem {
    */
   private checkDoorways(player: Player): void {
     if (this.spaces.settling) return;
-    const { x, z } = player.position;
-    const fromX = player.previousPosition.x;
-    const fromZ = player.previousPosition.z;
+    // The path she took this frame, stride by stride on a dash — see
+    // `tapSpacing.ts`'s `bandWalkedThrough`.
 
     if (!this.inside) {
-      if (bandCrossed(this.towerDoorBand(), fromX, fromZ, x, z)) {
+      if (bandWalkedThrough(this.towerDoorBand(), player)) {
         this.spaces.changeTo(() => this.enterLobby());
       }
       return;
@@ -2488,7 +2487,7 @@ export class Hotel implements GameSystem {
     const bands = hotelDoorBands(room);
     const walkedThrough = (kind: HotelDoorBand['kind']): boolean => {
       const band = bands.find((candidate) => candidate.kind === kind);
-      return band !== undefined && bandCrossed(band, fromX, fromZ, x, z);
+      return band !== undefined && bandWalkedThrough(band, player);
     };
 
     if (room === LOBBY && walkedThrough('exit')) {

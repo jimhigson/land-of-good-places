@@ -3,6 +3,8 @@ import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
   CAMERA_LOOK_AHEAD,
+  PLAYER_MAX_SPEED,
+  PLAYER_SPRINT_MULTIPLIER,
   CAMERA_LOOK_MAX_DISTANCE,
   CAMERA_LOOK_RETURN_DELAY,
   CAMERA_LOOK_RETURN_HALF_LIFE,
@@ -18,9 +20,37 @@ import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
 import { cameraBreath, CAMERA_BREATH_REFERENCE_FOV, CAMERA_BREATH_REFERENCE_REACH, type CameraBreath } from './cameraBreath';
 import type { FrameContext } from './types';
+import type { FramePath } from '../entities/framePath';
 import type { ParkBoundary } from '../world/boundary';
 import { eyeForFocus, isOutdoors } from '../world/up';
 import { altitudeAt, yAtAltitude } from '../world/terrain';
+
+/**
+ * **How far ahead of her the camera aims, in seconds of her own velocity.**
+ *
+ * At a walk or a sprint it is {@link CAMERA_LOOK_AHEAD}, unchanged: the focus
+ * then settles about `(HL/ln 2 − LOOK_AHEAD)·v` behind her (`HL` the follow
+ * half-life), 0.5 m at a walk and 0.8 m at a sprint — a lag nobody sees.
+ *
+ * A tapped dash (`entities/tapDash.ts`) runs at up to ~85 m/s, where that same
+ * lag is **6 m** — and a portrait phone shows only `CAMERA_MIN_VIEW_WIDTH` /
+ * 2 = 5.5 m either side of the focus, so a long sideways dash put her at the
+ * edge of the screen (#745's review). So above a sprint the lead grows, by
+ * twice a sprint, to the one value at which the follow's damp settles
+ * **exactly** on her at a steady speed: with `r = 2^(−dt/HL)` per frame the
+ * focus's error after a frame is `r·(e − v·dt − lead·v) + lead·v`, which holds
+ * at zero when `lead = r·dt / (1 − r)` — the follow's time constant `HL/ln 2`
+ * as frames get short, and a little less on a slow frame. It blends in by
+ * speed, so there is no step in the framing as a dash starts or ends.
+ */
+export function cameraLead(speed: number, dt: number): number {
+  const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
+  const dash = clamp((speed - sprint) / sprint, 0, 1);
+  if (dash === 0) return CAMERA_LOOK_AHEAD;
+  const r = Math.pow(2, -dt / CAMERA_FOLLOW_HALF_LIFE);
+  const settles = dt > 1e-6 ? (r * dt) / (1 - r) : CAMERA_FOLLOW_HALF_LIFE / Math.LN2;
+  return CAMERA_LOOK_AHEAD + (settles - CAMERA_LOOK_AHEAD) * dash;
+}
 
 /**
  * The Theme Park camera.
@@ -761,7 +791,14 @@ export class IsoCamera {
    * Follows `target`, leaning slightly in the direction of travel so the player
    * can see a touch further ahead when they run.
    */
-  update(context: FrameContext, target: Vector3, velocity: Vector3): void {
+  /**
+   * `path`, when given, is the frame's stride path (`Player.framePath`): a
+   * tapped dash cuts a slow frame into strides that can turn a corner, and the
+   * follow is then run stride by stride along it rather than once at the
+   * frame's end — so a 7 m frame with a corner in it does not fling the
+   * framing (#745). Ignored unless it is this frame's path, ending at `target`.
+   */
+  update(context: FrameContext, target: Vector3, velocity: Vector3, path?: FramePath): void {
     const { dt, input } = context;
 
     // Manual pinch/scroll zoom is ignored while a shot is holding its own
@@ -809,7 +846,7 @@ export class IsoCamera {
         this.desiredFocus.z,
       );
     } else {
-      this.desiredFocus.copy(target).addScaledVector(velocity, CAMERA_LOOK_AHEAD);
+      this.desiredFocus.copy(target).addScaledVector(velocity, cameraLead(Math.hypot(velocity.x, velocity.z), dt));
       // Aim a little above the player's feet so they sit slightly low on screen,
       // leaving room to see what you are walking towards.
       //
@@ -823,8 +860,31 @@ export class IsoCamera {
       this.desiredFocus.y = yAtAltitude(this.desiredFocus.x, this.desiredFocus.z, desiredAltitude);
     }
 
-    this.focus.x = damp(this.focus.x, this.desiredFocus.x, CAMERA_FOLLOW_HALF_LIFE, dt);
-    this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
+    const strides = path ? path.count - 1 : 0;
+    if (
+      path &&
+      strides >= 2 &&
+      !this.focusOverrideActive &&
+      dt > 0 &&
+      path.xz[strides * 2] === target.x &&
+      path.xz[strides * 2 + 1] === target.z
+    ) {
+      // The follow, stride by stride: each stride's own velocity, lead and
+      // share of the frame — the same damp, integrated finer.
+      const step = dt / strides;
+      for (let i = 1; i <= strides; i += 1) {
+        const x = path.xz[i * 2] ?? target.x;
+        const z = path.xz[i * 2 + 1] ?? target.z;
+        const vx = (x - (path.xz[i * 2 - 2] ?? x)) / step;
+        const vz = (z - (path.xz[i * 2 - 1] ?? z)) / step;
+        const lead = cameraLead(Math.hypot(vx, vz), step);
+        this.focus.x = damp(this.focus.x, x + vx * lead, CAMERA_FOLLOW_HALF_LIFE, step);
+        this.focus.z = damp(this.focus.z, z + vz * lead, CAMERA_FOLLOW_HALF_LIFE, step);
+      }
+    } else {
+      this.focus.x = damp(this.focus.x, this.desiredFocus.x, CAMERA_FOLLOW_HALF_LIFE, dt);
+      this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
+    }
     // **The height damps as an ALTITUDE outdoors, never as a `y`.**
     //
     // The half-life here is deliberately twice the other two, and the reason it

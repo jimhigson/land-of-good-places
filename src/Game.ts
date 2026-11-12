@@ -1,5 +1,6 @@
 import { PerspectiveCamera, Vector3 } from 'three';
 import { doorwayTapTarget } from './entities/doorwayTap';
+import { FrameStrides } from './entities/frameStrides';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
@@ -1752,6 +1753,9 @@ export class Game {
 
   // ------------------------------------------------------------------ frame
 
+  /** See `entities/frameStrides.ts`: once a frame, or once a stride while dashing. */
+  private readonly strides = new FrameStrides();
+
   private tick(tick: LoopTick): void {
     this.input.update();
 
@@ -1863,9 +1867,9 @@ export class Game {
     // devices, and the navigator pushes it back on the character's behalf before
     // anybody reads it. Registered as an ordinary system it would be a frame
     // late — which, since the scan happens first, means never moving at all.
-    if (!paused) this.tapNavigator.update(this.frameContext);
-
-    if (!paused) this.player.update(this.frameContext);
+    // A tapped dash (`entities/tapDash.ts`) is cut into strides here, each an
+    // ordinary navigator update and `player.update` — see `FrameStrides`.
+    if (!paused) this.strides.step(this.frameContext, this.tapNavigator, this.player, this.parade);
 
     // **The arrival camera — the three beats Jim asked for.** Jim, 3 September
     // 2026: *"when the bus arrives at the park, the camera needs to face the
@@ -2086,7 +2090,7 @@ export class Game {
     // mid-drag cannot inherit an offset.
     if (this.lookAroundBlocked()) this.camera.cancelLook();
 
-    this.camera.update(this.frameContext, this.player.position, this.player.velocity);
+    this.camera.update(this.frameContext, this.player.position, this.player.velocity, this.player.framePath);
     // Straight after the camera moves and before the sky is drawn: the stars,
     // the moon and the sun all slide with the park so the night sky reads as a
     // place a long way off rather than as wallpaper stuck to the screen. Fed

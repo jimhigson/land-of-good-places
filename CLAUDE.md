@@ -1110,6 +1110,31 @@ and travels with the work, not with the agent that happened to be holding it.
 This is a game a father is building with his six-year-old daughter. When a
 trade-off is close, pick the one a six-year-old will enjoy more.
 
+## The frame-rate target is 120 fps, not 60
+
+Jim, 12 November 2026: *"60 fps is nowhere near acceptable on modern hardware
+- the target should be 120fps."*
+
+So the budget for a frame is **8.3 ms**. That covers everything: JS, render
+and GPU together, in every scene. A frame over 8.3 ms is a dropped frame.
+60 fps is a floor that something has already fallen to, not a target to reach.
+Any plan, check or PR that treats 16.7 ms as "fine" is aiming at the wrong
+number.
+
+- **Measure against 8.3 ms.** That applies to frame-time budgets,
+  dropped-frame counts and "is this fast enough" judgements alike. On a 120 Hz
+  display, report the share of frames over 8.3 ms and over 16.7 ms
+  separately.
+- **A new feature may not spend the budget silently.** If it adds per-frame
+  work, say what it costs in ms in the PR. A per-frame allocation or a
+  synchronous rebuild in a hot path is a regression even when 60 fps still
+  holds.
+- **Phones count, and must be measured on real ones** when the question is
+  how a phone behaves. A desktop Chrome with its CPU throttled is a stand-in
+  for the CPU only, and must be labelled as one. The plan in
+  `docs/perf/FRAME-DROPS-2026-11.md` (#746) was written against 60 fps and
+  should be read against this target.
+
 ## QA is not optional, and it is not paperwork
 
 On 17 August a full pipeline of "QA approved" PRs shipped a furniture piece
