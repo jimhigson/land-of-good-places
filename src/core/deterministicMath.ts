@@ -259,8 +259,12 @@ const pio2_2t = 2.02226624879595063154e-21;
 const pio2_3 = 2.02226624871116645580e-21;
 const pio2_3t = 8.47842766036889956997e-32;
 
-/** Returns the quadrant, 0..3; the reduced argument is left in {@link reduced}. */
-function remPio2(x: number): number {
+/**
+ * Reduces the `x` waiting in `reduced[0]`. Returns the quadrant, 0..3; the
+ * reduced argument is left in {@link reduced}.
+ */
+function remPio2(): number {
+  const x = reduced[0]!;
   const hx = hiWord(x);
   const ix = hx & 0x7fffffff;
   if (ix <= 0x3fe921fb) {
@@ -406,68 +410,103 @@ function remPio2Large(x: number, hx: number): number {
   return quadrant;
 }
 
+// `sin`, `cos` and `tan` are each one store, one call and one load: small
+// enough for TurboFan to inline into their callers (three.js's `setFromEuler`,
+// the walk cycles, every bob and sway), and an inlined call's answer is never
+// boxed. The work is in the `…Into` functions behind them, which take `x` from
+// {@link reduced} and leave the answer there, so nothing crosses that call as
+// a double either.
+
 export function sin(x: number): number {
+  reduced[0] = x;
+  sinInto();
+  return reduced[0]!;
+}
+
+function sinInto(): void {
+  const x = reduced[0]!;
   const ix = hiWord(x) & 0x7fffffff;
   if (ix <= 0x3fe921fb) {
-    reduced[0] = x;
     reduced[1] = 0;
     kernelSin(0);
-    return reduced[0]!;
+    return;
   }
-  if (ix >= 0x7ff00000) return x - x;
-  switch (remPio2(x)) {
+  if (ix >= 0x7ff00000) {
+    reduced[0] = x - x;
+    return;
+  }
+  switch (remPio2()) {
     case 0:
       kernelSin(1);
-      return reduced[0]!;
+      return;
     case 1:
       kernelCos();
-      return reduced[0]!;
+      return;
     case 2:
       kernelSin(1);
-      return -reduced[0]!;
+      reduced[0] = -reduced[0]!;
+      return;
     default:
       kernelCos();
-      return -reduced[0]!;
+      reduced[0] = -reduced[0]!;
   }
 }
 
 export function cos(x: number): number {
+  reduced[0] = x;
+  cosInto();
+  return reduced[0]!;
+}
+
+function cosInto(): void {
+  const x = reduced[0]!;
   const ix = hiWord(x) & 0x7fffffff;
   if (ix <= 0x3fe921fb) {
-    reduced[0] = x;
     reduced[1] = 0;
     kernelCos();
-    return reduced[0]!;
+    return;
   }
-  if (ix >= 0x7ff00000) return x - x;
-  switch (remPio2(x)) {
+  if (ix >= 0x7ff00000) {
+    reduced[0] = x - x;
+    return;
+  }
+  switch (remPio2()) {
     case 0:
       kernelCos();
-      return reduced[0]!;
+      return;
     case 1:
       kernelSin(1);
-      return -reduced[0]!;
+      reduced[0] = -reduced[0]!;
+      return;
     case 2:
       kernelCos();
-      return -reduced[0]!;
+      reduced[0] = -reduced[0]!;
+      return;
     default:
       kernelSin(1);
-      return reduced[0]!;
   }
 }
 
 export function tan(x: number): number {
+  reduced[0] = x;
+  tanInto();
+  return reduced[0]!;
+}
+
+function tanInto(): void {
+  const x = reduced[0]!;
   const ix = hiWord(x) & 0x7fffffff;
   if (ix <= 0x3fe921fb) {
-    reduced[0] = x;
     reduced[1] = 0;
     kernelTan(1);
-    return reduced[0]!;
+    return;
   }
-  if (ix >= 0x7ff00000) return x - x;
-  const n = remPio2(x);
+  if (ix >= 0x7ff00000) {
+    reduced[0] = x - x;
+    return;
+  }
+  const n = remPio2();
   kernelTan(1 - ((n & 1) << 1));
-  return reduced[0]!;
 }
 
 // ---------------------------------------------------------------------------
