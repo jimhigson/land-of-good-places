@@ -6,6 +6,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   Object3D,
+  Sphere,
   type Material,
 } from 'three';
 
@@ -39,11 +40,25 @@ import {
  *   one shared material, tinted per instance via `instanceColor`. That is what
  *   makes the whole crowd share materials; it also means a member's colours are
  *   set once at spawn, not swapped per frame.
- * - **Instanced meshes are not frustum-culled here.** An `InstancedMesh`'s
- *   bounding sphere is computed from where its instances *were*, and these ones
- *   walk about; culling against a stale sphere makes children blink out of
- *   existence at the screen edge. At one draw call per part it is not a trade
- *   worth making.
+ * - **A part's instances are packed, and its bounds are live.** `commit` only
+ *   records what a member shows; `flush` then writes, for every part variant,
+ *   just the members actually wearing it into slots `0..count-1`, and sets that
+ *   mesh's bounding sphere to the union of exactly those instances. So a mesh
+ *   draws no zero-scaled stand-ins for children wearing a different face or
+ *   hair, and three.js's ordinary frustum culling — main pass and shadow pass
+ *   alike — skips a part whose children are all off screen, or a whole crowd
+ *   in a space she is not in (step 4 of docs/perf/FRAME-DROPS-2026-11.md).
+ *
+ *   Culling used to be off here, and rightly: three.js computes an
+ *   `InstancedMesh`'s sphere once, from where its instances *were*, and these
+ *   walk about — a stale sphere makes children blink out at the screen edge.
+ *   The sphere is now rebuilt in the same `flush` that uploads the matrices it
+ *   bounds, so it can never be a frame behind them. `check:crowd-cull` holds
+ *   both halves of that: nobody on screen culled, nobody off screen drawn.
+ *
+ *   The cost of packing is that **slot ≠ member**: an instance id from a
+ *   raycast or `getMatrixAt` does not name a child. Nothing asks today; ask the
+ *   crowd, not the buffer, if something ever needs to.
  */
 
 /** One part of the prototype, and the instanced mesh (or meshes) that draw it. */
@@ -93,6 +108,15 @@ export interface CrowdOptions {
 
 const ZERO_MATRIX = new Matrix4().makeScale(0, 0, 0);
 const scratchColour = new Color();
+const scratchMatrix = new Matrix4();
+const scratchSphere = new Sphere();
+/**
+ * Metres added to each part's packed bounding sphere. The sphere is exact for
+ * the geometry as committed; this is slack for nothing in particular — no crowd
+ * material displaces vertices — so it is kept to a hand's breadth, where it
+ * cannot make a whole part's culling meaningless.
+ */
+const BOUNDS_MARGIN = 0.1;
 
 export class InstancedCrowd {
   readonly group = new Group();
@@ -105,6 +129,21 @@ export class InstancedCrowd {
   private readonly capacity: number;
   private readonly members: CrowdMember[] = [];
   private dirty = true;
+  /**
+   * What each member showed at its last `commit`, per part: the variant drawn,
+   * or -1 for none. Indexed `member * parts + part`. Kept apart from
+   * {@link CrowdMember.variant}/`shown`, which callers may change between
+   * commits; the buffer only ever reflects what was committed.
+   */
+  private readonly committedChoice: Int16Array;
+  /** Each member's committed part matrices, 16 floats per `member * parts + part`. */
+  private readonly committedMatrix: Float32Array;
+  /** Each member's colour per part, 3 floats per `member * parts + part`. */
+  private readonly colour: Float32Array;
+  /** Which member each packed slot held at the last flush, per variant mesh. */
+  private readonly slotMember = new Map<InstancedMesh, Int32Array>();
+  /** A colour changed since the last flush, so every packed colour is rewritten. */
+  private coloursDirty = true;
 
   constructor(prototype: Object3D, capacity: number, options: CrowdOptions) {
     this.capacity = capacity;
@@ -122,15 +161,19 @@ export class InstancedCrowd {
         mesh.name = `crowd:${source.name || source.geometry.type}`;
         mesh.castShadow = options.castShadowFor?.(source) ?? false;
         mesh.receiveShadow = options.receiveShadow ?? false;
-        // See the note in the class doc: these walk, so a cached bounding
-        // sphere would cull them at the wrong moment.
-        mesh.frustumCulled = false;
+        // Culled, against a sphere `flush` rebuilds from the live instances —
+        // see the class doc.
+        mesh.frustumCulled = true;
+        mesh.boundingSphere = new Sphere();
         mesh.renderOrder = source.renderOrder;
-        // Everything starts hidden; `commit` reveals a member's parts.
+        // Nobody is drawn until a member is committed into it.
         for (let i = 0; i < capacity; i += 1) {
           mesh.setMatrixAt(i, ZERO_MATRIX);
           mesh.setColorAt(i, scratchColour.setHex(0xffffff));
         }
+        mesh.count = 0;
+        mesh.visible = false;
+        this.slotMember.set(mesh, new Int32Array(capacity).fill(-1));
         this.group.add(mesh);
         return mesh;
       });
@@ -138,6 +181,9 @@ export class InstancedCrowd {
     }
 
     this.parts = parts;
+    this.committedChoice = new Int16Array(capacity * parts.length).fill(-1);
+    this.committedMatrix = new Float32Array(capacity * parts.length * 16);
+    this.colour = new Float32Array(capacity * parts.length * 3).fill(1);
     this.partCount = parts.reduce((total, part) => total + part.variants.length, 0);
   }
 
@@ -174,42 +220,88 @@ export class InstancedCrowd {
 
   /** Tints one part of one member. Colours are multiplied into the material. */
   setPartColour(member: CrowdMember, partIndex: number, colour: number): void {
-    const part = this.parts[partIndex];
-    if (!part) return;
+    if (!this.parts[partIndex]) return;
     scratchColour.setHex(colour);
-    for (const variant of part.variants) {
-      variant.setColorAt(member.index, scratchColour);
-      if (variant.instanceColor) variant.instanceColor.needsUpdate = true;
-    }
+    const at = (member.index * this.parts.length + partIndex) * 3;
+    this.colour[at] = scratchColour.r;
+    this.colour[at + 1] = scratchColour.g;
+    this.colour[at + 2] = scratchColour.b;
+    this.coloursDirty = true;
+    this.dirty = true;
   }
 
   /**
-   * Recomputes the member's world transforms and writes them into the instance
-   * buffers. Call once per frame per member, after posing the skeleton.
+   * Recomputes the member's world transforms and records what it shows. Call
+   * once per frame per member, after posing the skeleton; `flush` then writes
+   * the buffers.
    */
   commit(member: CrowdMember): void {
     member.root.updateMatrixWorld(true);
 
-    for (let p = 0; p < this.parts.length; p += 1) {
+    const partTotal = this.parts.length;
+    const base = member.index * partTotal;
+    for (let p = 0; p < partTotal; p += 1) {
       const part = this.parts[p];
       const proxy = member.proxies[p];
       if (!part || !proxy) continue;
-      const chosen = member.shown[p] ? member.variant[p] : -1;
-      for (let v = 0; v < part.variants.length; v += 1) {
-        const variant = part.variants[v];
-        if (!variant) continue;
-        variant.setMatrixAt(member.index, v === chosen ? proxy.matrixWorld : ZERO_MATRIX);
-      }
+      const variant = member.variant[p] ?? 0;
+      const chosen = member.shown[p] && variant < part.variants.length ? variant : -1;
+      this.committedChoice[base + p] = chosen;
+      if (chosen >= 0) this.committedMatrix.set(proxy.matrixWorld.elements, (base + p) * 16);
     }
     this.dirty = true;
   }
 
-  /** Flushes the instance buffers to the GPU. Call once, after every `commit`. */
+  /**
+   * Packs every part variant's buffer with the members wearing it, rebuilds its
+   * bounding sphere from exactly those instances, and flags the upload. Call
+   * once, after every `commit`.
+   */
   flush(): void {
     if (!this.dirty) return;
-    for (const part of this.parts) {
-      for (const variant of part.variants) variant.instanceMatrix.needsUpdate = true;
+    const partTotal = this.parts.length;
+    const memberTotal = this.members.length;
+    const coloursDirty = this.coloursDirty;
+    for (let p = 0; p < partTotal; p += 1) {
+      const part = this.parts[p];
+      if (!part) continue;
+      const geometrySphere = part.source.geometry.boundingSphere ?? computeSphere(part.source);
+      for (let v = 0; v < part.variants.length; v += 1) {
+        const mesh = part.variants[v];
+        const slots = mesh ? this.slotMember.get(mesh) : undefined;
+        if (!mesh || !slots) continue;
+        const matrices = mesh.instanceMatrix.array as Float32Array;
+        const colours = mesh.instanceColor?.array as Float32Array | undefined;
+        const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
+        let count = 0;
+        let recoloured = false;
+        for (let m = 0; m < memberTotal; m += 1) {
+          const at = m * partTotal + p;
+          if (this.committedChoice[at] !== v) continue;
+          // Element by element: a `subarray` view here would allocate per instance per frame.
+          for (let e = 0; e < 16; e += 1) matrices[count * 16 + e] = this.committedMatrix[at * 16 + e]!;
+          if (colours && (coloursDirty || slots[count] !== m)) {
+            colours[count * 3] = this.colour[at * 3]!;
+            colours[count * 3 + 1] = this.colour[at * 3 + 1]!;
+            colours[count * 3 + 2] = this.colour[at * 3 + 2]!;
+            recoloured = true;
+          }
+          slots[count] = m;
+          scratchMatrix.fromArray(matrices, count * 16);
+          scratchSphere.copy(geometrySphere).applyMatrix4(scratchMatrix);
+          if (count === 0) sphere.copy(scratchSphere);
+          else sphere.union(scratchSphere);
+          count += 1;
+        }
+        if (count > 0) sphere.radius += BOUNDS_MARGIN;
+        else sphere.makeEmpty();
+        mesh.count = count;
+        mesh.visible = count > 0;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      }
     }
+    this.coloursDirty = false;
     this.dirty = false;
   }
 
@@ -221,6 +313,12 @@ export class InstancedCrowd {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/** A prototype mesh's geometry sphere, computed once and cached on the geometry. */
+function computeSphere(source: Mesh): Sphere {
+  source.geometry.computeBoundingSphere();
+  return source.geometry.boundingSphere ?? new Sphere();
+}
 
 /**
  * Every mesh in the prototype that the crowd should draw, in traversal order.
