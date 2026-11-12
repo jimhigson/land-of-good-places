@@ -1330,7 +1330,7 @@ export class Game {
   private interiorControls(): InteriorControls {
     return {
       cancelWalk: () => this.tapNavigator.cancel(),
-      iris: (midpoint) => this.transitions.irisWipe(midpoint),
+      iris: (midpoint, ready) => this.transitions.irisWipe(midpoint, undefined, ready),
       flash: () => this.transitions.flash(),
       snapCamera: () => this.camera.snapTo(this.player.position),
       // The building owns the shop geometry; `Shopping` owns the panel. This is

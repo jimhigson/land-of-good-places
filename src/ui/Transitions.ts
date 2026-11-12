@@ -59,7 +59,7 @@ export class Transitions {
    * transition event, because a backgrounded tab never fires `transitionend` and
    * a child coming back to the game would find the screen permanently dark.
    */
-  irisWipe(midpoint: () => void, onOpened?: () => void): void {
+  irisWipe(midpoint: () => void, onOpened?: () => void, ready?: Promise<unknown>): void {
     window.clearTimeout(this.closeTimer);
     window.clearTimeout(this.openTimer);
     // **A wipe that starts while another is still closing runs the first one's
@@ -75,7 +75,17 @@ export class Transitions {
     this.irisRunning = true;
     this.iris.dataset.closed = 'true';
     this.pendingMidpoint = midpoint;
-    this.closeTimer = window.setTimeout(() => {
+    // **`ready`: hold shut until a room being fetched has landed** (a lazy
+    // interior, `world/LazyPart.ts`). Settled either way — a failed fetch still
+    // runs the midpoint, which is the owner's to refuse, so the iris can never
+    // stay shut for ever.
+    let settled = ready === undefined;
+    ready?.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    const open = (): void => {
+      if (this.pendingMidpoint !== midpoint) return;
       this.pendingMidpoint = null;
       midpoint();
       this.iris.dataset.closed = 'false';
@@ -83,6 +93,10 @@ export class Transitions {
         this.irisRunning = false;
         onOpened?.();
       }, IRIS_OPEN_SECONDS * 1000);
+    };
+    this.closeTimer = window.setTimeout(() => {
+      if (settled || !ready) open();
+      else ready.then(open, open);
     }, IRIS_CLOSE_SECONDS * 1000);
   }
 

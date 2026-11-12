@@ -41,6 +41,7 @@ import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/pa
 import { parkStamp } from './world/prebuilt/parkFileStore';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 import { BOOKS, bookById } from './world/library/books';
+import { interiorsToPreload } from './world/interiors';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -1294,7 +1295,17 @@ async function finishLaunch(
   // Already settled when the ride built the park; on a continued save, a deep
   // link, `/view` or `/spawn` this is where the whole search is saved.
   await loadPrebuiltPark();
-  const GameClass = await loadGame();
+  // A room she starts inside — a save that restores in one, a deep link that
+  // opens in one — is fetched now, alongside the game, so the building finds
+  // it here and furnishes it in its constructor (`world/interiors.ts`). Every
+  // other room waits for its door. A room that will not load (offline on a
+  // first visit) is not fatal: its building says so and fetches it again.
+  const [GameClass] = await Promise.all([
+    loadGame(),
+    ...interiorsToPreload(gameOptions.startPlace?.space, location.pathname).map((part) =>
+      part.load().catch((error: unknown) => console.error(`Land of Good Places: ${part.name} failed to load`, error)),
+    ),
+  ]);
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the

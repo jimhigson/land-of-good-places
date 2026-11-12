@@ -64,6 +64,16 @@ const LAZY_MODULES = [
   'src/world/library/reader/pagePictures.ts',
   'src/world/library/reader/storyProps.ts',
   'src/art/assets/storyPropsGlb.ts',
+  // The Reptile House's hall floor and the kits it alone is drawn from (`world/interiors.ts`).
+  'src/world/reptileHouse/hall.ts',
+  'src/world/reptileHouse/exhibits.ts',
+  'src/world/reptileHouse/planting.ts',
+  'src/world/reptileHouse/stall.ts',
+  'src/world/reptileHouse/tortoiseRide.ts',
+  'src/art/assets/reptileCasesGlb.ts',
+  'src/art/assets/reptilePlantsGlb.ts',
+  'src/art/assets/reptileNoodleGlb.ts',
+  'src/art/assets/reptileStallGlb.ts',
   // Mini-games behind a stall's curtain (`MiniGameHost`).
   'src/minigames/dodgems/Dodgems.ts',
   'src/minigames/waterFight/WaterFight.ts',
