@@ -74,6 +74,11 @@ const LAZY_MODULES = [
   'src/art/assets/reptilePlantsGlb.ts',
   'src/art/assets/reptileNoodleGlb.ts',
   'src/art/assets/reptileStallGlb.ts',
+  // The Space Ferris Wheel's sky show, built on boarding (`world/ferrisWheel/show.ts`).
+  'src/world/ferrisWheel/show.ts',
+  'src/minigames/ferrisWheel/space.ts',
+  'src/minigames/ferrisWheel/sparks.ts',
+  'src/world/ferrisWheel/clouds.ts',
   // Mini-games behind a stall's curtain (`MiniGameHost`).
   'src/minigames/dodgems/Dodgems.ts',
   'src/minigames/waterFight/WaterFight.ts',

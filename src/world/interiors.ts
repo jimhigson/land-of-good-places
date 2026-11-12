@@ -1,5 +1,6 @@
 import { LazyPart } from './LazyPart';
 import type * as ReptileHallModule from './reptileHouse/hall';
+import type * as FerrisShowModule from './ferrisWheel/show';
 
 /**
  * **Every room that is fetched when she goes into it** — the one list.
@@ -19,8 +20,11 @@ import type * as ReptileHallModule from './reptileHouse/hall';
 /** The Reptile House's hall floor: cases, enclosures, planting, the stall and the tortoise. */
 export const REPTILE_HALL = new LazyPart<typeof ReptileHallModule>('the Reptile House hall', () => import('./reptileHouse/hall'));
 
+/** The Space Ferris Wheel's sky show: clouds, space, the four friends and the sparks — built on boarding. */
+export const FERRIS_SHOW = new LazyPart<typeof FerrisShowModule>('the ferris wheel sky show', () => import('./ferrisWheel/show'));
+
 /** Every lazy room, for the boot's preloading and Node's providing. */
-export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL];
+export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW];
 
 /**
  * The rooms a boot must load before the game is built: the one a restored save
@@ -34,5 +38,6 @@ export function interiorsToPreload(space: string | undefined, pathname: string):
   const parts = new Set<LazyPart<unknown>>();
   if (space === 'reptileHouse') parts.add(REPTILE_HALL);
   if (pathname === '/reptile-house' || pathname === '/tortoise-ride') parts.add(REPTILE_HALL);
+  if (pathname === '/ferris') parts.add(FERRIS_SHOW);
   return [...parts];
 }
