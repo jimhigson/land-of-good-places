@@ -133,7 +133,9 @@ const DOOR_REFUSED_LINE = 'The snakes are still waking up — try again in a mom
 /**
  * Where that line hangs: over the doormat, out in front of the mouth, at
  * this height in metres — over her head. Hung in the doorway itself it was
- * half hidden by the mouth's own arch (QA's frame of the first try).
+ * half hidden by the mouth's own arch (QA's frame of the first try); hung
+ * here but depth-tested, the arch's pink rim still cut its top corners off
+ * ("he snakes are sti", issue #757) — hence its own `overScenery` bubble.
  */
 const REPTILE_DOOR_LINE_HEIGHT = 2.6;
 /** How far past the door band she must step before a refused door will try again, in metres. */
@@ -182,6 +184,17 @@ export class ReptileHouse implements GameSystem {
   private readonly frame: FacadeFrame;
   /** Every line the hall says — an answer to a press, so `actionFeedback`. Its item is set per line. */
   private readonly bubble = new SpeechBubble({ id: 'reptile-house-say', item: '', kind: 'actionFeedback' }, PALETTE.markerMint);
+  /**
+   * The door's one line, when the hall could not be fetched (`refuseDoor`).
+   * Its own bubble, drawn over the scenery, because its quad faces the camera
+   * from in front of Sunny's mouth and the arch's rim — nearer the camera
+   * than the quad's top corners — cut them off when it was depth-tested
+   * (issue #757; `docs/design/LABELS.md`, "Drawn over the scenery"). The
+   * hall's bubble keeps the default: nothing in there asked for it.
+   */
+  private readonly doorBubble = new SpeechBubble({ id: 'reptile-house-door-says', item: ENTRANCE_ZONE, kind: 'actionFeedback' }, PALETTE.markerMint, {
+    overScenery: true,
+  });
   /** Hearts over whatever was just greeted — `art/effects/spritePuffs.ts`, the reptile house's own pink at 0.35. */
   private readonly hearts: SpritePuffs;
   private readonly rng = new Rng(0x5e7a1e);
@@ -189,6 +202,7 @@ export class ReptileHouse implements GameSystem {
   private inside = false;
   private onForecourt = false;
   private bubbleFor = 0;
+  private doorBubbleFor = 0;
   private tickle = 0;
   private lastSaid = '';
 
@@ -365,9 +379,9 @@ export class ReptileHouse implements GameSystem {
     return this.hall?.props.solids ?? [];
   }
 
-  /** The hall's one bubble, for `World` to register with the park's `LabelManager`. */
+  /** The hall's bubble and the door's, for `World` to register with the park's `LabelManager`. */
   get screenLabels(): readonly ManagedLabel[] {
-    return [this.bubble];
+    return [this.bubble, this.doorBubble];
   }
 
   /** The last line a bubble was asked to say — for the checks, which cannot read a sprite. */
@@ -513,11 +527,16 @@ export class ReptileHouse implements GameSystem {
       }
       this.hearts.update(dt);
     }
-    // In the hall or, after a door that could not open, outside it.
     if (this.bubbleFor > 0) {
       this.bubbleFor -= dt;
       if (this.bubbleFor <= 0) this.bubble.setText(null);
       else this.bubble.updateScreenSize(this.deps.camera);
+    }
+    // Outside, after a door that could not open.
+    if (this.doorBubbleFor > 0) {
+      this.doorBubbleFor -= dt;
+      if (this.doorBubbleFor <= 0) this.doorBubble.setText(null);
+      else this.doorBubble.updateScreenSize(this.deps.camera);
     }
 
     if (this.onForecourt || this.deps.plot) {
@@ -568,6 +587,7 @@ export class ReptileHouse implements GameSystem {
 
   dispose(): void {
     this.bubble.setText(null);
+    this.hushDoor();
   }
 
   // ------------------------------------------------------------ private
@@ -647,6 +667,7 @@ export class ReptileHouse implements GameSystem {
     this.hallRoot.visible = false;
     this.forecourtRoot.visible = false;
     this.bubble.setText(null);
+    this.hushDoor();
   }
 
   /** Out through the door: into the park at the plot's doormat, or onto the forecourt. */
@@ -757,8 +778,7 @@ export class ReptileHouse implements GameSystem {
   }
 
   private say(item: string, text: string, at: LocalPoint, y: number): void {
-    // Back in the hall if the door last borrowed it (`refuseDoor`).
-    if (this.bubble.sprite.parent !== this.hallRoot) this.hallRoot.add(this.bubble.sprite);
+    this.hushDoor();
     this.lastSaid = text;
     this.bubble.identity.item = item;
     this.bubble.anchorAt(at.x, y, at.z);
@@ -786,7 +806,11 @@ export class ReptileHouse implements GameSystem {
 
   /** Into the hall, fetching and building its floor behind the iris first if it is not here yet. */
   private changeToHall(midpoint: () => void): void {
-    this.spaces.changeToFurnished(() => this.hall !== null, () => this.furnish(), midpoint, () => this.refuseDoor());
+    const inside = (): void => {
+      this.hushDoor();
+      midpoint();
+    };
+    this.spaces.changeToFurnished(() => this.hall !== null, () => this.furnish(), inside, () => this.refuseDoor());
   }
 
   /**
@@ -800,12 +824,17 @@ export class ReptileHouse implements GameSystem {
     this.doorRefused = true;
     const door = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 0);
     const root = this.deps.plot ? this.parkRoot : this.forecourtRoot;
-    root.add(this.bubble.sprite);
+    if (this.doorBubble.sprite.parent !== root) root.add(this.doorBubble.sprite);
     this.lastSaid = DOOR_REFUSED_LINE;
-    this.bubble.identity.item = ENTRANCE_ZONE;
-    this.bubble.anchorAt(door.x - this.frame.x, REPTILE_DOOR_LINE_HEIGHT, door.z - this.frame.z);
-    this.bubble.setText(DOOR_REFUSED_LINE);
-    this.bubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
+    this.doorBubble.anchorAt(door.x - this.frame.x, REPTILE_DOOR_LINE_HEIGHT, door.z - this.frame.z);
+    this.doorBubble.setText(DOOR_REFUSED_LINE);
+    this.doorBubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
+  }
+
+  /** The door's line is done with: she got in after all, or left the building's spaces. */
+  private hushDoor(): void {
+    this.doorBubbleFor = 0;
+    this.doorBubble.setText(null);
   }
 }
 
