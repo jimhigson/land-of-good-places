@@ -208,6 +208,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // world ride, so this falls to `MiniGameHost.open` the same way `/ferris`
   // does.
   '/spooky-house': 'spookyHouse',
+  // The other two curtain games (#749): each is a lazy chunk fetched behind
+  // its curtain, and a link straight to it is how that is seen working.
+  '/dodgems': 'dodgems',
+  '/water-fight': 'waterFight',
   // The Reptile House's front door from outside (issue: Jim, 2 Oct 2026): she
   // stands on its park plot's doormat, the tongue, facing the mouth —
   // `ReptileHouse.requestEnterDoor` / `ReptileHouse.doormat`.
