@@ -19,3 +19,17 @@ precache limit (`src/boot/precacheLimit.ts`, now the one owner). Do NOT raise it
 
 ## Next
 Remaining boot payload is GLB base64: hotel 929K, library 586K, reptile* ~1.16M, castle 172K, cart 134K, den 107K.
+
+## Step 2 (pushed): Reptile House hall floor lazy
+- `src/world/LazyPart.ts`, `src/world/interiors.ts` (REPTILE_HALL, LAZY_INTERIORS, interiorsToPreload).
+- `reptileHouse/hall.ts` builds props/exhibits/planting/paths/stall/tortoise; ReptileHouse keeps shell, lights, pools, exhibit camera.
+- Doors: `SpaceManager.changeToFurnished` → iris holds shut (`Transitions.irisWipe(…, ready)`).
+- Saves/deep links inside: main.ts `finishLaunch` awaits `interiorsToPreload(...)` before `new Game`.
+- Node: `scripts/lib/eagerInteriors.mts` provides every LazyPart (park-harness imports it; slideRider/petSlide/measure-procgen too).
+- boot set 4735 KB.
+
+## Why the rest is per-building work
+castle/hotel/library colliders are *measured from their GLB kit at module load* (e.g. castleAssets CASTLE_TABLE_TOP =
+surfaceTop(...)), so the kit is needed at boot unless that building's whole interior (colliders included) moves into its
+lazy chunk the way the reptile hall did. Hotel/library kits also hold the exteriors (tower 100K of hotel.glb, shell 111K
+of library.glb) → need a GLB split at pack time.
