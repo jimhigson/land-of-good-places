@@ -260,7 +260,8 @@ import { GATHER_TIMEOUT, STORY_EVERY, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_I
 import { Parade } from '../src/entities/parade/Parade.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
-import { NAV_GRID_BUILDS } from '../src/world/NavGrid.ts';
+import { NAV_GRID_BUILDS, NavGrid } from '../src/world/NavGrid.ts';
+import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { visibleBounds, visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { PLAYER_SEPARATION, SEPARATION } from '../src/entities/npc/NpcSystem.ts';
@@ -4801,6 +4802,21 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     NAV_GRID_BUILDS.reachScale = 0;
     note("PATCHES CUT SHORT on purpose (no walker's margin round a change) — NAV REBUILDS' whole-vs-patched proof must go red");
   }
+  // The lattices that plan while story time runs, exactly as the game builds
+  // them: the park children's (`JourneyPlanner`'s garden grid — the one that
+  // froze the frame, docs/perf/FRAME-DROPS-2026-11.md) and her own, which
+  // follows the play bounds into the reading room. Each is asked a question
+  // every frame of the story, as a route plan would ask it, so every collider
+  // the story moves is met by every lattice that would see it.
+  const sampleGround = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
+  const navProbes = [
+    new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers, GARDEN_PLAY_BOUNDARY),
+    playerNavGrid(world),
+  ];
+  const navAsk = (): void => {
+    for (const grid of navProbes) grid.canStandAt(OX, OZ, LIBRARY_FLOOR_Y, sampleGround);
+  };
+  navAsk();
   NAV_GRID_BUILDS.verify = true;
   const navBefore = { full: NAV_GRID_BUILDS.full, patched: NAV_GRID_BUILDS.patched, cells: NAV_GRID_BUILDS.patchedCells, verified: NAV_GRID_BUILDS.verified, fullMs: NAV_GRID_BUILDS.fullMs, patchMs: NAV_GRID_BUILDS.patchMs };
   NAV_GRID_BUILDS.worstFullMs = 0;
@@ -4846,6 +4862,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   const LIMIT = 150;
   while (t < LIMIT) {
     child.step();
+    navAsk();
     // The label manager decides, once a frame after every system, which labels are drawn (`Game.tick`'s order).
     world.labels.resolve(view, CHILD_DT);
     t += CHILD_DT;
