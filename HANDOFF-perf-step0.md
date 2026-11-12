@@ -11,5 +11,9 @@ Branch `perf-step0`, worktree `.claude/worktrees/perf-step0`.
 - Control finding: per-call (autoReset) vs per-frame summing differs by ~1 draw in the park (609 vs 610); matters only with book/mini-game up.
 - docs/perf/REAL-PHONE-BASELINE.md.
 
+## State (PR #752, head 81cf7877, main f3e0b6b8 merged)
+- CI green on 81cf7877: Checks pass (shard 10 = render-budget, counts unchanged after #749), Procgen invariants pass, preview deployed.
+- Shard 9 `check:book-reader` FAILED once on 81cf7877 (waitPainted 120 s timeout after isOpen at ~8 s), passed on rerun; passed on main f3e0b6b8. Not reachable from this diff (probe only under ?perf=1). Cold-dev-server SwiftShader repro: reader loaded 38 s after isOpen vs LazyPart's 20 s timeout, but no timeout error logged — root cause NOT confirmed. Needs an owner (LazyBookReader / check-book-reader, #749's area).
+
 ## Next
-- `pnpm run check` + `test:procgen` locally; PR; merge main once #749 lands; CI green.
+- Address review comments on #752 if any.
