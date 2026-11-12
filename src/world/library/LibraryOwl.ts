@@ -7,7 +7,8 @@ import { gameStore } from '../../state';
 import type { Player } from '../../entities/Player';
 import type { BoxCollider, CollisionWorld, WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
-import { SpeechBubble } from '../../ui/SpeechBubble';
+import type { SpeechBubble } from '../../ui/SpeechBubble';
+import { OWL_ZONE_ID } from './roomIds';
 import { lineSeconds } from '../../ui/speechTiming';
 import { playSurpriseChime } from '../../ui/chime';
 import { createFaceLife, type FaceLife } from '../../art/style/faceLife';
@@ -117,7 +118,7 @@ import { LIBRARY_BOOKCASES, LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIA
  * on the chair, it stays, her solid there. She perches on the chair's seat
  * ({@link owlPerch}), `OWL_PERCH_BACK` into it.
  */
-export const OWL_ZONE_ID = 'library-owl';
+export { OWL_ZONE_ID };
 
 /** Her own seeded stream: the phase of her breathing, so she is never in step with anything else that breathes. */
 export const LIBRARY_OWL_SEED = 0x0b00c4;
@@ -565,7 +566,7 @@ export class LibraryOwl {
    * she stands at her desk, where {@link capsule} is her solid.
    */
   readonly body: BoxCollider;
-  /** Her speech bubble — `actionFeedback` for {@link OWL_ZONE_ID}, so it outranks her own chip. */
+  /** Her speech bubble — `actionFeedback` for {@link OWL_ZONE_ID}, so it outranks her own chip (`Library.ts`'s `createOwlBubble`). */
   readonly bubble: SpeechBubble;
   /** Where she stands: `LIBRARY_LIBRARIAN_SPOT`, room-local, with her facing. */
   readonly spot: StandSpot = LIBRARY_LIBRARIAN_SPOT;
@@ -624,6 +625,7 @@ export class LibraryOwl {
     shelfBooks: readonly FurnishedShelfBook[],
     controls: InteriorControls,
     bystanders: OwlBystanders,
+    bubble: SpeechBubble,
   ) {
     this.roomRoot = roomRoot;
     this.controls = controls;
@@ -655,12 +657,9 @@ export class LibraryOwl {
     );
     collision.removeBox(this.body);
 
-    // Drawn over the room's furniture, never cut by it (`overScenery`; LABELS.md, "Drawn over the
-    // scenery"): she reads from the story chair, backed onto the bookcase wall, and a depth-tested bubble
-    // there lost its right side behind the cases — "A day in the pa…" (headless Chrome, 23 Oct; STORY
-    // measures it). The label manager still decides whether it is drawn; this only stops scenery cutting
-    // a granted one.
-    this.bubble = new SpeechBubble({ id: 'library-owl-says', item: OWL_ZONE_ID, kind: 'actionFeedback' }, PALETTE.markerLilac, { overScenery: true });
+    // Made by the Library, which loads with the park, so the label manager has
+    // it from the start (`Library.ts`'s `createOwlBubble`); hung in the room here.
+    this.bubble = bubble;
     roomRoot.add(this.bubble.sprite);
     this.anchorBubble();
 
@@ -1228,3 +1227,4 @@ export class LibraryOwl {
     this.bubble.anchorAt(at.x, at.y + this.handle.height + OWL_BUBBLE_OVER_HEAD, at.z);
   }
 }
+

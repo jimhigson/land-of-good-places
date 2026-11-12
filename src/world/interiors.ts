@@ -3,6 +3,7 @@ import { chunkPart } from './lazyChunks';
 import { SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
 import type * as ReptileHallModule from './reptileHouse/hall';
 import type * as FerrisShowModule from './ferrisWheel/show';
+import type * as LibraryRoomModule from './library/room';
 
 /**
  * **Every room that is fetched when she goes into it** — the one list.
@@ -25,8 +26,11 @@ export const REPTILE_HALL = chunkPart<typeof ReptileHallModule>('the Reptile Hou
 /** The Space Ferris Wheel's sky show: clouds, space, the four friends and the sparks — built on boarding. */
 export const FERRIS_SHOW = chunkPart<typeof FerrisShowModule>('the ferris wheel sky show', 'src/world/ferrisWheel/show.ts', () => import('./ferrisWheel/show'));
 
+/** The Library's reading room and secret den: shell, furniture, books, the owl, the dragon, the cat. */
+export const LIBRARY_ROOM = chunkPart<typeof LibraryRoomModule>('the Library reading room', 'src/world/library/room.ts', () => import('./library/room'));
+
 /** Every lazy room, for the boot's preloading and Node's providing. */
-export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW];
+export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW, LIBRARY_ROOM];
 
 /**
  * The rooms a boot must load before the game is built: the one a restored save

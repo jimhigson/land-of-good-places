@@ -241,9 +241,12 @@ export class BookGlance {
 
   /** The glowing book while the owl, at her desk, says it is glowing — else null. */
   private window(): FurnishedShelfBook | null {
+    // Inside first: the owl is the reading room's, and the room is only
+    // furnished once she has been in (`world/interiors.ts`).
+    if (!this.library.playerIsInside) return null;
     const { owl } = this.library;
     const id = owl.recommendedBookId;
-    if (!this.library.playerIsInside || !owl.atDesk || !owl.speaking || id === null) return null;
+    if (!owl.atDesk || !owl.speaking || id === null) return null;
     if (owl.lastSaid !== LIBRARY_LINES.owl.recommendGlow) return null;
     return this.library.shelfBooks.find((candidate) => candidate.book.id === id) ?? null;
   }
