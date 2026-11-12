@@ -65,6 +65,13 @@ function createDropletField(): {
     transparent: true,
     depthWrite: false,
     side: DoubleSide,
+    // One pass, not three.js's default two for a transparent double-sided
+    // material — which draws the back faces, then the front, and sets
+    // `needsUpdate` on the material for each, every frame (two program
+    // re-validations a frame for every splash in the park, measured). A flat
+    // fleck cannot overlap itself, so the back-then-front order bought
+    // nothing to see.
+    forceSinglePass: true,
     toneMapped: false,
   });
   const mesh = decal(new InstancedMesh(geometry, material, DROPLET_CAPACITY));
