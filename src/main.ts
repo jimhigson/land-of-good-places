@@ -42,6 +42,7 @@ import { parkStamp } from './world/prebuilt/parkFileStore';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 import { BOOKS, bookById } from './world/library/books';
 import { interiorsToPreload } from './world/interiors';
+import { installChunkImporter } from './world/lazyChunks';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -101,6 +102,10 @@ function boot(): void {
       `Reproduce this park with ?seed=${PARK_SEED_ASKED}`,
   );
 
+  // A lazy room retried after a failed fetch is imported again under a fresh
+  // URL; the run-time `import()` that does it lives here, outside the park's
+  // source closure (`world/lazyChunks.ts`).
+  installChunkImporter((url) => import(/* @vite-ignore */ url));
   const save = loadSave();
   const deepLink = parseDeepLink(location.pathname, location.search) ?? undefined;
 

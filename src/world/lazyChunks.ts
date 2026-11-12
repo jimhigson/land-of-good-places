@@ -35,6 +35,22 @@ export type LazyChunkMap = Readonly<Record<string, string>>;
 
 let map: Promise<LazyChunkMap> | null = null;
 
+/**
+ * The one `import()` of a URL known only at run time, handed in by `main.ts`
+ * ({@link installChunkImporter}) rather than written here. This module is in
+ * the park's source closure (the rooms list imports it), and
+ * `park-source-hash` refuses a computed `import()` anywhere in that closure,
+ * because it could not follow one. This one only ever re-imports a chunk the
+ * closure already follows by its literal `import()`; keeping it in `main.ts`
+ * keeps the rule exceptionless. Node never refetches, so never installs one.
+ */
+let importUrl: ((url: string) => Promise<unknown>) | null = null;
+
+/** `main.ts`'s run-time `import()`, for {@link refetchChunk}. */
+export function installChunkImporter(importer: (url: string) => Promise<unknown>): void {
+  importUrl = importer;
+}
+
 function chunkMap(): Promise<LazyChunkMap> {
   if (!map) {
     const loading = fetch(`/${lazyChunkMapFile(__APP_VERSION__)}`, { cache: 'no-store' }).then((response) => {
@@ -59,7 +75,8 @@ export async function refetchChunk<T>(source: string, attempt: number): Promise<
   const file = import.meta.env.DEV ? source : (await chunkMap())[source];
   if (!file) throw new Error(`lazy chunk map: no chunk for ${source}`);
   const url = new URL(`/${file}?retry=${attempt}-${Date.now()}`, location.href).href;
-  return (await import(/* @vite-ignore */ url)) as T;
+  if (!importUrl) throw new Error('lazy chunk retry: no importer installed — main.ts installs it at boot');
+  return (await importUrl(url)) as T;
 }
 
 /**

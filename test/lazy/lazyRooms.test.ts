@@ -1,6 +1,8 @@
 // The canvas shim every model-building check uses. First import, so it is in
 // place before any art module paints a texture at load.
 import '../../scripts/headless-canvas.mjs';
+// The park's solver, as every test that builds park modules installs it.
+import '../../procgen/install.ts';
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { LazyPart } from '../../src/world/LazyPart';
