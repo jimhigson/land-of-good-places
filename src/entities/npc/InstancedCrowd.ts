@@ -116,8 +116,6 @@ export interface CrowdOptions {
 const ZERO_MATRIX = new Matrix4().makeScale(0, 0, 0);
 const scratchColour = new Color();
 const scratchMatrix = new Matrix4();
-const scratchSphere = new Sphere();
-const memberScratch = new Sphere();
 const cullSphere = new Sphere();
 const cullFrustum = new Frustum();
 const cullMatrix = new Matrix4();
@@ -159,8 +157,19 @@ export class InstancedCrowd {
   private readonly slotMember = new Map<InstancedMesh, Int32Array>();
   /** A colour changed since the last flush, so every packed colour is rewritten. */
   private coloursDirty = true;
-  /** Each member's committed sphere in the crowd's frame: x, y, z, radius (-1: shows nothing). */
-  private readonly memberSphere: Float32Array;
+  /**
+   * Each member's committed box in the crowd's frame — min x, y, z, max x, y,
+   * z — enclosing every part she shows (min x is `Infinity` if she shows
+   * nothing). Built in `commit` from each part's {@link partReach}.
+   */
+  private readonly memberBox: Float32Array;
+  /**
+   * How far each part's geometry reaches from its own origin: its bounding
+   * sphere's centre distance plus radius, in the part's frame.
+   */
+  private readonly partReach: Float32Array;
+  /** Scratch box for {@link pack}. */
+  private readonly packBox = new Float32Array(6);
   /** Scratch for {@link cullTo}: whether each member is kept for this draw. */
   private readonly keep: Uint8Array;
 
@@ -203,7 +212,11 @@ export class InstancedCrowd {
     this.committedChoice = new Int16Array(capacity * parts.length).fill(-1);
     this.committedMatrix = new Float32Array(capacity * parts.length * 16);
     this.colour = new Float32Array(capacity * parts.length * 3).fill(1);
-    this.memberSphere = new Float32Array(capacity * 4).fill(-1);
+    this.memberBox = new Float32Array(capacity * 6).fill(Infinity);
+    this.partReach = new Float32Array(parts.map((part) => {
+      const sphere = geometrySphereOf(part.source);
+      return sphere.center.length() + sphere.radius;
+    }));
     this.keep = new Uint8Array(capacity);
     LIVE_CROWDS.add(this);
     this.partCount = parts.reduce((total, part) => total + part.variants.length, 0);
@@ -262,6 +275,8 @@ export class InstancedCrowd {
 
     const partTotal = this.parts.length;
     const base = member.index * partTotal;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (let p = 0; p < partTotal; p += 1) {
       const part = this.parts[p];
       const proxy = member.proxies[p];
@@ -269,14 +284,43 @@ export class InstancedCrowd {
       const variant = member.variant[p] ?? 0;
       const chosen = member.shown[p] && variant < part.variants.length ? variant : -1;
       this.committedChoice[base + p] = chosen;
-      if (chosen >= 0) this.committedMatrix.set(proxy.matrixWorld.elements, (base + p) * 16);
+      if (chosen < 0) continue;
+      const e = proxy.matrixWorld.elements;
+      this.committedMatrix.set(e, (base + p) * 16);
+      // The part lies within `reach` of its own origin in its own frame, so
+      // within reach × its largest scale of that origin here — a cube that
+      // costs one square root, where transforming its sphere costs three.
+      const scaleSq = Math.max(
+        e[0]! * e[0]! + e[1]! * e[1]! + e[2]! * e[2]!,
+        e[4]! * e[4]! + e[5]! * e[5]! + e[6]! * e[6]!,
+        e[8]! * e[8]! + e[9]! * e[9]! + e[10]! * e[10]!,
+      );
+      const reach = this.partReach[p]! * Math.sqrt(scaleSq);
+      const x = e[12]!, y = e[13]!, z = e[14]!;
+      if (x - reach < minX) minX = x - reach;
+      if (y - reach < minY) minY = y - reach;
+      if (z - reach < minZ) minZ = z - reach;
+      if (x + reach > maxX) maxX = x + reach;
+      if (y + reach > maxY) maxY = y + reach;
+      if (z + reach > maxZ) maxZ = z + reach;
+    }
+    const b = member.index * 6;
+    if (minX === Infinity) {
+      this.memberBox[b] = Infinity;
+    } else {
+      this.memberBox[b] = minX;
+      this.memberBox[b + 1] = minY;
+      this.memberBox[b + 2] = minZ;
+      this.memberBox[b + 3] = maxX;
+      this.memberBox[b + 4] = maxY;
+      this.memberBox[b + 5] = maxZ;
     }
     this.dirty = true;
   }
 
   /**
    * Packs every part variant's buffer with the members wearing it, rebuilds its
-   * bounding sphere from exactly those instances, and flags the upload. Call
+   * bounding sphere round exactly those children, and flags the upload. Call
    * once, after every `commit`.
    *
    * This alone is always correct to draw: every committed member is in. A
@@ -286,27 +330,6 @@ export class InstancedCrowd {
   flush(): void {
     if (!this.dirty) return;
     const partTotal = this.parts.length;
-    const memberTotal = this.members.length;
-    // Each member's own sphere, in the crowd's frame: the union of its parts.
-    for (let m = 0; m < memberTotal; m += 1) {
-      let any = false;
-      for (let p = 0; p < partTotal; p += 1) {
-        const at = m * partTotal + p;
-        if (this.committedChoice[at]! < 0) continue;
-        const part = this.parts[p];
-        if (!part) continue;
-        scratchMatrix.fromArray(this.committedMatrix, at * 16);
-        scratchSphere.copy(geometrySphereOf(part.source)).applyMatrix4(scratchMatrix);
-        if (!any) memberScratch.copy(scratchSphere);
-        else memberScratch.union(scratchSphere);
-        any = true;
-      }
-      const o = m * 4;
-      this.memberSphere[o] = memberScratch.center.x;
-      this.memberSphere[o + 1] = memberScratch.center.y;
-      this.memberSphere[o + 2] = memberScratch.center.z;
-      this.memberSphere[o + 3] = any ? memberScratch.radius + CROWD_BOUNDS_MARGIN : -1;
-    }
     for (let p = 0; p < partTotal; p += 1) {
       const part = this.parts[p];
       if (!part) continue;
@@ -321,9 +344,10 @@ export class InstancedCrowd {
    * to happen through it. Call after `flush`, immediately before
    * `renderer.render` — `cullCrowdsFor` is how `Game` does it.
    *
-   * A child is kept whole if her own sphere (every part she shows, plus
-   * {@link CROWD_BOUNDS_MARGIN}) touches the frustum, so a child half over the screen
-   * edge is drawn complete — culling is per child, never per part.
+   * A child is kept whole if anything of her touches the frustum, so a child
+   * half over the screen edge is drawn complete — culling is per child, never
+   * per part. Her committed box decides the clear cases; one whose box straddles
+   * the frustum is decided part by part, against each part's exact sphere.
    *
    * **Shadow-casting parts are left alone.** The same buffer feeds the shadow
    * pass, and a child just off the screen still throws her shadow onto it; the
@@ -336,16 +360,13 @@ export class InstancedCrowd {
     const toWorld = this.group.matrixWorld;
     const scale = toWorld.getMaxScaleOnAxis();
     for (let m = 0; m < memberTotal; m += 1) {
-      const o = m * 4;
-      const radius = this.memberSphere[o + 3]!;
-      if (radius < 0) {
+      if (!this.memberShows(m)) {
         this.keep[m] = 0;
         continue;
       }
-      cullSphere.center
-        .set(this.memberSphere[o]!, this.memberSphere[o + 1]!, this.memberSphere[o + 2]!)
-        .applyMatrix4(toWorld);
-      cullSphere.radius = radius * scale;
+      this.sphereOfBox(m * 6, this.memberBox, cullSphere);
+      cullSphere.center.applyMatrix4(toWorld);
+      cullSphere.radius *= scale;
       const inside = sphereSide(frustum, cullSphere);
       // Wholly in or wholly out is decided by the child's own sphere; one
       // straddling the frustum asks her parts, so a child whose union sphere
@@ -360,6 +381,20 @@ export class InstancedCrowd {
         this.pack(p, v, this.keep);
       }
     }
+  }
+
+  /** Whether member `m` showed anything at her last commit. */
+  private memberShows(m: number): boolean {
+    return m < this.members.length && this.memberBox[m * 6] !== Infinity;
+  }
+
+  /** The sphere round the box at `box[o..o+5]`, plus {@link CROWD_BOUNDS_MARGIN}. */
+  private sphereOfBox(o: number, box: Float32Array, out: Sphere): void {
+    const hx = (box[o + 3]! - box[o]!) / 2;
+    const hy = (box[o + 4]! - box[o + 1]!) / 2;
+    const hz = (box[o + 5]! - box[o + 2]!) / 2;
+    out.center.set(box[o]! + hx, box[o + 1]! + hy, box[o + 2]! + hz);
+    out.radius = Math.sqrt(hx * hx + hy * hy + hz * hz) + CROWD_BOUNDS_MARGIN;
   }
 
   /** Whether any part member `m` shows meets `frustum`, each part padded by {@link CROWD_BOUNDS_MARGIN}. */
@@ -380,7 +415,7 @@ export class InstancedCrowd {
   /**
    * Writes one part variant's buffer: the members wearing it (and, given
    * `keep`, only those kept) into slots `0..count-1`, its bounding sphere the
-   * union of exactly those instances.
+   * sphere round those children's boxes.
    */
   private pack(p: number, v: number, keep: Uint8Array | null): void {
     const part = this.parts[p];
@@ -390,12 +425,14 @@ export class InstancedCrowd {
     const partTotal = this.parts.length;
     const memberTotal = this.members.length;
     const coloursDirty = this.coloursDirty;
-    const geometrySphere = geometrySphereOf(part.source);
     const matrices = mesh.instanceMatrix.array as Float32Array;
     const colours = mesh.instanceColor?.array as Float32Array | undefined;
     const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
     let count = 0;
     let recoloured = false;
+    const box = this.packBox;
+    box[0] = box[1] = box[2] = Infinity;
+    box[3] = box[4] = box[5] = -Infinity;
     for (let m = 0; m < memberTotal; m += 1) {
       const at = m * partTotal + p;
       if (this.committedChoice[at] !== v) continue;
@@ -409,13 +446,16 @@ export class InstancedCrowd {
         recoloured = true;
       }
       slots[count] = m;
-      scratchMatrix.fromArray(this.committedMatrix, at * 16);
-      scratchSphere.copy(geometrySphere).applyMatrix4(scratchMatrix);
-      if (count === 0) sphere.copy(scratchSphere);
-      else sphere.union(scratchSphere);
+      // The mesh's bounds are the box round its children's own boxes: no
+      // transform per instance, and never smaller than any part it draws.
+      const b = m * 6;
+      for (let k = 0; k < 3; k += 1) {
+        if (this.memberBox[b + k]! < box[k]!) box[k] = this.memberBox[b + k]!;
+        if (this.memberBox[b + 3 + k]! > box[3 + k]!) box[3 + k] = this.memberBox[b + 3 + k]!;
+      }
       count += 1;
     }
-    if (count > 0) sphere.radius += CROWD_BOUNDS_MARGIN;
+    if (count > 0) this.sphereOfBox(0, box, sphere);
     else sphere.makeEmpty();
     mesh.count = count;
     mesh.visible = count > 0;
@@ -456,7 +496,9 @@ export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
   cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   cullFrustum.setFromProjectionMatrix(cullMatrix, camera.coordinateSystem, camera.reversedDepth);
   for (const crowd of LIVE_CROWDS) {
-    if (rootOf(crowd.group) !== scene) continue;
+    // Not in this scene, or switched off (an interior she is not in): not drawn
+    // by this render at all, so there is nothing to trim.
+    if (!drawnIn(crowd.group, scene)) continue;
     crowd.group.updateWorldMatrix(true, false);
     crowd.cullTo(cullFrustum);
   }
@@ -473,10 +515,15 @@ function sphereSide(frustum: Frustum, sphere: Sphere): number {
   return side;
 }
 
-function rootOf(object: Object3D): Object3D {
-  let root = object;
-  while (root.parent) root = root.parent;
-  return root;
+/** Whether `object` and all its ancestors are visible and it hangs from `scene`. */
+function drawnIn(object: Object3D, scene: Object3D): boolean {
+  let at: Object3D | null = object;
+  while (at) {
+    if (!at.visible) return false;
+    if (at === scene) return true;
+    at = at.parent;
+  }
+  return false;
 }
 
 /**
