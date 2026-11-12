@@ -189,6 +189,26 @@ export default defineConfig({
         // ("Math.sin ... are still the platform's own"). The dev server and Node
         // already follow source order, so this makes the build agree with them.
         strictExecutionOrder: true,
+        // **Each embedded GLB in a chunk of its own.** `src/art/assets/*Glb.ts`
+        // are base64 models — 3 MB of the 4.2 MB `Game` chunk on 12 Nov 2026,
+        // the hotel alone 0.9 MB — and that one chunk crossed the precache's
+        // `maximumFileSizeToCacheInBytes` below, which failed the build and the
+        // deploy. Raising the limit would only move the cliff; splitting them
+        // out keeps the code chunk at about a megabyte and every model well
+        // under the limit however many more the park grows. They are still
+        // static imports, loaded with `Game` and precached with it: this
+        // changes how the bytes are filed, not when they arrive.
+        codeSplitting: {
+          groups: [
+            {
+              name: (id: string) => {
+                const model = /src\/art\/assets\/([A-Za-z0-9]+Glb)\.ts$/.exec(id);
+                return model ? `glb-${model[1]}` : null;
+              },
+              test: /src\/art\/assets\/[A-Za-z0-9]+Glb\.ts$/,
+            },
+          ],
+        },
       },
     },
   },
