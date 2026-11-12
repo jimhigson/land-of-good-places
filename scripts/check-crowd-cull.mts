@@ -22,7 +22,7 @@
  * buffer the code under test writes:
  *
  * 1. **Nobody on screen is culled (main pass).** For every member, for every
- *    part it shows, if that part's box intersects the real game camera's
+ *    part it shows, if that part's enclosing sphere meets the real game camera's
  *    frustum, the instanced mesh drawing it must pass three.js's own culling
  *    test *and* hold that member's matrix in a slot below its `count`. Zero
  *    tolerance.
@@ -45,7 +45,18 @@
  * whether a crowd in another space is submitted — does not depend on it.
  */
 import './headless-canvas.mjs';
-import { Box3, Frustum, InstancedMesh, Matrix4, Vector3, type Object3D, type DirectionalLight } from 'three';
+import {
+  Box3,
+  Frustum,
+  InstancedMesh,
+  Matrix4,
+  Sphere,
+  Vector3,
+  type BufferAttribute,
+  type BufferGeometry,
+  type DirectionalLight,
+  type Object3D,
+} from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { InstancedCrowd } from '../src/entities/npc/InstancedCrowd.ts';
@@ -86,7 +97,7 @@ InstancedCrowd.prototype.commit = function (this: InstancedCrowd, member): void 
 
 /** The fields this check reads; present before and after step 4. */
 interface CrowdInsides {
-  readonly parts: readonly { readonly source: { geometry: import('three').BufferGeometry }; readonly variants: readonly InstancedMesh[] }[];
+  readonly parts: readonly { readonly source: { geometry: BufferGeometry }; readonly variants: readonly InstancedMesh[] }[];
   readonly members: readonly {
     readonly proxies: readonly Object3D[];
     readonly variant: Uint8Array;
@@ -181,16 +192,48 @@ function passes(mesh: InstancedMesh, frustum: Frustum): boolean {
   return !mesh.frustumCulled || frustum.intersectsObject(mesh);
 }
 
-const box = new Box3();
+/**
+ * Each part's own enclosing sphere, computed here from its vertices rather
+ * than read off `geometry.boundingSphere`, which the code under test also
+ * reads. A part whose sphere misses the frustum has no vertex on screen, so
+ * this is a sound "might be on screen": a box would not be — `intersectsBox`
+ * says yes for a box corner poking into the frustum that no vertex reaches,
+ * and an early version of this check failed the renderer for disagreeing with
+ * exactly that (a bob of hair whose own sphere, r 1.02, cleared the frustum).
+ */
+const spheres = new WeakMap<BufferGeometry, Sphere>();
+function enclosingSphere(geometry: BufferGeometry): Sphere {
+  let sphere = spheres.get(geometry);
+  if (!sphere) {
+    const position = geometry.getAttribute('position');
+    const bounds = new Box3().setFromBufferAttribute(position as BufferAttribute);
+    const centre = bounds.getCenter(new Vector3());
+    let radiusSq = 0;
+    const v = new Vector3();
+    for (let i = 0; i < position.count; i += 1) radiusSq = Math.max(radiusSq, centre.distanceToSquared(v.fromBufferAttribute(position, i)));
+    sphere = new Sphere(centre, Math.sqrt(radiusSq));
+    spheres.set(geometry, sphere);
+  }
+  return sphere;
+}
+const partSphere = new Sphere();
 const slotMatrix = new Matrix4();
-/** Does a slot below `count` hold this matrix? */
+/**
+ * Does a slot below `count` hold this matrix? Compared at float32 precision —
+ * the instance buffer is a `Float32Array`, and 600 m out (the castle's floors)
+ * a float32 is only good to ~6e-5 m, which an early version of this check
+ * read as a missing child.
+ */
 function holds(mesh: InstancedMesh, matrix: Matrix4): boolean {
   const e = matrix.elements;
   for (let i = 0; i < mesh.count; i += 1) {
     mesh.getMatrixAt(i, slotMatrix);
     const s = slotMatrix.elements;
-    if (Math.abs(s[12]! - e[12]!) < 1e-5 && Math.abs(s[13]! - e[13]!) < 1e-5 && Math.abs(s[14]! - e[14]!) < 1e-5 &&
-        Math.abs(s[0]! - e[0]!) < 1e-5 && Math.abs(s[5]! - e[5]!) < 1e-5) return true;
+    let same = true;
+    for (let k = 0; k < 16 && same; k += 1) {
+      same = Math.abs(s[k]! - Math.fround(e[k]!)) <= 1e-6 * Math.max(1, Math.abs(e[k]!));
+    }
+    if (same) return true;
   }
   return false;
 }
@@ -235,20 +278,37 @@ function measure(label: string, kind: 'park' | 'interior'): void {
         const mesh = part.variants[chosen];
         const proxy = member.proxies[p];
         if (!mesh || !proxy || !visibleChain(mesh)) continue;
-        const geometry = part.source.geometry;
-        if (!geometry.boundingBox) geometry.computeBoundingBox();
         worldMatrix.multiplyMatrices(mesh.matrixWorld, proxy.matrixWorld);
-        box.copy(geometry.boundingBox!).applyMatrix4(worldMatrix);
-        if (view.intersectsBox(box)) {
+        partSphere.copy(enclosingSphere(part.source.geometry)).applyMatrix4(worldMatrix);
+        if (view.intersectsSphere(partSphere)) {
           partsOnScreen += 1;
           onScreen.set(mesh, (onScreen.get(mesh) ?? 0) + 1);
           if (!passes(mesh, view)) {
-            failures.push(`${label}: ${mesh.name} culled from the main pass with a child on screen at (${box.min.x.toFixed(1)}, ${box.min.z.toFixed(1)})`);
+            const s = mesh.boundingSphere ? mesh.boundingSphere.clone().applyMatrix4(mesh.matrixWorld) : null;
+            const c = partSphere.center;
+            failures.push(
+              `${label}: ${mesh.name} culled from the main pass with a child on screen, part centre ` +
+                `(${c.x.toFixed(2)}, ${c.y.toFixed(2)}, ${c.z.toFixed(2)}); its sphere ` +
+                (s ? `(${s.center.x.toFixed(2)}, ${s.center.y.toFixed(2)}, ${s.center.z.toFixed(2)}) r ${s.radius.toFixed(2)}` : 'none') +
+                `, count ${mesh.count}, holds the instance: ${holds(mesh, proxy.matrixWorld)}`,
+            );
+            if (process.env['STOP_AFTER'] && failures.length >= Number(process.env['STOP_AFTER'])) { console.error(failures.join('\n')); process.exit(1); }
           } else if (!holds(mesh, proxy.matrixWorld)) {
-            failures.push(`${label}: ${mesh.name} drawn but missing an on-screen child's instance`);
+            let nearest = Infinity;
+            const e = proxy.matrixWorld.elements;
+            for (let i = 0; i < mesh.count; i += 1) {
+              mesh.getMatrixAt(i, slotMatrix);
+              const t = slotMatrix.elements;
+              nearest = Math.min(nearest, Math.hypot(t[12]! - e[12]!, t[13]! - e[13]!, t[14]! - e[14]!));
+            }
+            failures.push(
+              `${label}: ${mesh.name} drawn but missing an on-screen child's instance at ` +
+                `(${e[12]!.toFixed(2)}, ${e[13]!.toFixed(2)}, ${e[14]!.toFixed(2)}) in its crowd's frame; nearest slot ${nearest.toFixed(3)} m away`,
+            );
+            if (process.env['STOP_AFTER'] && failures.length >= Number(process.env['STOP_AFTER'])) { console.error(failures.join('\n')); process.exit(1); }
           }
         }
-        if (mesh.castShadow && shadow.intersectsBox(box)) {
+        if (mesh.castShadow && shadow.intersectsSphere(partSphere)) {
           partsInShadow += 1;
           if (!passes(mesh, shadow)) {
             failures.push(`${label}: ${mesh.name} culled from the shadow pass with a child in the shadow frustum`);
@@ -309,6 +369,7 @@ const focus = new Vector3();
 for (let round = 0; round < ROUNDS; round += 1) {
   step(zero, 600);
   for (const [name, width, height] of ASPECTS) {
+    if (process.env['SKIP_PARK']) break;
     for (const zoomedOut of [false, true]) {
       // Children in the park, each one put in turn at every edge of the frame.
       for (let k = round % 2; k < kids.length; k += 2) {
@@ -330,24 +391,77 @@ for (let round = 0; round < ROUNDS; round += 1) {
   }
 }
 
-// Every interior, at its origin and a few metres about it.
+// ---------------------------------------------------------------- interiors
+/**
+ * Indoors, as `Game` draws it: the space she is in is switched on. Headless,
+ * nothing ever walks through a door, so every interior root stays hidden and a
+ * banquet diner would be "correctly" invisible in the hall she is standing in.
+ * So for these poses every ancestor of every crowd is switched on — more than
+ * the game ever shows at once (all three castle floors), which only makes the
+ * "nothing off screen drawn" half harder to pass.
+ */
+function withCrowdsShown(body: () => void): void {
+  const hidden: Object3D[] = [];
+  for (const crowd of crowds) {
+    for (let o: Object3D | null = crowd.group; o; o = o.parent) {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    }
+  }
+  try {
+    body();
+  } finally {
+    for (const o of hidden) o.visible = false;
+  }
+}
+
 const interiors = [
   ...CASTLE_FLOORS.map((f) => f.space),
   ...HOTEL_ROOM_Z.map(([s]) => s),
   ...REPTILE_SPACE_ORIGINS.map(([s]) => s),
   SPACE_LIBRARY,
 ];
-for (const space of interiors) {
-  for (const [dx, dz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]] as const) {
-    const at = localToWorld(space, dx, 0, dz);
-    if (!at) continue;
-    for (const [name, width, height] of ASPECTS) {
-      focus.set(at.x, at.y, at.z);
-      frameOn(focus, width, height, false);
-      measure(`${space} (${dx},${dz}) ${name}`, 'interior');
+const memberAt = new Vector3();
+withCrowdsShown(() => {
+  // Every interior, at its origin and a few metres about it.
+  for (const space of interiors) {
+    for (const [dx, dz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]] as const) {
+      const at = localToWorld(space, dx, 0, dz);
+      if (!at) continue;
+      for (const [name, width, height] of ASPECTS) {
+        focus.set(at.x, at.y, at.z);
+        frameOn(focus, width, height, false);
+        measure(`${space} (${dx},${dz}) ${name}`, 'interior');
+      }
     }
   }
-}
+  // Every crowd member indoors — banquet diners, and park children who have
+  // wandered in — at the centre and on every edge of the frame.
+  for (const crowd of crowds) {
+    for (const member of insides(crowd).members) {
+      if (!committed.has(member)) continue;
+      const root = (member as unknown as { root: Object3D }).root;
+      memberAt.copy(root.position).applyMatrix4(crowd.group.matrixWorld);
+      const space = spaceAt(memberAt.x, memberAt.z);
+      if (space === SPACE_GARDEN) continue;
+      target.copy(memberAt);
+      for (const [name, width, height] of ASPECTS) {
+        frameOn(target, width, height, false);
+        for (const [ox, oy] of edgeOffsets) {
+          if (Math.abs(ox) > 1.01 || Math.abs(oy) > 1.01) continue;
+          focus.copy(target)
+            .addScaledVector(iso.screenRightAxis as Vector3, -ox * iso.viewHalfWidth)
+            .addScaledVector(iso.screenUpAxis as Vector3, -oy * iso.viewHalfHeight);
+          focus.y = target.y;
+          frameOn(focus, width, height, false);
+          measure(`${space} ${name}, ${crowd.group.name} member ${(member as unknown as { index: number }).index} at (${ox},${oy})`, 'interior');
+        }
+      }
+    }
+  }
+});
 
 // ------------------------------------------------------------- the verdict
 /**
