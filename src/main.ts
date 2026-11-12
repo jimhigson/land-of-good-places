@@ -219,6 +219,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // foot of the steps, facing the door — `Library.requestEnterDoor`. The
   // reading room itself is `/library`, its own `DeepLink` kind below.
   '/library-door': 'libraryDoor',
+  // The Library's secret den (#719): just inside its doorway, the bookcase
+  // swung open, the baby dragon ahead — `Library.requestEnterDen`. It skips
+  // the find (pulling the gold book), so the session is never saved.
+  '/library-den': 'libraryDen',
 };
 
 /**

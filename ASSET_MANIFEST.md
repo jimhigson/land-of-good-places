@@ -183,6 +183,7 @@ only question asked is whether the bytes still match.
 | `reptileStall.glb` | `pnpm run blend:reptile-stall` | 73 KB | Scales & Tails' dressing and the Noodle-o-meter — 17 nodes, 2 449 triangles |
 | `library.glb` | `pnpm run blend:library` | 439 KB | the Library kit (#715): building, furniture, books, owl, dragon, cat — 65 nodes, 18 568 triangles |
 | `storyProps.glb` | `pnpm run blend:story-props` | 449 KB | the story-props kit: every prop the six chapter books' pictures need that the park had no model for — 31 assets, 61 nodes, 17 232 triangles |
+| `libraryDen.glb` | `pnpm run blend:library-den` | 80 KB | the Library's secret den kit (#719, Library v2): the den's room, a wall lantern, the pull book — 14 nodes, 2 748 triangles |
 
 **Two shapes of kit, and the difference matters.** Some are *models* a placer
 puts down whole (the castle's furniture, the hotel's fittings); some are **kits
@@ -681,7 +682,106 @@ no material.
   face figures do, `STORY_FACES` is exactly the file's extras, `v` climbs with
   height on both faces, and both readers agree on every node.
 
-### 43 — Doorway frames round every interior's way out (`src/art/models/doorFrames.ts`)
+### 43 — The Library den kit (Library v2, epic #714 part 5, #719)
+
+Three assets in one file, `libraryDen.glb` (80 KB, 14 nodes, 2 748
+triangles; budget 100 KB, a hard gate in `pack-library-den-asset.mts`) — **a
+kit of its own** because `library.glb` ships 11 KB under its 450 KB budget.
+Jim, 22 October 2026: *"model in Blender as much as is needed, in preference
+to coding geometric primitives to create items in the world"* — so every
+visible thing the den track drew, or would have drawn, from three.js
+primitives is authored here: the den's floor, its three walls, the lintel
+over its doorway, and the pull book, plus the dressing that makes the den a
+room of its own.
+
+- **`den`** — the secret room behind the reading room's west wall, nine
+  nodes: `den-floor` (the slab, 6.8 × 5.9 × 0.5 m, its top the floor she
+  walks on), `den-wallWest` and `den-wallNorth` (the far walls, 0.6 m thick
+  and 5.2 m tall, each cut with **three book niches** 1.5 m wide between
+  0.275 m piers, 0.34 m deep, five rows at the library kit's own shelf
+  heights — 0.180, 0.756, 1.332, 1.908 and 2.484 m above the floor, 0.516 m
+  clear each, the figures `library_build.py` owns), `den-wallSouth` (plain:
+  the camera's near side, which the game draws hidden), `den-lintel` (over
+  the doorway, 4.0 × 0.6 × 2.0 m, from the shut shelf's top at 3.2 m to the
+  wall's top), `den-shelves` (thirty boards), `den-nicheBacks`, `den-stars`
+  (nine) and `den-moon`, reliefs 25 mm off the far walls above the niches.
+  **Origin: the middle of the doorway on the wall's centre line, at the
+  bottom of the floor slab** — the slab is the den's plinth, the way the
+  exterior's plinth stands under its door; the doorway faces +Z, the den runs
+  to −Z, its longer run past the doorway on +X. Inner plan 5.6 × 5.6 m, read
+  from `layout.ts` at build time (`LIBRARY_DEN_DEPTH`,
+  `LIBRARY_DEN_DOOR_HALF`, `DEN_NORTH_PAST_DOOR`, `LIBRARY_WALL_HALF`,
+  `LIBRARY_WALL_HEIGHT`) and from `library_build.py` (`SHELF_LENGTH` for
+  the doorway, `SHELF_HEIGHT` for the lintel's base), and measured back by
+  `libraryDenKit.ts`'s `LIBRARY_DEN_PLAN` (floor top and plan, wall half and
+  height, door half, lintel base and top, depth, the far walls' inner faces,
+  every niche's rows in a case's own terms). In the room it stands at
+  `(-LIBRARY_HALF_X, 0, LIBRARY_SECRET_BOOKCASE.at.z)`, `rotation.y = +π/2`.
+- **`denLantern`** — a glowing paper lantern (`denLantern-glow`, the part the
+  Engineer lights) on a brass bracket (`denLantern-bracket`): 0.62 m tall,
+  0.28 m wide, standing 0.415 m off its wall. Back on z 0, bottom at 0,
+  facing +Z. No `PointLight`: the ball glows on its own.
+- **`secretBook`** — the pull book on the secret shelf: 0.46 m tall (taller
+  than any kit book, `TALL_BOOK` 0.42, and under a row's 0.516 m clear height
+  with `BOOK_PULL_MARGIN` to spare, asserted), 0.11 m thick, its boards
+  `BOOK_DEPTH` (0.26 m) deep, the spine 1 cm proud with a raised star
+  (`secretBook-star`, 12 mm proud, its own node so the twinkle can drive its
+  glow). Base-centred, thickness along X, spine on +Z, like the kit's six
+  blocks. 184 triangles.
+
+`art/blend/library_den_build.py` → `art/blend/libraryDen.blend` →
+`library_den_export.py` → `src/art/assets/libraryDen.glb` →
+`scripts/pack-library-den-asset.mts` → `libraryDenGlb.ts`; `pnpm run
+blend:library-den` runs all three, and `pnpm run render:library-den` writes
+`art/renders/library-den/*.png` (eight pictures: each asset beside a
+child-height post; the den as she finds it, 405 of the kit's books shelved in
+its niches with the nest, the dragon, the swung-open shelf and two lanterns
+placed as the game will; a plan of the same; the doorway from the reading room
+with the lintel over the shut shelf between its neighbours and the pull book
+proud on its second row; that row close up; and the lantern and the book in
+elevation against the rig's hip and reach lines). Shape only: no colour, no
+material, no UV, no pivot, no face. Colours are `LIBRARY_DEN_GLB_STYLES` in
+`src/art/models/libraryDenAssets.ts`, read back by the render script.
+
+- **Every CONTRACT figure is asserted against the emitted vertices on every
+  build**: the inner depth and the runs past the doorway (by rays off the far
+  walls' piers), the doorway's width and the lintel's base, the wall height
+  and thickness, the floor's top, the niche count, rows per niche and every
+  row's clear height (by rays, `library_build.m_shelf_rows`'s way), the
+  niches' usable depth, the reliefs' stand-off and their lowest point, the
+  lantern's back on its wall, the book's boards' depth; and the pieces that
+  must meet — the floor's apron edge, the side walls abutting the room wall
+  and the far wall, the lintel's span — are measured off the emitted nodes.
+- **`pnpm run check:library-glb`** walks this kit beside `library.glb`: the
+  module is the file, the export's rules hold, **no node carries texcoords or
+  extras** (asserted of all 14, not passed over an empty list), and
+  `readGlbParts` and `GLTFLoader` agree on every node. `check:assets`
+  measures all three assets' height, origin and scale.
+- **Nothing drawn here is a collider.** The den's walls, the lintel's band
+  and the nest's disc are the game's (`shell.ts`, `props.ts`), built from
+  `LIBRARY_DEN_PLAN` and `layout.ts`; the niches recess into the walls'
+  thickness, so no collider moves and no keep-out is touched; the reliefs
+  stand 25 mm off a wall, inside an ink outline's own thickness, above every
+  reach. The south wall and the lintel are hidden or faded by the game's own
+  rules, not shortened.
+- **In the game** (Library v2 track C, plan Step den-art, 23 Oct 2026):
+  `shell.ts`'s `buildLibraryDenShell` draws `createLibraryDen` in the reading
+  room's own paint, where `libraryDenPlacement()` stands it — and refuses to
+  build unless every drawn figure (the doorway, the three inner faces, the
+  walls, the lintel's band, the floor slab's edges) is `layout.ts`'s within
+  5 mm. `den-lintel` is moved into the west wall's group in that wall's faded
+  material; the niches hold 476 of the library kit's book blocks
+  (`furnish.ts`'s `shelveDenNiches`, a seed of the den's own); the two
+  lanterns hang over a pier of each far wall with their bottoms at the
+  reading room's sconce height (3.9 m), out of every reach as the sconces are,
+  with no body. The secret shelf's pull book is `secretBook`
+  (`secretShelf.ts`), its star winking with the shelf's twinkle. The copies
+  of the faces a part rests on are deleted from its ink outline
+  (`src/art/style/outlineHiddenFaces.ts`: the lantern's back plate on its
+  wall, the book's underside on its board), so the kit adds no coplanar seam.
+  `check:library`'s THE DEN, DRAWN measures the drawn den against its bodies.
+
+### 44 — Doorway frames round every interior's way out (`src/art/models/doorFrames.ts`)
 
 Jim, 11 November 2026: *"in the game when in interior spaces the exit to
 outside is usually a door in a hidden wall, with no visual indicator where the
@@ -691,8 +791,8 @@ to each setting."* Four frames, one per interior with a way out to the park:
 lintel, a pink fan bonnet with a gold star), `library` (stacked chunky books,
 a lintel of upright spines, an open book on top), `reptile` (mossy stacked
 sandstone, a fat green snake for the lintel with its head resting on the
-front, looking out, tongue and all), `castle` (ashlar quoins, stone blocks and
-a keystone, under the ground floor's ceiling).
+front, looking out, tongue and all), `castle` (ashlar quoins, stone blocks, a
+keystone, and a crenellated gatehouse top with a pink shield).
 
 `art/blend/doorframes_build.py` → `art/blend/doorframes.blend` →
 `doorframes_export.py` → `src/art/assets/doorframes.glb` →
@@ -712,10 +812,13 @@ tallest-child post in the opening, colours read from the loader). Budget
   about the frame — post footprint (moss included), post height, tile width and
   height — is measured off the geometry; the build's `CONTRACT` owns them and
   asserts them against the emitted vertices.
-- **Heights from the game**: every lintel's underside is at least
-  `TALLEST_CHILD_HEIGHT` + 5 cm (read from `kid.ts`), and the castle's whole
-  frame fits under `BUILDING_FLOOR_HEIGHT − BUILDING_SLAB` (read from
-  `constants.ts`).
+- **Heights from the game**: every lintel's underside stands over her head
+  at the top of a jump — `KID_HEIGHT` + `JUMP_SPEED`² / 2 `GRAVITY` + 0.10 m
+  (3.50 m), read from `kidHeight.ts` and `constants.ts` — so a hop through any
+  doorway goes straight through. The castle's frame stands in its wall's line
+  (posts under the 3.60 m wall top), with a crenellated gatehouse top and a
+  pink shield over the lintel that clears the porch roof (whose height and
+  thickness `Shell.ts` exports and the build reads).
 - **No shared planes**: posts are deeper than every room's wall, lintels never
   as deep as their posts, and each room draws its wall back from the gap by
   the post's measured width (`drawnClearOfFrame`) so the post's outer face

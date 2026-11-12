@@ -161,15 +161,25 @@ for (const room of ROOMS) {
   spaces.push({ name: SPACE_REPTILE_HOUSE, zones: reptileHouse.interactZones(), bands: exit ? [exit] : [] });
 }
 
-// The Library's reading room (#716): gated on where the player is, one door
-// band, the way out.
+// The Library's reading room (#716): gated on where the player is. Two bands
+// inside: the way out, and the secret den's doorway (#719), which fires
+// nothing but says no other chip may sit in it. Two snapshots: the secret
+// shelf shut (the gold book's Pull chip in the doorway, its own band's zone),
+// and open (the baby dragon's Say hi offered too), then shut again.
 {
   const { library } = world;
   library.attachPlayer(outsidePlayer as never);
-  const [, exit] = library.doorBands();
+  const inside = library.doorBands().slice(1);
   outsidePlayer.position.set(LIBRARY_ORIGIN_X, 0, LIBRARY_ORIGIN_Z);
   library.adoptRestoredPlayer();
-  spaces.push({ name: SPACE_LIBRARY, zones: library.interactZones(), bands: exit ? [exit] : [] });
+  spaces.push({ name: SPACE_LIBRARY, zones: library.interactZones(), bands: inside });
+  library.openDenInstantly();
+  const openZones = library.interactZones();
+  if (!library.denOpen || !openZones.some((zone) => zone.id === 'library-dragon')) {
+    throw new Error("check:tap-spacing: the Library's secret shelf did not open, or opened with no dragon zone — the open snapshot would measure nothing");
+  }
+  spaces.push({ name: `${SPACE_LIBRARY}, secret shelf open`, zones: openZones, bands: library.doorBands().slice(1) });
+  library.releasePlayer();
 }
 
 let pairsChecked = 0;

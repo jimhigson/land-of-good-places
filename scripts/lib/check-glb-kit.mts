@@ -61,9 +61,8 @@ export interface GlbKitCheck {
   readonly base64: string;
   /**
    * The module's typed face figures, keyed by node name — or `null` for a kit
-   * with nothing painted on it (the doorway frames), which then must carry no
-   * texcoords and no face figures anywhere, and says on stderr that the face
-   * clauses cover nothing in it.
+   * that paints nothing (the den kit), which then has to prove that no node
+   * carries texcoords or extras, rather than passing over an empty list.
    */
   readonly faces: Readonly<Record<string, unknown>> | null;
   /** That constant's name, for messages: `LIBRARY_FACES`. */
@@ -166,6 +165,11 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
     const extras = (node.extras ?? {}) as Record<string, unknown>;
     const hasUv = 'TEXCOORD_0' in attributes;
     const hasFace = 'face_eyes_uv' in extras;
+    if (kit.faces === null) {
+      check(!hasUv, `${name}: carries texcoords, and nothing in this kit is painted`);
+      check(Object.keys(extras).length === 0, `${name}: extras ${JSON.stringify(extras)} on a kit that ships none`);
+      continue;
+    }
     check(
       hasUv === hasFace,
       `${name}: ${hasUv ? 'has' : 'lacks'} texcoords but ${hasFace ? 'carries' : 'lacks'} face_eyes_uv — ` +
@@ -202,16 +206,17 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
       if (rim) check(rim.every((c) => c > 0 && c < 0.5), `${name}: face_rim_uv ${JSON.stringify(rim)}`);
     }
   }
+  notes.push(`  ${nodes.length} nodes, no material, no texture, names without full stops, translation-only`);
+  const ours = readGlbParts(shipped.slice().buffer);
   if (kit.faces === null) {
-    check(faced.length === 0, `${faced.length} node(s) carry a face, in a kit declared to have none: ${faced.join(', ')}`);
-    process.stderr.write(`  ${kit.label}: this kit declares no painted faces, so the face clauses below cover nothing in it\n`);
+    // The absence is the assertion here, and it covered every node: say so.
+    let withUv = 0;
+    for (const part of ours.values()) if (part.geometry.getAttribute('uv')) withUv += 1;
+    check(withUv === 0, `${withUv} node(s) read back with a uv attribute on a kit that paints nothing`);
+    notes.push(`  paints nothing: all ${nodes.length} nodes checked for texcoords and extras, none found`);
   } else {
-    check(faced.length > 0, 'no node carries a face — the check of the painted faces covered nothing');
-  }
-  notes.push(
-    `  ${nodes.length} nodes, no material, no texture, names without full stops, translation-only`,
-    `  ${faced.length} faced heads, found from the file: ${faced.join(', ')}`,
-  );
+  check(faced.length > 0, 'no node carries a face — the check of the painted faces covered nothing');
+  notes.push(`  ${faced.length} faced heads, found from the file: ${faced.join(', ')}`);
 
   // The typed constant is what the Engineer imports: it must be the file's
   // extras, verbatim, for exactly the faced heads the file has.
@@ -219,15 +224,14 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
     nodes.filter((node) => faced.includes(node.name ?? '')).map((node) => [node.name, node.extras]),
   );
   check(
-    canonical(kit.faces ?? {}) === canonical(fileFaces),
+    canonical(kit.faces) === canonical(fileFaces),
     `${kit.facesName} is not the .glb's face extras — run \`${kit.packScript}\`.\n` +
-      `      module: ${canonical(kit.faces ?? {})}\n      file:   ${canonical(fileFaces)}`,
+      `      module: ${canonical(kit.faces)}\n      file:   ${canonical(fileFaces)}`,
   );
-  notes.push(`  ${kit.facesName} equals the file's face extras for all ${Object.keys(kit.faces ?? {}).length} heads`);
+  notes.push(`  ${kit.facesName} equals the file's face extras for all ${Object.keys(kit.faces).length} heads`);
 
   // ------------------------------------------- 3. v climbs with height on every face
 
-  const ours = readGlbParts(shipped.slice().buffer);
   for (const name of faced) {
     const part = ours.get(name);
     if (!part) continue;
@@ -266,6 +270,7 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
     );
     check(outside === 0, `${name}: ${outside} front-mapped vertices have a uv off the canvas`);
     notes.push(`  ${name}: dv/dy +${slope.toFixed(3)} over ${n} front-mapped vertices, all on the canvas`);
+  }
   }
 
   // ----------------------------------------------------- 4. two readers, one answer

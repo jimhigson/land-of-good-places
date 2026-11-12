@@ -52,7 +52,8 @@ import { Shopping } from './Shopping';
 import { SaveSystem } from './SaveSystem';
 import { gameStore, type CharacterCreationChoice } from './state';
 import { shopItem } from './world/building/shops/catalogue';
-import type { SavedPlace } from './state/save';
+import { makeSessionUnsavable, type SavedPlace } from './state/save';
+import { libraryDenContains } from './world/library/layout';
 import { SPACE_GARDEN, SPACE_LIBRARY } from './world/spaces';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
@@ -1068,6 +1069,14 @@ export class Game {
       // (`/library-door`), #716. The reading room is its own `DeepLink` kind,
       // `enterLibrarySpawn`, never a stall id.
       if (stallId === 'libraryDoor') return this.world.library.requestEnterDoor();
+      // The Library's secret den (`/library-den`, #719): just inside its
+      // doorway, the shelf open. The link skips the find, so it leaves no
+      // durable mark — typed on Eleri's machine it must not hand her the
+      // Dragon friend card (the `?pets` and `/book` rule).
+      if (stallId === 'libraryDen') {
+        makeSessionUnsavable();
+        return this.world.library.requestEnterDen();
+      }
       return false;
     };
 
@@ -1690,6 +1699,9 @@ export class Game {
           '(sit=1, sit=3). Standing, not sitting.',
       );
     }
+    // A spot inside the secret den skips the find, exactly as `/library-den`
+    // does — the same rule: no durable mark (#719, plan Step 14).
+    if (at && libraryDenContains(at.x, at.z)) makeSessionUnsavable();
     const entered = this.world.library.requestEnter(at, seat);
     if (entered && story) this.world.library.requestStoryTime();
     return entered;

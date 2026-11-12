@@ -76,7 +76,7 @@ ENGINEER_MODULE = "src/art/models/reptileCasesAssets.ts"
 NORTH_STAND_OFFSET = ts_const(LAYOUT, "REPTILE_NORTH_STAND_Z") - ts_const(LAYOUT, "REPTILE_NORTH_CASE_Z")
 #: The plinth's back face stands this far off the room wall (the spec's 0.2).
 CASE_WALL_GAP = 0.2
-KID_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+KID_HEIGHT = ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
 
 
 def engineer_styles():
