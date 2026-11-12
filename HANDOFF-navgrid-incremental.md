@@ -13,7 +13,8 @@ rebuild (measured 483–649 ms M4 Pro, ~2 s phone stand-in, twice per story).
 - `check:library` STORY: NAV REBUILDS clause (0 whole, ≥1 patch, all verified).
   Mutations: `nav-whole-rebuilds` (patching off) and `nav-short-patch` (no margin).
 
-## Todo
-- Green run, then both mutations red (paste output in PR).
-- check, test:procgen; PR with before/after ms vs 8.3 ms.
-- check:library solves a park on first run at a new source hash (~10–20 min).
+## State (12 Nov)
+- PR #751 open. Green + both mutations red, outputs in the PR body.
+- Before/after (Node, check:library): 5 whole rebuilds 1,522 ms (worst 482) -> 5 patches 3.0 ms (worst 1.9).
+- Local `check` fails only on the main-wide precache limit (#747); `test:procgen` seeds 3/10/14 timed out
+  solving locally. When #747 merges: merge main, re-run CI, add browser after-number from the preview.
