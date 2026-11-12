@@ -182,7 +182,6 @@ export const FLAT_PRIMITIVE_BASELINE: Readonly<Record<string, BaselineEntry>> = 
   "src/entities/parade/BackpackPeek.ts::Y_DIFFERENCE::top - bottom": { count: 1, rule: 'Y_DIFFERENCE' },
   "src/entities/parade/ParadeMember.ts::AXIS_ALIGNED_BOX::box.min.y": { count: 2, rule: 'AXIS_ALIGNED_BOX' },
   "src/entities/parade/ParadeMember.ts::Y_DIFFERENCE::target.y - this.position.y": { count: 1, rule: 'Y_DIFFERENCE' },
-  "src/entities/parade/trail.ts::Y_DIFFERENCE::b.y - a.y": { count: 1, rule: 'Y_DIFFERENCE' },
   "src/minigames/dodgems/Dodgems.ts::FLAT_DISC::this.youMarker.rotation.x = -Math.PI / 2": { count: 1, rule: 'FLAT_DISC' },
   "src/minigames/dodgems/arena.ts::FLAT_DISC::floor.rotation.x = -Math.PI / 2": { count: 1, rule: 'FLAT_DISC' },
   "src/minigames/dodgems/arena.ts::FLAT_DISC::kerb.rotation.x = Math.PI / 2": { count: 1, rule: 'FLAT_DISC' },

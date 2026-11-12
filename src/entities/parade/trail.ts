@@ -40,37 +40,61 @@ const MAX_LENGTH = 30;
  */
 export const TELEPORT_GAP = 3;
 
-interface Crumb {
-  x: number;
-  y: number;
-  z: number;
-  /** Cumulative distance walked when this crumb was dropped. */
-  at: number;
-}
+/**
+ * Crumbs the ring holds, at most. `MAX_LENGTH / STEP` = 250 can be live at
+ * once; a power of two so the wrap is a mask.
+ *
+ * **A ring, not an array that is pushed and shifted** (#745's review): a tapped
+ * dash (`entities/tapDash.ts`) runs at up to ~85 m/s and drops a crumb every
+ * stride, ~700 a second against ~60 walking. An object per crumb and an
+ * `Array.shift()` over ~250 entries per crumb was garbage and copying at
+ * exactly the moment frames are tightest. Four flat columns, written in place,
+ * allocate nothing after construction.
+ */
+const CAPACITY = 512;
+const MASK = CAPACITY - 1;
 
 export class PlayerTrail {
-  private readonly crumbs: Crumb[] = [];
+  private readonly xs = new Float64Array(CAPACITY);
+  private readonly ys = new Float64Array(CAPACITY);
+  private readonly zs = new Float64Array(CAPACITY);
+  /** Cumulative distance walked when each crumb was dropped. */
+  private readonly ats = new Float64Array(CAPACITY);
+  /** Ring index of the oldest crumb. */
+  private head = 0;
+  /** Crumbs held. */
+  private size = 0;
   private travelled = 0;
+
+  /** Ring index of the `i`th crumb, oldest first. */
+  private slot(i: number): number {
+    return (this.head + i) & MASK;
+  }
 
   /** True once there is enough history for anybody to follow. */
   get ready(): boolean {
-    return this.crumbs.length > 1;
+    return this.size > 1;
   }
 
   /** Total distance the player has walked since the last break in the trail. */
   get length(): number {
-    return this.crumbs.length === 0 ? 0 : this.travelled - this.crumbs[0]!.at;
+    return this.size === 0 ? 0 : this.travelled - (this.ats[this.head] ?? 0);
   }
 
   /** Throws the history away — used when the character is moved, not walked. */
   reset(x: number, y: number, z: number): void {
-    this.crumbs.length = 0;
+    this.head = 0;
+    this.size = 1;
     this.travelled = 0;
-    this.crumbs.push({ x, y, z, at: 0 });
+    this.xs[0] = x;
+    this.ys[0] = y;
+    this.zs[0] = z;
+    this.ats[0] = 0;
   }
 
   /**
-   * Call once a frame with the player's feet.
+   * Call once a frame with the player's feet — or once a stride, during a
+   * dash (`Parade.followStride`).
    *
    * **Returns true on the frame the character was *moved* rather than walked**
    * — the deep link into a hotel room, a ride setting her down, anything that
@@ -82,15 +106,15 @@ export class PlayerTrail {
    * that has to be kept in step with this one.
    */
   push(x: number, y: number, z: number): boolean {
-    const last = this.crumbs[this.crumbs.length - 1];
-    if (!last) {
+    if (this.size === 0) {
       // The very first crumb of a run. Nobody was anywhere to be moved *from*,
       // so this is a start, not a teleport.
       this.reset(x, y, z);
       return false;
     }
 
-    const moved = Math.hypot(x - last.x, z - last.z);
+    const last = this.slot(this.size - 1);
+    const moved = Math.hypot(x - (this.xs[last] ?? 0), z - (this.zs[last] ?? 0));
     if (moved > TELEPORT_GAP) {
       this.reset(x, y, z);
       return true;
@@ -100,11 +124,23 @@ export class PlayerTrail {
     if (moved < STEP) return false;
 
     this.travelled += moved;
-    this.crumbs.push({ x, y, z, at: this.travelled });
+    if (this.size === CAPACITY) {
+      // Full: the oldest crumb makes room. Never reached in practice — the
+      // length rule below keeps ~250 — but a ring must not overwrite its head.
+      this.head = (this.head + 1) & MASK;
+      this.size -= 1;
+    }
+    const next = this.slot(this.size);
+    this.xs[next] = x;
+    this.ys[next] = y;
+    this.zs[next] = z;
+    this.ats[next] = this.travelled;
+    this.size += 1;
 
     // Drop history nobody can still be standing on.
-    while (this.crumbs.length > 2 && this.travelled - this.crumbs[1]!.at > MAX_LENGTH) {
-      this.crumbs.shift();
+    while (this.size > 2 && this.travelled - (this.ats[this.slot(1)] ?? 0) > MAX_LENGTH) {
+      this.head = (this.head + 1) & MASK;
+      this.size -= 1;
     }
     return false;
   }
@@ -118,18 +154,17 @@ export class PlayerTrail {
    * appearing all at once.
    */
   sample(behind: number, out: Vector3): boolean {
-    const crumbs = this.crumbs;
-    if (crumbs.length === 0) return false;
-    if (crumbs.length === 1) {
-      const only = crumbs[0]!;
-      out.set(only.x, only.y, only.z);
+    if (this.size === 0) return false;
+    const { xs, ys, zs, ats } = this;
+    const oldest = this.head;
+    if (this.size === 1) {
+      out.set(xs[oldest] ?? 0, ys[oldest] ?? 0, zs[oldest] ?? 0);
       return true;
     }
 
     const target = this.travelled - Math.max(0, behind);
-    const oldest = crumbs[0]!;
-    if (target <= oldest.at) {
-      out.set(oldest.x, oldest.y, oldest.z);
+    if (target <= (ats[oldest] ?? 0)) {
+      out.set(xs[oldest] ?? 0, ys[oldest] ?? 0, zs[oldest] ?? 0);
       return true;
     }
 
@@ -137,18 +172,22 @@ export class PlayerTrail {
     // along the trail, so a shared cursor would thrash; this is O(log n) and
     // runs eight times a frame.
     let low = 0;
-    let high = crumbs.length - 1;
+    let high = this.size - 1;
     while (high - low > 1) {
       const mid = (low + high) >> 1;
-      if (crumbs[mid]!.at <= target) low = mid;
+      if ((ats[this.slot(mid)] ?? 0) <= target) low = mid;
       else high = mid;
     }
 
-    const a = crumbs[low]!;
-    const b = crumbs[high]!;
-    const span = b.at - a.at;
-    const t = span > 1e-6 ? (target - a.at) / span : 0;
-    out.set(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+    const a = this.slot(low);
+    const b = this.slot(high);
+    const aAt = ats[a] ?? 0;
+    const span = (ats[b] ?? 0) - aAt;
+    const t = span > 1e-6 ? (target - aAt) / span : 0;
+    const ax = xs[a] ?? 0;
+    const ay = ys[a] ?? 0;
+    const az = zs[a] ?? 0;
+    out.set(ax + ((xs[b] ?? 0) - ax) * t, ay + ((ys[b] ?? 0) - ay) * t, az + ((zs[b] ?? 0) - az) * t);
     return true;
   }
 
@@ -181,28 +220,29 @@ export class PlayerTrail {
    * body has left the line.
    */
   distanceTo(x: number, z: number): number {
-    const crumbs = this.crumbs;
-    if (crumbs.length === 0) return Number.POSITIVE_INFINITY;
-    if (crumbs.length === 1) {
-      const only = crumbs[0]!;
-      return Math.hypot(x - only.x, z - only.z);
+    if (this.size === 0) return Number.POSITIVE_INFINITY;
+    const { xs, zs } = this;
+    if (this.size === 1) {
+      return Math.hypot(x - (xs[this.head] ?? 0), z - (zs[this.head] ?? 0));
     }
 
     let best = Number.POSITIVE_INFINITY;
-    for (let index = 1; index < crumbs.length; index += 1) {
-      const a = crumbs[index - 1]!;
-      const b = crumbs[index]!;
-      const abx = b.x - a.x;
-      const abz = b.z - a.z;
+    for (let index = 1; index < this.size; index += 1) {
+      const a = this.slot(index - 1);
+      const b = this.slot(index);
+      const ax = xs[a] ?? 0;
+      const az = zs[a] ?? 0;
+      const abx = (xs[b] ?? 0) - ax;
+      const abz = (zs[b] ?? 0) - az;
       const lengthSq = abx * abx + abz * abz;
       // Crumbs are STEP apart, so a zero-length segment cannot arise from
       // walking — but a reset leaves one crumb and a teleport can coincide.
       const t =
         lengthSq > 1e-9
-          ? Math.max(0, Math.min(1, ((x - a.x) * abx + (z - a.z) * abz) / lengthSq))
+          ? Math.max(0, Math.min(1, ((x - ax) * abx + (z - az) * abz) / lengthSq))
           : 0;
-      const dx = x - (a.x + abx * t);
-      const dz = z - (a.z + abz * t);
+      const dx = x - (ax + abx * t);
+      const dz = z - (az + abz * t);
       const distance = Math.hypot(dx, dz);
       if (distance < best) best = distance;
     }
