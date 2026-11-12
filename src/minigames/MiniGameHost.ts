@@ -44,6 +44,12 @@ type Phase =
   | 'idle'
   /** Curtain closing over the park. */
   | 'in'
+  /**
+   * Curtain shut, the game's own code still on its way (it is a lazy chunk —
+   * every mini-game is loaded on the visit that needs it, never at boot). The
+   * park stays frozen behind the closed curtain until it lands.
+   */
+  | 'loading'
   /** The mini-game is on screen and being updated. */
   | 'play'
   /** Curtain closing over the mini-game (which is still animating behind it). */
@@ -79,6 +85,15 @@ export class MiniGameHost {
   private phase: Phase = 'idle';
   private game: MiniGame | null = null;
   private pending: StallInstance | null = null;
+  /**
+   * The game being fetched for {@link pending}: started the moment the curtain
+   * starts to close, so the load runs behind the wipe and usually costs nothing.
+   * `null` once it has been taken, or when the visit is abandoned — a late
+   * arrival for an abandoned visit sees its promise is no longer this one and
+   * disposes what it built.
+   */
+  private loadingGame: Promise<MiniGame> | null = null;
+  private loadedGame: MiniGame | null = null;
   private pendingResult: MiniGameResult | null = null;
   private gameElapsed = 0;
   private holdPrevious = false;
@@ -108,7 +123,7 @@ export class MiniGameHost {
    * world is already alive underneath the opening half of the wipe.
    */
   get frozen(): boolean {
-    return this.phase === 'in' || this.phase === 'play' || this.phase === 'out';
+    return this.phase === 'in' || this.phase === 'loading' || this.phase === 'play' || this.phase === 'out';
   }
 
   /** True while the mini-game is what the screen is showing, not the park. */
@@ -149,6 +164,7 @@ export class MiniGameHost {
     if (this.phase === 'idle') return;
     this.game?.dispose();
     this.game = null;
+    this.forgetLoad();
     this.overlay.setShown(false);
     this.overlay.clearContent();
     this.pending = null;
@@ -177,6 +193,10 @@ export class MiniGameHost {
       case 'in':
         this.transition.update(dt);
         if (!this.transition.busy) this.startGame();
+        return;
+
+      case 'loading':
+        if (this.loadedGame) this.startGame();
         return;
 
       case 'play':
@@ -219,6 +239,7 @@ export class MiniGameHost {
   dispose(): void {
     this.game?.dispose();
     this.game = null;
+    this.forgetLoad();
     this.detachResize();
     this.overlay.dispose();
     this.transition.dispose();
@@ -280,6 +301,26 @@ export class MiniGameHost {
 
     this.pending = stall;
     this.pendingResult = null;
+    this.forgetLoad();
+    const factory = stall.definition.create;
+    if (factory) {
+      const load = Promise.resolve().then(factory);
+      this.loadingGame = load;
+      load.then(
+        (game) => {
+          if (this.loadingGame === load) this.loadedGame = game;
+          else game.dispose();
+        },
+        (error: unknown) => {
+          if (this.loadingGame !== load) return;
+          // A chunk that will not load (offline on a first visit, say): say so
+          // and open the curtain back onto the park rather than holding it shut.
+          console.error(`stall '${stall.definition.id}': its mini-game failed to load`, error);
+          this.loadingGame = null;
+          this.finishLeaving();
+        },
+      );
+    }
     this.phase = 'in';
     this.transition.setAspect(this.engine.aspect);
     this.transition.play('closing', stall.definition.accent);
@@ -293,8 +334,7 @@ export class MiniGameHost {
       return;
     }
 
-    const factory = stall.definition.create;
-    if (!factory) {
+    if (!stall.definition.create) {
       // A ride-boarding stall with no mini-game behind it: boardRide should
       // have taken it in `enter`; ending up here means the wiring is
       // missing, and saying so beats a silent black curtain.
@@ -302,7 +342,14 @@ export class MiniGameHost {
       this.finishLeaving();
       return;
     }
-    const game = factory();
+    const game = this.loadedGame;
+    if (!game) {
+      // Still on its way: hold the curtain shut until it lands.
+      this.phase = 'loading';
+      return;
+    }
+    this.loadedGame = null;
+    this.loadingGame = null;
     game.init({
       renderer: this.engine.renderer,
       touch: this.touch,
@@ -322,6 +369,13 @@ export class MiniGameHost {
     this.overlay.setHeld(false);
     this.phase = 'play';
     this.transition.play('opening');
+  }
+
+  /** Drops an in-flight or landed-but-unused game load. */
+  private forgetLoad(): void {
+    this.loadedGame?.dispose();
+    this.loadedGame = null;
+    this.loadingGame = null;
   }
 
   private updateGame(dt: number): void {

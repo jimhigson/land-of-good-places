@@ -472,6 +472,9 @@ interface ConnectorEdge {
   readonly via: number;
 }
 
+/** Where along a wall segment {@link NavGrid}'s step test is asked: both ends and the middle. */
+const WALL_STEP_SAMPLES = [0, 0.5, 1] as const;
+
 export class NavGrid {
   /** Cells per side. 0 until the first lattice is built. */
   private cells = 0;
@@ -716,6 +719,35 @@ export class NavGrid {
    * the world, no more than a step above the ground under its centre? Only
    * ever true for a lattice that {@link standsOnSolids}.
    */
+  /**
+   * {@link walksOnto} for a wall segment, asked at the six places a walker's
+   * feet are when she meets it: `reach` off the face either side, at both ends
+   * and the middle. All six must be a step.
+   */
+  private walksOntoAlong(
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+    reach: number,
+    topHeight: number,
+    topIsAbsolute: boolean,
+    sample: GroundSampler,
+    standable = true,
+  ): boolean {
+    const length = Math.hypot(x2 - x1, z2 - z1);
+    const nx = length > 1e-9 ? -(z2 - z1) / length : 0;
+    const nz = length > 1e-9 ? (x2 - x1) / length : 0;
+    for (const t of WALL_STEP_SAMPLES) {
+      const x = x1 + (x2 - x1) * t;
+      const z = z1 + (z2 - z1) * t;
+      for (const side of [-1, 1]) {
+        if (!this.walksOnto(topHeight, topIsAbsolute, x + nx * reach * side, z + nz * reach * side, sample, standable)) return false;
+      }
+    }
+    return true;
+  }
+
   private walksOnto(topHeight: number, topIsAbsolute: boolean, x: number, z: number, sample: GroundSampler, standable = true): boolean {
     if (!this.standsOnSolids || !standable || !topIsAbsolute || !Number.isFinite(topHeight)) return false;
     const ground = sample(x, z, topHeight);
@@ -1002,7 +1034,16 @@ export class NavGrid {
         ) {
           return;
         }
-        if (this.walksOnto(topHeight, topIsAbsolute, (x1 + x2) / 2, (z1 + z2) / 2, sample, standable)) return;
+        // Walked onto only if it is a step **everywhere she would meet it** —
+        // asked where her feet are when she does: a body's radius off the
+        // face, either side, at both ends and the middle. A fence down a slope
+        // keeps one top per segment while the ground falls away beside it, so
+        // a segment that is a step at its own midline can be knee-high where
+        // she actually stands: the lattice said walk over, `Player`'s step
+        // rule (asked from her feet) said no, and every walker routed there
+        // ground along it for seconds. Measured on main after #745 + #739:
+        // seeds 0, 9 and 13.
+        if (this.walksOntoAlong(x1, z1, x2, z2, halfThickness + this.walkerRadius, topHeight, topIsAbsolute, sample, standable)) return;
         this.stampSegment(
           x1,
           z1,
