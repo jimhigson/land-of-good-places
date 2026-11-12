@@ -7,20 +7,32 @@ import type { Player, RideHolder } from '../../entities/Player';
 import type { CollisionWorld } from '../Collision';
 import { liftFromGround, terrainHeight, tiltToSphere } from '../terrain';
 import { placedEntry } from '../parkLayout';
-import { createCloudBand, type CloudBand } from './clouds';
+import type { CloudBand } from './clouds';
 import { FERRIS_CAR_LOW_Y } from '../../minigames/ferrisWheel/wheelProp';
 import { FERRIS_WHEEL_EXIT } from '../../minigames/ferrisWheel/exit';
 import { GONDOLA_EYE, createGondola, type Gondola } from '../../minigames/ferrisWheel/gondola';
-import {
-  createAlienSaucer,
-  createSpaceRipika,
-  createSweetieNebula,
-  createSpaceTurtles,
-  type FriendId,
-  type SpaceFriend,
-} from '../../minigames/ferrisWheel/friends';
-import { createSpaceShow, fromAngle, type SpaceShow } from '../../minigames/ferrisWheel/space';
-import { createSparks, type Sparks } from '../../minigames/ferrisWheel/sparks';
+import type { FriendId, SpaceFriend } from '../../minigames/ferrisWheel/friends';
+import type { SpaceShow } from '../../minigames/ferrisWheel/space';
+import type { Sparks } from '../../minigames/ferrisWheel/sparks';
+import { FERRIS_SHOW } from '../interiors';
+
+/** How far she may have moved since her press for the first boarding to still go ahead, in metres. */
+const BOARD_STAY_RADIUS = 1;
+
+/** True if she is where she pressed to board, and not on anything else. */
+function stillAtTheKiosk(player: Player | null, pressedAt: Vector3): boolean {
+  return player !== null && !player.riding && player.position.distanceTo(pressedAt) <= BOARD_STAY_RADIUS;
+}
+
+/**
+ * The sky show's `fromAngle`, once its chunk is here — only ever asked while
+ * she is riding, which is after `requestBoard` has loaded it.
+ */
+function fromAngle(angle: number, distance: number, height: number): Vector3 {
+  const kit = FERRIS_SHOW.loaded;
+  if (!kit) throw new Error('FerrisWheelRide: the sky show was asked for before it was loaded');
+  return kit.fromAngle(angle, distance, height);
+}
 
 /**
  * **The Space Ferris Wheel, riding in the real park.**
@@ -221,6 +233,8 @@ export class FerrisWheelRide implements GameSystem {
 
   private readonly show = new Group();
   private gondola: Gondola | null = null;
+  /** True while the first boarding waits for the sky show's chunk. */
+  private fetchingShow = false;
   private clouds: CloudBand | null = null;
   private space: SpaceShow | null = null;
   private sparks: Sparks | null = null;
@@ -290,6 +304,9 @@ export class FerrisWheelRide implements GameSystem {
    * on a phone is most of the time.
    */
   private build(): void {
+    const kit = FERRIS_SHOW.loaded;
+    if (!kit) throw new Error('FerrisWheelRide: built before the sky show was loaded');
+    const { createCloudBand, createSpaceShow, createAlienSaucer, createSpaceRipika, createSweetieNebula, createSpaceTurtles, createSparks } = kit;
     this.clouds = createCloudBand(this.boardX, this.boardZ);
     this.group.add(this.clouds.root);
 
@@ -409,7 +426,28 @@ export class FerrisWheelRide implements GameSystem {
   };
 
   requestBoard(): boolean {
-    if (this.riding || !this.player) return false;
+    if (this.riding || this.fetchingShow || !this.player) return false;
+    // **The sky show is a lazy chunk** (`show.ts`): the first boarding fetches
+    // it — a precached file, so a moment — and boards when it lands. The press
+    // is claimed now, so the kiosk does not fall through to a curtain.
+    if (!FERRIS_SHOW.loaded) {
+      this.fetchingShow = true;
+      // Where she pressed: the car is only boarded if she is still there when
+      // the show lands. Walked away in the meantime (or on another ride),
+      // she meant to, and is not pulled back onto the wheel.
+      const pressedAt = this.player.position.clone();
+      FERRIS_SHOW.load().then(
+        () => {
+          this.fetchingShow = false;
+          if (stillAtTheKiosk(this.player, pressedAt)) this.requestBoard();
+        },
+        (error: unknown) => {
+          this.fetchingShow = false;
+          console.error('Land of Good Places: the ferris wheel\'s sky show failed to load', error);
+        },
+      );
+      return true;
+    }
     this.riding = true;
     // Fresh every visit — see `build`. Before `onRideChange`, which reads
     // `rideView.camera` the moment it fires.
