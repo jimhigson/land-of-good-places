@@ -8,7 +8,7 @@ import { MAX_LEVEL_GAP, MAX_ROUTE_WAYPOINTS, type NavGrid } from '../world/NavGr
 import { TapMarker } from '../art/models/tapMarker';
 import type { GroundSampler, Player } from './Player';
 import { PLAYER_MAX_SPEED } from '../core/constants';
-import { dashBoost, dashBoostNow, dashSubsteps } from './tapDash';
+import { DASH_RECOVER_SECONDS, dashBoost, dashBoostNow, dashSubsteps } from './tapDash';
 
 /**
  * Tap a place, and Eleri walks there — round whatever is in the way.
@@ -185,6 +185,16 @@ export class TapNavigator implements GameSystem {
    * `Player.setTravelBoost` every frame the navigator steers.
    */
   private boost = 1;
+  /**
+   * Seconds left of walking after a dash ran into something. A dash that is
+   * blocked (`Player.blocked`) walks — a walk's speed, a walk's grip — for
+   * {@link DASH_RECOVER_SECONDS} after the last stride that met anything, so
+   * the contact is exactly the contact a walk has: she grinds along the face
+   * and finds her way round as she always has, instead of a 60 m/s slide
+   * carrying her metres along it into a pocket she cannot leave (#745 on main,
+   * seed 9). Clear of it, she dashes again.
+   */
+  private recovering = 0;
 
   private readonly player: Player;
   private readonly camera: IsoCamera;
@@ -331,7 +341,7 @@ export class TapNavigator implements GameSystem {
 
   /** True while the current journey is running faster than a walk. */
   get dashing(): boolean {
-    return this.active && this.boost > 1;
+    return this.active && this.cruiseBoost > 1;
   }
 
   /**
@@ -340,7 +350,10 @@ export class TapNavigator implements GameSystem {
    * `DASH_STRIDE`. See `tapDash.ts`'s `dashSubsteps`.
    */
   stridesFor(dt: number): number {
-    return this.dashing ? dashSubsteps(this.boost * PLAYER_MAX_SPEED, dt) : 1;
+    // The journey's cruise, not this frame's boost: the boost can rise back to
+    // the cruise inside this very frame (a dash recovering from a bump, the
+    // first frame of a tap), and the strides must already be short enough.
+    return this.dashing ? dashSubsteps(this.cruiseBoost * PLAYER_MAX_SPEED, dt) : 1;
   }
 
   /** Drops the current destination. Called when the player takes over. */
@@ -438,8 +451,11 @@ export class TapNavigator implements GameSystem {
     );
     this.input.setNavigationSprint(this.running);
     // Eased off over the last stretch, so the dash hands over to the walk's
-    // own easing into the marker (`DASH_BRAKE_SECONDS`).
-    this.boost = dashBoostNow(this.cruiseBoost, this.remainingRoute());
+    // own easing into the marker (`DASH_BRAKE_SECONDS`) — and a walk for the
+    // rest of any leg on which it ran into something (`walkingLeg`).
+    if (this.cruiseBoost > 1 && this.player.blocked) this.recovering = DASH_RECOVER_SECONDS;
+    else this.recovering = Math.max(0, this.recovering - dt);
+    this.boost = this.recovering > 0 ? 1 : dashBoostNow(this.cruiseBoost, this.remainingRoute());
     this.player.setTravelBoost(this.boost);
 
     this.marker.moveTo(this.target.x, this.target.y, this.target.z);
@@ -589,6 +605,7 @@ export class TapNavigator implements GameSystem {
    * dashes — a stair ride's pace is the ride's.
    */
   private planDash(scripted: boolean): void {
+    this.recovering = 0;
     this.cruiseBoost = scripted ? 1 : dashBoost(this.remainingRoute());
     this.boost = dashBoostNow(this.cruiseBoost, this.remainingRoute());
   }

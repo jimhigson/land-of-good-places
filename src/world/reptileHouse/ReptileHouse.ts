@@ -34,13 +34,11 @@ import {
 } from '../../art/models/reptileHouseAssets';
 import { ReptileLighting } from './lighting';
 import { SignAtlas } from './signs';
-import { ReptileProps } from './props';
-import { Exhibits } from './exhibits';
-import { ExhibitCamera, REPTILE_HALL } from './exhibitCamera';
-import { Planting } from './planting';
-import { paintPaths } from './floorPaint';
-import { ReptileStall } from './stall';
-import { TortoiseRide } from './tortoiseRide';
+import type { ReptileProps } from './props';
+import { ExhibitCamera, REPTILE_HALL as REPTILE_HALL_ROOM } from './exhibitCamera';
+import type { ReptileHallContent } from './hall';
+import type { HallContext } from './context';
+import { REPTILE_HALL } from '../interiors';
 import {
   buildForecourt,
   buildHallShell,
@@ -128,6 +126,20 @@ export interface ReptileHouseDeps {
   nightFactor(): number;
 }
 
+/** How near the building she must be for its hall's chunk to be fetched ahead of the door, in metres. */
+const REPTILE_PREFETCH_RADIUS = 18;
+
+/** What she is told when the hall could not be fetched — the room is fine, it just is not here yet. */
+const DOOR_REFUSED_LINE = 'The snakes are still waking up — try again in a moment!';
+/**
+ * Where that line hangs: over the doormat, out in front of the mouth, at
+ * this height in metres — over her head. Hung in the doorway itself it was
+ * half hidden by the mouth's own arch (QA's frame of the first try).
+ */
+const REPTILE_DOOR_LINE_HEIGHT = 2.6;
+/** How far past the door band she must step before a refused door will try again, in metres. */
+const DOOR_STEP_AWAY = 1.5;
+
 /** The exit chip and the tail-tickle chip's ids. */
 const ENTRANCE_ZONE = 'reptile-entrance';
 
@@ -139,8 +151,6 @@ export class ReptileHouse implements GameSystem {
   readonly forecourtRoot = new Group();
   /** The exterior's root in the park, when the park has a plot for it. */
   readonly parkRoot = new Group();
-  /** The two shop stands — the stall's and the nursery's — for `World.shopStands()`. */
-  readonly stands: readonly ShopStand[];
   /** The exterior shell's wall colliders, chords first, so a check can remove one and go red. */
   readonly shellSolids: readonly WallCollider[];
   /** The doorway frame round the hall's way out (`doorFrames.ts`). */
@@ -151,12 +161,26 @@ export class ReptileHouse implements GameSystem {
   private readonly surfaces: WalkSurfaces;
   private readonly deps: ReptileHouseDeps;
   private readonly spaces: SpaceManager;
-  private readonly props: ReptileProps;
-  private readonly exhibits: Exhibits;
+  /**
+   * The hall's floor — cases, enclosures, planting, the stall, the tortoise —
+   * or `null` until she first walks in: it is a lazy chunk
+   * (`world/interiors.ts`'s `REPTILE_HALL`, `hall.ts`). Built in the
+   * constructor when the chunk is already here (Node's checks, and a boot that
+   * restores or deep-links into the hall), otherwise behind the door's iris.
+   */
+  private hall: ReptileHallContent | null = null;
+  /**
+   * Where a save restored her in the hall, hall-local, when the hall's floor
+   * was not here to restore her into (`adoptRestoredPlayer`): she is taken in
+   * through the door on the first frame, once it is.
+   */
+  private restoreInto: { readonly x: number; readonly z: number; readonly facing: number } | null = null;
+  /** The door just failed to open because the hall could not be fetched; it waits until she steps away (`refuseDoor`). */
+  private doorRefused = false;
+  /** Everything the hall's floor is built with but the props, which it makes itself. */
+  private readonly hallContext: Omit<HallContext, 'props'>;
   /** The over-the-shoulder shot an exhibit's chip brings the camera down to. */
   readonly exhibitCamera: ExhibitCamera;
-  private readonly stall: ReptileStall;
-  private readonly ride: TortoiseRide;
   private readonly exterior: ReptileHouseExterior;
   private readonly frame: FacadeFrame;
   /** Every line the hall says — an answer to a press, so `actionFeedback`. Its item is set per line. */
@@ -194,15 +218,13 @@ export class ReptileHouse implements GameSystem {
     this.hallRoot.visible = false;
     this.hallRoot.add(new ReptileLighting(0, 0).group);
     this.exitDoorFrame = buildHallShell(this.hallRoot, collision, surfaces);
-    this.props = new ReptileProps(collision, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z);
     const atlas = new SignAtlas();
     this.hearts = new SpritePuffs(this.hallRoot, 12);
     this.hallRoot.add(this.bubble.sprite);
     const adults = new SnakeSegmentPool(this.hallRoot, 260, 'reptile-adults');
     const babies = new SnakeSegmentPool(this.hallRoot, 200, 'reptile-babies');
-    const context = {
+    this.hallContext = {
       root: this.hallRoot,
-      props: this.props,
       atlas,
       adults,
       babies,
@@ -217,16 +239,12 @@ export class ReptileHouse implements GameSystem {
       // tries them all"); `model.height` is the bare rig and never moves.
       playerHeight: () => this.player?.topHeight ?? 0,
     };
-    this.exhibits = new Exhibits(context);
     // The snake pools are animals, every one of them — a body is never an
     // obstacle to seeing an animal.
-    this.exhibitCamera = new ExhibitCamera({ hall: this.hallRoot, collision, camera: deps.camera, seeThrough: [...adults.meshes, ...babies.meshes], room: REPTILE_HALL });
-    new Planting(context);
-    paintPaths(context);
-    this.stall = new ReptileStall(context);
-    this.stands = this.stall.stands;
-    this.ride = new TortoiseRide(this.hallRoot, this.props, collision, controls);
-    this.props.assertClear();
+    this.exhibitCamera = new ExhibitCamera({ hall: this.hallRoot, collision, camera: deps.camera, seeThrough: [...adults.meshes, ...babies.meshes], room: REPTILE_HALL_ROOM });
+    // The floor, now, if its chunk is already here — in the order it was
+    // always built, before the outside; otherwise on the way in.
+    this.furnishIfLoaded();
 
     // ------------------------------------------------------- the outside
     this.exterior = createReptileHouseExterior();
@@ -297,37 +315,57 @@ export class ReptileHouse implements GameSystem {
     return this.frame;
   }
 
+  /** True once the hall's floor has been built (`hall.ts`). */
+  get furnished(): boolean {
+    return this.hall !== null;
+  }
+
+  /**
+   * Fetches the hall's floor and builds it, if nobody has. The door does this
+   * behind its iris; anything else that wants the hall furnished (a check
+   * driving a served build) can ask for it directly.
+   */
+  furnish(): Promise<void> {
+    if (this.hall) return Promise.resolve();
+    return REPTILE_HALL.load().then(() => this.furnishIfLoaded());
+  }
+
+  /** The two shop stands — the stall's and the nursery's — for `World.shopStands()`. None until the hall is furnished. */
+  get stands(): readonly ShopStand[] {
+    return this.hall?.stall.stands ?? [];
+  }
+
   get exhibitsGreeted(): number {
-    return this.exhibits.exhibitsGreeted;
+    return this.hall?.exhibits.exhibitsGreeted ?? 0;
   }
 
   get babiesFound(): number {
-    return this.exhibits.babiesFound;
+    return this.hall?.exhibits.babiesFound ?? 0;
   }
 
   /** Every exhibit's id, in table order — for `check:exhibit-camera`. */
   get exhibitIds(): readonly string[] {
-    return this.exhibits.ids;
+    return this.hall?.exhibits.ids ?? [];
   }
 
   /** The animals an exhibit's shot frames — for `check:exhibit-camera`. */
   exhibitSubjects(id: string): readonly Object3D[] {
-    return this.exhibits.subjectsOf(id);
+    return this.hall?.exhibits.subjectsOf(id) ?? [];
   }
 
   /** Every animal in an exhibit, for `check:exhibit-camera`. */
   exhibitCast(id: string): readonly Object3D[] {
-    return this.exhibits.castOf(id);
+    return this.hall?.exhibits.castOf(id) ?? [];
   }
 
   /** Every animal's hall-local spot with its exhibit, for the check. */
   animalSpots(): { id: string; x: number; z: number }[] {
-    return this.exhibits.animalSpots();
+    return this.hall?.exhibits.animalSpots() ?? [];
   }
 
   /** Every solid the hall registered, with its collision handle — so a check can remove one and go red. */
   get solids(): ReptileProps['solids'] {
-    return this.props.solids;
+    return this.hall?.props.solids ?? [];
   }
 
   /** The hall's one bubble, for `World` to register with the park's `LabelManager`. */
@@ -342,22 +380,22 @@ export class ReptileHouse implements GameSystem {
 
   attachPlayer(player: Player): void {
     this.player = player;
-    this.ride.attachPlayer(player);
+    this.hall?.ride.attachPlayer(player);
   }
 
   /** On the tortoise's shell, mid-lap — for the checks and `Game`'s tap handler. */
   get playerOnTortoise(): boolean {
-    return this.ride.playerRiding;
+    return this.hall?.ride.playerRiding ?? false;
   }
 
-  /** The tortoise back in its bay, solid — for the check. */
+  /** The tortoise back in its bay, solid — for the check. True before the hall is furnished: it has not left it. */
   get tortoiseParked(): boolean {
-    return this.ride.parked;
+    return this.hall?.ride.parked ?? true;
   }
 
   /** A tap anywhere while she is on the tortoise: off it, walking. */
   dismountTortoise(): void {
-    this.ride.dismount();
+    this.hall?.ride.dismount();
   }
 
   /**
@@ -374,6 +412,24 @@ export class ReptileHouse implements GameSystem {
     // `check:tap-spacing` does) must get the forecourt's two zones, not the
     // hall's twenty a second time.
     if (space === SPACE_REPTILE_HOUSE) {
+      // `main.ts` loads the hall's chunk before the game is built for a save
+      // that restores in here (`interiorsToPreload`), so it is furnished by
+      // now. If it is not — that load failed, or timed out — she is **never**
+      // put in the hall to have its floor built round her: a prop's collider
+      // registered on top of her is a box she can never leave. On the first
+      // frame (`update`) she is put on the doormat and taken in through the
+      // door, behind its iris, to the spot she saved at, once the floor is
+      // built. Not here: `Game` puts her back on her saved spot after every
+      // adoption, so a move made now would be undone.
+      if (!this.hall) {
+        console.error('Land of Good Places: restored into the Reptile House hall before its floor was loaded — see interiorsToPreload in world/interiors.ts. She waits at the door.');
+        this.restoreInto = {
+          x: player.position.x - REPTILE_HOUSE_ORIGIN_X,
+          z: player.position.z - REPTILE_HOUSE_ORIGIN_Z,
+          facing: (player.facing * 180) / Math.PI,
+        };
+        return;
+      }
       this.inside = true;
       this.onForecourt = false;
       this.hallRoot.visible = true;
@@ -406,7 +462,7 @@ export class ReptileHouse implements GameSystem {
   requestEnter(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
     const player = this.player;
     if (!player || player.riding || this.spaces.isChanging) return false;
-    this.spaces.changeTo(() => this.enterHall(at));
+    this.changeToHall(() => this.enterHall(at));
     return true;
   }
 
@@ -418,9 +474,9 @@ export class ReptileHouse implements GameSystem {
   requestTortoiseRide(): boolean {
     const player = this.player;
     if (!player || player.riding || this.spaces.isChanging) return false;
-    this.spaces.changeTo(() => {
+    this.changeToHall(() => {
       this.enterHall(TORTOISE_RIDE_STAND);
-      this.ride.requestBoard();
+      this.hall?.ride.requestBoard();
     });
     return true;
   }
@@ -439,7 +495,7 @@ export class ReptileHouse implements GameSystem {
   }
 
   interactZones(): InteractZone[] {
-    if (this.inside) return [...this.exhibits.zones(), ...this.stall.zones(), ...this.ride.zones()];
+    if (this.inside) return this.hall ? [...this.hall.exhibits.zones(), ...this.hall.stall.zones(), ...this.hall.ride.zones()] : [];
     if (this.onForecourt || this.deps.plot) return [this.exteriorEntranceZone(), this.tailZone()];
     return [];
   }
@@ -451,16 +507,20 @@ export class ReptileHouse implements GameSystem {
 
     if (this.inside) {
       const local: LocalPoint | null = player ? { x: player.position.x - REPTILE_HOUSE_ORIGIN_X, z: player.position.z - REPTILE_HOUSE_ORIGIN_Z } : null;
-      this.exhibits.update(dt, elapsed, local);
+      const hall = this.hall;
+      if (hall) hall.exhibits.update(dt, elapsed, local);
       if (player) this.exhibitCamera.update(dt, context.input, player, true, this.bubbleFor);
-      this.stall.update(dt, elapsed);
-      this.ride.update(dt, elapsed, context.input);
-      this.hearts.update(dt);
-      if (this.bubbleFor > 0) {
-        this.bubbleFor -= dt;
-        if (this.bubbleFor <= 0) this.bubble.setText(null);
-        else this.bubble.updateScreenSize(this.deps.camera);
+      if (hall) {
+        hall.stall.update(dt, elapsed);
+        hall.ride.update(dt, elapsed, context.input);
       }
+      this.hearts.update(dt);
+    }
+    // In the hall or, after a door that could not open, outside it.
+    if (this.bubbleFor > 0) {
+      this.bubbleFor -= dt;
+      if (this.bubbleFor <= 0) this.bubble.setText(null);
+      else this.bubble.updateScreenSize(this.deps.camera);
     }
 
     if (this.onForecourt || this.deps.plot) {
@@ -481,6 +541,25 @@ export class ReptileHouse implements GameSystem {
     }
 
     if (!player) return;
+    // A save that restored her in the hall before its floor was here: in
+    // through the door now, behind its iris, which holds until it is built.
+    const restore = this.restoreInto;
+    if (restore && !this.spaces.isChanging) {
+      this.restoreInto = null;
+      // Out of the empty hall at once, onto the doormat — where she stays,
+      // told why, if the floor cannot be fetched (`refuseDoor`).
+      this.standAtDoor();
+      this.controls.snapCamera();
+      this.changeToHall(() => this.enterHall(restore));
+    }
+    // **Fetch the hall's chunk on approach** — only fetch, not build, so
+    // walking up costs nothing; the door then builds it behind its iris
+    // without waiting on the network. Entering is still what furnishes it.
+    if (!this.hall && !this.inside && Math.hypot(player.position.x - this.frame.x, player.position.z - this.frame.z) < REPTILE_PREFETCH_RADIUS) {
+      REPTILE_HALL.load().catch(() => {
+        // The door asks again, and says so if it still cannot.
+      });
+    }
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
     // Nobody falls out of the world: a slipped trigger lands her back at the arrival.
@@ -507,8 +586,20 @@ export class ReptileHouse implements GameSystem {
       // immediately pushes down used to walk off the plate and be popped back
       // to the arrival (the solidity review, 2 October 2026).
       if (this.spaces.settling) return;
-      if (bandWalkedThrough(reptileEntryBand(this.frame), player)) {
-        this.spaces.changeTo(() => this.enterHall());
+      const band = reptileEntryBand(this.frame);
+      // **A door that could not open stays shut until she has stepped away
+      // from it.** Its floor failed to load (`refuseDoor`): firing again every
+      // time the cooldown ran out, while she stood in the mouth or pushed into
+      // it, closed and opened the iris about once a second — a flashing
+      // screen, QA on #749. One clear try per approach.
+      if (this.doorRefused) {
+        if (Math.hypot(player.position.x - band.centreX, player.position.z - band.centreZ) > band.halfAlong + DOOR_STEP_AWAY) {
+          this.doorRefused = false;
+        }
+        return;
+      }
+      if (bandWalkedThrough(band, player)) {
+        this.changeToHall(() => this.enterHall());
       }
       return;
     }
@@ -601,8 +692,8 @@ export class ReptileHouse implements GameSystem {
     this.exhibitCamera.warm(
       EXHIBIT_PLACEMENTS.map((placement) => ({
         id: placement.id,
-        subjects: () => this.exhibits.subjectsOf(placement.id),
-        cast: () => this.exhibits.castOf(placement.id),
+        subjects: () => this.exhibitSubjects(placement.id),
+        cast: () => this.exhibitCast(placement.id),
         at: new Vector3(REPTILE_HOUSE_ORIGIN_X + placement.stand.x, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z + placement.stand.z),
         facing: (placement.stand.facing * Math.PI) / 180,
       })),
@@ -669,6 +760,8 @@ export class ReptileHouse implements GameSystem {
   }
 
   private say(item: string, text: string, at: LocalPoint, y: number): void {
+    // Back in the hall if the door last borrowed it (`refuseDoor`).
+    if (this.bubble.sprite.parent !== this.hallRoot) this.hallRoot.add(this.bubble.sprite);
     this.lastSaid = text;
     this.bubble.identity.item = item;
     this.bubble.anchorAt(at.x, y, at.z);
@@ -678,12 +771,44 @@ export class ReptileHouse implements GameSystem {
 
   private onGreet(id: string): void {
     const player = this.player;
-    if (player && this.inside) this.exhibitCamera.start(id, this.exhibits.subjectsOf(id), this.exhibits.castOf(id), player);
-    if (this.exhibits.exhibitsGreeted >= 15) discoverSecret('secret.metTheReptiles');
+    if (player && this.inside) this.exhibitCamera.start(id, this.exhibitSubjects(id), this.exhibitCast(id), player);
+    if (this.exhibitsGreeted >= 15) discoverSecret('secret.metTheReptiles');
   }
 
   private onBabyFound(): void {
-    if (this.exhibits.babiesFound >= 5) discoverSecret('secret.snakeSpotter');
+    if (this.babiesFound >= 5) discoverSecret('secret.snakeSpotter');
+  }
+
+  /** Builds the hall's floor if its chunk is here and nobody has yet. */
+  private furnishIfLoaded(): void {
+    const module = REPTILE_HALL.loaded;
+    if (this.hall || !module) return;
+    this.hall = this.collision.ownedBy('reptile house', () => module.furnishReptileHall(this.collision, this.controls, this.hallContext));
+    if (this.player) this.hall.ride.attachPlayer(this.player);
+  }
+
+  /** Into the hall, fetching and building its floor behind the iris first if it is not here yet. */
+  private changeToHall(midpoint: () => void): void {
+    this.spaces.changeToFurnished(() => this.hall !== null, () => this.furnish(), midpoint, () => this.refuseDoor());
+  }
+
+  /**
+   * The hall's floor could not be fetched (offline before it was ever cached,
+   * or a dropped connection): she is still outside, so say why over the door,
+   * and keep the door from firing again under her until she has stepped away
+   * from it (`checkDoorways`). The next approach tries again — `LazyPart`
+   * fetches it afresh once its short back-off has passed.
+   */
+  private refuseDoor(): void {
+    this.doorRefused = true;
+    const door = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 0);
+    const root = this.deps.plot ? this.parkRoot : this.forecourtRoot;
+    root.add(this.bubble.sprite);
+    this.lastSaid = DOOR_REFUSED_LINE;
+    this.bubble.identity.item = ENTRANCE_ZONE;
+    this.bubble.anchorAt(door.x - this.frame.x, REPTILE_DOOR_LINE_HEIGHT, door.z - this.frame.z);
+    this.bubble.setText(DOOR_REFUSED_LINE);
+    this.bubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
   }
 }
 

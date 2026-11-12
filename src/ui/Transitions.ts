@@ -38,6 +38,12 @@ export class Transitions {
     const eye = document.createElement('div');
     eye.className = 'iris-eye';
     this.iris.append(eye);
+    // The "still on its way" dots, shown only while a held wipe waits on a
+    // room (`irisWipe`'s `ready`) — see `.iris-wait` in style.css.
+    const wait = document.createElement('div');
+    wait.className = 'iris-wait';
+    wait.append(document.createElement('span'), document.createElement('span'), document.createElement('span'));
+    this.iris.append(wait);
 
     this.whoosh = document.createElement('div');
     this.whoosh.className = 'whoosh';
@@ -59,7 +65,7 @@ export class Transitions {
    * transition event, because a backgrounded tab never fires `transitionend` and
    * a child coming back to the game would find the screen permanently dark.
    */
-  irisWipe(midpoint: () => void, onOpened?: () => void): void {
+  irisWipe(midpoint: () => void, onOpened?: () => void, ready?: Promise<unknown>): void {
     window.clearTimeout(this.closeTimer);
     window.clearTimeout(this.openTimer);
     // **A wipe that starts while another is still closing runs the first one's
@@ -75,7 +81,17 @@ export class Transitions {
     this.irisRunning = true;
     this.iris.dataset.closed = 'true';
     this.pendingMidpoint = midpoint;
-    this.closeTimer = window.setTimeout(() => {
+    // **`ready`: hold shut until a room being fetched has landed** (a lazy
+    // interior, `world/LazyPart.ts`). Settled either way — a failed fetch still
+    // runs the midpoint, which is the owner's to refuse, so the iris can never
+    // stay shut for ever.
+    let settled = ready === undefined;
+    ready?.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    const open = (): void => {
+      if (this.pendingMidpoint !== midpoint) return;
       this.pendingMidpoint = null;
       midpoint();
       this.iris.dataset.closed = 'false';
@@ -83,6 +99,18 @@ export class Transitions {
         this.irisRunning = false;
         onOpened?.();
       }, IRIS_OPEN_SECONDS * 1000);
+    };
+    this.closeTimer = window.setTimeout(() => {
+      if (settled || !ready) {
+        open();
+        return;
+      }
+      this.iris.dataset.waiting = 'true';
+      const done = (): void => {
+        delete this.iris.dataset.waiting;
+        open();
+      };
+      ready.then(done, done);
     }, IRIS_CLOSE_SECONDS * 1000);
   }
 
