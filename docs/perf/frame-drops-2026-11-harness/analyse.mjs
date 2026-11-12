@@ -64,7 +64,8 @@ if (fs.existsSync(tracePath)) {
   const inWin = (arr, a, b) => arr.filter((s) => s.ts < b && s.ts + s.dur > a);
   // all-window totals
   const fromUs = meta.measureFrom * 1000 + offUs, toUs = meta.measureTo * 1000 + offUs;
-  const total = {}; for (const s of inWin(spans.main, fromUs, toUs)) if (GC.has(s.name) || s.name === 'FireAnimationFrame') total[s.name] = (total[s.name] || 0) + clip(s, fromUs, toUs);
+  const total = {}; for (const s of inWin(spans.main, fromUs, toUs)) if (GC.has(s.name) || s.name === 'FireAnimationFrame' || LAYOUT.has(s.name) || s.name === 'Paint' || s.name === 'UpdateLayoutTree' || s.name === 'Layout' || s.name === 'PrePaint' || s.name === 'Layerize' || s.name === 'Commit') total[s.name] = (total[s.name] || 0) + clip(s, fromUs, toUs);
+  const layoutTotal = ['UpdateLayoutTree', 'Layout', 'PrePaint', 'Paint', 'Layerize', 'Commit', 'HitTest', 'UpdateLayer'].reduce((a, k) => a + (total[k] || 0), 0);
   report.trace = {
     aligned: !!alignEv, mainThread: threads[mainKey],
     gcMsPerSec: r1(((total.MinorGC || 0) + (total.MajorGC || 0)) / 1000 / durS),
@@ -72,6 +73,7 @@ if (fs.existsSync(tracePath)) {
     majorGC: inWin(spans.main, fromUs, toUs).filter((s) => s.name === 'MajorGC').length,
     gcMaxMs: r1(Math.max(0, ...inWin(spans.main, fromUs, toUs).filter((s) => GC.has(s.name)).map((s) => s.dur / 1000))),
     rafMsPerSec: r1((total.FireAnimationFrame || 0) / 1000 / durS),
+    styleLayoutPaintMsPerSec: r1(layoutTotal / 1000 / durS),
   };
   const cats = {};
   const detail = [];

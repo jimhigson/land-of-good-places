@@ -59,7 +59,7 @@ if (o.trace && !o.traceFromStart) await startTrace();
 if (o.cpu) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start'); }
 if (o.heap) { await cdp.send('HeapProfiler.enable'); await cdp.send('HeapProfiler.startSampling', { samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
 const align = await page.evaluate(() => { performance.mark('__perf_align'); return performance.now(); });
-const measureFrom = align;
+const measureFrom = o.measureAll ? 0 : align;
 
 // --- drive ---
 const until = Date.now() + secs * 1000;
@@ -78,6 +78,11 @@ if (walk === 'square') {
   await page.keyboard.down('KeyW');
   while (Date.now() < until) { await tapSpace(); await sleep(300); }
   await page.keyboard.up('KeyW');
+} else if (walk === 'dash') {
+  // tap far points on the ground, alternating sides: 'Tap to go' super-speed journeys
+  const vp = page.viewportSize(); let i = 0;
+  const pts = [[0.92, 0.88], [0.08, 0.12], [0.9, 0.1], [0.1, 0.9]];
+  while (Date.now() < until) { const [fx, fy] = pts[i++ % 4]; await page.mouse.click(vp.width * fx, vp.height * fy); await sleep(4500); }
 } else if (walk === 'tap') {
   while (Date.now() < until) { await tapSpace(); await sleep(250); }
 } else {
