@@ -52,6 +52,7 @@ import {
   type FacadeFrame,
 } from './shell';
 import {
+  REPTILE_ARCH_HEIGHT,
   REPTILE_ARRIVAL_FACING,
   REPTILE_ARRIVAL_X,
   REPTILE_ARRIVAL_Z,
@@ -132,12 +133,14 @@ const REPTILE_PREFETCH_RADIUS = 18;
 const DOOR_REFUSED_LINE = 'The snakes are still waking up — try again in a moment!';
 /**
  * Where that line hangs: over the doormat, out in front of the mouth, at
- * this height in metres — over her head. Hung in the doorway itself it was
- * half hidden by the mouth's own arch (QA's frame of the first try); hung
- * here but depth-tested, the arch's pink rim still cut its top corners off
- * ("he snakes are sti", issue #757) — hence its own `overScenery` bubble.
+ * this height in metres. Hung in the doorway itself it was half hidden by the
+ * mouth's own arch (QA's frame of the first try); hung over her head at 2.6 m
+ * it still landed inside the arch on screen, where the pink rim cut its top
+ * corners off ("he snakes are sti", issue #757) and the pill covered her. So
+ * its tail now sits clear above the arch's crown — the clear bore plus the
+ * rim's thickness — and it is drawn over the scenery as well (`doorBubble`).
  */
-const REPTILE_DOOR_LINE_HEIGHT = 2.6;
+const REPTILE_DOOR_LINE_HEIGHT = REPTILE_ARCH_HEIGHT + 0.9;
 /** How far past the door band she must step before a refused door will try again, in metres. */
 const DOOR_STEP_AWAY = 1.5;
 
