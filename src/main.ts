@@ -25,6 +25,7 @@ import {
 import { loadPrebuiltPark } from './boot/prebuiltPark';
 import { showBootFailure } from './ui/bootFailure';
 import { OVERRUN_WARMUP_BUDGET_MS, ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
+import { prepareAudio } from './core/audio';
 import { JourneySkip } from './ui/JourneySkip';
 import { JourneyTitle } from './ui/JourneyTitle';
 import { JourneyWait } from './ui/JourneyWait';
@@ -1477,6 +1478,12 @@ async function finishLaunch(
 // startup" is not a thing iOS will accept, and why asking per-ride was worse
 // than asking late.
 askForOrientationOnFirstGesture();
+
+// The park's one AudioContext, built now — behind the splash, before any park
+// frame exists — because constructing one blocks the main thread for ~150 ms
+// wherever it happens. It starts suspended until her first tap or key press,
+// which resumes it (the iOS rule). See `core/audio.ts`.
+prepareAudio();
 
 
 try {
