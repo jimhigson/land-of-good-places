@@ -54,7 +54,9 @@ import { gameStore, type CharacterCreationChoice } from './state';
 import { shopItem } from './world/building/shops/catalogue';
 import { makeSessionUnsavable, type SavedPlace } from './state/save';
 import { libraryDenContains } from './world/library/layout';
-import { SPACE_GARDEN, SPACE_LIBRARY } from './world/spaces';
+import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from './world/spaces';
+import { PerfProbe, perfRequested } from './core/perfProbe';
+import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
@@ -1146,7 +1148,40 @@ export class Game {
     // skips the follow smoothing outright rather than shortening it, so there
     // is no opening pan across a park she has not arrived at yet.
     this.camera.snapTo(this.player.position);
-    this.loop = new Loop((tick) => this.tick(tick));
+    // `?perf=1` — the frame counted and shown (120 fps plan, step 0; see
+    // `core/perfProbe.ts`). Without the flag the loop calls `tick` directly,
+    // exactly as it always has: nothing is constructed, nothing is wrapped.
+    if (perfRequested()) {
+      const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
+      this.perfOverlay = new PerfOverlay(probe);
+      this.loop = new Loop((tick) => {
+        probe.begin();
+        this.tick(tick);
+        probe.end();
+      });
+    } else {
+      this.loop = new Loop((tick) => this.tick(tick));
+    }
+  }
+
+  /** The `?perf=1` overlay, when the URL asked for it. */
+  private perfOverlay: PerfOverlay | null = null;
+
+  /** What the perf overlay's JSON says about where and on what it was measured. */
+  private perfContext(): Record<string, unknown> {
+    const renderer = this.engine.renderer;
+    const gl = renderer.getContext();
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      space: spaceAt(this.player.position.x, this.player.position.z),
+      riding: this.player.riding,
+      gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+      userAgent: navigator.userAgent,
+      pixelRatio: renderer.getPixelRatio(),
+      canvas: [gl.drawingBufferWidth, gl.drawingBufferHeight],
+      viewport: [window.innerWidth, window.innerHeight],
+      hardwareConcurrency: navigator.hardwareConcurrency,
+    };
   }
 
   /** Registers an extra per-frame system. Updated after the world, in order. */
@@ -1741,6 +1776,7 @@ export class Game {
 
   dispose(): void {
     this.stop();
+    this.perfOverlay?.dispose();
     this.saveSystem.dispose();
     for (const system of this.systems) system.dispose?.();
     this.miniGames.dispose();
