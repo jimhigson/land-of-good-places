@@ -58,6 +58,8 @@
  */
 
 import './headless-dom.mjs';
+// The ride's sky show is a lazy chunk in the browser; provided up front here.
+import './lib/eagerInteriors.mts';
 import { dispatch, setViewport } from './headless-dom.mjs';
 import type { PerspectiveCamera } from 'three';
 import { Quaternion, Vector3 } from 'three';
