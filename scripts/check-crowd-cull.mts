@@ -30,9 +30,11 @@
  * 2. **No shadow is lost (shadow pass).** The same, for the shadow-casting
  *    parts against the sun's real shadow camera — a child just off the edge of
  *    the screen still throws a shadow onto it.
- * 3. **Nothing off screen is drawn.** Triangles the main pass would submit for
- *    instances that are not on screen, summed per pose. Ratcheted per scene
- *    (park / interior); today's code is far over both.
+ * 3. **Nobody off screen is drawn.** Every instance a drawn part submits
+ *    must belong to a child with some part on screen — zero tolerance — except
+ *    the shadow-casting parts, which keep every child because the same buffer
+ *    feeds the shadow pass. Their off-screen triangles are counted and held to
+ *    a ratcheted budget per scene (park / interior).
  *
  * Poses: the real `IsoCamera`, resized to the desktop (1440×900) and the phone
  * (390×844), at the default zoom and zoomed out; centred on every park child,
@@ -244,14 +246,18 @@ interface SceneTally {
   poses: number;
   drawCalls: number;
   tris: number;
-  offTris: number;
-  worstOffTris: number;
-  worstOffPose: string;
+  /** Shadow-casting parts drawn off screen — legitimate, budgeted. */
+  shadowTris: number;
+  worstShadowTris: number;
+  worstShadowPose: string;
+  /** Non-shadow parts drawn for a child wholly off screen — forbidden. */
+  wasteTris: number;
+  wasteReports: number;
 }
-const tally: Record<'park' | 'interior', SceneTally> = {
-  park: { poses: 0, drawCalls: 0, tris: 0, offTris: 0, worstOffTris: 0, worstOffPose: '' },
-  interior: { poses: 0, drawCalls: 0, tris: 0, offTris: 0, worstOffTris: 0, worstOffPose: '' },
-};
+const freshTally = (): SceneTally => ({
+  poses: 0, drawCalls: 0, tris: 0, shadowTris: 0, worstShadowTris: 0, worstShadowPose: '', wasteTris: 0, wasteReports: 0,
+});
+const tally: Record<'park' | 'interior', SceneTally> = { park: freshTally(), interior: freshTally() };
 const failures: string[] = [];
 let partsOnScreen = 0;
 let partsInShadow = 0;
@@ -268,6 +274,7 @@ function measure(label: string, kind: 'park' | 'interior'): void {
   const shadow = sunLight.shadow.getFrustum();
 
   const onScreen = new Map<InstancedMesh, number>();
+  const membersOnScreen = new Set<object>();
   for (const crowd of crowds) {
     const { parts, members } = insides(crowd);
     for (const member of members) {
@@ -284,6 +291,7 @@ function measure(label: string, kind: 'park' | 'interior'): void {
         partSphere.copy(enclosingSphere(part.source.geometry)).applyMatrix4(worldMatrix);
         if (view.intersectsSphere(partSphere)) {
           partsOnScreen += 1;
+          membersOnScreen.add(member);
           onScreen.set(mesh, (onScreen.get(mesh) ?? 0) + 1);
           if (!passes(mesh, view)) {
             const s = mesh.boundingSphere ? mesh.boundingSphere.clone().applyMatrix4(mesh.matrixWorld) : null;
@@ -322,23 +330,50 @@ function measure(label: string, kind: 'park' | 'interior'): void {
 
   const t = tally[kind];
   t.poses += 1;
-  let offTris = 0;
+  let shadowTris = 0;
   for (const crowd of crowds) {
-    for (const part of insides(crowd).parts) {
-      for (const mesh of part.variants) {
+    const { parts, members } = insides(crowd);
+    for (let p = 0; p < parts.length; p += 1) {
+      const part = parts[p]!;
+      for (let v = 0; v < part.variants.length; v += 1) {
+        const mesh = part.variants[v]!;
         if (!passes(mesh, view)) continue;
-        const drawnInstances = mesh.count;
         t.drawCalls += 1;
-        t.tris += trisOf(mesh) * drawnInstances;
-        offTris += trisOf(mesh) * Math.max(0, drawnInstances - (onScreen.get(mesh) ?? 0));
+        t.tris += trisOf(mesh) * mesh.count;
+        if (mesh.castShadow) {
+          // Kept for the shadow pass; counted, budgeted, not forbidden.
+          shadowTris += trisOf(mesh) * Math.max(0, mesh.count - (onScreen.get(mesh) ?? 0));
+          continue;
+        }
+        // Every other drawn instance must be a child with something on screen.
+        for (let i = 0; i < mesh.count; i += 1) {
+          mesh.getMatrixAt(i, slotMatrix);
+          const owner = members.find((m) => committed.get(m)?.[p] === v && sameTranslation(slotMatrix, m.proxies[p]!.matrixWorld));
+          if (!owner) {
+            failures.push(`${label}: ${mesh.name} slot ${i} holds no committed child`);
+          } else if (!membersOnScreen.has(owner)) {
+            t.wasteTris += trisOf(mesh);
+            if (t.wasteReports < 5) {
+              t.wasteReports += 1;
+              failures.push(`${label}: ${mesh.name} drawn for a child wholly off screen`);
+            }
+          }
+        }
       }
     }
   }
-  t.offTris += offTris;
-  if (offTris > t.worstOffTris) {
-    t.worstOffTris = offTris;
-    t.worstOffPose = label;
+  t.shadowTris += shadowTris;
+  if (shadowTris > t.worstShadowTris) {
+    t.worstShadowTris = shadowTris;
+    t.worstShadowPose = label;
   }
+}
+
+function sameTranslation(a: Matrix4, b: Matrix4): boolean {
+  const x = a.elements;
+  const y = b.elements;
+  for (const k of [12, 13, 14]) if (Math.abs(x[k]! - Math.fround(y[k]!)) > 1e-6 * Math.max(1, Math.abs(y[k]!))) return false;
+  return true;
 }
 
 /** Places the camera as `Game` would after a door: snapped, then one update. */
@@ -486,24 +521,26 @@ withCrowdsShown(() => {
 
 // ------------------------------------------------------------- the verdict
 /**
- * Off-screen triangles the main pass may submit, mean per pose. Ratchet these
- * down, never up. What is left in the park is the union-sphere cost: a part
- * whose few instances straddle the frame is drawn whole.
+ * Off-screen triangles of **shadow-casting** parts, mean per pose. Those parts
+ * keep every child, because the buffer they draw from also feeds the shadow
+ * pass (`InstancedCrowd.cullTo`). Ratchet down, never up. Every other part
+ * drawn for a child wholly off screen is a failure outright, above.
  */
-const BUDGET = { park: 120_000, interior: 0 } as const;
+const SHADOW_BUDGET = { park: 100_000, interior: 600_000 } as const;
 
 const fmt = (n: number): string => Math.round(n).toLocaleString('en-GB');
 for (const kind of ['park', 'interior'] as const) {
   const t = tally[kind];
-  const meanOff = t.offTris / Math.max(1, t.poses);
+  const meanShadow = t.shadowTris / Math.max(1, t.poses);
   console.log(
     `check:crowd-cull ${kind}: ${t.poses} poses; per pose ${(t.drawCalls / t.poses).toFixed(1)} crowd draw calls, ` +
-      `${fmt(t.tris / t.poses)} crowd tris, ${fmt(meanOff)} of them off screen ` +
-      `(budget ${fmt(BUDGET[kind])}); worst ${fmt(t.worstOffTris)} at ${t.worstOffPose || '—'}`,
+      `${fmt(t.tris / t.poses)} crowd tris; off screen: ${fmt(t.wasteTris / t.poses)} non-shadow (must be 0), ` +
+      `${fmt(meanShadow)} shadow-casting (budget ${fmt(SHADOW_BUDGET[kind])}, worst ${fmt(t.worstShadowTris)} at ${t.worstShadowPose || '—'})`,
   );
-  if (meanOff > BUDGET[kind]) {
-    failures.push(`${kind}: ${fmt(meanOff)} off-screen crowd triangles per pose, budget ${fmt(BUDGET[kind])}`);
+  if (meanShadow > SHADOW_BUDGET[kind]) {
+    failures.push(`${kind}: ${fmt(meanShadow)} off-screen shadow-casting crowd triangles per pose, budget ${fmt(SHADOW_BUDGET[kind])}`);
   }
+  if (t.wasteTris > 0) failures.push(`${kind}: ${fmt(t.wasteTris)} triangles drawn in all for children wholly off screen`);
 }
 process.stderr.write(
   `check:crowd-cull: ${crowds.size} crowds, ${partsOnScreen} on-screen parts and ${partsInShadow} shadow-frustum parts checked\n`,
