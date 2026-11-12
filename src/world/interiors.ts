@@ -1,4 +1,5 @@
 import { LazyPart } from './LazyPart';
+import { SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
 import type * as ReptileHallModule from './reptileHouse/hall';
 import type * as FerrisShowModule from './ferrisWheel/show';
 
@@ -34,9 +35,9 @@ export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRI
  * already is, in its constructor, and a room with no floor yet would be a shell
  * with no solids in it.
  */
-export function interiorsToPreload(space: string | undefined, pathname: string): LazyPart<unknown>[] {
+export function interiorsToPreload(space: SpaceId | undefined, pathname: string): LazyPart<unknown>[] {
   const parts = new Set<LazyPart<unknown>>();
-  if (space === 'reptileHouse') parts.add(REPTILE_HALL);
+  if (space === SPACE_REPTILE_HOUSE) parts.add(REPTILE_HALL);
   if (pathname === '/reptile-house' || pathname === '/tortoise-ride') parts.add(REPTILE_HALL);
   if (pathname === '/ferris') parts.add(FERRIS_SHOW);
   return [...parts];

@@ -1,6 +1,11 @@
 import type { Mesh, PerspectiveCamera, WebGLRenderer } from 'three';
 import { bookById, type LibraryBook } from '../books';
 import type { BookReader, BookReaderOptions, ReaderFraming } from './BookReader';
+import type * as BookReaderModule from './BookReader';
+import { LazyPart } from '../../LazyPart';
+
+/** The reader's chunk — a `LazyPart` for its timeout, so a hung fetch lets the held park go. */
+const READER = new LazyPart<typeof BookReaderModule>('the book reader', () => import('./BookReader'));
 import type { PaintedFace } from './pageFaces';
 
 /**
@@ -45,7 +50,7 @@ export class LazyBookReader {
   /** Fetches and builds the reader if nobody has yet. Safe to call repeatedly. */
   load(): Promise<BookReader> {
     if (this.loading) return this.loading;
-    this.loading = import('./BookReader').then(({ BookReader }) => {
+    this.loading = READER.load().then(({ BookReader }) => {
       const reader = new BookReader(this.options);
       if (this.disposed) {
         reader.dispose();

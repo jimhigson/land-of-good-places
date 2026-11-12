@@ -155,6 +155,12 @@ export class ReptileHouse implements GameSystem {
    * restores or deep-links into the hall), otherwise behind the door's iris.
    */
   private hall: ReptileHallContent | null = null;
+  /**
+   * Where a save restored her in the hall, hall-local, when the hall's floor
+   * was not here to restore her into (`adoptRestoredPlayer`): she is taken in
+   * through the door on the first frame, once it is.
+   */
+  private restoreInto: { readonly x: number; readonly z: number; readonly facing: number } | null = null;
   /** Everything the hall's floor is built with but the props, which it makes itself. */
   private readonly hallContext: Omit<HallContext, 'props'>;
   /** The over-the-shoulder shot an exhibit's chip brings the camera down to. */
@@ -391,11 +397,21 @@ export class ReptileHouse implements GameSystem {
     // hall's twenty a second time.
     if (space === SPACE_REPTILE_HOUSE) {
       // `main.ts` loads the hall's chunk before the game is built for a save
-      // that restores in here, so it is furnished by now. Say so loudly if
-      // not: she would be standing in a shell whose solids are not there.
+      // that restores in here (`interiorsToPreload`), so it is furnished by
+      // now. If it is not — that load failed, or timed out — she is **never**
+      // put in the hall to have its floor built round her: a prop's collider
+      // registered on top of her is a box she can never leave. She waits on
+      // the doormat instead, and goes in through the door, behind its iris,
+      // to the spot she saved at, once the floor is built (`update`).
       if (!this.hall) {
-        console.error('Land of Good Places: restored into the Reptile House hall before its floor was loaded — see main.ts preloadInteriorsFor');
-        void this.furnish();
+        console.error('Land of Good Places: restored into the Reptile House hall before its floor was loaded — see interiorsToPreload in world/interiors.ts. She waits at the door.');
+        this.restoreInto = {
+          x: player.position.x - REPTILE_HOUSE_ORIGIN_X,
+          z: player.position.z - REPTILE_HOUSE_ORIGIN_Z,
+          facing: (player.facing * 180) / Math.PI,
+        };
+        this.standAtDoor();
+        return;
       }
       this.inside = true;
       this.onForecourt = false;
@@ -507,6 +523,13 @@ export class ReptileHouse implements GameSystem {
     }
 
     if (!player) return;
+    // A save that restored her in the hall before its floor was here: in
+    // through the door now, behind its iris, which holds until it is built.
+    const restore = this.restoreInto;
+    if (restore && !this.spaces.isChanging) {
+      this.restoreInto = null;
+      this.changeToHall(() => this.enterHall(restore));
+    }
     // **Fetch the hall's chunk on approach** — only fetch, not build, so
     // walking up costs nothing; the door then builds it behind its iris
     // without waiting on the network. Entering is still what furnishes it.

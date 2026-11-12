@@ -16,6 +16,14 @@ import type { SpaceShow } from '../../minigames/ferrisWheel/space';
 import type { Sparks } from '../../minigames/ferrisWheel/sparks';
 import { FERRIS_SHOW } from '../interiors';
 
+/** How far she may have moved since her press for the first boarding to still go ahead, in metres. */
+const BOARD_STAY_RADIUS = 1;
+
+/** True if she is where she pressed to board, and not on anything else. */
+function stillAtTheKiosk(player: Player | null, pressedAt: Vector3): boolean {
+  return player !== null && !player.riding && player.position.distanceTo(pressedAt) <= BOARD_STAY_RADIUS;
+}
+
 /**
  * The sky show's `fromAngle`, once its chunk is here — only ever asked while
  * she is riding, which is after `requestBoard` has loaded it.
@@ -424,10 +432,14 @@ export class FerrisWheelRide implements GameSystem {
     // is claimed now, so the kiosk does not fall through to a curtain.
     if (!FERRIS_SHOW.loaded) {
       this.fetchingShow = true;
+      // Where she pressed: the car is only boarded if she is still there when
+      // the show lands. Walked away in the meantime (or on another ride),
+      // she meant to, and is not pulled back onto the wheel.
+      const pressedAt = this.player.position.clone();
       FERRIS_SHOW.load().then(
         () => {
           this.fetchingShow = false;
-          this.requestBoard();
+          if (stillAtTheKiosk(this.player, pressedAt)) this.requestBoard();
         },
         (error: unknown) => {
           this.fetchingShow = false;

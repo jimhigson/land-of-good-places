@@ -21,15 +21,29 @@
  *   headless build is furnished synchronously and measures what it always
  *   measured.
  */
+/**
+ * How long a fetch may take before it counts as failed, in milliseconds.
+ *
+ * Every chunk is precached, so a real load is a disk read; this is not a
+ * budget for slow networks. It exists so that a fetch which **hangs** — never
+ * resolving and never rejecting — turns into the failure path every caller
+ * already has (the iris opens on her where she was, the curtain opens on the
+ * park, the held park is let go) rather than a door, a curtain or a book that
+ * waits for ever with nothing she can press.
+ */
+export const LAZY_PART_TIMEOUT_MS = 20_000;
+
 export class LazyPart<T> {
   readonly name: string;
   private readonly loader: () => Promise<T>;
+  private readonly timeoutMs: number;
   private value: T | null = null;
   private pending: Promise<T> | null = null;
 
-  constructor(name: string, loader: () => Promise<T>) {
+  constructor(name: string, loader: () => Promise<T>, timeoutMs: number = LAZY_PART_TIMEOUT_MS) {
     this.name = name;
     this.loader = loader;
+    this.timeoutMs = timeoutMs;
   }
 
   /** The module, once it is here; `null` until then. */
@@ -37,11 +51,22 @@ export class LazyPart<T> {
     return this.value;
   }
 
-  /** Fetches the module (once — every later call gets the same promise). A failed fetch can be retried. */
+  /**
+   * Fetches the module (once — every later call gets the same promise). A
+   * failed fetch, or one still not here after {@link LAZY_PART_TIMEOUT_MS},
+   * rejects, and can be retried.
+   */
   load(): Promise<T> {
     if (this.value) return Promise.resolve(this.value);
     if (!this.pending) {
-      const pending = this.loader().then(
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${this.name} did not arrive within ${this.timeoutMs} ms`)),
+          this.timeoutMs,
+        );
+      });
+      const pending = Promise.race([Promise.resolve().then(this.loader), timeout]).finally(() => clearTimeout(timer)).then(
         (value) => {
           this.value = value;
           return value;
