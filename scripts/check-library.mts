@@ -276,7 +276,8 @@ import { buildLibraryDenShell, buildReadingRoomShell, libraryDenGap, LIBRARY_SEC
 import { SECRET_LEAF_OPEN, SLIDE, SLIDE_SECONDS, SWING_END, SWING_SECONDS, TWINKLE_PERIOD } from '../src/world/library/secretShelf.ts';
 import { ART } from '../src/art/style/artPalette.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
-import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
+import { libraryBookcaseSize, libraryCushionSize } from '../src/art/models/libraryAssets.ts';
+import { libraryArmchairSize, libraryDeskSize } from '../src/art/models/libraryRoomAssets.ts';
 import {
   createLibraryBookPile,
   createLibraryCat,
