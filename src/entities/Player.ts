@@ -1683,9 +1683,17 @@ export class Player implements GameSystem {
     // `resolve` gave her is hers, at the height she stands (seed 6: come down
     // on a bush's edge against a sky cruiser pylon, the hold put her back
     // into the pylon every frame the push took her out of it).
+    // And no edge is gone over by coasting: with nothing asked of the stick
+    // she stops at a top's edge rather than sliding off it on her own
+    // momentum. Walked up onto the station bench at a run and let go, she
+    // carried on over its back and down (QA on PR #742) — its seat is half a
+    // metre deep, under her stopping distance; a child who lets go has
+    // stopped, and walking on off it is hers to ask for.
+    const coastingOff = inputLength <= 1e-4 && !this.escorting && groundY < this.groundHeight - STEP_DOWN_ASKED;
     if (
       !this.airborne &&
       ((groundY < this.groundHeight - STEP_DOWN_ASKED && dropWedges(this.collision, this.position.x, this.position.z, groundY, this.groundHeight)) ||
+        coastingOff ||
         this.walksIntoWedge(groundY))
     ) {
       if (wedgeDepth(this.collision, this.previousPosition, this.groundHeight) <= WEDGE_DEPTH) {

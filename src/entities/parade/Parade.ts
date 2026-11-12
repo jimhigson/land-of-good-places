@@ -374,6 +374,23 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
   }
 
   /**
+   * **Her companion steps down off its seat while she is still aboard** — the
+   * ride has no seat for it this frame (the cat bus once she is down on the
+   * pavement, walking in through the gate): it hops down to its place in her
+   * line, formed up behind her where there is room ({@link formUpBehind}), as
+   * it does when she gets off. Left to walk back to her line from its seat,
+   * its place was aimed at from inside the ride's body and pushed out of it —
+   * 15 m off and 4.5 m up over the cat bus's roof (QA on PR #742).
+   */
+  private stepOffSeat(companion: ParadeMember): void {
+    companion.leaveSeat();
+    this.formUpBehind();
+    this.aimAtLine(companion);
+    companion.placeAt(companion.target.x, companion.target.y, companion.target.z, this.player.group.rotation.y);
+    companion.hop(0);
+  }
+
+  /**
    * **Where her line forms up again when she gets off**, laid as a trail of
    * her own steps: the longest clear run out from where she stands — behind
    * her first, then round to her sides and ahead — that stays on her floor
@@ -751,7 +768,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       const companion = this.members.find((member) => member.uid === this.aboard?.companion);
       if (companion) {
         if (ride.beside(this.companionSeat)) companion.rideSeat(this.companionSeat);
-        else companion.leaveSeat();
+        else if (companion.onSeat) this.stepOffSeat(companion);
       }
     }
 

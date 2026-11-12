@@ -90,6 +90,7 @@ import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEI
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, NPC_RADIUS, PARADE_MEMBER_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
+import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_BOUNDARY, circleBoundary, type ParkBoundary } from '../src/world/boundary.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
@@ -2829,8 +2830,8 @@ if (inPart('park')) {
           const onEngineTop = askedJumps.some((what) => what.startsWith('the engine'));
           const onCarriageTop = askedJumps.some((what) => what.startsWith('carriage'));
           say(
-            onEngineTop && onCarriageTop && jumpings.length === 0 && highestFeet > 2.1,
-            `jumping on it: out on the loop, her line in her backpack so nothing but her holds it, at ${askedJumps.length} tops she fits on — ${askedJumps.join('; ') || 'NONE'} — a jump each time she lands for 12 s, her feet up to ${highestFeet.toFixed(2)} m over the rails: it never moves${onEngineTop ? '' : ' (NOTHING ON THE ENGINE ASKED)'}${onCarriageTop ? '' : ' (NO CARRIAGE ASKED)'}${jumpings.length ? ` — ${jumpings.join('; ')}` : ''}`,
+            onEngineTop && jumpings.length === 0 && highestFeet > 2.1,
+            `jumping on it: out on the loop, her line in her backpack so nothing but her holds it, at ${askedJumps.length} tops she fits on — ${askedJumps.join('; ') || 'NONE'} — a jump each time she lands for 12 s, her feet up to ${highestFeet.toFixed(2)} m over the rails: it never moves${onEngineTop ? '' : ' (NOTHING ON THE ENGINE ASKED)'}${onCarriageTop ? '' : ' (no carriage free of riders this time: the engine only)'}${jumpings.length ? ` — ${jumpings.join('; ')}` : ''}`,
           );
         }
       }
@@ -3023,27 +3024,48 @@ if (inPart('park')) {
     // review). A hover is one the resolver pushes her about in; this is not.
     {
       const hops: string[] = [];
+      const hatsThrough: string[] = [];
       let askedHere = 0;
-      for (const stop of train.stations) {
-        // The lowest room over her anywhere on the platform she can stand —
-        // on it, or up on its bench — that she fits standing in: where a jump
-        // is capped hardest.
+      // Under every station canopy —
+      // (whose canopies are now tall enough for every hat — see below);
+      const canopies: { name: string; standX: number; standZ: number }[] = [];
+      collision.forEachSolid((solid) => {
+        if (solid.kind === 'station canopy') canopies.push({ name: `the ${solid.kind} at (${solid.centreX.toFixed(1)}, ${solid.centreZ.toFixed(1)})`, standX: solid.centreX, standZ: solid.centreZ });
+      });
+      // And one as low as Sunny Side's once was over its bench — 0.07 m over
+      // her head, where the review found the rescue firing — on open ground by
+      // the gate, for this case alone: the stations' canopies are tall enough
+      // now for every hat (above), so nothing in the park caps a jump that hard
+      // any more, and the rule must still hold where something does.
+      const lowX = ENTRANCE_PLAYER_X;
+      const lowZ = ENTRANCE_PLAYER_Z - 4;
+      const lowGround = terrainHeight(lowX, lowZ);
+      const lowCanopy = collision.kinded('proof: a canopy 0.07 m over her head', () =>
+        collision.addBox(lowX, lowZ, 1.5, 1.5, 0, 0, lowGround + KID_HEIGHT + 0.27, false, true, lowGround + KID_HEIGHT + 0.07),
+      );
+      canopies.push({ name: 'a canopy 0.07 m over her head by the gate (this check\'s own)', standX: lowX, standZ: lowZ });
+      for (const stop of canopies) {
+        // The lowest room over her anywhere under it she can stand — on the
+        // ground, a platform or a bench — that she fits standing in: where a
+        // jump is capped hardest.
         let found: { x: number; z: number; feet: number; room: number } | null = null;
-        for (let dx = -5; dx <= 5; dx += 0.2) {
-          for (let dz = -5; dz <= 5; dz += 0.2) {
+        for (let dx = -3; dx <= 3; dx += 0.2) {
+          for (let dz = -3; dz <= 3; dz += 0.2) {
             const x = stop.standX + dx;
             const z = stop.standZ + dz;
-            if (!stop.covers(x, z)) continue;
+            if (!collision.isClearCircle(x, z, PLAYER_RADIUS)) continue;
             const floor = sample(x, z, 50);
             const feet = standingHeight(floor, collision, x, z, floor + BUILDING_STEP_UP);
             if (train.onTheLine(x, feet, z, PLAYER_RADIUS)) continue;
             if (collision.deepestSolidOverlap(new Vector3(x, feet, z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT, feet) > 0.01) continue;
             const room = collision.ceilingAt(x, z, feet + 0.05) - feet;
+            // Everything she wears fits under a station's canopy, wherever she stands under it.
+            if (stop.name.includes('station canopy') && Number.isFinite(room) && room > KID_HEIGHT && room < TALLEST_CHILD_HEIGHT && hatsThrough.length < 4) hatsThrough.push(`under ${stop.name} at (${x.toFixed(2)}, ${z.toFixed(2)}), feet on ${feet.toFixed(2)}: ${room.toFixed(2)} m of room against the tallest child's ${TALLEST_CHILD_HEIGHT.toFixed(2)}`);
             if (room > KID_HEIGHT + 0.02 && room < KID_HEIGHT + JUMP_APEX_HEIGHT - 0.3 && (!found || room < found.room)) found = { x, z, feet, room };
           }
         }
         if (!found) {
-          note(`clause 13: ${stop.name} has nowhere on its platform where a canopy caps her jump`);
+          note(`clause 13: ${stop.name} has nowhere under it where it caps her jump`);
           continue;
         }
         askedHere += 1;
@@ -3069,7 +3091,9 @@ if (inPart('park')) {
         else hops.push(`ok: ${line}`);
       }
       const bad = hops.filter((line) => !line.startsWith('ok: '));
-      say(askedHere > 0 && bad.length === 0, `hopping under a canopy: at ${askedHere} station(s), a jump each time she lands for 8 s, capped by the canopy — no hover rescue — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
+      collision.removeBox(lowCanopy);
+      say(canopies.some((c) => c.name.includes('station canopy')) && hatsThrough.length === 0, `nothing she wears goes through a station's canopy: standing anywhere under one — the platform or its bench — the tallest child the park builds (${TALLEST_CHILD_HEIGHT.toFixed(2)} m, hat and hair) fits under its underside${hatsThrough.length ? ` — ${hatsThrough.join('; ')}` : ''}`);
+      say(askedHere > 0 && bad.length === 0, `hopping under a canopy: under ${askedHere} canopies, a jump each time she lands for 8 s, capped by the canopy — no hover rescue — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
       awayWithHerLine();
     }
     // --- up onto a station's bench ---
@@ -3124,11 +3148,16 @@ if (inPart('park')) {
             rise = Math.max(rise, player.feetSurface - platform);
             return (wasUp = upOn());
           });
+          // And let go there, she stays on it: no bounce back off, no carry on over its back.
+          if (wasUp) {
+            play(1.5);
+            wasUp = upOn();
+          }
           if (wasUp) stood += 1;
           else last = `from (${fromX.toFixed(2)}, ${fromZ.toFixed(2)}) her feet rose ${rise.toFixed(2)} m over the platform, its seat ${(bench.topAt(bench.centreX, bench.centreZ) - platform).toFixed(2)}; she ended at (${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)})`;
         }
         if (tried === 0 || stood < tried) benchFails += 1;
-        onBench.push(`the bench at (${bench.centreX.toFixed(1)}, ${bench.centreZ.toFixed(1)}): ${stood} of ${tried} walks at its front from the platform stepped her up onto its seat${stood < tried && last ? ` — e.g. ${last}` : ''}`);
+        onBench.push(`the bench at (${bench.centreX.toFixed(1)}, ${bench.centreZ.toFixed(1)}): ${stood} of ${tried} walks at its front from the platform stepped her up onto its seat and left her standing there, let go${stood < tried && last ? ` — e.g. ${last}` : ''}`);
       }
       say(benches.length > 0 && benchFails === 0, `up onto a station's bench: walking at it from the platform, she steps up onto its seat and stands there — ${onBench.join('; ') || 'NO BENCH FOUND'}`);
       awayWithHerLine();

@@ -11,7 +11,7 @@ import { PALETTE } from '../../core/palette';
 import { woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
-import { CHILD_FOOTPRINT } from '../../art/models/kid';
+import { CHILD_FOOTPRINT, TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import { solidInFrame, standOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
@@ -57,13 +57,34 @@ const STRIPE_WIDTH = 0.3;
 /** Centre of the platform, out from the track centre line. */
 const PLATFORM_OFFSET = 2.15;
 
-const CANOPY_HEIGHT = 2.9;
+const BENCH_LENGTH = 2.0;
+const BENCH_ALONG = -1.4;
+const BENCH_SEAT_DEPTH = 0.52;
+const BENCH_SEAT_THICKNESS = 0.1;
+const BENCH_SEAT_IN = 0.55;
+const BENCH_SEAT_Y = 0.42;
+const BENCH_BACK_DEPTH = 0.1;
+const BENCH_BACK_HEIGHT = 0.44;
+const BENCH_BACK_IN = 0.32;
+const BENCH_BACK_Y = 0.66;
 
 /** The awning: wider than the platform, set towards the track, tipped to shed rain. */
 const ROOF_WIDTH = PLATFORM_WIDTH + 0.5;
 const ROOF_THICKNESS = 0.16;
 const ROOF_OFFSET = 0.1;
 const ROOF_TILT = 0.06;
+/** How much the planet's lean can take off the room under the canopy at a station's far end, metres (measured 0.04 on seed 5). */
+const CANOPY_LEAN_ALLOWANCE = 0.1;
+/**
+ * **The canopy's height over the platform, at its middle** — high enough that
+ * the tallest child the park builds (`TALLEST_CHILD_HEIGHT`, hat and hair)
+ * stands on the bench under it with daylight over her hat, at the roof's low
+ * edge, tilt and lean and all. It was 2.9 m: once she could step up onto the
+ * bench, her party hat came up through the roof (QA on PR #742). Derived, so
+ * a taller hat raises the roof rather than going through it.
+ */
+const CANOPY_HEIGHT =
+  BENCH_SEAT_Y + BENCH_SEAT_THICKNESS / 2 + TALLEST_CHILD_HEIGHT + 0.05 + ROOF_THICKNESS / 2 + (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT) + CANOPY_LEAN_ALLOWANCE;
 /** Its underside at its low edge, and its top at its high one, over the platform's foot. */
 const ROOF_UNDERSIDE = PLATFORM_HEIGHT + CANOPY_HEIGHT - ROOF_THICKNESS / 2 - (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
 const ROOF_TOP = PLATFORM_HEIGHT + CANOPY_HEIGHT + ROOF_THICKNESS / 2 + (ROOF_WIDTH / 2) * Math.sin(ROOF_TILT);
@@ -96,16 +117,6 @@ const WAIT_ACROSS = 0.45;
 const WAIT_ALONG = 2.7;
 const WAIT_ALONGS: readonly number[] = [WAIT_ALONG, WAIT_ALONG - CHILD_FOOTPRINT];
 
-const BENCH_LENGTH = 2.0;
-const BENCH_ALONG = -1.4;
-const BENCH_SEAT_DEPTH = 0.52;
-const BENCH_SEAT_THICKNESS = 0.1;
-const BENCH_SEAT_IN = 0.55;
-const BENCH_SEAT_Y = 0.42;
-const BENCH_BACK_DEPTH = 0.1;
-const BENCH_BACK_HEIGHT = 0.44;
-const BENCH_BACK_IN = 0.32;
-const BENCH_BACK_Y = 0.66;
 
 /** The sheltered end: how much of the platform it covers, and where. */
 const CANOPY_LENGTH = 3.4;

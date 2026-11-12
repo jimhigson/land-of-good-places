@@ -2132,11 +2132,15 @@ export class ArrivalSequence {
 
   /**
    * Where her companion sits this frame: on the cushion across the gangway
-   * from hers, facing the front of the bus as every rider does — while she
-   * sits. Walking in through the gate, it walks with her.
+   * from hers, facing the front of the bus as every rider does — for the
+   * whole of the arrival, until the bus hands her over at the gate. Then it
+   * hops down into her line behind her, as on every ride (`Parade.disembark`).
+   * Let off while she walked in from the kerb, its place in her line was
+   * outside the park's bounds, and pulled back inside them threw it 14 m on
+   * and 4.5 m up into the sky by the bus (QA on PR #742, /arrive?pets=3).
    */
   private companionSeatPose(seat: CompanionSeat): boolean {
-    if (!this.playerPose.live || this.playerPose.walking) return false;
+    if (!this.playerPose.live) return false;
     const anchor = this.bus.companionSeat;
     anchor.getWorldPosition(SCRATCH);
     seat.x = SCRATCH.x;
