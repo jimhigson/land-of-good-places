@@ -38,6 +38,12 @@ export class Transitions {
     const eye = document.createElement('div');
     eye.className = 'iris-eye';
     this.iris.append(eye);
+    // The "still on its way" dots, shown only while a held wipe waits on a
+    // room (`irisWipe`'s `ready`) — see `.iris-wait` in style.css.
+    const wait = document.createElement('div');
+    wait.className = 'iris-wait';
+    wait.append(document.createElement('span'), document.createElement('span'), document.createElement('span'));
+    this.iris.append(wait);
 
     this.whoosh = document.createElement('div');
     this.whoosh.className = 'whoosh';
@@ -95,8 +101,16 @@ export class Transitions {
       }, IRIS_OPEN_SECONDS * 1000);
     };
     this.closeTimer = window.setTimeout(() => {
-      if (settled || !ready) open();
-      else ready.then(open, open);
+      if (settled || !ready) {
+        open();
+        return;
+      }
+      this.iris.dataset.waiting = 'true';
+      const done = (): void => {
+        delete this.iris.dataset.waiting;
+        open();
+      };
+      ready.then(done, done);
     }, IRIS_CLOSE_SECONDS * 1000);
   }
 
