@@ -359,6 +359,15 @@ async function openPrizes(page: Page): Promise<string[]> {
 
 async function waitPainted(page: Page): Promise<void> {
   try {
+    // **The reader's code first, on the boot's budget.** The reader is a lazy
+    // chunk (#749), fetched when the first book opens, so on the dev server its
+    // first open also compiles its module graph — up to 24 s measured on a cold
+    // SwiftShader server — which used to be paid inside the boot wait. Counting
+    // that against the painting budget made the paint check depend on how fast
+    // the runner compiles. Once loaded, this returns at once.
+    await page.waitForFunction(() => (window as unknown as { game: any }).game.bookReader.loaded === true, undefined, {
+      timeout: BOOT_TIMEOUT_MS,
+    });
     await page.waitForFunction(
       () => {
         const faces = (window as unknown as { game: any }).game.bookReader.facesPainted() as unknown[];
@@ -1039,6 +1048,18 @@ try {
   const page = await browser.newPage({ viewport: { width: first.width, height: first.height } });
   page.on('pageerror', (error) => pageErrors.push(String((error as Error)?.stack ?? error)));
   watchPage(page);
+  // **`CHECK_BOOK_READER_DELAY_MS=n`: hold the reader's own module back by n ms**
+  // — a cold dev server compiling the reader's graph on first open, or a slow
+  // fetch, made reproducible. The instrument for the #752 flake: the reader
+  // must still open and paint, however long its code takes to arrive.
+  const delayReader = Number(process.env.CHECK_BOOK_READER_DELAY_MS ?? 0);
+  if (delayReader > 0) {
+    await page.route(/\/reader\/BookReader\.ts|\/BookReader-[^/]+\.js/, async (route) => {
+      logLine(`holding ${route.request().url()} back ${delayReader} ms (CHECK_BOOK_READER_DELAY_MS)`);
+      await new Promise((resolve) => setTimeout(resolve, delayReader));
+      await route.continue();
+    });
+  }
   // Every program link the page makes, counted from before its first script.
   await page.addInitScript(() => {
     const counter = { links: 0 };
