@@ -50,3 +50,12 @@ culling the hidden banquet (0.08 ms). Fixed in "per-child boxes" commit: banquet
 cull skipped when hidden; park crowd total 0.103 ms vs main 0.109. Re-measuring (v2).
 Note: `pnpm run build` exits 1 on main and here (PWA precache limit, #749); dist is complete.
 Parks are source-hash gated: rebuild with `LGP_SEEDS=5 LGP_RESTART_LANES=2 pnpm run build:parks`.
+
+## After merging main (#749), head after 3d44cf12
+- check:crowd-cull default (ROUNDS=2, banquet every 3rd diner): exit 0, 519 s local under load.
+  Park 2200 poses: 32.9 draws, 135,292 tris/pose, 0 non-shadow off screen, 95,654 shadow (budget 110k).
+  Interior 1582 poses: 0 non-shadow off screen, 396,601 shadow (budget 500k).
+- Browser CPU is too noisy on the shared Mac for single runs; interleaved desktop park
+  a-b mean +0.08 ms; 4x stand-in order-balanced +0.8 ms (+-2 ms noise). Node bench is the
+  controlled figure: park crowd 0.103 vs 0.109 ms; banquet hidden in park 0.732 vs 0.641 ms.
+- PR body draft: scratchpad pr-body.md. Remaining: CI green, report.
