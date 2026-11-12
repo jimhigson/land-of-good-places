@@ -125,6 +125,9 @@ export interface ReptileHouseDeps {
   nightFactor(): number;
 }
 
+/** How near the building she must be for its hall's chunk to be fetched ahead of the door, in metres. */
+const REPTILE_PREFETCH_RADIUS = 18;
+
 /** The exit chip and the tail-tickle chip's ids. */
 const ENTRANCE_ZONE = 'reptile-entrance';
 
@@ -504,6 +507,14 @@ export class ReptileHouse implements GameSystem {
     }
 
     if (!player) return;
+    // **Fetch the hall's chunk on approach** — only fetch, not build, so
+    // walking up costs nothing; the door then builds it behind its iris
+    // without waiting on the network. Entering is still what furnishes it.
+    if (!this.hall && !this.inside && Math.hypot(player.position.x - this.frame.x, player.position.z - this.frame.z) < REPTILE_PREFETCH_RADIUS) {
+      REPTILE_HALL.load().catch(() => {
+        // The door asks again, and says so if it still cannot.
+      });
+    }
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
     // Nobody falls out of the world: a slipped trigger lands her back at the arrival.
