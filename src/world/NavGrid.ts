@@ -238,8 +238,15 @@ export const NAV_GRID_BUILDS = {
   full: 0,
   patched: 0,
   patchedCells: 0,
+  /** Wall-clock milliseconds spent in whole builds and in patches, and the longest of each — reported, never asserted. */
+  fullMs: 0,
+  patchMs: 0,
+  worstFullMs: 0,
+  worstPatchMs: 0,
   patching: true,
   verify: false,
+  /** How far past a change's footprint a patch reaches, as a share of the real margin. 1 in the game; a check sets 0 to prove the verifier sees a short patch. */
+  reachScale: 1,
   verified: 0,
   mismatches: [] as string[],
 };
@@ -895,10 +902,23 @@ export class NavGrid {
       // A collider came or went since this lattice was laid: redo the cells it
       // touched, never the whole space (docs/perf/FRAME-DROPS-2026-11.md — a
       // whole rebuild was 0.5 s on an M4 Pro, twice per story time).
-      if (NAV_GRID_BUILDS.patching && this.patch(boundary, sample)) return true;
+      if (NAV_GRID_BUILDS.patching) {
+        const began = performance.now();
+        if (this.patch(boundary, sample)) {
+          const took = performance.now() - began;
+          NAV_GRID_BUILDS.patchMs += took;
+          NAV_GRID_BUILDS.worstPatchMs = Math.max(NAV_GRID_BUILDS.worstPatchMs, took);
+          if (NAV_GRID_BUILDS.verify) this.verifyAgainstWhole(boundary, sample);
+          return true;
+        }
+      }
     }
 
+    const began = performance.now();
     this.rebuild(boundary, sample);
+    const took = performance.now() - began;
+    NAV_GRID_BUILDS.fullMs += took;
+    NAV_GRID_BUILDS.worstFullMs = Math.max(NAV_GRID_BUILDS.worstFullMs, took);
     return this.built;
   }
 
@@ -1236,7 +1256,7 @@ export class NavGrid {
     // Everything a collider can alter is within its footprint fattened by the
     // walker, plus a cell for the stamps' centre-sampling — and the levels a
     // walker who stands on solids reads lie inside the footprint itself.
-    const reach = this.walkerRadius + 2 * CELL;
+    const reach = (this.walkerRadius + 2 * CELL) * NAV_GRID_BUILDS.reachScale;
     const last = this.cells - 1;
     const fromX = Math.max(0, this.columnOf(minX - reach));
     const toX = Math.min(last, this.columnOf(maxX + reach));
@@ -1271,6 +1291,7 @@ export class NavGrid {
     if (rects.length === 0) {
       // Every change was off this lattice altogether: another space's.
       this.builtRevision = this.collision.revision;
+      NAV_GRID_BUILDS.patched += 1;
       return true;
     }
 
@@ -1362,7 +1383,6 @@ export class NavGrid {
     this.finishBuild(boundary);
     NAV_GRID_BUILDS.patched += 1;
     NAV_GRID_BUILDS.patchedCells += cellsRedone;
-    if (NAV_GRID_BUILDS.verify) this.verifyAgainstWhole(boundary, sample);
     return true;
   }
 
