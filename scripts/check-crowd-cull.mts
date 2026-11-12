@@ -533,7 +533,8 @@ withCrowdsShown(() => {
 
 // ------------------------------------------------------------- the verdict
 /**
- * Off-screen triangles of **shadow-casting** parts, mean per pose. Those parts
+ * Off-screen triangles of **shadow-casting** parts, **mean** per pose — a budget
+ * on the mean, not a cap on any one pose (the worst poses run well over it). Those parts
  * keep every child, because the buffer they draw from also feeds the shadow
  * pass (`InstancedCrowd.cullTo`). Ratchet down, never up. Every other part
  * drawn for a child wholly off screen is a failure outright, above.
@@ -553,7 +554,7 @@ for (const kind of ['park', 'interior'] as const) {
   console.log(
     `check:crowd-cull ${kind}: ${t.poses} poses; per pose ${(t.drawCalls / t.poses).toFixed(1)} crowd draw calls, ` +
       `${fmt(t.tris / t.poses)} crowd tris; off screen: ${fmt(t.wasteTris / t.poses)} non-shadow (must be 0), ` +
-      `${fmt(meanShadow)} shadow-casting (budget ${fmt(SHADOW_BUDGET[kind])}, worst ${fmt(t.worstShadowTris)} at ${t.worstShadowPose || '—'})`,
+      `mean ${fmt(meanShadow)} shadow-casting (mean budget ${fmt(SHADOW_BUDGET[kind])}; worst single pose ${fmt(t.worstShadowTris)}, not capped, at ${t.worstShadowPose || '—'})`,
   );
   if (meanShadow > SHADOW_BUDGET[kind]) {
     failures.push(`${kind}: ${fmt(meanShadow)} off-screen shadow-casting crowd triangles per pose, budget ${fmt(SHADOW_BUDGET[kind])}`);
