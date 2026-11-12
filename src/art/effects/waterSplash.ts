@@ -80,6 +80,11 @@ function createDropletField(): {
   const scale = new Vector3();
   const axis = new Vector3(0.2, 0.6, 0.4).normalize();
   const colour = new Color();
+  // Uploads are per frame only while there is something to upload: an idle
+  // splash (every fountain and pond in the park, nearly all the time) used to
+  // re-send its whole instance buffer, every frame, for no droplets at all.
+  let drawn = 0;
+  let coloursDirty = false;
 
   return {
     root,
@@ -119,6 +124,7 @@ function createDropletField(): {
             droplets[i] = last;
             mesh.getColorAt(droplets.length - 1, colour);
             mesh.setColorAt(i, colour);
+            coloursDirty = true;
           }
           droplets.pop();
           continue;
@@ -130,6 +136,8 @@ function createDropletField(): {
         drop.angle += drop.spin * dt;
       }
 
+      if (droplets.length === 0 && drawn === 0) return;
+      drawn = droplets.length;
       mesh.count = droplets.length;
       for (let i = 0; i < droplets.length; i += 1) {
         const drop = droplets[i];
@@ -142,7 +150,8 @@ function createDropletField(): {
         mesh.setMatrixAt(i, matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      if (coloursDirty && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      coloursDirty = false;
     },
 
     dispose() {
