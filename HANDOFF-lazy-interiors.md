@@ -33,3 +33,8 @@ castle/hotel/library colliders are *measured from their GLB kit at module load* 
 surfaceTop(...)), so the kit is needed at boot unless that building's whole interior (colliders included) moves into its
 lazy chunk the way the reptile hall did. Hotel/library kits also hold the exteriors (tower 100K of hotel.glb, shell 111K
 of library.glb) → need a GLB split at pack time.
+
+## Step 3 (pushed fdf0219e): ferris sky show lazy (FERRIS_SHOW); budget 5 MiB; boot set 4723 KB.
+Verified in dev (scripts/.scratch/lazy-probe.mts, untracked): book/dodgems/water/spooky/hall chunks load only on entry,
+desktop + phone, no page errors. Restore-in-hall untested in dev (a deep-link session's save restores to the bus spawn
+there, pre-existing) — verify on preview.
