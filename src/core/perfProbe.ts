@@ -136,7 +136,7 @@ export function summarise(frames: readonly PerfFrame[], worstSinceReset: number)
       if (delta !== 0) changes++;
       if (delta > 0) grown += delta;
     }
-    if (changes === 0 && seconds >= 1) {
+    if (changes === 0 && seconds >= 0.5) {
       // A running game allocates every frame; a heap that never moves is a
       // cached, quantised reading, and 0 MB/s would be a confident lie.
       heapNote = 'heap reading is frozen — launch Chrome with --enable-precise-memory-info';
