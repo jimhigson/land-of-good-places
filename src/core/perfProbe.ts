@@ -29,8 +29,11 @@ import type { WebGLRenderer } from 'three';
  *   call in the frame** (sky, scene, viewmodel, mini-game, book reader, and the
  *   shadow pass, which three.js counts through the same path). Three resets
  *   the counter on each `render()` by default, which would report only the
- *   last pass drawn — usually the book reader's two draws — so while the probe
- *   is on, `autoReset` is off and the probe resets once per frame.
+ *   last pass drawn, so while the probe is on, `autoReset` is off and the
+ *   probe resets once per frame. In ordinary park play that changes little —
+ *   measured, 609 draws per-call against 610 summed, the sky's pass being the
+ *   difference — but with a book open or a mini-game up the last pass is
+ *   *theirs*, and per-call counting would report that alone.
  * - **`heap`** — `performance.memory.usedJSHeapSize` (Chrome only). Its
  *   per-second sum of *increases* is the churn the overlay shows: a lower bound
  *   on allocation, since a GC between two samples hides what it collected.
