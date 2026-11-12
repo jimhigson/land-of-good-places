@@ -127,7 +127,7 @@ export class SpaceManager {
    * far side of the iris. Being inside somewhere is a camera and a set of play
    * bounds as much as it is a position.
    */
-  changeTo(midpoint: () => void): void {
+  changeTo(midpoint: () => void, ready?: Promise<unknown>): void {
     this.changing = true;
     this.controls.cancelWalk();
     this.beforeChange();
@@ -136,7 +136,39 @@ export class SpaceManager {
       this.controls.snapCamera();
       this.changing = false;
       this.cooldown = SPACE_COOLDOWN;
+    }, ready);
+  }
+
+  /**
+   * {@link changeTo}, into a room whose furnishings may not be here yet
+   * (`world/LazyPart.ts`): `furnished()` says whether they are, `furnish()`
+   * fetches and builds them. Already furnished, it is exactly `changeTo`.
+   * Otherwise the fetch starts now, the iris closes over it and holds shut
+   * until the room is built, and only then is `midpoint` run — so she never
+   * stands in a shell whose solids have not arrived. If the fetch fails
+   * (offline on a first visit) `midpoint` is not run at all: she stays where
+   * she was, the iris opens on her there, and `onFailed` runs — the owner's
+   * cue to tell her, and to keep the door from firing again under her while
+   * she still stands in it (a failed door re-fired every cooldown was a
+   * screen flashing on a loop, QA on #749).
+   */
+  changeToFurnished(
+    furnished: () => boolean,
+    furnish: () => Promise<unknown>,
+    midpoint: () => void,
+    onFailed: () => void = () => {},
+  ): void {
+    if (furnished()) {
+      this.changeTo(midpoint);
+      return;
+    }
+    const ready = furnish().catch((error: unknown) => {
+      console.error('Land of Good Places: a room failed to load, so she stays where she is', error);
+      onFailed();
     });
+    this.changeTo(() => {
+      if (furnished()) midpoint();
+    }, ready);
   }
 
   /**

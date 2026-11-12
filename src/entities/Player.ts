@@ -801,6 +801,19 @@ export class Player implements GameSystem {
    * every ordinary frame.
    */
   poseThisUpdate = true;
+
+  private blockedValue = false;
+  /**
+   * True when the last movement was mostly taken away by something solid —
+   * she walked into a wall, a fence, a bench's side. A tapped dash
+   * (`TapNavigator`) drops to a walk on this until she has passed the next
+   * corner of her route: at a walk she grinds along a face and finds her way
+   * round it as she always has, where at 60 m/s the same slide carries her
+   * metres along it into a pocket she cannot leave (#745 on main, seed 9).
+   */
+  get blocked(): boolean {
+    return this.blockedValue;
+  }
   /** Seconds of movement since the pose was last drawn. See {@link poseThisUpdate}. */
   private poseSeconds = 0;
 
@@ -1713,10 +1726,14 @@ export class Player implements GameSystem {
     // while an escort is running: that distance is an external nudge, not
     // something achieved under her own power. Leaving velocity alone lets it
     // simply decelerate normally, as if nothing solid were there at all.
+    this.blockedValue = false;
     if (dt > 0 && !this.escorting) {
       const previousSpeed = Math.hypot(this.velocity.x, this.velocity.z);
       const derivedX = (this.position.x - this.previousPosition.x) / dt;
       const derivedZ = (this.position.z - this.previousPosition.z) / dt;
+      // Something solid took most of this step away. Read by a dash
+      // (`TapNavigator`), which then walks until it is past whatever it met.
+      this.blockedValue = previousSpeed > 1 && Math.hypot(derivedX, derivedZ) < previousSpeed * 0.5;
       // Second line of defence, and an invariant worth stating outright:
       // being blocked is a *constraint*, so it can only ever take speed away.
       // If a resolved position ever implies she came out of a collision going
