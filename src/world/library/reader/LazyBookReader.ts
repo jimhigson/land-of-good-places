@@ -1,4 +1,4 @@
-import type { Mesh, WebGLRenderer } from 'three';
+import type { Mesh, PerspectiveCamera, WebGLRenderer } from 'three';
 import { bookById, type LibraryBook } from '../books';
 import type { BookReader, BookReaderOptions, ReaderFraming } from './BookReader';
 import type { PaintedFace } from './pageFaces';
@@ -69,6 +69,11 @@ export class LazyBookReader {
 
   get isOpen(): boolean {
     return this.pendingBook !== null || (this.reader?.isOpen ?? false);
+  }
+
+  /** The reader's own camera — `check:book-reader` projects the pages through it. Null until loaded. */
+  get camera(): PerspectiveCamera | null {
+    return this.reader?.camera ?? null;
   }
 
   get bookId(): string | null {
