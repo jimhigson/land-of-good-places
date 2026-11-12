@@ -26,9 +26,14 @@ did the reptile hall; exterior (tower, its collider, outer doors) stays boot.
 4. `interiors.ts`: `HOTEL_INTERIOR` + preload for saves in hotel rooms and
    `/hotel…` links; eagerInteriors provides it; check:boot-chunk lists it.
 
+## After (d8cb8a6f, `check:boot-chunk`)
+- boot set 41 chunks, 4122 KB (was 4742); largest boot chunk 603 KB; 10 lazy
+  chunks 2108 KB (was 9, 1475) — the hotel interior chunk is ~632 KB
+- proved red: `import * as hotelEager from './interior'` appended to Hotel.ts
+  → exit 1, 5 FAIL lines (interior, dressing, cinematic, hotelInsideKit,
+  hotelInsideGlb in chunk Hotel-*.js), boot set 4753 KB. Reverted.
+
 ## Status
-- [ ] 1 pack split
-- [ ] 2 class split
-- [ ] 3 residents
-- [ ] 4 wiring + guard proved red
+- [x] 1 pack split (60108cba)
+- [x] 2 class split, 3 residents, 4 wiring (d8cb8a6f); guard proved red
 - [ ] check, test:procgen, Playwright desktop+phone, PR
