@@ -532,8 +532,12 @@ withCrowdsShown(() => {
  * keep every child, because the buffer they draw from also feeds the shadow
  * pass (`InstancedCrowd.cullTo`). Ratchet down, never up. Every other part
  * drawn for a child wholly off screen is a failure outright, above.
+ *
+ * Measured when set (seed 5, ROUNDS=1): park 86,986, interior 435,527 — the
+ * interior figure is mostly the great hall's banquet, every diner's head and
+ * body kept for the castle key light's shadow.
  */
-const SHADOW_BUDGET = { park: 100_000, interior: 600_000 } as const;
+const SHADOW_BUDGET = { park: 100_000, interior: 480_000 } as const;
 
 const fmt = (n: number): string => Math.round(n).toLocaleString('en-GB');
 for (const kind of ['park', 'interior'] as const) {
