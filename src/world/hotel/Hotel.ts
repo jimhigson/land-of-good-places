@@ -359,6 +359,11 @@ export class Hotel implements GameSystem {
     return this.interior?.bathroomRooms ?? [];
   }
 
+  /** See `HotelInterior.bathroomFixtures`; `null` until the interior is built. */
+  bathroomFixtures(room: HotelRoom): ReturnType<HotelInterior['bathroomFixtures']> {
+    return this.interior?.bathroomFixtures(room) ?? null;
+  }
+
   get artworkStands(): HotelInterior['artworkStands'] {
     return this.interior?.artworkStands ?? [];
   }
