@@ -19,3 +19,11 @@ Spec: docs/perf/FRAME-DROPS-2026-11.md on PR #746 (step 5, item 16).
   /spawn?seed=0 on a `vite build --minify false` bundle via `vite preview`.
   Needs prebuilt parks (`LGP_SEEDS=0 pnpm run build:parks`), else the client
   never finishes solving.
+
+## PR #754 (opened). Measured
+- bumps/s 720-770 -> 0.1. Sources: RailRace.animate setExpression per frame
+  (skull 351/s, facePaintOverlay 43/s), three's two-pass transparent DoubleSide
+  on waterDroplets (233/s; fixed with forceSinglePass), reptile head setNight (117/s).
+- Remaining ~8.3 MB/s getParameters is the SHADOW pass: shared MeshDepthMaterial
+  flips instancing/instancingColor ~17x/frame. Not needsUpdate; follow-up proposed in PR.
+- TODO: pnpm run check + test:procgen; merge main when #749 lands.
