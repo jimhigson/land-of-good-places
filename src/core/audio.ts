@@ -68,20 +68,30 @@ function playSilentSample(ctx: AudioContext): void {
   }
 }
 
-let unlockedOnce = false;
-
+/**
+ * Every gesture while the context is not running retries the whole unlock —
+ * `resume()` **and** the silent sample — never just the first one. iOS does
+ * not count `pointerdown`/`mousedown` (or a `touchstart` it turns into one) as
+ * user activation; only the `touchend`/`pointerup`/`click` that follows does.
+ * A one-shot unlock spent on the first `pointerdown` would therefore be spent
+ * where iOS ignores it, and the gesture that *would* have worked would find
+ * the key already used. Retrying is cheap (~0.1 ms) and stops by itself: once
+ * the context reports `running`, every handler returns at the first line.
+ */
 function onGesture(): void {
   const ctx = construct();
   if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
   void ctx.resume();
-  if (!unlockedOnce) {
-    unlockedOnce = true;
-    playSilentSample(ctx);
-  }
+  playSilentSample(ctx);
 }
 
-/** Every event either browser counts as user activation, in capture so nothing can swallow it. */
-const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'mousedown', 'keydown', 'click'] as const;
+/**
+ * Every event either browser counts as user activation, in capture so nothing
+ * can swallow it. `pointerdown`/`mousedown` count in Chrome (and are where a
+ * desktop click first lands); `pointerup`/`touchend`/`click` are the ones iOS
+ * counts; `keydown` is every keyboard player's first gesture.
+ */
+const GESTURES = ['pointerdown', 'mousedown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
 
 /**
  * Build the context now and arm the gesture unlock. Call once, at boot, before
