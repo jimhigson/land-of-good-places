@@ -45,6 +45,7 @@ if (o.trace && o.traceFromStart) await startTrace();
 
 const t0 = Date.now();
 await page.goto(base + urlPath, { waitUntil: 'domcontentloaded' });
+if (o.letsGo) { const go = page.locator('button', { hasText: /Let.s go/i }).first(); await go.waitFor({ state: 'visible', timeout: 60000 }); await go.click(); }
 // wait until the game draws a real scene
 let ready = false;
 for (let i = 0; i < 240 && !ready; i++) {

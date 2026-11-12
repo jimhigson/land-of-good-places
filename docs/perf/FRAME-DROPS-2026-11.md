@@ -9,7 +9,7 @@ written against 60 fps.
 
 Investigation only: no shipped code changed. Every number was measured on the
 shipped build of `main` (at `dd23766c`, before #739/#745; the dash numbers are
-from the build after #745, see [S-dash](#13-the-super-speed-dash-per-stride-collision)).
+from the build after #745, see item 13).
 The harness is in [`frame-drops-2026-11-harness/`](frame-drops-2026-11-harness/).
 
 ## Where we are against 8.3 ms
@@ -88,6 +88,7 @@ visible changes wait for Jim; invisible ones merge after QA).
 |---|---|---|---|---|---|
 | **0** | **Measurement first**: `?perf=1` overlay + real-phone baseline; count-based CI budget checks (scene size, material churn, nav rebuilds, alloc/frame) | — | everything after it | none | no |
 | **1** | **NavGrid: incremental rebuild; moving colliders never trigger a full rebuild** | removes 483–649 ms freezes (stand-in ~2 s) and the 158–191 ms castle-entry freeze | library, castle, any space change | low–medium | no (a freeze goes away) |
+| **1b** | **Lattices built during the bus ride; A\* resumable across frames** (≤ ~2 ms of search a frame) | removes the 526 ms first-tap freeze and the 37–51 ms frames every tap and NPC plan costs | every tap; the first seconds of play | medium | no |
 | **2** | **Detach hidden interiors from the scene graph** | **−1.9 ms M** (7.7→5.8); stand-in −5.8 ms M | every scene outdoors; each interior when the others are hidden | medium | no |
 | **3** | **Don't update what isn't drawn (simulation LOD, part 1)**: banquet, wild pets, reptile cases, library children only while their space is drawn | **−1.0 ms E** (banquet 115 ms/s) | every scene | low | no |
 | **4** | **The crowd is culled**: hide the park crowd when she is in another space; give crowd instanced meshes a live bounding sphere (or per-chunk meshes) so `frustumCulled` can be on | GPU: −1.7 M tris indoors (M, counted); −0.7 M tris in the park (38 crowd meshes wholly off-screen, M) | reptile house, library, castle, hotel; park | low–medium | no |
@@ -149,7 +150,8 @@ engineer), and which can run at once:
 | step | main files | depends on | conflicts with |
 |---|---|---|---|
 | 0 measurement | `scripts/check-*.mts`, `package.json` (check chain), `src/main.ts` (`?perf=1`) | — | any step adding a `check:` to `package.json` (resolve by parsing the chain, CLAUDE.md) |
-| 1 NavGrid | `src/world/NavGrid.ts`, `src/world/Collision.ts` | — | 7 (`Hotel.covers` is the sampler NavGrid calls — different file, same hot path; measure 1 before 7) |
+| 1 NavGrid | `src/world/NavGrid.ts`, `src/world/Collision.ts`, `scripts/check-library.mts` | — | **1b** (NavGrid.ts); 7 (`Hotel.covers` is the sampler NavGrid calls — measure 1 before 7) |
+| 1b lattice warm-up + resumable A\* | `src/world/NavGrid.ts`, `entities/npc/journey*.ts`, `TapNavigator`, `boot/journeyDirector` | after **1** (same file) | **1**, 8 (both hook the bus ride's warm-up) |
 | 2 detach interiors | `Building.ts`, `hotel/Hotel.ts`, `library/Library.ts`, `reptileHouse/*` (the `interiorRoot` hide/show), `boot/shaderWarmup.ts` | — | **3** (Building.ts), **8** (shaderWarmup.ts), 7 (Hotel.ts, different function) |
 | 3 undrawn updates | `building/greatHallBanquet.ts`, `Building.ts`, `WildPets.ts`, `reptileHouse/*`, `library/LibraryKids.ts` | best after 2 (same "which space is drawn" owner) | **2** |
 | 4 crowd culling | `entities/npc/InstancedCrowd.ts`, `entities/npc/NpcSystem.ts` | — | **11, 16** (same files) |
@@ -172,8 +174,9 @@ engineer), and which can run at once:
 | 21 LOD / KTX2 | art pipeline | after 0 | — |
 
 **Can start at once, one engineer each (no shared files):** 1, 2, 4, 5, 6, 9,
-10, 12, 15, 19 — and 0. **Sequenced chains:** 2 → 3 → 18; 2 → 8; 2 → 13 → 14
-(with 10 → 14); 4 → 11 → 16; 1 → 7; {0, 12, 16, 17} → 20.
+10, 12, 15, 19 — and 0. **Sequenced chains:** 1 → 1b → 7; 2 → 3 → 18;
+2 → 8 (and 8 after 1b, both hooking the bus ride's warm-up); 2 → 13 → 14
+(with 10 → 14); 4 → 11 → 16; {0, 12, 16, 17} → 20.
 
 ---
 
@@ -397,7 +400,33 @@ with **~70 k triangles** (crowd 1.67 M tris / 24 kids, the face patches alone
 
 ### 13. The super-speed dash: per-stride collision
 
-DASH_RESULT_PLACEHOLDER
+Measured on the build after #745 (`/spawn?seed=0`, 30 s of taps on far
+points, each a super-speed journey of up to ~4 s; Chrome trace with CPU
+samples, unminified build):
+
+- **The per-stride cost is small.** `FrameStrides.step` (strides, each an
+  ordinary navigator + `Player.update` with its collision) is **12.6 ms/s**
+  inclusive across the run; `Player.update` 10.7 ms/s; `groundAt` 11.0 ms/s.
+  That is ~0.1 ms per frame on the M4 Pro. At 120 Hz a dash rarely needs more
+  than one stride a frame (3.5 m per *clamped* frame is the hitch case), so the
+  stride loop is not where the dash's cost is. No per-stride allocation showed
+  in the samples, as #745 intended.
+- **The dash's real cost is the route, not the run.**
+  - **The first tap of a session froze for 526 ms**: `onPointerUp → onTap →
+    handleTap → planRoute → findRoute → ensureLattice → rebuild` — the
+    player's own lattice is built lazily, on her first tap (78 % of it in the
+    ground sampler, `Hotel.covers` 24 %). On the phone stand-in that is ~2 s.
+  - **Every later tap costs 37–42 ms of A\*** (`search`/`forEachStep`), in
+    one frame: four to five missed vsyncs at 120 Hz.
+- **Fix (step 1b).** Build every lattice the game will need — hers and each
+  journey grid — during the bus ride, as `ShaderWarmup` does; and make A\*
+  resumable across frames (a node budget per frame, the route followed when
+  done) so no single plan takes more than ~2 ms. A Web Worker is the
+  alternative for A\* (pure arrays in, waypoints out), once the lattice is
+  data rather than a sampler call.
+- **Check.** `check:tap-dash` already drives journeys; add: 0 whole lattice
+  builds after hand-over, and the longest single `findRoute` ≤ 4 ms (counted
+  in A\* node expansions, not timed, so it is deterministic).
 
 ### 14. Shader precompile for every space (step 8)
 
@@ -471,7 +500,27 @@ the park ≤ budget, ratcheted.
 
 ### 19. Load hitches: GLB decode, texture upload, AudioContext (step 9)
 
-BOOT_RESULT_PLACEHOLDER
+Traced from navigation on `/spawn?seed=0` (no bus ride, so no warm-up —
+the deep-link worst case) and from the earlier runs:
+
+| hitch | measured | cause (in-trace CPU samples) | fix |
+|---|---|---|---|
+| first frame | **259 ms** | 34 program links + 30 texture uploads in one frame (`setProgram → getUniforms`); the bus ride's warm-up hides this in the normal flow | deep links run the same `ShaderWarmup` before revealing the park (step 8) |
+| **first sound** | **133 ms** (`/spawn`), **168 ms** (library) | `WildPets.advance → playPuffMelody → singNote → ensureContext → new AudioContext()` inside a frame | create and `resume()` the context in the first pointer/key handler (step 9) |
+| NPC route plans at start | **41–51 ms each**, several in the first 2 s | `NpcSystem → wanderDriver.updateJourney → journey.plan → NavGrid.findRoute` A\* | step 1b: resumable A\*, a plan budget per frame |
+| first tap | **526 ms** | the player's lattice built lazily (item 13) | step 1b |
+| ball physics start-up | 34–41 ms | `ballPhysics.substep` catching up its accumulator on the first frames | clamp the first frame's accumulator (step 19) |
+| GLB decode | **none landed in a frame** | the GLBs decode before the first rendered frame on every route we traced | nothing to do today; keep it there with the frame check |
+| texture upload mid-session | ≤ 30 uploads, only at first sight; the library's 20 (13 MB) coincided with the 150 ms shader link | canvas textures generated on first use | warm them with the shaders (step 8) |
+
+- **The bundle.** The minified `Game` chunk is **4,196,878 bytes** since #745 —
+  2.5 KB over the service worker's 4 MiB precache limit, which broke every build
+  on `main` (fixed by raising the limit in #747). Splitting it (the park's
+  interiors and rides as lazy chunks behind their own warm-up) cuts first-load
+  parse/compile time on a phone; size it from step 0.
+- **Check.** The `gpu:frame-time` boot run: 0 frames over 100 ms after the
+  park is revealed, 0 program links after warm-up, and `new AudioContext`
+  never called from inside a rAF callback (counted by the probe).
 
 ---
 
