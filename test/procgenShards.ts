@@ -73,6 +73,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/railRaceRefusals.test.ts',
     'test/input/text-entry-guard.test.ts',
     'test/input/wheel-zoom.test.ts',
+    'test/lazy/lazyRooms.test.ts',
     'test/parkChangingSwitches.test.ts',
     'test/parkSolveBounded.test.ts',
   ],
@@ -95,6 +96,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/library/pageCurl.test.ts',
     'test/library/big-reader.test.ts',
     'test/library/chapter-books.test.ts',
+    'test/library/faces-on-heads.test.ts',
   ],
 ];
 

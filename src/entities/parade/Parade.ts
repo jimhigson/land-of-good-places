@@ -12,7 +12,7 @@ const SLIDE_BODY_BOX = new Box3();
 import { shopItem } from '../../world/building/shops/catalogue';
 import { gameStore, walksInParade, type GameState, type InventoryItem } from '../../state';
 import type { CompanionRide, CompanionSeat, Player, RideHolder } from '../Player';
-import { BUILDING_STEP_UP } from '../../core/constants';
+import { BUILDING_STEP_UP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../../core/constants';
 import { CLEAR_TOLERANCE } from '../../world/dismount';
 import { PlayerTrail } from './trail';
 import { ParadeMember, type BedPhase, type PetTablePlace } from './ParadeMember';
@@ -725,18 +725,32 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     this.peek.rebind();
   }
 
+  /**
+   * Drops a crumb where she stands now. Called once a frame from
+   * {@link update}, and by `Game.tick` after each stride of a tapped dash
+   * (`entities/tapDash.ts`) as well: a dash on a hitching phone covers more
+   * than `trail.ts`'s `TELEPORT_GAP` in one frame, and a trail fed only once a frame
+   * would call that a teleport — so the trail is fed at the stride, and stays
+   * the ground she actually ran over, corners and all.
+   *
+   * The trail is the one owner of "was she moved, or did she walk?" — see
+   * `PlayerTrail.push`. When she was moved, her companions were moved with
+   * her, and leaving them behind in the space she left is what sent five
+   * animals flying across the park and in through the hotel wall on every
+   * `/hotel-suite` deep link. See {@link catchUpAfterTeleport}.
+   */
+  followStride(): void {
+    const player = this.player;
+    if (this.trail.push(player.position.x, player.position.y, player.position.z)) {
+      this.catchUpAfterTeleport();
+    }
+  }
+
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     const player = this.player;
 
-    // The trail is the one owner of "was she moved, or did she walk?" — see
-    // `PlayerTrail.push`. When she was moved, her companions were moved with
-    // her, and leaving them behind in the space she left is what sent five
-    // animals flying across the park and in through the hotel wall on every
-    // `/hotel-suite` deep link. See {@link catchUpAfterTeleport}.
-    if (this.trail.push(player.position.x, player.position.y, player.position.z)) {
-      this.catchUpAfterTeleport();
-    }
+    this.followStride();
 
     // Copy the hop. Reading the player's own airborne edge rather than the jump
     // button means the trampoline and the slide's landing get a hop out of the
@@ -772,8 +786,20 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       }
     }
 
+    // **A dash keeps its followers with her** (#745's QA: at the old spring
+    // they were 40-120 m behind when she stopped). Past a sprint the spring's
+    // time shrinks with the square of her speed, so by full dash each follower
+    // all but stands on its own place in the line — a point on the trail,
+    // which is ground she has just run over, collided stride by stride
+    // (`followStride`). It never leaves the line, so it never routes, cuts a
+    // corner or meets anything she did not; and it is there when she stops.
+    const pace = Math.hypot(player.velocity.x, player.velocity.z);
+    const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
+    const followPace = pace > sprint ? (sprint / pace) ** 2 : 1;
+
     for (const member of this.members) {
       member.setFlying(flying);
+      member.followPace = followPace;
       // A pet on its way to bed aims at its bed's own run-up spot instead of
       // at a trail sample. That is the *only* difference: the same spring,
       // the same easing, the same turn-to-face and the same walk cycle carry

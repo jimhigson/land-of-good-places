@@ -292,8 +292,15 @@ interface ActiveRide {
 export interface InteriorControls {
   /** Stop whatever the character was told to do. */
   cancelWalk(): void;
-  /** Close the iris, run `midpoint` behind it, open it again. */
-  iris(midpoint: () => void): void;
+  /**
+   * Close the iris, run `midpoint` behind it, open it again.
+   *
+   * With `ready`, the iris **holds shut** until it settles before running
+   * `midpoint` — a room whose furnishings are still being fetched
+   * (`world/LazyPart.ts`) is never shown half-built, and the screen is the
+   * closed iris rather than a frozen frame.
+   */
+  iris(midpoint: () => void, ready?: Promise<unknown>): void;
   /** A soft blink. */
   flash(): void;
   /** Put the camera exactly on the player, with no travelling. */

@@ -40,6 +40,7 @@
  * radius a well-aimed tap can still miss by. Change the camera framing or the
  * UI floor and this number follows automatically.
  */
+import type { FramePath } from '../entities/framePath';
 import { cameraViewHalfHeight } from '../core/constants';
 import { FALLBACK_UNIT_PX } from '../core/uiScale';
 import { ZONE_HEIGHT_TOLERANCE, zoneVerb, type InteractZone } from './interact';
@@ -194,6 +195,50 @@ export function bandCrossed(
   );
   if (!alongInside) return false;
   return clip(fromDX * cos - fromDZ * sin, toDX * cos - toDZ * sin, band.halfAcross);
+}
+
+/**
+ * **Did she walk through this doorway this frame?** {@link bandCrossed}, asked
+ * of the path she actually took.
+ *
+ * An ordinary frame is one step and the path is the segment from
+ * `previousPosition` to `position`, exactly as before. A tapped dash cuts a
+ * frame into strides that follow the route round its corners
+ * (`entities/frameStrides.ts`), and asking the straight chord across them —
+ * up to 7 m on a slow frame — could cut a corner through a door she never went
+ * near, or across one she skirted (#745's review). So when the frame's path is
+ * there, each stride is asked in turn.
+ *
+ * The path is only trusted when it is *this* frame's: its first point must be
+ * `previousPosition` and its last `position`. Anything that has moved her
+ * since — a teleport collapses `previousPosition` onto the destination — fails
+ * that, and the question falls back to the chord, which a teleport has made a
+ * point. So a change of space still sweeps nothing.
+ */
+export function bandWalkedThrough(
+  band: PortalBand,
+  walker: {
+    readonly position: { readonly x: number; readonly z: number };
+    readonly previousPosition: { readonly x: number; readonly z: number };
+    /** Absent on a walker that never strides (a check's stand-in body): the chord is its path. */
+    readonly framePath?: FramePath;
+  },
+): boolean {
+  const { position, previousPosition, framePath } = walker;
+  if (!framePath) return bandCrossed(band, previousPosition.x, previousPosition.z, position.x, position.z);
+  const points = framePath.count;
+  const xz = framePath.xz;
+  const current =
+    points >= 2 &&
+    xz[0] === previousPosition.x &&
+    xz[1] === previousPosition.z &&
+    xz[points * 2 - 2] === position.x &&
+    xz[points * 2 - 1] === position.z;
+  if (!current) return bandCrossed(band, previousPosition.x, previousPosition.z, position.x, position.z);
+  for (let index = 1; index < points; index += 1) {
+    if (bandCrossed(band, xz[index * 2 - 2] ?? 0, xz[index * 2 - 1] ?? 0, xz[index * 2] ?? 0, xz[index * 2 + 1] ?? 0)) return true;
+  }
+  return false;
 }
 
 /**

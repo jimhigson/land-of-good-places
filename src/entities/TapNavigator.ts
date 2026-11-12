@@ -7,6 +7,8 @@ import { pickWalkablePoint } from '../world/pickWalkable';
 import { MAX_LEVEL_GAP, MAX_ROUTE_WAYPOINTS, type NavGrid } from '../world/NavGrid';
 import { TapMarker } from '../art/models/tapMarker';
 import type { GroundSampler, Player } from './Player';
+import { PLAYER_MAX_SPEED } from '../core/constants';
+import { DASH_RECOVER_SECONDS, dashBoost, dashBoostNow, dashSubsteps } from './tapDash';
 
 /**
  * Tap a place, and Eleri walks there — round whatever is in the way.
@@ -164,6 +166,29 @@ export class TapNavigator implements GameSystem {
   private sinceProgress = 0;
   /** Set by a double-tap. Holds the `sprint` action for as long as we seek. */
   private running = false;
+  /**
+   * **A long journey is a dash** (`tapDash.ts`, which owns the curve). The
+   * multiple of the walk this journey cruises at, judged once on the whole
+   * route when it is planned — 1 for a journey of 1.5 s or less at a walk, and
+   * for every scripted walk, which keeps its own pace.
+   */
+  private cruiseBoost = 1;
+  /**
+   * The boost actually being run at this frame: {@link cruiseBoost}, eased
+   * down to the walk over the last couple of metres (`dashBoostNow`). Handed to
+   * `Player.setTravelBoost` every frame the navigator steers.
+   */
+  private boost = 1;
+  /**
+   * Seconds left of walking after a dash ran into something. A dash that is
+   * blocked (`Player.blocked`) walks — a walk's speed, a walk's grip — for
+   * {@link DASH_RECOVER_SECONDS} after the last stride that met anything, so
+   * the contact is exactly the contact a walk has: she grinds along the face
+   * and finds her way round as she always has, instead of a 60 m/s slide
+   * carrying her metres along it into a pocket she cannot leave (#745 on main,
+   * seed 9). Clear of it, she dashes again.
+   */
+  private recovering = 0;
 
   private readonly player: Player;
   private readonly camera: IsoCamera;
@@ -249,6 +274,7 @@ export class TapNavigator implements GameSystem {
     // moves the target — and therefore the marker — to where she can get to.
     this.planRoute(sampler);
     this.beginLeg();
+    this.planDash(false);
     this.marker.show(this.target.x, this.target.y, this.target.z, false, this.running);
     return true;
   }
@@ -278,12 +304,45 @@ export class TapNavigator implements GameSystem {
     if (!scripted && sampler) this.planRoute(sampler);
 
     this.beginLeg();
+    this.planDash(scripted !== undefined);
     this.marker.show(this.target.x, this.target.y, this.target.z, true);
+  }
+
+  /**
+   * False on a stride whose marker animation nobody will see — set by
+   * `FrameStrides` while a dash cuts a frame into strides, so the marker is
+   * animated once a frame. The skipped strides' time is carried over.
+   */
+  drawThisUpdate = true;
+  private markerSeconds = 0;
+
+  private drawMarker(dt: number, elapsed: number, walking: boolean): void {
+    this.markerSeconds += dt;
+    if (!this.drawThisUpdate) return;
+    this.marker.update(this.markerSeconds, elapsed, walking);
+    this.markerSeconds = 0;
   }
 
   /** True while the character is walking somewhere it was told to. */
   get isNavigating(): boolean {
     return this.active;
+  }
+
+  /** True while the current journey is running faster than a walk. */
+  get dashing(): boolean {
+    return this.active && this.cruiseBoost > 1;
+  }
+
+  /**
+   * How many strides `Game.tick` should split a frame of `dt` seconds into:
+   * 1 unless a dash is running, and then enough that no stride is longer than
+   * `DASH_STRIDE`. See `tapDash.ts`'s `dashSubsteps`.
+   */
+  stridesFor(dt: number): number {
+    // The journey's cruise, not this frame's boost: the boost can rise back to
+    // the cruise inside this very frame (a dash recovering from a bump, the
+    // first frame of a tap), and the strides must already be short enough.
+    return this.dashing ? dashSubsteps(this.cruiseBoost * PLAYER_MAX_SPEED, dt) : 1;
   }
 
   /** Drops the current destination. Called when the player takes over. */
@@ -292,6 +351,7 @@ export class TapNavigator implements GameSystem {
     this.running = false;
     this.routeLength = 0;
     this.routeIndex = 0;
+    this.endDash();
     this.abandonScripted();
     this.input.setNavigationSprint(false);
   }
@@ -307,7 +367,8 @@ export class TapNavigator implements GameSystem {
 
     if (!this.active) {
       this.input.setNavigationMove(0, 0);
-      this.marker.update(dt, elapsed, false);
+      this.endDash();
+      this.drawMarker(dt, elapsed, false);
       return;
     }
 
@@ -322,7 +383,7 @@ export class TapNavigator implements GameSystem {
     const levelGap = Math.abs(this.player.position.y - this.target.y);
     if (distance <= ARRIVE_RADIUS && (this.routeLength === 0 || levelGap <= MAX_LEVEL_GAP)) {
       this.arrive();
-      this.marker.update(dt, elapsed, false);
+      this.drawMarker(dt, elapsed, false);
       return;
     }
 
@@ -350,7 +411,7 @@ export class TapNavigator implements GameSystem {
         // seek looks like.
         this.cancel();
         this.input.setNavigationMove(0, 0);
-        this.marker.update(dt, elapsed, false);
+        this.drawMarker(dt, elapsed, false);
         return;
       }
     }
@@ -378,9 +439,16 @@ export class TapNavigator implements GameSystem {
       worldX * this.camera.forward.x + worldZ * this.camera.forward.z,
     );
     this.input.setNavigationSprint(this.running);
+    // Eased off over the last stretch, so the dash hands over to the walk's
+    // own easing into the marker (`DASH_BRAKE_SECONDS`) — and a walk for the
+    // rest of any leg on which it ran into something (`walkingLeg`).
+    if (this.cruiseBoost > 1 && this.player.blocked) this.recovering = DASH_RECOVER_SECONDS;
+    else this.recovering = Math.max(0, this.recovering - dt);
+    this.boost = this.recovering > 0 ? 1 : dashBoostNow(this.cruiseBoost, this.remainingRoute());
+    this.player.setTravelBoost(this.boost);
 
     this.marker.moveTo(this.target.x, this.target.y, this.target.z);
-    this.marker.update(dt, elapsed, true);
+    this.drawMarker(dt, elapsed, true);
   }
 
   dispose(): void {
@@ -508,6 +576,7 @@ export class TapNavigator implements GameSystem {
    */
   private arrive(): void {
     this.input.setNavigationMove(0, 0);
+    this.endDash();
 
     // Take the handler off first: `onArrive` is how the stair ride queues its
     // *next* waypoint, and it must not be abandoned by the cancel below.
@@ -517,6 +586,45 @@ export class TapNavigator implements GameSystem {
     this.routeLength = 0;
     this.routeIndex = 0;
     scripted?.onArrive();
+  }
+
+  /**
+   * Judges the journey just planned: how fast it cruises (`dashBoost`) on the
+   * length of the whole route from where she stands. A scripted walk never
+   * dashes — a stair ride's pace is the ride's.
+   */
+  private planDash(scripted: boolean): void {
+    this.recovering = 0;
+    this.cruiseBoost = scripted ? 1 : dashBoost(this.remainingRoute());
+    this.boost = dashBoostNow(this.cruiseBoost, this.remainingRoute());
+  }
+
+  /** No dash any more, and she is told so — see `Player.setTravelBoost`. */
+  private endDash(): void {
+    this.cruiseBoost = 1;
+    this.boost = 1;
+    this.player.setTravelBoost(1);
+  }
+
+  /**
+   * Metres still to go along the route: to the next waypoint, along every leg
+   * after it, and from the last waypoint to the destination (a route that
+   * stops just short of a stand point). Straight to the target with no route.
+   * At most `MAX_ROUTE_WAYPOINTS` additions; allocates nothing.
+   */
+  private remainingRoute(): number {
+    if (this.routeLength === 0) return this.planarDistance();
+    let total = this.legDistance();
+    const route = this.route;
+    for (let index = this.routeIndex; index < this.routeLength - 1; index += 1) {
+      total += Math.hypot(
+        (route[index * 2 + 2] ?? 0) - (route[index * 2] ?? 0),
+        (route[index * 2 + 3] ?? 0) - (route[index * 2 + 1] ?? 0),
+      );
+    }
+    const last = (this.routeLength - 1) * 2;
+    total += Math.hypot(this.target.x - (route[last] ?? this.target.x), this.target.z - (route[last + 1] ?? this.target.z));
+    return total;
   }
 
   /** Tells a scripted walk it has been taken over, once and once only. */

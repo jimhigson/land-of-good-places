@@ -35,6 +35,7 @@ cannot float over anything.
 | The Reptile House's answers — blurbs, "peep!", "ribbit!", "Hisss-ello!", "3 of 5 babies found!", the Noodle-o-meter reading | `world/reptileHouse/ReptileHouse.ts` (`say`) → `SpeechBubble` | `actionFeedback` | the pressed zone's id (`reptile:<exhibit>`, `reptile:baby:<n>`, `reptile:meter`) |
 | The owl librarian's lines — "Shhh!", the card ceremony, the recommendation, story time | `world/library/LibraryOwl.ts` → `SpeechBubble` | `actionFeedback` | `library-owl` |
 | "a wild bunny appears!" on the castle roof | `world/building/WildPets.ts` → `SpeechBubble` | `speech` | `wildPet:<uid>` (its catch chip's item) |
+| The Library's creatures' answers — the baby dragon's hello and "I keep books, not gold!", the cat's purr | `world/library/Library.ts` (`sayCreature`) → `SpeechBubble` | `actionFeedback` | the pressed zone's id (`library-dragon`, `library-cat`) |
 | Dodgems: "TWEET!?" | `minigames/dodgems/tree.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:tree` |
 | Dodgems: giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts` → `SpriteLabel` | `actionFeedback` | `dodgems:giggle:<n>` |
 | Water fight: "YOU" | `minigames/waterFight/child.ts` → `NameLabel` | `playerName` | `player` |
@@ -122,6 +123,7 @@ that sprite's material.
 | label | decided by | why |
 |---|---|---|
 | The owl librarian's bubble | `SpeechBubble`'s `overScenery`, asked for by `world/library/LibraryOwl.ts` | She reads story time from the big armchair, which is backed onto the bookcase wall. Her bubble's quad, facing the camera from over the chair, reaches back into the wall cases, and depth-tested it lost its right side behind them ("A day in the pa…", headless Chrome, 23 Oct 2026). `check:library`'s STORY measures it from her cushion's camera: 6 of 45 points of the painted bubble stand behind `library.books.2`, so it fails if the bubble is depth-tested. |
+| The Library's creatures' bubble (the baby dragon's, the cat's) | `SpeechBubble`'s `overScenery`, asked for by `world/library/Library.ts` | The dragon speaks from the secret den's corner, behind the faded west wall and the lintel. Depth-tested, its bubble lost both rounded ends at 390x844 and half its text to the wall once she stepped back out of the den ("I lov…", headless Chrome on PR #739's preview, 11 Nov 2026). Seen fixed on the next preview; no check measures it yet. |
 | The dodgems' giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts`, which builds the sprites its `SpriteLabel`s wrap | Built that way with the dodgems (48bf4bcc, 26 July 2026); no reason is recorded. |
 
 Turning it on for another speaker changes how that speaker's bubble looks: it

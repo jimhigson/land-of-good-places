@@ -27,7 +27,6 @@ import {
   createLibraryReadingLamp,
   createLibraryRug,
   createLibrarySconce,
-  createLibrarySecretBookcase,
   createLibrarySideTable,
   createShelfBook,
   libraryArmchairParts,
@@ -47,6 +46,7 @@ import {
   type BookcaseKind,
   type LampHandle,
 } from '../../art/models/libraryAssets';
+import type { LibraryDenNiche } from '../../art/models/libraryDenKit';
 import { KID_REACH_HEIGHT } from '../../art/models/kid';
 import type { LibraryProps } from './props';
 import type { PoolSpot } from './lighting';
@@ -58,6 +58,7 @@ import {
   LIBRARY_FURNITURE,
   LIBRARY_READABLE_SLOTS,
   LIBRARY_SCONCE_HEIGHT,
+  LIBRARY_SECRET_BOOK,
   type BookcaseSpec,
   type FurnitureSpec,
   type LocalPoint,
@@ -154,7 +155,12 @@ export function assertReadableSlotsInReach(): void {
   if (problems.length > 0) throw new Error(`Library: a readable book she cannot reach:\n  - ${problems.join('\n  - ')}`);
 }
 
-/** One book: its shape, colour and transform in its case's own frame. */
+/**
+ * One book: its shape (an index into `libraryBookShapes()`), colour and
+ * transform in its case's own frame (front +Z, centred on X and Z) — the
+ * frame {@link bookInstances} draws a case's row in, and the secret shelf's
+ * leaf (`secretShelf.ts`) carries onto its hinge.
+ */
 export interface PlacedBook {
   readonly shape: number;
   readonly colour: number;
@@ -162,22 +168,76 @@ export interface PlacedBook {
 }
 
 /**
+ * **Where a book stands in its case's own frame** (front +Z): on `shelf` (0
+ * the bottom), `along` the board from the case's middle, its spine `proud` in
+ * front of the row's spines — which stand {@link SPINE_INSET} behind the
+ * boards' front edge. `proud` is clipped so the spine never passes the case's
+ * drawn front: drawn implies solid, and the case's collider stops at that face.
+ * The readable books and the secret shelf's pull book both stand here; a shelf
+ * the case does not have throws.
+ */
+export function bookSpot(kind: BookcaseKind, shelf: number, along: number, bookDepth: number, proud: number): Vector3 {
+  const size = libraryBookcaseSize(kind);
+  const shelfY = size.shelfTops[shelf];
+  if (shelfY === undefined) throw new Error(`Library: a ${kind} case has no shelf ${shelf} to stand a book on (it has ${size.shelfTops.length})`);
+  const spine = size.boardFront - SPINE_INSET;
+  return new Vector3(along, shelfY, spine - bookDepth / 2 + Math.min(proud, size.depth / 2 - spine));
+}
+
+/**
+ * **The rows a shelf holds, in its own frame** (front +Z, centred on X, the
+ * floor at 0): each board's top, the clear height over it, the half-width a
+ * row fits in, and the boards' front edge. A case's (`libraryBookcaseSize`)
+ * and a book niche in the secret den's walls (#719, `LIBRARY_DEN_PLAN.niches`,
+ * measured off the Artist's kit in the same terms) are both this, so one loop
+ * fills either.
+ */
+export interface ShelfRows {
+  readonly shelfTops: readonly number[];
+  readonly shelfClear: readonly number[];
+  readonly innerHalf: number;
+  readonly boardFront: number;
+}
+
+/**
  * The books on one face of one case, in the case's own frame (front +Z).
- * `back` puts them on the far face, spines out the other way. Exported, with
+ * `back` puts them on the far face, spines out the other way. `pullBookGap`
+ * leaves the secret shelf's pull book (#719, `LIBRARY_SECRET_BOOK`) its gap in
+ * the row, exactly as every readable slot gets one. Exported, with
  * {@link bookInstances}, for the reader's picture bookcase
  * (`reader/pagePictures.ts`), so a shelf in a storybook is stocked by the
  * room's one rule rather than a copy of it.
  */
-export function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonly BookShape[]): PlacedBook[] {
-  const size = libraryBookcaseSize(spec.kind);
+export function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: readonly BookShape[], pullBookGap = false): PlacedBook[] {
+  const slots = back ? [] : LIBRARY_READABLE_SLOTS.filter((slot) => slot.bookcase === spec.id);
+  return shelveRows(libraryBookcaseSize(spec.kind), back, rng, shapes, (shelf) => {
+    const gaps = slots.filter((slot) => slot.shelf === shelf).map((slot) => [slot.along - SLOT_HALF, slot.along + SLOT_HALF] as const);
+    if (pullBookGap && shelf === LIBRARY_SECRET_BOOK.shelf) gaps.push([LIBRARY_SECRET_BOOK.along - SLOT_HALF, LIBRARY_SECRET_BOOK.along + SLOT_HALF] as const);
+    return gaps;
+  });
+}
+
+/**
+ * **One shelf's rows of books**, in its own frame: on every board a book of
+ * some height fits on, a row from end to end with a short gap now and then,
+ * leaving `gapsOn(shelf)` clear — a case's face ({@link shelveFace}) or a den
+ * niche ({@link shelveDenNiches}). Every number it draws comes off `rng` in a
+ * fixed order, so the same stream fills the same rows on every load.
+ */
+function shelveRows(
+  size: ShelfRows,
+  back: boolean,
+  rng: Rng,
+  shapes: readonly BookShape[],
+  gapsOn: (shelf: number) => readonly (readonly [number, number])[],
+): PlacedBook[] {
   const books: PlacedBook[] = [];
   const spineZ = size.boardFront - SPINE_INSET;
-  const slots = back ? [] : LIBRARY_READABLE_SLOTS.filter((slot) => slot.bookcase === spec.id);
   size.shelfTops.forEach((shelfY, shelf) => {
     const clear = size.shelfClear[shelf] ?? 0;
     const fits = shapes.map((shape, index) => ({ shape, index })).filter(({ shape }) => shape.height <= clear - 0.04);
     if (fits.length === 0) return;
-    const gaps = slots.filter((slot) => slot.shelf === shelf).map((slot) => [slot.along - SLOT_HALF, slot.along + SLOT_HALF] as const);
+    const gaps = gapsOn(shelf);
     let x = -size.innerHalf + ROW_END_GAP;
     const end = size.innerHalf - ROW_END_GAP;
     while (x < end) {
@@ -204,6 +264,34 @@ export function shelveFace(spec: BookcaseSpec, back: boolean, rng: Rng, shapes: 
     }
   });
   return books;
+}
+
+/** A seed for the den's books, of its own (#719): the room's are drawn from {@link BOOK_SEED}'s stream, and a den that took from it would reshuffle every case. */
+const DEN_BOOK_SEED = 0x0b00d7;
+
+/**
+ * **The secret den's niche books** (#719): every row of every book niche the
+ * Artist cut into the den's far walls, filled exactly as a case's face is
+ * ({@link shelveRows}) — a niche is measured in a case's own terms
+ * (`LibraryDenNiche`: its boards' tops, the clear over each, its half-width,
+ * its boards' front) — from a seed of the den's own, so no book in the reading
+ * room moves. One `InstancedMesh` for the lot, in the den kit's own frame (the
+ * frame `LIBRARY_DEN_PLAN` measures in, its floor `floorTop` up): the den is
+ * shown and hidden whole and its walls never fade, so its books share the
+ * room's book paint.
+ */
+export function shelveDenNiches(niches: readonly LibraryDenNiche[], floorTop: number): InstancedMesh {
+  const rng = new Rng(DEN_BOOK_SEED);
+  const shapes = libraryBookShapes();
+  const books: PlacedBook[] = [];
+  for (const niche of niches) {
+    const place = placement(niche.centre.x, floorTop, niche.centre.z, niche.facing);
+    for (const book of shelveRows(niche, false, rng, shapes, () => [])) books.push({ ...book, matrix: new Matrix4().multiplyMatrices(place, book.matrix) });
+  }
+  if (books.length === 0) throw new Error(`Library: the secret den's ${niches.length} book niche(s) took no books — the Artist's niches no longer fit the kit's book blocks`);
+  const instanced = bookInstances(books, shapes, libraryBookMaterial());
+  instanced.name = 'library.den.books';
+  return instanced;
 }
 
 /**
@@ -279,7 +367,7 @@ function shelfBookMesh(entry: ShelfBook, spec: BookcaseSpec): Mesh {
   mesh.name = `library.book.${entry.book.id}`;
   const outline = mesh.children[0];
   if (outline) outline.name = `${mesh.name}.outline`;
-  mesh.position.set(entry.slot.along, shelfY, size.boardFront - SPINE_INSET - shape.depth / 2 + readableProud(spec.kind));
+  mesh.position.copy(bookSpot(spec.kind, entry.slot.shelf, entry.slot.along, shape.depth, readableProud(spec.kind)));
   mesh.rotation.x = READABLE_LEAN;
   return mesh;
 }
@@ -288,15 +376,19 @@ function shelfBookMesh(entry: ShelfBook, spec: BookcaseSpec): Mesh {
  * One case's books as a single `InstancedMesh`: every shape is the first
  * book's geometry scaled to its own measured size, so one case is one draw
  * call — the stacks fade and the secret shelf swings, so each owns its books.
+ * `offset` carries a row drawn in the case-centred frame into another: the
+ * secret leaf's, whose origin is its back-left edge (`secretShelf.ts`).
  */
-export function bookInstances(books: readonly PlacedBook[], shapes: readonly BookShape[], material: Material): InstancedMesh {
+export function bookInstances(books: readonly PlacedBook[], shapes: readonly BookShape[], material: Material, offset?: Vector3): InstancedMesh {
   const base = shapes[0]!;
   const instanced = new InstancedMesh(base.geometry, material, books.length);
   const scaled = new Matrix4();
+  const shift = offset ? new Matrix4().makeTranslation(offset.x, offset.y, offset.z) : null;
   const colour = new Color();
   books.forEach((book, index) => {
     const shape = shapes[book.shape]!;
     scaled.makeScale(shape.thickness / base.thickness, shape.height / base.height, shape.depth / base.depth).premultiply(book.matrix);
+    if (shift) scaled.premultiply(shift);
     instanced.setMatrixAt(index, scaled);
     instanced.setColorAt(index, colour.setHex(book.colour));
   });
@@ -411,6 +503,18 @@ export interface FurnishedShelfBook extends ShelfBook {
   readonly local: LocalPoint;
 }
 
+/**
+ * **The secret shelf, as furnished** (#719): its spec and the books on its one
+ * face, in the case-centred frame, with the pull book's gap left in the row.
+ * The case itself is **not** drawn or made solid here — `secretShelf.ts`'s
+ * `SecretLeaf` draws it on its hinge and registers both of its collider
+ * states — so the furnisher hands the row over rather than instancing it.
+ */
+export interface FurnishedSecret {
+  readonly spec: BookcaseSpec;
+  readonly books: readonly PlacedBook[];
+}
+
 /** What furnishing the room hands back. */
 export interface Furnished {
   readonly stacks: readonly StackFader[];
@@ -420,6 +524,8 @@ export interface Furnished {
   readonly pieces: ReadonlyMap<string, Object3D>;
   /** The readable books (#718), in `SHELF_BOOKS`' order: one per `BOOKS` entry. */
   readonly shelfBooks: readonly FurnishedShelfBook[];
+  /** The secret shelf's row (#719), for the leaf that swings it. */
+  readonly secret: FurnishedSecret;
 }
 
 /** The cloth of each chair's frame and each cushion — the park's own bright colours, a different one each; the storyteller's chair the castle's tapestry red. */
@@ -469,13 +575,30 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
   const fixedBooks: { shape: number; colour: number; matrix: Matrix4 }[] = [];
   const stacks: StackFader[] = [];
   const shelved = new Map<number, FurnishedShelfBook>();
+  let secret: FurnishedSecret | null = null;
   let bookCount = 0;
   for (const spec of LIBRARY_BOOKCASES) {
     const size = libraryBookcaseSize(spec.kind);
     const centre = bookcaseCentre(spec);
     const transform = placement(centre.x, 0, centre.z, spec.facing);
-    props.box(`bookcase ${spec.id}`, { x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2 }, size.height);
-    const books = [...shelveFace(spec, false, rng, shapes), ...(spec.kind === 'stack' ? shelveFace(spec, true, rng, shapes) : [])];
+    // The secret shelf (#719) is solid in two states — shut in the wall, and
+    // swung open into the den — and `SecretLeaf` registers both, so it is the
+    // one case not made solid here.
+    if (!spec.secret) {
+      props.box(`bookcase ${spec.id}`, { x: centre.x, z: centre.z, facing: spec.facing, halfLength: size.length / 2, halfDepth: size.depth / 2 }, size.height);
+    }
+    let books: PlacedBook[];
+    if (spec.secret) {
+      // The secret shelf's row is drawn from a fork of the stream at this
+      // case's turn, with the pull book's gap left in it; the stream itself is
+      // walked past the case exactly as for an ordinary case (the fork reads
+      // the same numbers, and only the gap's extra steps differ), so the gap
+      // moves no other case's books.
+      books = shelveFace(spec, false, new Rng(rng.state), shapes, true);
+      shelveFace(spec, false, rng, shapes);
+    } else {
+      books = [...shelveFace(spec, false, rng, shapes), ...(spec.kind === 'stack' ? shelveFace(spec, true, rng, shapes) : [])];
+    }
     bookCount += books.length;
     // The readable books standing in this case's gaps (#718), each in its own
     // case-local place; where each goes in the scene is the case kind's own.
@@ -494,17 +617,12 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
       throw new Error(`Library: readable book(s) ${readable.map((placed) => `'${placed.book.id}'`).join(', ')} stand on the secret shelf ${spec.id}, which swings open`);
     }
     if (spec.secret) {
-      // The secret shelf (#719) is drawn from the kit's hinge-origin twin, its
-      // books on its own door so they swing with it. Closed, it stands exactly
-      // where an ordinary case would.
-      const secret = createLibrarySecretBookcase();
-      secret.root.name = `library.secret.${spec.id}`;
-      secret.root.applyMatrix4(transform);
-      const instanced = bookInstances(books, shapes, libraryBookMaterial());
-      instanced.position.copy(secret.offset).negate();
-      secret.door.add(instanced);
-      root.add(secret.root);
-      pieces.set(spec.id, secret.root);
+      // The secret shelf (#719) is neither instanced nor shelved here: the
+      // leaf swings, so `secretShelf.ts` draws the case on its hinge with this
+      // row and the gold pull book on it. Shut, it stands exactly where an
+      // ordinary case would.
+      if (secret) throw new Error(`Library: two secret shelves (${secret.spec.id}, ${spec.id}), where the den has one doorway`);
+      secret = { spec, books };
       continue;
     }
     if (spec.kind !== 'stack') {
@@ -686,6 +804,7 @@ export function furnishReadingRoom(root: Group, props: LibraryProps): Furnished 
     if (!placed) throw new Error(`Library: readable book '${entry.book.id}' names case '${entry.slot.bookcase}', which the room does not build`);
     return placed;
   });
-  return { stacks, pools, bookCount, pieces, shelfBooks };
+  if (!secret) throw new Error('Library: no bookcase is the secret one, so there is no leaf to hinge onto the den (layout.ts marks exactly one)');
+  return { stacks, pools, bookCount, pieces, shelfBooks, secret };
 }
 

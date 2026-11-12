@@ -96,7 +96,13 @@ export interface MiniGame {
   dispose(): void;
 }
 
-export type MiniGameFactory = () => MiniGame;
+/**
+ * Builds a fresh instance of a mini-game — **asynchronously**, because each
+ * one is its own lazy chunk, fetched on the visit that needs it and never at
+ * boot (`check:boot-chunk` holds that). The host starts it as the curtain
+ * begins to close, so the fetch runs behind the wipe.
+ */
+export type MiniGameFactory = () => Promise<MiniGame>;
 
 /**
  * A stall in the garden: a cute striped booth, a tap target, and the game

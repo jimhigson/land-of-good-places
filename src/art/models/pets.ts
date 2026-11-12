@@ -393,6 +393,9 @@ function puffSingingFace() {
   return puffSingingTexture;
 }
 
+/** The puff's ball is a sphere squashed by this; its face patch is squashed the same way, so it rides the surface. */
+const PUFF_BALL_SQUASH = [1, 0.92, 1.04] as const;
+
 let puffInstanceCount = 0;
 
 /** Builds one puff. Shared by `createPet('puff')` and `createHat('puff')`. */
@@ -418,17 +421,21 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
 
   const furMat = toonMaterial(PUFF_FUR);
 
-  const ball = blob(PUFF_BALL_RADIUS, furMat, [1, 0.92, 1.04], 24);
+  const ball = blob(PUFF_BALL_RADIUS, furMat, [...PUFF_BALL_SQUASH], 24);
   head.add(ball);
   addOutline(ball, 0.012);
 
   // The tummy patch: lighter pastel pink, protruding past the ball's own
   // surface (ART_DIRECTION.md §5 — a marking that sits flush reads as a
   // starburst intersection, not a patch).
+  //
+  // Low on the ball, under the mouth (books QA, Oct 2026): at y −0.15R it
+  // covered the lower half of the face, so Trilla showed no eyes in most
+  // moods — measured on the chapter books' pictures and in the park alike.
   const tummy = decal(
-    blob(PUFF_BALL_RADIUS * 0.62, toonMaterial(PUFF_BELLY), [1, 0.85, 0.45], 14),
+    blob(PUFF_BALL_RADIUS * 0.62 * 0.85, toonMaterial(PUFF_BELLY), [1, 0.85, 0.45], 14),
   );
-  tummy.position.set(0, -PUFF_BALL_RADIUS * 0.15, PUFF_BALL_RADIUS * 0.86);
+  tummy.position.set(0, -PUFF_BALL_RADIUS * 0.46, PUFF_BALL_RADIUS * 0.76);
   head.add(tummy);
 
   // The one asymmetric feature every head needs (ART_DIRECTION.md §4): a
@@ -446,6 +453,11 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
     ...PUFF_FACE_SHAPE,
     ...PUFF_FACE_PAINT,
   });
+  // The patch is a sphere of the ball's radius; the ball is squashed by
+  // PUFF_BALL_SQUASH, so its front is at 1.04R and an unsquashed patch sat
+  // 5.6 mm inside it — the face was buried in the fur. Squashed the same way,
+  // the patch rides the ball's own surface (one owner of the squash).
+  face.mesh.scale.set(...PUFF_BALL_SQUASH);
   head.add(face.mesh);
   const faceMaterial = face.mesh.material as MeshToonMaterial;
 

@@ -1,6 +1,7 @@
 import { Group, Vector3, type BufferAttribute, type Mesh, type MeshToonMaterial, type Texture } from 'three';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../style/materials';
+import { dropHiddenOutlineFaces } from '../style/outlineHiddenFaces';
 import { visibleBounds, visiblePoints, visibleReachXZ } from '../style/measure';
 import type { AssetHandle, CreatureHandle } from '../style/asset';
 import type { Expression } from '../style/faces';
@@ -160,6 +161,16 @@ export function createLibraryOwl(): OwlHandle {
  */
 export const DRAGON_BELLY_REST_GLOW = 0.2;
 
+/**
+ * **The baby dragon glows softly all over**, at this much of its own colour:
+ * the den has no light pool of its own (the room's eight are spent), and lit
+ * only by the room's ambient the mint dragon read as a dark shape on the den's
+ * dark green wall — "hard to see" in PR #739's QA on a phone. A creature of
+ * magic that glows a little in the dark is in keeping (its belly already
+ * does); the face glows through its own texture, so its eyes stay ink.
+ */
+export const DRAGON_SELF_LIGHT = 0.45;
+
 export interface DragonHandle extends CreatureHandle {
   /** The `dragon-tail` mesh, at its pivot where it leaves the body: `rotation.y` flicks it. */
   readonly tail: Mesh;
@@ -199,6 +210,15 @@ function frontMost(name: string): Vector3 {
 }
 
 /**
+ * The way a creature model rests, in its own unplaced frame — down, onto the
+ * plane its base stands on (`y = 0`): the floor, the nest's pad, a pile's top.
+ * The faces it rests on keep no copy in its ink lines
+ * (`dropHiddenOutlineFaces`): each would be a line's width inside what
+ * it rests on, a hidden face a hair off a seen one.
+ */
+const RESTS_DOWN = new Vector3(0, -1, 0); // flat-ok: down in a creature model's own unplaced frame, object-local
+
+/**
  * **The baby dragon** — mint, with a cream tummy that glows warm, two stubby
  * horns and little lilac wings: the same dragon as the storybook's, its
  * colours read from the same `LIBRARY_GLB_STYLES` rows. 0.9 m to its horns.
@@ -211,30 +231,41 @@ export function createLibraryDragon(): DragonHandle {
   body.name = 'library.dragon.body';
   root.add(body);
   const belly = toonMaterial(colourOf('dragon-belly'), { emissive: PALETTE.fairyWarm, emissiveIntensity: DRAGON_BELLY_REST_GLOW });
-  body.add(libraryKitMesh('dragon-body'));
+  const glowing = (name: string): Mesh => {
+    const colour = colourOf(name);
+    return libraryKitMesh(name, toonMaterial(colour, { emissive: colour, emissiveIntensity: DRAGON_SELF_LIGHT }));
+  };
+  body.add(glowing('dragon-body'));
   body.add(libraryKitMesh('dragon-belly', belly));
   body.add(libraryKitMesh('dragon-spines'));
-  body.add(libraryKitMesh('dragon-wings'));
+  body.add(glowing('dragon-wings'));
   // The tail's node translation is its pivot (where it leaves the body), so
   // the mesh itself turns about it.
-  const tail = libraryKitMesh('dragon-tail');
+  const tail = glowing('dragon-tail');
   body.add(tail);
 
   const faces = dragonFaceTextures();
   const head = pivotGroup('library.dragon.head', 'dragon-head');
   body.add(head);
   const face = facedHead('dragon-head', faces.neutral);
+  // The head glows with the body, through its painted face (see DRAGON_SELF_LIGHT).
+  face.material.emissive.setHex(colourOf('dragon-head'));
+  face.material.emissiveMap = faces.neutral;
+  face.material.emissiveIntensity = DRAGON_SELF_LIGHT;
   hang(head, face.mesh);
   hang(head, libraryKitMesh('dragon-horns'));
 
   const mouth = frontMost('dragon-head');
   const mouthInHead = mouth.clone().sub(head.position);
+  // It sits on its nest's pad: its tail's underside rests there.
+  dropHiddenOutlineFaces(root, RESTS_DOWN, 0);
 
   let showing: DragonFace = 'neutral';
   const setFace = (next: DragonFace): void => {
     if (next === showing) return;
     showing = next;
     face.material.map = faces[next];
+    face.material.emissiveMap = faces[next];
   };
   return {
     root,
@@ -270,6 +301,8 @@ export function createLibraryDragonNest(): DragonNestHandle {
   for (const name of ['dragonNest-pad', 'dragonNest-coversA', 'dragonNest-coversB', 'dragonNest-coversC', 'dragonNest-pages']) {
     root.add(libraryKitMesh(name));
   }
+  // Its pad and its books rest on the floor and on one another.
+  dropHiddenOutlineFaces(root, RESTS_DOWN, 0);
   return { root, height: visibleBounds(root).top, padTop: kitBounds(['dragonNest-pad']).maxY, radius: visibleReachXZ(root) };
 }
 
@@ -358,6 +391,8 @@ export function createLibraryBookPile(): BookPileHandle {
   for (const name of ['bookPile-cover1', 'bookPile-cover2', 'bookPile-cover3', 'bookPile-cover4', 'bookPile-cover5', 'bookPile-pages']) {
     root.add(libraryKitMesh(name));
   }
+  // Each book rests on the one below it, the bottom one on the floor.
+  dropHiddenOutlineFaces(root, RESTS_DOWN, 0);
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;

@@ -20,6 +20,8 @@
  * paints a texture at construction time and reaches for `document` to do it.
  */
 import './headless-canvas.mjs';
+// Every lazy room furnished up front — a headless build measures every room.
+import './lib/eagerInteriors.mts';
 import { Scene } from 'three';
 import { World } from '../src/world/World.ts';
 import { Sky } from '../src/world/Sky.ts';
@@ -63,8 +65,18 @@ function inertInteriorControls(): InteriorControls {
   const refuseIris = refuse('iris');
   return {
     cancelWalk: refuse('cancelWalk'),
-    iris: (midpoint) => {
+    iris: (midpoint, ready) => {
       refuseIris();
+      // Headless, every room is furnished up front (`lib/eagerInteriors.mts`,
+      // imported above), so no door ever has to wait for one. A `ready` here
+      // means a room was not provided, and a check would be walking into a
+      // shell it believes is furnished.
+      if (ready) {
+        throw new Error(
+          'park-harness: a door waited for a room that was not provided — every lazy interior must be ' +
+            'provided by scripts/lib/eagerInteriors.mts before the park is built.',
+        );
+      }
       midpoint();
     },
     flash: refuse('flash'),

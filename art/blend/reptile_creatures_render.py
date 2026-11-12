@@ -48,7 +48,7 @@ from reptile_creatures_build import BLEND, EXPECTED  # noqa: E402
 
 OUT = os.path.join(REPO, "art", "renders", "reptile-creatures")
 ENGINEER_MODULE = "src/art/models/reptileCreaturesAssets.ts"
-CHILD_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+CHILD_HEIGHT = ts_const("src/art/models/kidHeight.ts", "KID_HEIGHT")
 
 
 

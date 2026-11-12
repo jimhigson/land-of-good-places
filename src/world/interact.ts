@@ -68,6 +68,15 @@ export interface InteractZone {
   readonly standRadius?: number;
 
   /**
+   * Where {@link standRadius} is measured from, when that is not the stand:
+   * a creature you can walk up to from every side (the Library's baby dragon,
+   * #719) is "stood at" within a ring round itself, while a tap still walks
+   * her to `standX/standZ`. Both or neither. See {@link reachDistance}.
+   */
+  readonly reachX?: number;
+  readonly reachZ?: number;
+
+  /**
    * Ranking when two zones both hold the player. Higher wins outright; equal
    * ranks are settled by distance. Defaults to 0.
    *
@@ -131,6 +140,15 @@ export const DEFAULT_STAND_RADIUS = 3;
 
 export function standRadiusOf(zone: InteractZone): number {
   return zone.standRadius ?? DEFAULT_STAND_RADIUS;
+}
+
+/**
+ * **How far (x, z) is from where a zone's reach is measured** — its
+ * `reachX/reachZ` if it has them, else its stand: the one owner of "is she
+ * standing at it", against {@link standRadiusOf}.
+ */
+export function reachDistance(zone: InteractZone, x: number, z: number): number {
+  return Math.hypot(x - (zone.reachX ?? zone.standX), z - (zone.reachZ ?? zone.standZ));
 }
 
 /**

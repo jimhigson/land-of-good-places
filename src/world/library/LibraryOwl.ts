@@ -102,8 +102,9 @@ import { LIBRARY_BOOKCASES, LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_LIBRARIA
  * never on the wing; mid-story only her face answers (a story is a script),
  * and on the chair her wings stay down: there the shush wing would swing out
  * over the rug, past her chair's front, into a listener ({@link perchShape}).
- * Not while the child is in the secret den: that condition is the den track's
- * (#719), which owns `libraryDenContains`.
+ * Not while the child is in the secret den (#719): the owl cannot see into
+ * the hidden room. `Library` asks `libraryDenContains`, the one owner of "she
+ * is in the den", and hands the answer in as `unseen`.
  *
  * ## Story time (plan Step 9)
  *
@@ -772,6 +773,17 @@ export class LibraryOwl {
     this.say(lines, -1, false);
   }
 
+  /**
+   * **A press elsewhere in the room cuts her one-liner short** — the
+   * invitation, a shush — exactly as a press at her desk does; a script (the
+   * card, a story) is never interrupted. For the cat's and the dragon's
+   * answers (#719): on a phone her standing invitation, the incumbent label,
+   * otherwise held the cat's purr off the screen beside her desk (PR #739).
+   */
+  giveWayToAPress(): void {
+    if (this.speech?.interruptible) this.clearSpeech();
+  }
+
   /** Stops whatever she is saying. */
   hush(): void {
     this.clearSpeech();
@@ -907,12 +919,13 @@ export class LibraryOwl {
    * One frame, while the child is in the reading room: her words, the shush,
    * her life (breath, blink, head, wings), the recommended book's glow, the
    * sprites, and her bubble's place on screen. `changing` is the room's
-   * `SpaceManager.isChanging` — mid-iris nobody is shushed.
+   * `SpaceManager.isChanging` — mid-iris nobody is shushed; `unseen` is true
+   * while she is in the secret den, where the owl cannot see her (#719).
    */
-  update(dt: number, elapsed: number, player: Player, changing: boolean, camera: IsoCamera): void {
+  update(dt: number, elapsed: number, player: Player, changing: boolean, camera: IsoCamera, unseen: boolean): void {
     this.updateFlight(dt, elapsed);
     this.updateSpeech(dt);
-    this.noticeShush(player, dt, changing);
+    this.noticeShush(player, dt, changing || unseen);
     this.live(dt, elapsed, player);
     this.glow(dt, elapsed);
     this.puffs.update(dt);
@@ -970,14 +983,15 @@ export class LibraryOwl {
    * accumulated into a run, and a take-off as the rising edge of `isAirborne`
    * with upward speed. Fired, she says the line unless she is mid-script, in
    * which case only her wing and face answer; either way the cooldown starts.
+   * `quiet` (a change of space, or the child in the den) notices nothing.
    */
-  private noticeShush(player: Player, dt: number, changing: boolean): void {
+  private noticeShush(player: Player, dt: number, quiet: boolean): void {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.shushFor = Math.max(0, this.shushFor - dt);
     const airborne = player.isAirborne;
     const jumped = !this.wasAirborne && airborne && player.verticalSpeed > 0;
     this.wasAirborne = airborne;
-    if (changing || player.riding || !(this.atDeskFlag || this.perchedFlag)) {
+    if (quiet || player.riding || !(this.atDeskFlag || this.perchedFlag)) {
       this.runningFor = 0;
       return;
     }

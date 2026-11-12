@@ -41,6 +41,8 @@ import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/pa
 import { parkStamp } from './world/prebuilt/parkFileStore';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 import { BOOKS, bookById } from './world/library/books';
+import { interiorsToPreload } from './world/interiors';
+import { installChunkImporter } from './world/lazyChunks';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -100,6 +102,10 @@ function boot(): void {
       `Reproduce this park with ?seed=${PARK_SEED_ASKED}`,
   );
 
+  // A lazy room retried after a failed fetch is imported again under a fresh
+  // URL; the run-time `import()` that does it lives here, outside the park's
+  // source closure (`world/lazyChunks.ts`).
+  installChunkImporter((url) => import(/* @vite-ignore */ url));
   const save = loadSave();
   const deepLink = parseDeepLink(location.pathname, location.search) ?? undefined;
 
@@ -207,6 +213,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // world ride, so this falls to `MiniGameHost.open` the same way `/ferris`
   // does.
   '/spooky-house': 'spookyHouse',
+  // The other two curtain games (#749): each is a lazy chunk fetched behind
+  // its curtain, and a link straight to it is how that is seen working.
+  '/dodgems': 'dodgems',
+  '/water-fight': 'waterFight',
   // The Reptile House's front door from outside (issue: Jim, 2 Oct 2026): she
   // stands on its park plot's doormat, the tongue, facing the mouth —
   // `ReptileHouse.requestEnterDoor` / `ReptileHouse.doormat`.
@@ -219,6 +229,10 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // foot of the steps, facing the door — `Library.requestEnterDoor`. The
   // reading room itself is `/library`, its own `DeepLink` kind below.
   '/library-door': 'libraryDoor',
+  // The Library's secret den (#719): just inside its doorway, the bookcase
+  // swung open, the baby dragon ahead — `Library.requestEnterDen`. It skips
+  // the find (pulling the gold book), so the session is never saved.
+  '/library-den': 'libraryDen',
 };
 
 /**
@@ -1290,7 +1304,17 @@ async function finishLaunch(
   // Already settled when the ride built the park; on a continued save, a deep
   // link, `/view` or `/spawn` this is where the whole search is saved.
   await loadPrebuiltPark();
-  const GameClass = await loadGame();
+  // A room she starts inside — a save that restores in one, a deep link that
+  // opens in one — is fetched now, alongside the game, so the building finds
+  // it here and furnishes it in its constructor (`world/interiors.ts`). Every
+  // other room waits for its door. A room that will not load (offline on a
+  // first visit) is not fatal: its building says so and fetches it again.
+  const [GameClass] = await Promise.all([
+    loadGame(),
+    ...interiorsToPreload(gameOptions.startPlace?.space, location.pathname).map((part) =>
+      part.load().catch((error: unknown) => console.error(`Land of Good Places: ${part.name} failed to load`, error)),
+    ),
+  ]);
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
