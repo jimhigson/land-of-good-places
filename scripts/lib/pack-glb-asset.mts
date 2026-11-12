@@ -18,6 +18,11 @@ import { gzipSync } from 'node:zlib';
 export interface PackGlbAssetConfig {
   /** Absolute path to the source `.glb`. */
   readonly glbPath: string;
+  /**
+   * The bytes to pack, when they are not the whole of `glbPath` — a part of it
+   * cut out at pack time (`split-glb.mts`). `glbPath` is then only reported.
+   */
+  readonly bytes?: Buffer;
   /** Absolute path to the `.ts` module to write. */
   readonly modulePath: string;
   /** The exported constant's name, e.g. `'KID_GLB_BASE64'`. */
@@ -38,7 +43,7 @@ const kb = (n: number): string => `${(n / 1024).toFixed(1)} KB`;
 
 /** Reads `config.glbPath`, writes `config.modulePath`, and enforces the budget. */
 export function packGlbAsset(config: PackGlbAssetConfig): void {
-  const bytes = readFileSync(config.glbPath);
+  const bytes = config.bytes ?? readFileSync(config.glbPath);
   const base64 = bytes.toString('base64');
 
   const doc = [
