@@ -55,8 +55,15 @@ const SETTLE_FRAMES = 20;
 const SAMPLE_FRAMES = 20;
 /** A cold dev server builds the park and every lazy chunk on first ask. */
 const BOOT_TIMEOUT_MS = 240_000;
-/** Measured + 15 %: room for the counts' frame-to-frame wobble (NPCs walking in and out of view), and no more. */
-const HEADROOM = 1.15;
+/**
+ * Measured + 10 % (the plan's own figure). The counts are not perfectly
+ * fixed: where she and the NPCs stand when the clock is frozen differs a
+ * little between a GPU and CI's software renderer — measured at up to 2.8 %
+ * (castle, 399 vs 410 draws). Ten per cent covers that with room, and is
+ * still far below any regression worth catching (one unculled crowd is 80
+ * draws and 1.7 M triangles).
+ */
+const HEADROOM = 1.1;
 
 interface Scene {
   /** A deep link from `main.ts`. */
@@ -71,16 +78,18 @@ interface Scene {
 }
 
 /**
- * Measured on `perf-step0` (see its PR for the transcript), canonical seed,
- * 1000×700 at DPR 1. Counts do not depend on resolution, only on what is drawn.
+ * Measured on `perf-step0`, canonical seed 5, 1000×700 at DPR 1, the higher
+ * of two runs — Apple M4 Pro (Metal) and SwiftShader, CI's renderer. Counts
+ * do not depend on resolution, only on what is drawn.
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', space: 'garden', draws: 0, tris: 0 },
-  library: { path: '/library', space: 'library', draws: 0, tris: 0 },
-  'reptile house': { path: '/reptile-house', space: 'reptileHouse', draws: 0, tris: 0 },
-  castle: { path: '/castle', space: 'castle.', draws: 0, tris: 0 },
-  hotel: { path: '/hotel', space: 'hotel.', draws: 0, tris: 0 },
-  'rail race': { path: '/rail-race', space: '', riding: true, draws: 0, tris: 0 },
+  park: { path: '/spawn', space: 'garden', draws: 610, tris: 3_664_324 },
+  library: { path: '/library', space: 'library', draws: 321, tris: 2_109_662 },
+  'reptile house': { path: '/reptile-house', space: 'reptileHouse', draws: 435, tris: 2_118_554 },
+  castle: { path: '/castle', space: 'castle.', draws: 410, tris: 2_629_482 },
+  hotel: { path: '/hotel', space: 'hotel.', draws: 336, tris: 1_799_960 },
+  // Riding, so the space is whatever the track passes through; `riding` is the guard.
+  'rail race': { path: '/rail-race', space: '', riding: true, draws: 2174, tris: 4_247_652 },
 };
 
 const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}&perf=1`;
