@@ -358,14 +358,26 @@ async function openPrizes(page: Page): Promise<string[]> {
 }
 
 async function waitPainted(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const faces = (window as unknown as { game: any }).game.bookReader.facesPainted() as unknown[];
-      return faces.length > 0 && faces.every((face) => face !== null);
-    },
-    undefined,
-    { timeout: PAINT_TIMEOUT_MS },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const faces = (window as unknown as { game: any }).game.bookReader.facesPainted() as unknown[];
+        return faces.length > 0 && faces.every((face) => face !== null);
+      },
+      undefined,
+      { timeout: PAINT_TIMEOUT_MS },
+    );
+  } catch (error) {
+    // Say which of the reader's stages it never got past (`LazyBookReader`).
+    const state = await page
+      .evaluate(() => {
+        const r = (window as unknown as { game: any }).game.bookReader;
+        const faces = r.facesPainted() as unknown[];
+        return `open=${r.isOpen} loaded=${r.loaded} book=${r.bookId} faces painted ${faces.filter((f) => f !== null).length}/${faces.length}`;
+      })
+      .catch((reason: unknown) => `state unreadable: ${String(reason).slice(0, 120)}`);
+    throw new Error(`the open book never finished painting within ${PAINT_TIMEOUT_MS} ms — ${state}`, { cause: error });
+  }
 }
 
 async function waitTurned(page: Page): Promise<void> {
@@ -992,11 +1004,41 @@ try {
 }
 
 const pageErrors: string[] = [];
+/**
+ * **What the page said and fetched, timestamped — printed when the check fails.**
+ *
+ * A failure here used to read "waitForFunction: Timeout 120000ms exceeded" and
+ * nothing else (#752's shard 9, 12 Nov 2026), which says the book never painted
+ * and not why: the reader is a lazy chunk now, fetched when the book opens, so
+ * a slow or failed fetch, a timed-out load and a slow warm-up all looked the
+ * same. Every console line, every failed request and every script that took
+ * over a second goes in here, against the run's own clock.
+ */
+const pageLog: string[] = [];
+const runStarted = Date.now();
+const logLine = (line: string): void => {
+  pageLog.push(`${((Date.now() - runStarted) / 1000).toFixed(1).padStart(6)} s  ${line}`);
+};
+function watchPage(target: Page): void {
+  target.on('console', (message) => logLine(`console.${message.type()}: ${message.text().slice(0, 300)}`));
+  target.on('requestfailed', (request) => logLine(`request failed: ${request.url()} — ${request.failure()?.errorText ?? '?'}`));
+  const started = new Map<unknown, number>();
+  target.on('request', (request) => {
+    started.set(request, Date.now());
+    if (/reader\/BookReader|BookReader-/.test(request.url())) logLine(`request: ${request.url()}`);
+  });
+  target.on('requestfinished', (request) => {
+    const took = Date.now() - (started.get(request) ?? Date.now());
+    started.delete(request);
+    if (took > 1000 || /reader\/BookReader|BookReader-/.test(request.url())) logLine(`fetched in ${took} ms: ${request.url()}`);
+  });
+}
 const browser = await chromium.launch({ channel: 'chromium', headless: true });
 try {
   const first = VIEWPORTS[0];
   const page = await browser.newPage({ viewport: { width: first.width, height: first.height } });
   page.on('pageerror', (error) => pageErrors.push(String((error as Error)?.stack ?? error)));
+  watchPage(page);
   // Every program link the page makes, counted from before its first script.
   await page.addInitScript(() => {
     const counter = { links: 0 };
@@ -1610,6 +1652,7 @@ try {
   try {
     const shelfPage = await shelfContext.newPage();
     shelfPage.on('pageerror', (error) => pageErrors.push(String((error as Error)?.stack ?? error)));
+    watchPage(shelfPage);
     await shelfPage.goto(`${BASE}${shelfPath}`, { waitUntil: 'domcontentloaded' });
     await shelfPage.waitForFunction(
       ({ x, z, tolerance }) => {
@@ -1729,6 +1772,8 @@ console.log(`(park seed ${SEED}; CHECK_BOOK_READER_SEED=n for another)`);
 if (fouls.length > 0) {
   console.error(`\ncheck:book-reader FAILED — ${fouls.length} problem(s)`);
   for (const foul of fouls) console.error(`  - ${foul}`);
+  console.error(`\nthe page, as it ran (${pageLog.length} line(s)):`);
+  for (const line of pageLog) console.error(`  ${line}`);
   process.exit(1);
 }
 console.log('\ncheck:book-reader passed');
