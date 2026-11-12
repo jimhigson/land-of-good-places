@@ -3,7 +3,7 @@ import { CAMERA_ZOOM_MIN } from '../../core/constants';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { FurnishedShelfBook } from './furnish';
 import { LIBRARY_LINES } from './libraryLines';
-import { glowBeaconBase, type LibraryOwl } from './LibraryOwl';
+import type { LibraryOwl } from './LibraryOwl';
 
 /**
  * **The owl shows her where the book is** — the camera's glance at the
@@ -129,7 +129,7 @@ export interface GlanceShot {
 
 /** What the glance reads of the library: the owl's words and the shelf. */
 export interface GlanceLibrary {
-  readonly owl: Pick<LibraryOwl, 'atDesk' | 'speaking' | 'lastSaid' | 'recommendedBookId' | 'bubble' | 'handle' | 'top'>;
+  readonly owl: Pick<LibraryOwl, 'atDesk' | 'speaking' | 'lastSaid' | 'recommendedBookId' | 'bubble' | 'handle' | 'top' | 'glowBeaconBase'>;
   readonly shelfBooks: readonly FurnishedShelfBook[];
   readonly roomRoot: Object3D;
   readonly playerIsInside: boolean;
@@ -271,7 +271,7 @@ export class BookGlance {
     // The beacon's base as `LibraryOwl.glow` puffs it: over the book, at its case's measured top.
     room.updateWorldMatrix(true, false);
     room.worldToLocal(SCRATCH_ROOM.copy(book));
-    base.set(SCRATCH_ROOM.x, glowBeaconBase(placed), SCRATCH_ROOM.z);
+    base.set(SCRATCH_ROOM.x, owl.glowBeaconBase(placed), SCRATCH_ROOM.z);
     room.localToWorld(base);
     column.copy(base);
     column.y += GLANCE_BEACON_COLUMN;

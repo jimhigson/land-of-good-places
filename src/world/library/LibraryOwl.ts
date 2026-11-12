@@ -673,6 +673,26 @@ export class LibraryOwl {
   // --------------------------------------------------------------- state
 
   /** At her desk — where her Talk zone is offered. */
+  /**
+   * **Her perch on the story chair** ({@link owlPerch}), and how far her
+   * bubble's tail stands over her head ({@link OWL_BUBBLE_OVER_HEAD}) — asked
+   * of her, not imported, by the camera and the glance that load with the park
+   * (`storyCamera.ts`, `bookGlance.ts`): this module is the reading room's lazy
+   * chunk's, and a value imported from it would carry the room into the boot.
+   */
+  get perch(): Readonly<RoomPoint> & { readonly facing: number } {
+    return owlPerch();
+  }
+
+  get bubbleOverHead(): number {
+    return OWL_BUBBLE_OVER_HEAD;
+  }
+
+  /** {@link glowBeaconBase}, asked of her for the same reason as {@link perch}. */
+  glowBeaconBase(placed: Readonly<FurnishedShelfBook>): number {
+    return glowBeaconBase(placed);
+  }
+
   get atDesk(): boolean {
     return this.atDeskFlag;
   }

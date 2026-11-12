@@ -7,7 +7,9 @@ import { KID_HIP_HEIGHT } from '../../art/models/kid';
 import { libraryCushionSize } from '../../art/models/libraryAssets';
 import { LibraryLighting } from './lighting';
 import { LibraryProps } from './props';
-import { furnishReadingRoom, StackFader, type FurnishedShelfBook } from './furnish';
+import { bookInstances, furnishReadingRoom, shelveFace, StackFader, type FurnishedShelfBook } from './furnish';
+import { createLibraryOwl } from '../../art/models/libraryCreatures';
+import { createLibraryDesk, createLibraryReadingLamp, libraryBookMaterial, libraryBookShapes } from '../../art/models/libraryRoomAssets';
 import { LibraryOwl, type OwlBystander } from './LibraryOwl';
 import { SecretLeaf } from './secretShelf';
 import { LibraryDen } from './LibraryDen';
@@ -48,6 +50,25 @@ import {
  * has run (`SpaceManager.changeToFurnished`), so she never stands in the room
  * before its solids are there.
  */
+
+/**
+ * **The reading room's models a storybook page draws** (`reader/pagePictures.ts`):
+ * handed over through this chunk rather than imported by the reader's, so no
+ * module is shared between two lazy chunks (see `pagePictures.ts`'s
+ * `libraryArt`).
+ */
+export const LIBRARY_PICTURE_ART = {
+  createLibraryOwl,
+  createLibraryDesk,
+  createLibraryReadingLamp,
+  libraryBookMaterial,
+  libraryBookShapes,
+  bookInstances,
+  shelveFace,
+};
+
+/** What a page may draw from the reading room. */
+export type LibraryPictureArt = typeof LIBRARY_PICTURE_ART;
 
 /** One of her two story cushions: where it is, which way she faces on it, and its drawn piece. */
 export interface PlayerSeat {

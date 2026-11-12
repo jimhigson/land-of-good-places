@@ -1,6 +1,6 @@
 import type { LazyPart } from './LazyPart';
 import { chunkPart } from './lazyChunks';
-import { SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
+import { SPACE_LIBRARY, SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
 import type * as ReptileHallModule from './reptileHouse/hall';
 import type * as FerrisShowModule from './ferrisWheel/show';
 import type * as LibraryRoomModule from './library/room';
@@ -45,5 +45,9 @@ export function interiorsToPreload(space: SpaceId | undefined, pathname: string)
   if (space === SPACE_REPTILE_HOUSE) parts.add(REPTILE_HALL);
   if (pathname === '/reptile-house' || pathname === '/tortoise-ride') parts.add(REPTILE_HALL);
   if (pathname === '/ferris') parts.add(FERRIS_SHOW);
+  if (space === SPACE_LIBRARY) parts.add(LIBRARY_ROOM);
+  // `/book?id=` too: a page that pictures the library draws the room's own
+  // owl and shelves (`LazyBookReader` loads the room with the reader).
+  if (pathname === '/library' || pathname === '/library-den' || pathname === '/book') parts.add(LIBRARY_ROOM);
   return [...parts];
 }
