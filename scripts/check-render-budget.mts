@@ -92,6 +92,7 @@ interface Measured {
   readonly tris: number;
   readonly drawsMin: number;
   readonly trisMin: number;
+  readonly gpu: string;
 }
 
 async function measure(page: Page, scene: Scene): Promise<Measured> {
@@ -112,7 +113,28 @@ async function measure(page: Page, scene: Scene): Promise<Measured> {
   const from = Number(await settledFrom.jsonValue());
   await page.waitForFunction(
     (until) => ((window as unknown as { __perf: { frameCount: number } }).__perf.frameCount >= until),
-    from + SETTLE_FRAMES + SAMPLE_FRAMES,
+    from + SETTLE_FRAMES,
+    { timeout: BOOT_TIMEOUT_MS, polling: 200 },
+  );
+  // **Then stop the clock**, so the sample is of one moment, not of how fast
+  // this machine is. Frames are counted, but game time per frame is not: on
+  // a GPU 20 frames are a sixth of a second, on CI's software renderer
+  // (clamped at `MAX_FRAME_DELTA`) they are seconds — long enough for the Rail
+  // Race's 3 s countdown to end and the cart to be somewhere else. With the
+  // clock frozen the frame still renders every pass; only the world holds
+  // still. `window.game` is the dev server's (`main.ts`), which is what the
+  // served checks run against.
+  const frozen = await page.evaluate(() => {
+    const g = (window as unknown as { game?: { timeScale: number } }).game;
+    if (!g) return false;
+    g.timeScale = 0;
+    return true;
+  });
+  if (!frozen) throw new Error('no window.game to freeze — run against the dev server (`check:served-render-budget`), not a production build');
+  const sampleFrom = await page.evaluate(() => (window as unknown as { __perf: { frameCount: number } }).__perf.frameCount);
+  await page.waitForFunction(
+    (until) => ((window as unknown as { __perf: { frameCount: number } }).__perf.frameCount >= until),
+    sampleFrom + SAMPLE_FRAMES,
     { timeout: BOOT_TIMEOUT_MS, polling: 200 },
   );
   return page.evaluate((n) => {
@@ -124,6 +146,7 @@ async function measure(page: Page, scene: Scene): Promise<Measured> {
     return {
       space: String(context['space']),
       riding: context['riding'] === true,
+      gpu: String(context['gpu']),
       draws: Math.max(...frames.map((f) => f.draws)),
       tris: Math.max(...frames.map((f) => f.tris)),
       drawsMin: Math.min(...frames.map((f) => f.draws)),
@@ -135,7 +158,11 @@ async function measure(page: Page, scene: Scene): Promise<Measured> {
 async function runScene(name: string, scene: Scene): Promise<{ result?: Measured; error?: string }> {
   // A fresh browser per scene: two parks in one Chromium under a software
   // renderer starve each other (check-deep-links.mts, `runInFreshBrowser`).
-  const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--mute-audio'] });
+  // SWIFTSHADER=1 forces the software rasteriser CI's runners have, so a
+  // local run can show the counts are the same there (they are counts, not
+  // timings — that is the point of this check).
+  const args = ['--mute-audio', ...(process.env.SWIFTSHADER === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])];
+  const browser = await chromium.launch({ channel: 'chromium', headless: true, args });
   const errors: string[] = [];
   const seeds: number[] = [];
   try {
@@ -197,6 +224,7 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
     `   tris ${String(result.tris).padStart(9)} (min ${result.trisMin}) / ceiling ${triCeiling}   ${secs} s`;
   rows.push(row);
   say(row);
+  if (rows.length === 1) say(`renderer: ${result.gpu}`);
   if (MEASURE) continue;
   if (!(result.draws > 0 && result.tris > 0)) {
     failures.push(`${name}: counted ${result.draws} draws and ${result.tris} triangles — the probe is not counting, so nothing here is measured`);
