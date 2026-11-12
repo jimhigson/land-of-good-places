@@ -84,7 +84,7 @@ const MiB = 1024 * 1024;
 /** No single boot chunk above this: three-fifths of the precache limit. */
 const BOOT_CHUNK_BUDGET = Math.round(PRECACHE_FILE_LIMIT_BYTES * 0.6);
 /** The whole boot set, every chunk together. */
-const BOOT_SET_BUDGET = Math.round(5.5 * MiB);
+const BOOT_SET_BUDGET = Math.round(5 * MiB);
 
 interface ChunkFacts {
   readonly fileName: string;
