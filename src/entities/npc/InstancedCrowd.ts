@@ -124,12 +124,14 @@ const cullMatrix = new Matrix4();
 /** Every crowd not yet disposed — what {@link cullCrowdsFor} walks. */
 const LIVE_CROWDS = new Set<InstancedCrowd>();
 /**
- * Metres added to each part's packed bounding sphere. The sphere is exact for
- * the geometry as committed; this is slack for nothing in particular — no crowd
- * material displaces vertices — so it is kept to a hand's breadth, where it
- * cannot make a whole part's culling meaningless.
+ * Metres added to every sphere the crowd is culled by (a part's packed bounds,
+ * a child's own sphere, a part tested on its own). The spheres are exact for
+ * the geometry as committed; this is slack against float32 rounding in the
+ * instance buffer and nothing else — no crowd material displaces vertices — so
+ * it is a hand's breadth, where it cannot make culling meaningless.
+ * `check:crowd-cull` reads it rather than keeping a number of its own.
  */
-const BOUNDS_MARGIN = 0.1;
+export const CROWD_BOUNDS_MARGIN = 0.1;
 
 export class InstancedCrowd {
   readonly group = new Group();
@@ -303,7 +305,7 @@ export class InstancedCrowd {
       this.memberSphere[o] = memberScratch.center.x;
       this.memberSphere[o + 1] = memberScratch.center.y;
       this.memberSphere[o + 2] = memberScratch.center.z;
-      this.memberSphere[o + 3] = any ? memberScratch.radius + BOUNDS_MARGIN : -1;
+      this.memberSphere[o + 3] = any ? memberScratch.radius + CROWD_BOUNDS_MARGIN : -1;
     }
     for (let p = 0; p < partTotal; p += 1) {
       const part = this.parts[p];
@@ -320,7 +322,7 @@ export class InstancedCrowd {
    * `renderer.render` — `cullCrowdsFor` is how `Game` does it.
    *
    * A child is kept whole if her own sphere (every part she shows, plus
-   * {@link BOUNDS_MARGIN}) touches the frustum, so a child half over the screen
+   * {@link CROWD_BOUNDS_MARGIN}) touches the frustum, so a child half over the screen
    * edge is drawn complete — culling is per child, never per part.
    *
    * **Shadow-casting parts are left alone.** The same buffer feeds the shadow
@@ -344,7 +346,11 @@ export class InstancedCrowd {
         .set(this.memberSphere[o]!, this.memberSphere[o + 1]!, this.memberSphere[o + 2]!)
         .applyMatrix4(toWorld);
       cullSphere.radius = radius * scale;
-      this.keep[m] = frustum.intersectsSphere(cullSphere) ? 1 : 0;
+      const inside = sphereSide(frustum, cullSphere);
+      // Wholly in or wholly out is decided by the child's own sphere; one
+      // straddling the frustum asks her parts, so a child whose union sphere
+      // pokes into the frame with nothing of her in it is not drawn.
+      this.keep[m] = inside === 1 ? 1 : inside === -1 ? 0 : this.anyPartMeets(frustum, m, toWorld, scale) ? 1 : 0;
     }
     for (let p = 0; p < this.parts.length; p += 1) {
       const part = this.parts[p];
@@ -354,6 +360,21 @@ export class InstancedCrowd {
         this.pack(p, v, this.keep);
       }
     }
+  }
+
+  /** Whether any part member `m` shows meets `frustum`, each part padded by {@link CROWD_BOUNDS_MARGIN}. */
+  private anyPartMeets(frustum: Frustum, m: number, toWorld: Matrix4, scale: number): boolean {
+    const partTotal = this.parts.length;
+    for (let p = 0; p < partTotal; p += 1) {
+      const at = m * partTotal + p;
+      const part = this.parts[p];
+      if (!part || this.committedChoice[at]! < 0) continue;
+      scratchMatrix.fromArray(this.committedMatrix, at * 16);
+      cullSphere.copy(geometrySphereOf(part.source)).applyMatrix4(scratchMatrix).applyMatrix4(toWorld);
+      cullSphere.radius += CROWD_BOUNDS_MARGIN * scale;
+      if (frustum.intersectsSphere(cullSphere)) return true;
+    }
+    return false;
   }
 
   /**
@@ -394,7 +415,7 @@ export class InstancedCrowd {
       else sphere.union(scratchSphere);
       count += 1;
     }
-    if (count > 0) sphere.radius += BOUNDS_MARGIN;
+    if (count > 0) sphere.radius += CROWD_BOUNDS_MARGIN;
     else sphere.makeEmpty();
     mesh.count = count;
     mesh.visible = count > 0;
@@ -439,6 +460,17 @@ export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
     crowd.group.updateWorldMatrix(true, false);
     crowd.cullTo(cullFrustum);
   }
+}
+
+/** 1 if `sphere` is wholly inside `frustum`, -1 if wholly outside, 0 if it straddles a plane. */
+function sphereSide(frustum: Frustum, sphere: Sphere): number {
+  let side = 1;
+  for (const plane of frustum.planes) {
+    const distance = plane.distanceToPoint(sphere.center);
+    if (distance < -sphere.radius) return -1;
+    if (distance < sphere.radius) side = 0;
+  }
+  return side;
 }
 
 function rootOf(object: Object3D): Object3D {

@@ -62,7 +62,7 @@ import {
 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
-import { InstancedCrowd, cullCrowdsFor } from '../src/entities/npc/InstancedCrowd.ts';
+import { CROWD_BOUNDS_MARGIN, InstancedCrowd, cullCrowdsFor } from '../src/entities/npc/InstancedCrowd.ts';
 import { CAMERA_ZOOM_MAX } from '../src/core/constants.ts';
 import { CASTLE_FLOORS } from '../src/world/building/floors.ts';
 import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
@@ -221,6 +221,7 @@ function enclosingSphere(geometry: BufferGeometry): Sphere {
   return sphere;
 }
 const partSphere = new Sphere();
+const nearSphere = new Sphere();
 const slotMatrix = new Matrix4();
 /**
  * Does a slot below `count` hold this matrix? Compared at float32 precision —
@@ -274,7 +275,7 @@ function measure(label: string, kind: 'park' | 'interior'): void {
   const shadow = sunLight.shadow.getFrustum();
 
   const onScreen = new Map<InstancedMesh, number>();
-  const membersOnScreen = new Set<object>();
+  const membersNearScreen = new Set<object>();
   for (const crowd of crowds) {
     const { parts, members } = insides(crowd);
     for (const member of members) {
@@ -289,9 +290,14 @@ function measure(label: string, kind: 'park' | 'interior'): void {
         if (!mesh || !proxy || !visibleChain(mesh)) continue;
         worldMatrix.multiplyMatrices(mesh.matrixWorld, proxy.matrixWorld);
         partSphere.copy(enclosingSphere(part.source.geometry)).applyMatrix4(worldMatrix);
+        // The "drawn for nobody" side is judged with the crowd's own margin and
+        // 2 cm more, so float32 rounding in the buffer can never turn a child
+        // the renderer was right to keep into a failure, nor the reverse.
+        nearSphere.copy(partSphere);
+        nearSphere.radius += CROWD_BOUNDS_MARGIN + 0.02;
+        if (view.intersectsSphere(nearSphere)) membersNearScreen.add(member);
         if (view.intersectsSphere(partSphere)) {
           partsOnScreen += 1;
-          membersOnScreen.add(member);
           onScreen.set(mesh, (onScreen.get(mesh) ?? 0) + 1);
           if (!passes(mesh, view)) {
             const s = mesh.boundingSphere ? mesh.boundingSphere.clone().applyMatrix4(mesh.matrixWorld) : null;
@@ -351,7 +357,7 @@ function measure(label: string, kind: 'park' | 'interior'): void {
           const owner = members.find((m) => committed.get(m)?.[p] === v && sameTranslation(slotMatrix, m.proxies[p]!.matrixWorld));
           if (!owner) {
             failures.push(`${label}: ${mesh.name} slot ${i} holds no committed child`);
-          } else if (!membersOnScreen.has(owner)) {
+          } else if (!membersNearScreen.has(owner)) {
             t.wasteTris += trisOf(mesh);
             if (t.wasteReports < 5) {
               t.wasteReports += 1;
@@ -417,7 +423,8 @@ for (const reach of [0.92, 1.0, 1.08]) {
   }
 }
 
-const ROUNDS = Number(process.env['ROUNDS'] ?? 4);
+/** Rounds alternate odd and even children, so two put every child at every edge. */
+const ROUNDS = Number(process.env['ROUNDS'] ?? 2);
 const kids = world.npcs.all;
 const target = new Vector3();
 const focus = new Vector3();
