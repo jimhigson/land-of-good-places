@@ -24,6 +24,28 @@ No PR: the integrator merges this into `perf/120fps`. `origin/perf/120fps-base` 
 - The sphere `InstancedCrowd` keeps round a child is ~2.0–2.4 × her `height`
   (headless, scale 1) — the thresholds in `instancedLod.ts` are on that sphere.
 
+## NOT verified — do these first
+
+- **`check:crowd-cull` has never completed on this branch.** Its park acceptance
+  loop for seed 5 did not finish in 7 minutes at load average 38 and was killed.
+  The edits to it (two meshes per variant, the three new assertions, both new
+  mutations) are type-checked only; neither new guard has been watched go red.
+- **Nothing was measured in the game.** No park-spawn or `/rail-race` triangle
+  counts, no in-game screenshots; the `Game.ts` hunk and `?lod=off` were never
+  exercised. Counts and screenshots came from a standalone page (9 children,
+  one per hairstyle, own lights): crowd main-pass triangles 161,528 -> 35,352,
+  frame 207,466 -> 45,956, draw calls 54 -> 54; 214 instances in every state.
+- Pets and banquet diners (the other `InstancedCrowd` users) now get a far
+  level too and were never looked at.
+
+## Seen wrong in the far level (visible)
+
+- **Spiky hair** drops from a dozen spikes to about three blunt ones — visible
+  in a 4x crop even at 23 px tall, obvious at 60-110 px. Vertex clustering
+  merges the cone tips. Needs a gentler ratio for that part or a tip-keeping
+  rule before this is "indistinguishable".
+- Speckle on the sandals and a stray sliver by one bag strap at 60-110 px.
+
 ## Not done
 
 - The shadow pass draws full detail for a child the main pass is drawing at full
