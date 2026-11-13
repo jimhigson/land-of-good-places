@@ -250,7 +250,10 @@ try {
 }
 
 const failures: string[] = [];
-const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--mute-audio'] });
+// SWIFTSHADER=1 forces the software rasteriser CI's runners have, as
+// check:render-budget and check:static-freeze do, so a local run can see CI's frame.
+const args = ['--mute-audio', ...(process.env.SWIFTSHADER === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])];
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args });
 try {
   const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
