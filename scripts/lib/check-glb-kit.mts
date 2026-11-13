@@ -57,6 +57,13 @@ export interface GlbKitCheck {
   readonly fileName: string;
   /** The generated module's basename, for messages: `libraryGlb.ts`. */
   readonly moduleName: string;
+  /**
+   * The bytes the module must decode to, when it ships a piece of the file
+   * rather than the whole of it (`pack:library` cuts `library.glb` in two;
+   * `check-library-glb.mts` cuts it again with the same `splitGlb.mts` and
+   * passes each piece here). Omitted, the module must be the file itself.
+   */
+  readonly expected?: Uint8Array;
   /** The module's base64 constant. */
   readonly base64: string;
   /**
@@ -127,7 +134,7 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
   // ----------------------------------------------- 1. the module is the file
 
   const shipped = new Uint8Array(base64ToArrayBuffer(kit.base64));
-  const onDisk = new Uint8Array(readFileSync(kit.glbPath));
+  const onDisk = kit.expected ?? new Uint8Array(readFileSync(kit.glbPath));
   let firstDifference = -1;
   for (let i = 0; i < Math.max(shipped.length, onDisk.length); i += 1) {
     if (shipped[i] !== onDisk[i]) {
@@ -140,7 +147,7 @@ export async function checkGlbKit(kit: GlbKitCheck): Promise<void> {
     `${kit.moduleName} (${shipped.length} B) is not ${kit.fileName} (${onDisk.length} B) — they differ ` +
       `from byte ${firstDifference}. Run \`${kit.packScript}\` on the committed export.`,
   );
-  notes.push(`  ${kit.moduleName} decodes to ${kit.fileName} exactly (${shipped.length} bytes)`);
+  notes.push(`  ${kit.moduleName} decodes to ${kit.fileName}${kit.expected ? "'s piece" : ''} exactly (${shipped.length} bytes)`);
 
   // ------------------------------------------------- 2. the export's own rules
 

@@ -276,11 +276,13 @@ import { bookcaseCentre, READABLE_LEAN, READABLE_PROUD } from '../src/world/libr
 import { SHELF_BOOK_ZONE_PREFIX, SHELF_BOOKS, shelfBookZoneId } from '../src/world/library/shelfBooks.ts';
 import { Selection } from '../src/world/Selection.ts';
 import { InteractRouter } from '../src/world/InteractRouter.ts';
-import { buildLibraryDenShell, buildReadingRoomShell, libraryDenGap, LIBRARY_SECRET_BOOK_ZONE } from '../src/world/library/shell.ts';
+import { libraryDenGap, LIBRARY_SECRET_BOOK_ZONE } from '../src/world/library/shell.ts';
+import { buildLibraryDenShell, buildReadingRoomShell } from '../src/world/library/roomShell.ts';
 import { SECRET_LEAF_OPEN, SLIDE, SLIDE_SECONDS, SWING_END, SWING_SECONDS, TWINKLE_PERIOD } from '../src/world/library/secretShelf.ts';
 import { ART } from '../src/art/style/artPalette.ts';
 import { floorIrradiance, LIBRARY_LIGHT_BUDGET } from '../src/world/library/lighting.ts';
-import { libraryArmchairSize, libraryBookcaseSize, libraryCushionSize, libraryDeskSize } from '../src/art/models/libraryAssets.ts';
+import { libraryBookcaseSize, libraryCushionSize } from '../src/art/models/libraryAssets.ts';
+import { libraryArmchairSize, libraryDeskSize } from '../src/art/models/libraryRoomAssets.ts';
 import {
   createLibraryBookPile,
   createLibraryCat,

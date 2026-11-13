@@ -490,7 +490,10 @@ export class NpcSystem implements GameSystem {
   private playerStationaryFor = 0;
   private readonly lastPlayerPosition = new Vector3();
   /** Scratch distance-to-camera per character, reused every frame — see `updateLabels`. */
-  private readonly labelDistances: Float32Array;
+  private labelDistances: Float32Array;
+  /** What residents added after construction are built against — see {@link addResidents}. */
+  private readonly residentCollision: CollisionWorld;
+  private residentGround: GroundSampler | null;
   /** Character indices, kept sorted nearest-first every frame. */
   private readonly labelOrder: number[] = [];
   private readonly playerPosition = new Vector3();
@@ -832,33 +835,9 @@ export class NpcSystem implements GameSystem {
     // park's two blob pets to two different children. Deliberately on their own
     // `Rng` per resident, never the park's `rng`, for the same reason — see
     // `ResidentSpec` and the seed-stream note in the constructor's signature.
-    for (const spec of residents) {
-      const rng = new Rng(spec.seed);
-      const start = spec.waypoints[0] ?? { x: 0, z: 0 };
-      const character = new NpcCharacter(
-        spec.avatar,
-        spec.driver
-          ? spec.driver(rng)
-          : new WaypointDriver({
-              rng,
-              points: spec.waypoints,
-              ...(spec.pace !== undefined ? { pace: spec.pace } : {}),
-            }),
-        collision,
-        start.x,
-        start.z,
-        rng.range(-Math.PI, Math.PI),
-        spec.name,
-      );
-      character.groundSampler = groundSampler;
-      // The constructor could only guess with `terrainHeight`, which knows
-      // nothing about a floor plate six hundred metres from the park — see
-      // `NpcCharacter.settle` and `ResidentSpec.floorY`.
-      character.settle(spec.floorY ?? 0);
-      character.setWalkPhase(rng.range(0, TAU));
-      spec.avatar.setExpression('neutral');
-      this.characters.push(character);
-    }
+    this.residentCollision = collision;
+    this.residentGround = groundSampler;
+    for (const spec of residents) this.addResident(spec);
 
     // Sized once everybody exists, residents included: `updateLabels` walks
     // `characters` and writes one distance per index, so a short array here
@@ -868,7 +847,49 @@ export class NpcSystem implements GameSystem {
 
   /** Installs the building's ground sampler, so the ground floor is walkable. */
   setGroundSampler(sampler: GroundSampler): void {
+    this.residentGround = sampler;
     for (const character of this.characters) character.groundSampler = sampler;
+  }
+
+  /**
+   * **Residents who arrive after the crowd was made** — the guests of an
+   * interior fetched when she first walks in (the hotel's, `world/interiors.ts`).
+   * Built exactly as the constructor builds its own residents, appended after
+   * everybody, on their own seeded streams, so nobody already here changes.
+   * Residents carry no name label, so the label arrays need nothing new; the
+   * per-character scratch is resized.
+   */
+  addResidents(residents: readonly ResidentSpec[]): void {
+    for (const spec of residents) this.addResident(spec);
+    this.labelDistances = new Float32Array(this.characters.length);
+  }
+
+  private addResident(spec: ResidentSpec): void {
+    const rng = new Rng(spec.seed);
+    const start = spec.waypoints[0] ?? { x: 0, z: 0 };
+    const character = new NpcCharacter(
+      spec.avatar,
+      spec.driver
+        ? spec.driver(rng)
+        : new WaypointDriver({
+            rng,
+            points: spec.waypoints,
+            ...(spec.pace !== undefined ? { pace: spec.pace } : {}),
+          }),
+      this.residentCollision,
+      start.x,
+      start.z,
+      rng.range(-Math.PI, Math.PI),
+      spec.name,
+    );
+    character.groundSampler = this.residentGround;
+    // The constructor could only guess with `terrainHeight`, which knows
+    // nothing about a floor plate six hundred metres from the park — see
+    // `NpcCharacter.settle` and `ResidentSpec.floorY`.
+    character.settle(spec.floorY ?? 0);
+    character.setWalkPhase(rng.range(0, TAU));
+    spec.avatar.setExpression('neutral');
+    this.characters.push(character);
   }
 
   /**

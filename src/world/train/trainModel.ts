@@ -148,11 +148,10 @@ export function createLocomotive(): Locomotive {
   // --- funnel --------------------------------------------------------------
   const funnel = solidMesh(new CylinderGeometry(0.2, 0.16, 0.62, 14), darkMaterial, true);
   funnel.position.set(0, CAR_FLOOR_Y + 1.4, 1.25);
-  root.add(funnel);
 
   const funnelRim = solidMesh(new CylinderGeometry(0.27, 0.21, 0.16, 14), trimMaterial);
   funnelRim.position.set(0, CAR_FLOOR_Y + 1.72, 1.25);
-  root.add(funnelRim);
+  thing(root, 'funnel', funnel, funnelRim);
 
   const funnelTip = new Vector3(0, LOCO_BODY_TOP_Y, 1.25);
 
@@ -218,7 +217,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
     darkMaterial,
   );
   floor.position.y = CAR_FLOOR_Y - 0.08;
-  root.add(floor);
+  const tub = thing(root, 'tub', floor);
 
   // Open-topped sides, low enough to see the passengers over.
   const sideHeight = 0.44;
@@ -229,7 +228,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
       true,
     );
     wall.position.set(side * (BODY_HALF_WIDTH - 0.06), CAR_FLOOR_Y + sideHeight / 2, 0);
-    root.add(wall);
+    tub.add(wall);
   }
   for (const end of [-1, 1] as const) {
     const wall = solidMesh(
@@ -237,7 +236,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
       bodyMaterial,
     );
     wall.position.set(0, CAR_FLOOR_Y + sideHeight / 2, end * (CARRIAGE_LENGTH / 2 - 0.06));
-    root.add(wall);
+    tub.add(wall);
   }
 
   // A cream rubbing strip along the top of each side.
@@ -247,7 +246,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
       trimMaterial,
     );
     strip.position.set(side * (BODY_HALF_WIDTH - 0.06), CAR_FLOOR_Y + sideHeight, 0);
-    root.add(strip);
+    tub.add(strip);
   }
 
   // --- two bench seats, back to back ---------------------------------------
@@ -276,7 +275,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
     CAR_FLOOR_Y + sideHeight + 0.2,
     -(CARRIAGE_LENGTH / 2 - 0.14),
   );
-  root.add(lanternPost);
+  const lanternThing = thing(root, 'lantern', lanternPost);
 
   const lanternMaterial = new MeshBasicMaterial({ color: PALETTE.fairyWarm, fog: true });
   const lantern = new Mesh(new SphereGeometry(0.1, 10, 8), lanternMaterial);
@@ -285,7 +284,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
     CAR_FLOOR_Y + sideHeight + 0.44,
     -(CARRIAGE_LENGTH / 2 - 0.14),
   );
-  root.add(lantern);
+  lanternThing.add(lantern);
   lamps.push(lanternMaterial);
 
   // No hub caps on the carriages: eight more little cylinders nobody looks at.
@@ -295,6 +294,23 @@ export function createCarriage(colour: number, index: number): TrainCar {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/**
+ * **One thing on a car, as one body** — the meshes that make it, gathered in a
+ * group of their own under the car's root. `ParkTrain` gives every child of a
+ * car's root one solid, shaped from what that child draws (`trainBodies.ts`):
+ * a carriage's tub — its floor, its four sides and the cream strips along
+ * their tops — is one thing whose top is its rim, not seven; the boiler and
+ * its bands are one. A thing drawn as one mesh needs no group: the mesh is a
+ * child of the root already.
+ */
+function thing(root: Group, name: string, ...meshes: Mesh[]): Group {
+  const group = new Group();
+  group.name = name;
+  for (const mesh of meshes) group.add(mesh);
+  root.add(group);
+  return group;
+}
 
 /**
  * A pair of wheels at each of `positions` along the car, with a bright hub cap

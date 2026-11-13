@@ -1,4 +1,5 @@
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { registerDoorFrameSolids, type PlacedDoorFrame } from '../../art/models/doorFrames';
 import { castleFloorBounds } from './floorBounds';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
@@ -33,7 +34,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type CompanionRide, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
 import type { OpenAreaPoint } from '../dismount';
 
 import { BallPit } from './BallPit';
@@ -100,6 +101,8 @@ import {
   ENTRANCE_MIN_X,
   GROWN_UP_X,
   GROWN_UP_Z,
+  CASTLE_DOOR_ARRIVAL_IN,
+  CASTLE_DOOR_ARRIVAL_X,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
@@ -671,6 +674,8 @@ export class Building implements GameSystem {
   readonly interiorRoot = new Group();
 
   private readonly shell = new BuildingShell('interior');
+  /** The doorway frame round the ground floor's way out (`doorFrames.ts`). */
+  readonly exitDoorFrame: PlacedDoorFrame;
   private readonly facade = new BuildingShell('facade');
   /** The facade, the ginormous slide, and the grown-up while they ride it. */
   /**
@@ -913,6 +918,16 @@ export class Building implements GameSystem {
     // paying for itself — a wall on the mall can no longer be a wall in the
     // great hall.
     for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
+    // The ground floor's doorway frame (`doorFrames.ts`), solid beside the walls.
+    const exitFrame = this.shell.exitFrame;
+    if (!exitFrame) throw new Error('Building: the interior shell built no doorway frame');
+    this.exitDoorFrame = {
+      frame: exitFrame,
+      solids: registerDoorFrameSolids(collision, exitFrame, floorX(CASTLE_MALL, 0), floorZ(CASTLE_MALL, 0), BUILDING_BASE_Y),
+      originX: floorX(CASTLE_MALL, 0),
+      originZ: floorZ(CASTLE_MALL, 0),
+      originY: BUILDING_BASE_Y,
+    };
 
     // **And the banquet is solid** (#453). Jim, having walked the hall: *"you
     // can walk straight through the tables — they should be solid."*
@@ -1475,7 +1490,7 @@ export class Building implements GameSystem {
    * there and her first sight of the market is the back of a wall.
    */
   private enterInterior(): void {
-    this.stepThroughDoor(CASTLE_MALL, 0, CASTLE_MALL.halfZ - 6.5, Math.PI);
+    this.stepThroughDoor(CASTLE_MALL, CASTLE_DOOR_ARRIVAL_X, CASTLE_MALL.halfZ - CASTLE_DOOR_ARRIVAL_IN, Math.PI);
   }
 
   /**
@@ -1651,8 +1666,8 @@ export class Building implements GameSystem {
       // screenshot rather than by trusting the link.
       this.stepThroughDoor(
         floor,
-        at ? at.x : 0,
-        at ? at.z : floor.halfZ - 6.5,
+        at ? at.x : CASTLE_DOOR_ARRIVAL_X,
+        at ? at.z : floor.halfZ - CASTLE_DOOR_ARRIVAL_IN,
         Math.PI,
       );
     });
@@ -1870,7 +1885,6 @@ export class Building implements GameSystem {
    * splash, its companions and its camera, just sooner.
    */
   private readonly slideHolder: RideHolder = (() => {
-    const building = this;
     return {
       holding: 'a slide',
       letGo: () => {
@@ -1878,13 +1892,11 @@ export class Building implements GameSystem {
         const player = this.player;
         if (ride && player) this.finishRide(ride, player);
       },
-      // Down the ginormous slide her companion rides the chute behind her,
-      // carried by the ride itself (`ridePetsDownSlide`, #468); a little
-      // slide has room for nobody but her, and it rides in her backpack.
-      // Asked as she boards, once `startRide` has said which slide it is.
-      get companion(): CompanionRide {
-        return building.ride?.giant === true ? 'carried by the ride' : 'in her backpack';
-      },
+      // Down any slide her companion rides the chute behind her, carried by
+      // the ride itself (`ridePetsDownSlide`, #468) — the ginormous one and
+      // the little ones alike (Jim, 19 Oct 2026: *"one rides on the seat
+      // alongside the player"*: on a slide, the chute behind her is the seat).
+      companion: 'carried by the ride',
     };
   })();
 
@@ -2083,7 +2095,9 @@ export class Building implements GameSystem {
     // arrive somewhere the ride is not. The seats come from
     // `slide/petRiders.ts`; the parade owns the animals, and this file never
     // touches one.
-    if (ride.giant) this.chaseCompanions = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
+    // Down a little slide too: her companion comes down behind her on every chute.
+    const riders = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
+    if (ride.giant) this.chaseCompanions = riders;
 
     if (ride.giant && this.grownUpComing) {
       // In front, and lying down. Clamped to the end of the chute so the
