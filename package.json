@@ -202,6 +202,8 @@
     "check:render-budget": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-render-budget.mts",
     "check:served-cull-audit": "pnpm run with-dev-server pnpm run check:cull-audit",
     "check:cull-audit": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cull-audit.mts",
+    "check:dom-churn": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-dom-churn.mts",
+    "check:served-dom-churn": "pnpm run with-dev-server pnpm run check:dom-churn",
     "check:served-deep-links": "pnpm run with-dev-server pnpm run check:deep-links",
     "build:parks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/build-parks.mts",
     "check:prebuilt-park": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-prebuilt-park.mts",
