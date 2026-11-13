@@ -90,6 +90,14 @@
  *   gets off — 4c's every exit must find it missing.
  * - `pets-count-aboard`: her companion counted as standing on the line while
  *   it rides beside her — 4d's train must never leave with her aboard.
+ * - `seat-says-backpack`: the breakfast chair says her line goes in her
+ *   backpack, as a seat that forgot to say `'not a ride'` once did — 4c must
+ *   find it against `NOT_RIDES`, whatever the chair declares.
+ * - `bus-lets-go-early`: the cat bus lets her companion out of its seat as she
+ *   starts walking, as it did before PR #742's QA, while she is still outside
+ *   the park's bounds — 4c's stepping off must find it flung.
+ * - `bus-in-backpack`: the cat bus with no seat for her companion, as it was
+ *   before PR #722's follow-up — 4c must find a ride with nobody beside her.
  */
 import './headless-canvas.mjs';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -105,7 +113,7 @@ import { NAV_CELL } from '../src/world/NavGrid.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { feetSampler } from '../src/world/standing.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
-import { terrainHeight } from '../src/world/terrain.ts';
+import { altitudeAt, terrainHeight } from '../src/world/terrain.ts';
 import { DAY_LENGTH_SECONDS, DAY_START_TIME, PARADE_MEMBER_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   BREAKFAST,
@@ -426,13 +434,39 @@ world.attachPlayer(player as never);
 // Her pets' parade, built and wired as `Game` does: one parade, introduced to
 // the park in `Game`'s one call (`World.attachParade`), routed by her own
 // router (below, once it exists).
+// `bus-in-backpack` (see the header): the cat bus's own word changed before
+// her line first meets it, since she is aboard it before this check's first frame.
+if (process.env['EXITS_PROVE'] === 'bus-in-backpack') {
+  const holder = (world.entrance.arrival as unknown as { holder: { companion: unknown } } | null)?.holder;
+  if (!holder) throw new Error('bus-in-backpack: no cat bus to change');
+  holder.companion = 'in her backpack';
+}
 const parade = new Parade(player as never, collision, camera);
 scene.add(parade.group);
 world.attachParade(parade);
 /** The red proofs (see the header): each breaks one thing 4c or 4d is for. */
 const PROVE = process.env['EXITS_PROVE'] ?? '';
-const PROOFS = ['pets-stay-out', 'pets-stay-in', 'pets-count-aboard'];
+const PROOFS = ['pets-stay-out', 'pets-stay-in', 'pets-count-aboard', 'seat-says-backpack', 'bus-in-backpack', 'bus-lets-go-early'];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`EXITS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
+if (PROVE === 'bus-lets-go-early') {
+  const arrival = world.entrance.arrival as unknown as { companionSeatPose(seat: unknown): boolean; playerPose: { walking: boolean } } | null;
+  if (!arrival) throw new Error('bus-lets-go-early: no cat bus to change');
+  const pose = arrival.companionSeatPose.bind(arrival);
+  arrival.companionSeatPose = (seat) => (arrival.playerPose.walking ? false : pose(seat));
+}
+if (PROVE === 'seat-says-backpack') {
+  // A holder's own word changed, the way a forgotten declaration once read:
+  // the breakfast chair saying the backpack.
+  // On her own, as the placement recorder above wraps it: the instance's own `beginRide`.
+  const begin = player.beginRide.bind(player);
+  const changed = 'a breakfast chair';
+  const swapped = new Map<RideHolder, RideHolder>();
+  player.beginRide = (holder: RideHolder): void => {
+    if (holder.holding !== changed) return begin(holder);
+    if (!swapped.has(holder)) swapped.set(holder, { holding: holder.holding, letGo: () => holder.letGo(), companion: 'in her backpack' });
+    return begin(swapped.get(holder)!);
+  };
+}
 if (PROVE === 'pets-stay-out') {
   (Parade.prototype as unknown as { embark: (holder: RideHolder) => void }).embark = function (this: { aboard: unknown }, holder: RideHolder) {
     this.aboard = { holder, ride: 'not a ride', companion: null, stays: true };
@@ -489,38 +523,123 @@ function tick(seconds: number, input = still): void {
 // ------------------------------------------------------------------ 4c. her companions on every ride (the watch)
 
 /** How many of her line were out the last frame she stood on her own feet — what each ride must give back. */
-let lineOnFoot = 0;
+/** `null` until she has stood on her own feet once: the cat bus has her before the first frame here, her whole line with her. */
+let lineOnFoot: number | null = null;
 /** The holder that has her now, how long it has, and whether her line has been asked about it. */
 let boarding: { holder: RideHolder; riding: number; asked: boolean; lineBefore: number } | null = null;
 /** Every holder her line was asked about, once each by name, with the answer. */
 const companionsAsked = new Map<string, string>();
+/**
+ * **Every holder that is a seat, not a ride** — by the name it gives
+ * (`RideHolder.holding`). Nothing carries her anywhere in one, and each place
+ * looks after her line itself (their beds, their table), so her whole line
+ * stays out. Every holder not named here is a ride: one of her line rides
+ * beside her, the rest in her backpack. A new seat is added here by hand, on
+ * purpose: this list, not the holder's own declaration, is what is checked.
+ */
+const NOT_RIDES: ReadonlySet<string> = new Set([
+  'a breakfast chair',
+  'a hotel bed',
+  'a painting',
+  'a seat at the banquet',
+  'a story cushion',
+  'a tree',
+  'a window view',
+  'the keychain rack',
+]);
 /** How long into a ride her line is asked: past the poof into her backpack, and the companion's first frame in its seat. */
 const COMPANIONS_ASKED_AFTER = 0.3;
 /** Every frame: when a holder takes her, her line is asked once she has been on it {@link COMPANIONS_ASKED_AFTER}. */
 function watchCompanions(dt: number): void {
+  watchSteppingOff(dt);
   const holder = player.rideHolder;
   if (!holder) {
     boarding = null;
     lineOnFoot = parade.lineNow().out;
     return;
   }
-  if (!boarding || boarding.holder !== holder) boarding = { holder, riding: 0, asked: false, lineBefore: lineOnFoot };
+  if (!boarding || boarding.holder !== holder) boarding = { holder, riding: 0, asked: false, lineBefore: lineOnFoot ?? PETS.length };
   boarding.riding += dt;
   if (!boarding.asked && boarding.riding >= COMPANIONS_ASKED_AFTER) {
     boarding.asked = true;
     companionsAboard(holder, boarding.lineBefore);
   }
 }
+// ------------------------------------------------- 4c. her companion stepping off
+/**
+ * **Off its seat, her companion stays by her** — on every ride, from the
+ * frame it leaves the seat beside her (as she gets off, or as the ride stops
+ * seating it while she walks to its door) for {@link STEP_OFF_SECONDS}: never
+ * further than {@link STEP_OFF_REACH} from her across the ground, never more
+ * than {@link STEP_OFF_RISE} over her feet. Getting off the cat bus once threw
+ * it 14 m off and 4.5 m up in one frame (QA on PR #742).
+ */
+const STEP_OFF_SECONDS = 3;
+/** Her line's first place is a stride or two behind her; this is several. */
+const STEP_OFF_REACH = 4;
+/** A hop down off a seat, and a hop's height; a fling is metres. */
+const STEP_OFF_RISE = 1.5;
+let wasSeated = false;
+let steppingOff: { what: string; left: number; far: number; high: number; moved: boolean; watched: number } | null = null;
+const herLast = new Vector3();
+/** Every ride her companion stepped off, with the furthest and highest it got from her. */
+const steppedOff = new Map<string, string>();
+function watchSteppingOff(dt: number): void {
+  const seated = parade.lineNow().seated > 0;
+  const her = player.position;
+  // Her own move out of the ride, on the frame its seat is left, is the ride
+  // putting her down — the very thing asked about — not this check.
+  const leftNow = wasSeated && !seated;
+  const jumped = leftNow ? 0 : Math.hypot(her.x - herLast.x, her.z - herLast.z);
+  herLast.copy(her);
+  if (leftNow) steppingOff = { what: player.rideHolder?.holding ?? boarding?.holder.holding ?? 'a ride just left', left: STEP_OFF_SECONDS, far: 0, high: -Infinity, moved: false, watched: STEP_OFF_SECONDS };
+  wasSeated = seated;
+  if (!steppingOff) return;
+  // This check moving her on (a walk-away, Next day, the next exit) ends the
+  // window: from there her line catches up with a teleport of hers, which is
+  // not her companion stepping off anything.
+  if (jumped > 1) {
+    steppingOff.watched = STEP_OFF_SECONDS - steppingOff.left;
+    steppingOff.left = 0;
+    steppingOff.moved = true;
+  }
+  const companion = parade.companionAt(0);
+  if (companion && !steppingOff.moved) {
+    const at = companion.root.position;
+    const p = player.position;
+    steppingOff.far = Math.max(steppingOff.far, Math.hypot(at.x - p.x, at.z - p.z));
+    steppingOff.high = Math.max(steppingOff.high, altitudeAt(at.x, at.y, at.z) - altitudeAt(p.x, p.y, p.z));
+  }
+  steppingOff.left -= dt;
+  if (steppingOff.left > 0) return;
+  const { what, far, high, moved, watched } = steppingOff;
+  // How long each was actually watched, said where a passing run shows it.
+  if (moved) process.stderr.write(`check:exits — 4c: her companion off ${what} was watched ${watched.toFixed(2)} s of ${STEP_OFF_SECONDS} before this check moved her on; what it asserts covers those ${watched.toFixed(2)} s only\n`);
+  steppingOff = null;
+  const ok = far <= STEP_OFF_REACH && high <= STEP_OFF_RISE;
+  steppedOff.set(what, `${what}: off its seat, her companion ${far.toFixed(2)} m from her at the furthest and ${high.toFixed(2)} m over her feet at the highest in ${moved ? `${watched.toFixed(2)} s, when this check moved her on` : `${STEP_OFF_SECONDS} s`}${ok ? '' : ' — FLUNG'}`);
+  if (!ok) fail(`her companion stepping off ${what}: ${far.toFixed(2)} m from her (${STEP_OFF_REACH} allowed) and ${high.toFixed(2)} m over her feet (${STEP_OFF_RISE} allowed) within ${STEP_OFF_SECONDS} s of leaving its seat`);
+}
+
 /**
  * **Her line, a moment into a ride** — what the holder declares
  * (`RideHolder.companion`), asked of the parade that owns the bodies.
  */
 function companionsAboard(holder: RideHolder, before: number): void {
-  const ride = holder.companion ?? 'in her backpack';
+  const ride = holder.companion;
   const line = parade.lineNow();
   let ok: boolean;
   let wanted: string;
-  if (ride === 'not a ride') {
+  // **What it is, asked of this list — never of its own declaration.** A seat
+  // that declared itself a ride (or forgot to say) stowed her whole line with
+  // every check green, because this took each holder's word for what it was.
+  const isRide = !NOT_RIDES.has(holder.holding);
+  if (isRide !== (ride !== 'not a ride') || ride === 'in her backpack') {
+    ok = false;
+    wanted = isRide
+      ? `one of her line beside her on ${holder.holding} — a ride (Jim, 19 Oct 2026: "one rides on the seat alongside the player"), declared ${typeof ride === 'object' ? 'a seat beside her' : `'${ride}'`}`
+      : `all of her line still out — ${holder.holding} is a seat, not a ride (NOT_RIDES), declared ${typeof ride === 'object' ? 'a seat beside her' : `'${ride}'`}`;
+  } else if (ride === 'not a ride') {
     ok = line.out === before && line.seated === 0;
     wanted = `all ${before} of her line still out — not a ride`;
   } else if (typeof ride === 'object') {
@@ -1313,7 +1432,7 @@ function judge(what: string, before: number, holding: string, left: string, ms: 
   if (Math.hypot(placed.x - spot.x, placed.z - spot.z) > 1e-6 && !placed.airborne) {
     fail(`${what}: she was left at (${placed.x.toFixed(2)}, ${placed.z.toFixed(2)}), not where the rule put her (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
   }
-  const lineBefore = boarding?.lineBefore ?? lineOnFoot;
+  const lineBefore = boarding?.lineBefore ?? lineOnFoot ?? PETS.length;
   tick(1); // let a fling land
   companionsBack(what, lineBefore);
   judgeWalkAway(`${what}: left by ${left}`);
@@ -1852,6 +1971,8 @@ say(
 say(`check:exits — arrivals:\n  ${arrivals.join('\n  ')}`);
 say(`check:exits — Next day:\n  ${nextDays.join('\n  ')}`);
 say(`check:exits — her companions on every holder she was boarded onto (${companionsAsked.size}):\n  ${[...companionsAsked.values()].join('\n  ')}`);
+say(`check:exits — her companion off its seat on every ride with one (${steppedOff.size}):\n  ${[...steppedOff.values()].join('\n  ') || 'NONE — nothing asked'}`);
+if (steppedOff.size === 0) fail('her companion stepping off: no ride seated her companion, so nothing was asked');
 for (const note of notes.filter((note) => !note.startsWith('rule') && !note.startsWith('instrument') && !note.startsWith('router agreement') && !note.startsWith('off the lattice'))) say(`  note: ${note}`);
 if (problems.length > 0) {
   for (const problem of problems) console.error(`  ✗ ${problem}`);
