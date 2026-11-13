@@ -67,7 +67,8 @@ const unasked = [...new Set(validations.flatMap((v) => v.askedOfASolveOnly))];
 process.stderr.write(
   'validate:parks NOTE: a checked-in park has no solve behind it, so the measures that need a live search were NOT asked of ' +
     `${validations.filter((v) => v.askedOfASolveOnly.length > 0).length} of ${validations.length} seed(s): ${unasked.join(', ') || '(none)'}. ` +
-    'They are asked when a park is solved (build:parks), and check:stall-accommodate asks the canonical seed in the check chain.\n',
+    'The only such measure is the layout rung\'s false-refusal proof, and only on a park whose rung fired; it is asked when a park is ' +
+    'solved (build:parks). check:stall-accommodate IS asked of every checked-in park (it resumes the stalls builder over the hydrated park).\n',
 );
 process.stderr.write(
   'validate:parks NOTE: the placement digest covers ground claims and the park boundary only — NOT meshes or colliders ' +

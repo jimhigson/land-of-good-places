@@ -70,12 +70,6 @@ import {
  * restart are read once per process). One owner: the check. A park it rejects
  * is a failed attempt.
  */
-/**
- * In-process measures that drive the world phase's own builders (the stalls'
- * `accommodate`), which a park hydrated from its file never constructs.
- */
-const SEARCHES_THE_WORLD_PHASE: ReadonlySet<string> = new Set(['check:stall-accommodate']);
-
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
 ];
@@ -345,12 +339,12 @@ const parkFile = process.env['LGP_PARK_FILE'] || null;
  * **`LGP_PARK_FILE_UNSOLVED=1`: this file is a checked-in park being validated,
  * and nothing may be solved to judge it** (`validate:parks`,
  * `scripts/lib/parkFiles.mts`). Every measure a *file* can be asked is asked,
- * exactly as below. The ones that need a live search — the stalls builder's
- * `accommodate` (`SEARCHES_THE_WORLD_PHASE`), and the layout rung's
- * false-refusal proof, which is a second solve — are **not asked**, and the
- * verdict names them (`askedOfASolveOnly`) so no log reads as though they
- * passed. They are asked when the park is solved (`build:parks`), and
- * `check:stall-accommodate` asks the canonical seed in the check chain.
+ * exactly as below — `check:stall-accommodate` included, since it resumes the
+ * stalls builder over the hydrated park rather than needing a search's. The one
+ * that needs a live search — the layout rung's false-refusal proof, which is a
+ * second solve, and only when the rung fired (no checked-in park today) — is
+ * **not asked**, and the verdict names it (`askedOfASolveOnly`) so no log reads
+ * as though it passed. It is asked when the park is solved (`build:parks`).
  */
 const unsolved = parkFile !== null && process.env['LGP_PARK_FILE_UNSOLVED'] === '1';
 const askedOfASolveOnly: string[] = [];
@@ -559,37 +553,23 @@ if (facts) {
     {
       name: 'middle',
       measures: [
-        ...ACCEPTANCE_SIM_MEASURES.filter(
-          ([name]) => STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
-        ).map(simCheck),
-        // On a park hydrated from its file (#705) there is no world-phase
-        // search in this process for these to drive, so each runs in its own
-        // process, which solves this seed and restart — the park the file was
-        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS). Not under
-        // `unsolved`: a checked-in file has no solve to be proved equal to.
-        ...(parkFile && !unsolved
-          ? [...SEARCHES_THE_WORLD_PHASE]
-              .filter((name) => STAGE_TWO_SIMS.has(name))
-              .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
-          : []),
+        // check:stall-accommodate included, on a park hydrated from its file
+        // too: it resumes the stalls builder over the hydrated park
+        // (`stallBuilder.ts`' `resumedStallBuilder`) rather than needing the
+        // one a world-phase search drove, so it no longer solves the seed again
+        // in a process of its own — and a checked-in park is asked it like
+        // every other clause.
+        ...ACCEPTANCE_SIM_MEASURES.filter(([name]) => STAGE_TWO_SIMS.has(name)).map(simCheck),
       ],
     },
     {
       name: 'heavy',
       measures: [
-        ...ACCEPTANCE_SIM_MEASURES.filter(
-          ([name]) => !STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
-        ).map(simCheck),
-        ...(parkFile && !unsolved
-          ? [...SEARCHES_THE_WORLD_PHASE]
-              .filter((name) => !STAGE_TWO_SIMS.has(name))
-              .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
-          : []),
+        ...ACCEPTANCE_SIM_MEASURES.filter(([name]) => !STAGE_TWO_SIMS.has(name)).map(simCheck),
         ...ACCEPTANCE_CHECK_SCRIPTS.map(scriptCheck),
       ],
     },
   ];
-  if (unsolved) askedOfASolveOnly.push(...SEARCHES_THE_WORLD_PHASE);
   const result = await runStages(stages);
   failures.push(...result.failures);
   broken ??= result.broken;

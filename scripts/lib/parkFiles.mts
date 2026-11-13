@@ -601,6 +601,16 @@ export function describeValidation(v: ParkValidation): string {
   if (v.status === 'accepted') {
     return `seed ${v.seed} accepted ${how} — restart ${v.restart}, ${v.measuresAsked} measures, placement ${v.layout}`;
   }
+  if (v.status === 'restamp' && v.recordedLayout === null) {
+    // Not a park that moved: a manifest line that never had a placement
+    // digest (a file adopted by hand). Saying "the park moved" here would send
+    // someone looking for a change that does not exist.
+    return (
+      `seed ${v.seed} NOT YET STAMPED: accepted ${how} (${v.measuresAsked} measures), placement digest ${v.layout}, but its manifest ` +
+      `line records no placement digest yet. Stamp it — no solve needed: run \`${fixCommand(v.seed)}\` and commit ` +
+      `${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST}.`
+    );
+  }
   if (v.status === 'restamp') {
     return (
       `seed ${v.seed} PLACEMENT MOVED: accepted ${how} (${v.measuresAsked} measures), but this source builds placement digest ${v.layout} from ` +
