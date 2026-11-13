@@ -80,6 +80,55 @@
  * when a change removes waste; never raise one to make a PR pass without
  * saying what it buys.
  *
+ * ## Proved red (13 November 2026, `fix/cull-audit-ci`, seed 5, 1000×700 DPR 1)
+ *
+ * Each clause broken on purpose and watched fail, with the inputs it failed
+ * on — a transcript goes stale when the geometry under it moves, so the
+ * geometry is written down with it. Every one restored and green after.
+ *
+ * - **Budgets.** Every tile's bound 50× too wide (`refreshInstanceBounds`,
+ *   `sphere.radius = (radius + margin) * 50`), so no tiled bush, tree, bulb
+ *   or flower can be culled — against the budgets above (park 39 / 368,916,
+ *   sky cruiser 12 / 214,416):
+ *   ```
+ *   park: 181 draws a frame for meshes wholly off the screen, ceiling 43 (measured 39)
+ *   park: 630456 triangles a frame off the screen, ceiling 405808 (measured 368916)
+ *   sky cruiser: 87 draws a frame for meshes wholly off the screen, ceiling 14 (measured 12)
+ *   sky cruiser: 342680 triangles a frame off the screen, ceiling 235858 (measured 214416)
+ *   ```
+ * - **Stale bounds, the motes** (CI's red): the lobby's motes and glints left
+ *   to three's cached bound again (`createDiscoSparkle` without its two
+ *   `boundingSphere`s; three cached motes centre (0.566, −2.893, 0.405) r 4.956
+ *   and glints r 0.627, in their own space, on the first draw). Neither is out
+ *   at the audited moment, 1 s — which is why the sweep exists:
+ *   ```
+ *   hotel: stale bound — …/hotel.disco.glints: up to 8 of 90 instances outside the bound three culls by, first at 1.100 s, by up to 0.036 m
+ *   hotel: stale bound — …/hotel.disco.motes: up to 3 of 40 instances outside the bound three culls by, first at 1.500 s, by up to 0.586 m
+ *   ```
+ * - **Stale bounds, the snakes**: `SnakeSegmentPool.holdWithin` made a no-op,
+ *   so every pool's bound is three's cache again — the six this check used to
+ *   tolerate, and four the sweep finds beside them:
+ *   ```
+ *   reptile house: stale bound — …/reptile-adults:segments: 1 of 66 instances outside the bound three culls by, at 1.000 s   (and :outline)
+ *   reptile house: stale bound — …/toy.noodlePlush/…/snake.mint:segments: 1 of 19 instances … at 1.000 s                     (and :outline)
+ *   reptile house: stale bound — …/hat.snake/…/snake.mint:segments: 2 of 20 instances … at 1.000 s                           (and :outline)
+ *   reptile house: stale bound — …/reptile-babies:segments: up to 1 of 148 instances …, first at 2.300 s, by up to 0.007 m  (and :outline)
+ *   reptile house: stale bound — …/balloon.snake/…/snake.coral:segments: up to 1 of 9 instances …, first at 3.800 s, by up to 0.004 m (and :outline)
+ *   ```
+ * - **Stale bounds, the ball pit**: `BallPit` without its own bound, on the
+ *   slide, whose rider lands in the pit:
+ *   ```
+ *   slide: stale bound — anchor-plots/anchor:ballPit/ball-pit/balls: up to 20 of 900 instances outside the bound three culls by, first at 10.500 s, by up to 0.402 m
+ *   ```
+ * - **A second boot.** The page reloaded straight after its moment
+ *   (`page.reload()` after `settle`):
+ *   ```
+ *   hotel: the page loaded again after its moment (0.2 s …/hotel?seed=5&perf=1&clock=1; 3.7 s …/hotel?seed=5&perf=1&clock=1) — the audit or the sweep ran on another boot
+ *   ```
+ *   Seen for real too: vite reloads the first page to connect after a source
+ *   edit. A reload *before* the moment is harmless — the last boot is whole,
+ *   its clock run from nothing — and is only noted.
+ *
  * ```
  * pnpm run check:served-cull-audit              # starts its own dev server
  * CHECK_CULL_AUDIT_URL=http://127.0.0.1:5947 pnpm run check:cull-audit
@@ -804,6 +853,10 @@ async function runScene(
   const seeds: number[] = [];
   const loads: string[] = [];
   const opened = Date.now();
+  /** Loads seen when the clock stopped at the moment; any after it are another boot. */
+  let loadsAtStop = Number.POSITIVE_INFINITY;
+  const reloadedAfter = (): string | null =>
+    loads.length > loadsAtStop ? `the page loaded again after its moment (${loads.join('; ')}) — the audit or the sweep ran on another boot` : null;
   try {
     const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
     const page = await context.newPage();
@@ -818,7 +871,9 @@ async function runScene(
     // on a boot that was not at it.
     page.on('load', () => loads.push(`${((Date.now() - opened) / 1000).toFixed(1)} s ${page.url()}`));
     await page.goto(at(scene), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    const { clock, loadsAtStop } = await settle(page, scene, loads);
+    const settled = await settle(page, scene, loads);
+    const clock = settled.clock;
+    loadsAtStop = settled.loadsAtStop;
     const result = await page.evaluate(auditInPage, OVERSIZED_RADIUS_M);
     const facts = await page.evaluate(() => {
       const context = (window as unknown as { __perf: { context(): Record<string, unknown> } }).__perf.context();
@@ -830,11 +885,14 @@ async function runScene(
     if (seeds.length === 0) return { error: `${name}: the page never reported its park seed, so the pin to ${SEED} is unproven` };
     if (wrong.length > 0) return { error: `${name}: asked for park seed ${SEED}, the page built ${wrong.join(', ')}` };
     if (errors.length > 0) return { error: `${name}: page errors: ${errors.slice(0, 3).join(' | ')}` };
-    if (loads.length !== loadsAtStop) {
-      return { error: `${name}: the page loaded again after its moment (${loads.join('; ')}) — the audit or the sweep ran on another boot` };
-    }
+    const reloaded = reloadedAfter();
+    if (reloaded) return { error: `${name}: ${reloaded}` };
     return { result, space: facts.space, gpu: facts.gpu, clock, sweep, ...(loads.length > 1 ? { reloadedBefore: [...loads] } : {}) };
   } catch (error) {
+    // A reload under the audit usually surfaces as a page that has lost its
+    // game half way through an evaluate; say which, not just the symptom.
+    const reloaded = reloadedAfter();
+    if (reloaded) return { error: `${name}: ${reloaded} (it surfaced as: ${String((error as Error)?.message ?? error).split('\n')[0]})` };
     return { error: `${name} (${scene.path}): ${String((error as Error)?.message ?? error).split('\n')[0]}${errors.length ? ` — page errors: ${errors.slice(0, 3).join(' | ')}` : ''}` };
   } finally {
     await browser.close().catch(() => {});
