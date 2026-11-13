@@ -32,21 +32,34 @@ import type { FrameContext } from '../../src/core/types';
  * `lazyRooms.test.ts`: nothing is provided up front.
  *
  * **Proved red** (13 Nov 2026, seed 5's checked-in park, `CASTLE_INTERIOR`
- * the real chunk) by putting back main's order in
- * `SpaceManager.changeToFurnished` — fetch and build at once,
- * `room.part.load().then(() => room.build())`:
+ * the real chunk) by handing `changeToFurnished` the build with the fetch, as
+ * the branch first did — `() => CASTLE_INTERIOR.load().then(() =>
+ * this.furnishIfLoaded())` with "furnished" meaning built:
  *
  *     FAIL  test/lazy/castleDoor.test.ts > the castle's front door, with nothing provided up front
  *     AssertionError: built in the frame that asked the iris to close — in front of it: expected true to be false
  *
- * and green again with the order restored (the build in the iris's midpoint),
+ * and green again with the build in the midpoint (`Building.changeToInterior`),
  * registering 55 colliders behind the shut iris.
  */
 
-/** The iris as the game runs it, held until the test says it is shut — see `lazyRooms.test.ts`. */
+/**
+ * The iris as the game runs it (`Transitions.irisWipe`), held until the test
+ * says it is shut. `ready` holds it shut until it settles; a `ready` that is a
+ * function is called only once the iris is shut — both shapes are taken, so
+ * this pins the castle and not one version of the iris.
+ */
 interface HeldWipe {
   readonly midpoint: () => void;
-  readonly ready: Promise<unknown> | undefined;
+  readonly ready: Promise<unknown> | (() => Promise<unknown>) | undefined;
+}
+
+/** The iris shuts: whatever it was holding for settles, then its midpoint runs. */
+async function shut(wipe: HeldWipe | undefined): Promise<void> {
+  if (!wipe) throw new Error('no wipe was started');
+  const holding = typeof wipe.ready === 'function' ? wipe.ready() : wipe.ready;
+  if (holding) await holding.then(() => {}, () => {});
+  wipe.midpoint();
 }
 
 /** Everything the door's own frame runs before the browser draws it: every microtask, and a macrotask. */
@@ -119,8 +132,7 @@ describe("the castle's front door, with nothing provided up front", () => {
     try {
       frame(0.1);
       expect(wipes.length, 'standing in the doorway starts the walk in').toBe(1);
-      await wipes[0]?.ready;
-      wipes[0]?.midpoint();
+      await shut(wipes[0]);
       expect(building.furnished).toBe(false);
       expect(building.playerIsInside, 'she is never stood in an interior that is not there').toBe(false);
       frame(1);
@@ -148,7 +160,7 @@ describe("the castle's front door, with nothing provided up front", () => {
     expect(wipes[1]?.ready, 'the chunk is here: the iris waits for nothing').toBeUndefined();
 
     // 4. The iris is shut: built, solid, and only then is she stood on the mall.
-    wipes[1]?.midpoint();
+    await shut(wipes[1]);
     expect(building.furnished).toBe(true);
     expect(building.playerIsInside).toBe(true);
     expect(castleFloorAt(player.position.x, player.position.z)?.index, 'on the mall, the storey the door opens on').toBe(CASTLE_MALL.index);

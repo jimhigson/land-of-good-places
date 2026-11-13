@@ -1,24 +1,4 @@
 import type { InteriorControls } from './building/Building';
-import type { LazyPart } from './LazyPart';
-
-/**
- * **A room fetched when she first goes in** — what {@link
- * SpaceManager.changeToFurnished} asks of its owner: the chunk, and the two
- * halves of furnishing from it, kept apart so the build can wait for the
- * shut iris while the fetch does not.
- */
-export interface LazyRoom {
-  /** The room's chunk (`world/interiors.ts`). Only ever fetched here, never built. */
-  readonly part: LazyPart<unknown>;
-  /** True once the room has been built. */
-  furnished(): boolean;
-  /**
-   * Builds the room from its chunk, if the chunk is here and nobody has yet.
-   * Synchronous: it is run behind the shut iris, in the frame the world is
-   * swapped, and must be done before `midpoint` stands her in the room.
-   */
-  build(): void;
-}
 
 /**
  * **Moving a child from one space to another, in one place.**
@@ -161,52 +141,33 @@ export class SpaceManager {
 
   /**
    * {@link changeTo}, into a room whose furnishings may not be here yet
-   * (`world/LazyPart.ts`). Already furnished, it is exactly `changeTo`.
-   *
-   * Otherwise **the fetch starts now and the build waits for the shut iris**:
-   * the iris closes over the fetch (held shut if it is still on its way), the
-   * room is built behind it, and only then is `midpoint` run — so she never
-   * stands in a shell whose solids have not arrived, and the build is never
-   * on screen.
-   *
-   * The two used to be one call made at once, and that was a bug in all four
-   * lazy rooms (QA on #759): a chunk prefetched on her way to the door is
-   * already loaded, so the build ran as a microtask in the very frame that
-   * asked the iris to close — before the iris had drawn anything. Measured in
-   * a production build on an M4 Pro: a frozen picture at the door for 116–303
-   * ms (castle, hotel, library), and in Safari's engine the iris's own timer
-   * fell due during that frame and swapped the world with the hole still
-   * 0.5–2.2 screen diagonals wide — the castle's first entry had no iris at
-   * all.
-   *
-   * If the fetch fails (offline on a first visit) — or the build throws —
-   * `midpoint` is not run: she stays where she was, the iris opens on her
-   * there, and `onFailed` runs: the owner's cue to tell her, and to keep the
-   * door from firing again under her while she still stands in it (a failed
-   * door re-fired every cooldown was a screen flashing on a loop, QA on
-   * #749).
+   * (`world/LazyPart.ts`): `furnished()` says whether they are, `furnish()`
+   * fetches and builds them. Already furnished, it is exactly `changeTo`.
+   * Otherwise the fetch starts now, the iris closes over it and holds shut
+   * until the room is built, and only then is `midpoint` run — so she never
+   * stands in a shell whose solids have not arrived. If the fetch fails
+   * (offline on a first visit) `midpoint` is not run at all: she stays where
+   * she was, the iris opens on her there, and `onFailed` runs — the owner's
+   * cue to tell her, and to keep the door from firing again under her while
+   * she still stands in it (a failed door re-fired every cooldown was a
+   * screen flashing on a loop, QA on #749).
    */
-  changeToFurnished(room: LazyRoom, midpoint: () => void, onFailed: () => void = () => {}): void {
-    if (room.furnished()) {
+  changeToFurnished(
+    furnished: () => boolean,
+    furnish: () => Promise<unknown>,
+    midpoint: () => void,
+    onFailed: () => void = () => {},
+  ): void {
+    if (furnished()) {
       this.changeTo(midpoint);
       return;
     }
-    const fail = (error: unknown): void => {
+    const ready = furnish().catch((error: unknown) => {
       console.error('Land of Good Places: a room failed to load, so she stays where she is', error);
       onFailed();
-    };
-    // Held shut only for a fetch still on its way: a prefetched room needs no
-    // wait, and an iris with nothing to wait for is a plain `changeTo`.
-    const ready = room.part.loaded === null ? room.part.load().catch(fail) : undefined;
+    });
     this.changeTo(() => {
-      // **Here, with the iris shut** — the whole point of this method.
-      try {
-        room.build();
-      } catch (error) {
-        fail(error);
-        return;
-      }
-      if (room.furnished()) midpoint();
+      if (furnished()) midpoint();
     }, ready);
   }
 

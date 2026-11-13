@@ -475,10 +475,9 @@ export class Library implements GameSystem {
   }
 
   /**
-   * Fetches the reading room and furnishes it, if nobody has — for anything
-   * that wants the room furnished without walking in (a check driving a served
-   * build). The door does not come through here: it fetches at once and
-   * furnishes behind its shut iris ({@link changeToRoom}).
+   * Fetches the reading room and furnishes it, if nobody has. The door does
+   * this behind its iris; anything else that wants the room furnished (a check
+   * driving a served build) can ask for it directly.
    */
   furnish(): Promise<void> {
     if (this.room) return Promise.resolve();
@@ -525,7 +524,8 @@ export class Library implements GameSystem {
   /** Into the reading room, fetching and furnishing it behind the iris first if it is not here yet. */
   private changeToRoom(midpoint: (room: FurnishedRoom) => void): void {
     this.spaces.changeToFurnished(
-      { part: LIBRARY_ROOM, furnished: () => this.room !== null, build: () => this.furnishIfLoaded() },
+      () => this.room !== null,
+      () => this.furnish(),
       () => midpoint(this.furnishedRoom),
       () => this.refuseDoor(),
     );

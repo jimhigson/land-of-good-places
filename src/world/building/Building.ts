@@ -1728,15 +1728,39 @@ export class Building implements GameSystem {
   }
 
   /**
-   * Into the castle: its chunk fetched now if it is not here yet, its
-   * furnishings built behind the shut iris (`SpaceManager.changeToFurnished`),
-   * and only then is she stood in it. If the chunk cannot be fetched she stays
-   * where she was, and the door says why ({@link refuseDoor}).
+   * Into the castle — **its chunk fetched, its furnishings built behind the
+   * shut iris**, and only then is she stood in it.
+   *
+   * `SpaceManager.changeToFurnished` is handed only the fetch: what it asks
+   * as "furnished" is "the chunk is here", and the build is the first thing
+   * the midpoint does, which the iris runs once it has closed. Handing it the
+   * build as well (a `furnish` that fetches and builds) ran the build in the
+   * very frame that asked the iris to close whenever the chunk had been
+   * prefetched on her way to the door — which is every time. QA on #759, and
+   * this branch's own measurement on a production build (M4 Pro): a frozen
+   * picture at the door of 223–256 ms in Chromium and 297–303 ms in Safari's
+   * engine, where the iris's timer fell due during that frame and the world
+   * was swapped with no iris over it at all.
+   *
+   * If the chunk cannot be fetched — or the build throws — she stays where
+   * she was, and the door says why ({@link refuseDoor}). A throw is caught
+   * here because the midpoint runs inside the iris: one escaping it would
+   * stop the iris before it reopens, a dark screen for good.
    */
   private changeToInterior(midpoint: () => void): void {
     this.spaces.changeToFurnished(
-      { part: CASTLE_INTERIOR, furnished: () => this.castle !== null, build: () => this.furnishIfLoaded() },
-      midpoint,
+      () => CASTLE_INTERIOR.loaded !== null,
+      () => CASTLE_INTERIOR.load(),
+      () => {
+        try {
+          this.furnishIfLoaded();
+        } catch (error) {
+          console.error('Land of Good Places: the castle interior failed to build, so she stays where she is', error);
+          this.refuseDoor();
+          return;
+        }
+        midpoint();
+      },
       () => this.refuseDoor(),
     );
   }
