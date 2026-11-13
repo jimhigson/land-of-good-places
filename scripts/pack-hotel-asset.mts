@@ -19,7 +19,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { packGlbAsset } from './lib/pack-glb-asset.mts';
-import { cutGlb, glbNodeNames } from './lib/split-glb.mts';
+import { glbNodeNames, glbSubset } from './lib/splitGlb.mts';
 import { isHotelBootPart } from '../src/art/models/hotelKitSplit.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -62,7 +62,7 @@ const doc = (which: string): string[] => [
 
 packGlbAsset({
   glbPath,
-  bytes: cutGlb(whole, (name) => !isHotelBootPart(name)),
+  bytes: glbSubset(whole, (name) => !isHotelBootPart(name)),
   modulePath: resolve(here, '../src/art/assets/hotelInsideGlb.ts'),
   constantName: 'HOTEL_INSIDE_GLB_BASE64',
   label: 'pack:hotel (inside kit, loaded on entry)',
@@ -72,7 +72,7 @@ packGlbAsset({
 
 packGlbAsset({
   glbPath,
-  bytes: cutGlb(whole, isHotelBootPart),
+  bytes: glbSubset(whole, isHotelBootPart),
   modulePath: resolve(here, '../src/art/assets/hotelGlb.ts'),
   constantName: 'HOTEL_GLB_BASE64',
   label: 'pack:hotel (boot kit)',
