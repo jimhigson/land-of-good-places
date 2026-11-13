@@ -3,6 +3,7 @@ import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
 import { REPTILE_HOUSE_GLB_BASE64 } from '../assets/reptileHouseGlb';
 import type { AssetHandle } from '../style/asset';
+import { showMap } from '../style/materials';
 import { visibleTop } from '../style/measure';
 import {
   REPTILE_ARCH_HEIGHT,
@@ -322,9 +323,10 @@ export function createReptileHouseExterior(): ReptileHouseExterior {
 
   let night = 0;
   let asked: SnakeExpression = 'neutral';
+  // Called every frame on the forecourt (`setNight` follows the clock), so
+  // it must cost nothing when the face is unchanged — `showMap` sees to that.
   const apply = (): void => {
-    headMaterial.map = faces[night > 0.6 ? 'asleep' : asked];
-    headMaterial.needsUpdate = true;
+    showMap(headMaterial, faces[night > 0.6 ? 'asleep' : asked]);
   };
 
   return {
