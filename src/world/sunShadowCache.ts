@@ -95,9 +95,9 @@ const SETTLE_MS = 750;
 export const TINY_CASTER_RADIUS = 0;
 
 /**
- * Whether the cache is switched on. **Off unless the URL says `?shadowCache=1`**
- * while it is being proved: off, `DayNight` leaves the sun's map to three.js
- * exactly as before step 12 (redrawn in full every frame).
+ * Whether the cache is switched on. **Off unless the URL says `?shadowCache=1`**:
+ * off, `DayNight` leaves the sun's map to three.js exactly as before step 12
+ * (redrawn in full every frame, the light following her continuously).
  */
 export function sunShadowCacheRequested(): boolean {
   if (typeof location === 'undefined') return false;
@@ -108,9 +108,25 @@ export function sunShadowCacheRequested(): boolean {
 }
 
 /**
- * The one line to flip once somebody has watched it in motion. Stills match
- * three's own pass (see HANDOFF-perf-step12.md); walking, the re-centre steps
- * and the sun's steps have been counted but not yet looked at frame by frame.
+ * **Off, on purpose — read this before flipping it** (measured 13 Nov 2026;
+ * the numbers are under item 7 of `docs/perf/FRAME-DROPS-2026-11.md`, with the
+ * harness that took them).
+ *
+ * - **The map is exact**: {@link SunShadowCache.audit} finds 0 differing texels
+ *   against three's own pass in every scene tried, moving or still.
+ * - **It is not invisible.** The light moves in steps. With the sun crossing
+ *   the sky in 150 s (`DAY_LENGTH_SECONDS`) a step moves a 7 m structure's
+ *   shadow ~2 px at 1280×720, six times a second at noon, where three's own
+ *   pass slides it. Steps small enough to hide on the park's tall casters
+ *   redraw the cache on about half of all sunlit frames.
+ * - **It is not a clear win.** The survey that keeps it exact costs ~0.4 ms a
+ *   frame, a redraw frame pays it on top of a full pass, and so the
+ *   shadow-pass p99 rises (1.1–1.5 → 1.4–1.9 ms; 6.0–6.5 → 7.9–8.6 ms on the
+ *   4× phone stand-in) for a mean saving of 0.1–0.2 ms (≈0.6 ms at 4×) and
+ *   none on the Rail Race. It does cut shadow-pass triangles by ~70 %.
+ *
+ * Whether visible stepping is worth those triangles is Jim's call, not a
+ * default to flip.
  */
 export const SUN_SHADOW_CACHE_DEFAULT = false;
 

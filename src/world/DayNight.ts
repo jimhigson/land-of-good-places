@@ -618,17 +618,17 @@ export class DayNight implements GameSystem {
     return this.shadowCache.stats();
   }
 
-  /** Whether {@link SunShadowCache} draws the sun's map in this game (`?shadowCache=0` says no). */
+  /** Whether {@link SunShadowCache} draws the sun's map in this game (see `sunShadowCacheRequested`). */
   get shadowCacheEnabled(): boolean {
     return this.shadowCacheOn;
   }
 
   /**
    * The cache's map against three's own pass, on the next frame the sun is
-   * drawn — for checks. See {@link SunShadowCache.audit}.
+   * drawn — for checks and harnesses. See {@link SunShadowCache.audit}.
    */
   auditShadowCache(): Promise<SunShadowAudit> {
-    if (!this.shadowCacheOn) return Promise.reject(new Error('the sun shadow cache is off in this game (?shadowCache=0)'));
+    if (!this.shadowCacheOn) return Promise.reject(new Error('the sun shadow cache is not drawing the sun in this game (open the page with ?shadowCache=1)'));
     return this.shadowCache.audit();
   }
 

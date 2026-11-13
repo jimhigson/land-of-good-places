@@ -336,6 +336,47 @@ with **~70 k triangles** (crowd 1.67 M tris / 24 kids, the face patches alone
   shadows) — prototype behind a URL flag and show him.
 - **Check.** Shadow-pass draws per frame (GL probe counts framebuffer binds and
   draws per pass) ≤ budget; shadow re-renders per second ≤ N.
+- **Outcome, 13 Nov 2026 (`perf/shadow-cache-default`): the cache is built,
+  exact, and left OFF** (`?shadowCache=1` turns it on). Measured on a
+  production build after the other eleven packages had landed, seed 5, M4 Pro,
+  harness [`shadow-cache-2026-11-harness/`](shadow-cache-2026-11-harness/):
+  - **Its map is exact.** `SunShadowCache.audit()` draws three's own full pass
+    from the same light pose and compares the two maps texel by texel: 0
+    differing in every audit — park at morning, noon and sunset, walking, the
+    Rail Race at speed, ferris, Sky Cruiser, slide, cat bus, park train,
+    trampoline, library and reptile house round trips (24 consecutive frames
+    from the door), 20 kinds of one-off static change. Controls: a blinded
+    survey gives 59–96 k differing texels, movers dropped 106–113 k. The audit
+    found one real hole (a swapped position attribute or index went unseen:
+    85,885 stale texels), now closed.
+  - **It is not invisible.** The light moves in steps; on a sun step a 7 m
+    structure's shadow jumps ~2 px at 1280×720, six times a second at noon and
+    up to every frame near sunrise and sunset (`steps.mjs`: a step changes
+    ~16 k pixels by > 8 levels where three's continuous light changes ~2 k a
+    frame). Taller casters jump further. Steps small enough to hide on the
+    park's tall casters (1 texel at 15 m) redraw the cache on **54 % of sunlit
+    frames** over a 150 s day (33 % at today's 5 m / 3 cm). Re-centring is
+    fine: no worse than three's own light following her (`recentre.mjs`).
+  - **It is not a clear win.** The per-frame survey that keeps it exact costs
+    ~0.4 ms on the M4 Pro (so ~1.6 ms at 4× throttle) and a redraw frame pays
+    it on top of a full pass. Shadow-pass CPU, cache off → on, clean pairs
+    only: standing mean 0.76–1.04 → 0.64–0.81 ms, p99 1.1–1.5 → 1.4–1.9 ms;
+    walking mean 0.82–0.88 → 0.63–0.67; Rail
+    Race 0.53–0.55 → 0.57–0.61 (worse); phone stand-in mean 4.3–4.8 → 3.6–4.1,
+    **p99 6.0–6.5 → 7.9–8.6 ms**. Whole-frame CPU means moved within run-to-run
+    noise. What it does cut is GPU work: shadow-pass triangles 0.46 M → 0.13 M
+    a frame standing (all triangles 1.00 M → 0.69 M).
+  - **Why the estimate above was wrong:** "map not re-rendered" removed the
+    pass outright; a cache that stays exact cannot, because the sun crosses the
+    sky in 150 s (`DAY_LENGTH_SECONDS`), so the map must be redrawn often, and
+    deciding what changed costs nearly what drawing it did.
+  - **For Jim:** (a) keep it off (recommended); (b) accept visible stepping on
+    tall shadows for the GPU triangles, a phone-tier question for step 20 once
+    real-phone numbers exist; (c) a slower sun changes the sums — at 600 s,
+    hiding the steps needs a redraw on 31 % of sunlit frames instead of 54 %.
+  - Found on the way: the `?perf=1` overlay asked for the GPU's name four times
+    a second, a synchronous GPU-process round trip that stalled the frames it
+    measured (~10 ms a call with the cache's passes queued); it now asks once.
 
 ### 8. The rainbow outline pass and post-processing
 
