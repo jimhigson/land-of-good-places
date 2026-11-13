@@ -78,18 +78,24 @@ interface Scene {
 }
 
 /**
- * Measured on `perf-step0`, canonical seed 5, 1000×700 at DPR 1, the higher
- * of two runs — Apple M4 Pro (Metal) and SwiftShader, CI's renderer. Counts
- * do not depend on resolution, only on what is drawn.
+ * Measured on `perf-step4-cull-crowd` (#756, the crowd culled), canonical
+ * seed 5, 1000×700 at DPR 1, the highest of three runs — Apple M4 Pro (Metal)
+ * twice and SwiftShader, CI's renderer, once. Counts do not depend on
+ * resolution, only on what is drawn.
+ *
+ * Lowered from #752's first figures, measured on `main` before the crowd was
+ * culled: park 610 draws / 3,664,324 tris, library 321 / 2,109,662, reptile
+ * house 435 / 2,118,554, castle 410 / 2,629,482, hotel 336 / 1,799,960, rail
+ * race 2174 / 4,247,652.
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', space: 'garden', draws: 610, tris: 3_664_324 },
-  library: { path: '/library', space: 'library', draws: 321, tris: 2_109_662 },
-  'reptile house': { path: '/reptile-house', space: 'reptileHouse', draws: 435, tris: 2_118_554 },
-  castle: { path: '/castle', space: 'castle.', draws: 410, tris: 2_629_482 },
-  hotel: { path: '/hotel', space: 'hotel.', draws: 336, tris: 1_799_960 },
+  park: { path: '/spawn', space: 'garden', draws: 569, tris: 1_470_630 },
+  library: { path: '/library', space: 'library', draws: 257, tris: 464_190 },
+  'reptile house': { path: '/reptile-house', space: 'reptileHouse', draws: 371, tris: 473_082 },
+  castle: { path: '/castle', space: 'castle.', draws: 332, tris: 185_674 },
+  hotel: { path: '/hotel', space: 'hotel.', draws: 272, tris: 154_488 },
   // Riding, so the space is whatever the track passes through; `riding` is the guard.
-  'rail race': { path: '/rail-race', space: '', riding: true, draws: 2174, tris: 4_247_652 },
+  'rail race': { path: '/rail-race', space: '', riding: true, draws: 2154, tris: 2_341_524 },
 };
 
 const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}&perf=1`;
