@@ -37,7 +37,7 @@ try {
     window.__rec = rec;
     const kids = () => w.npcs.all.filter((c) => c.driver?.constructor?.name !== 'WaypointDriver');
     const sample = () => {
-      if (rec.on) rec.frames.push({ t: performance.now(), parkAttached: w.parkRoot.parent !== null, train: w.train.distance, kids: kids().map((c) => [c.position.x, c.position.z]) });
+      if (rec.on) rec.frames.push({ t: performance.now(), parkAttached: w.parkRoot ? w.parkRoot.parent !== null : w.player === undefined || true, train: w.train.distance, kids: kids().map((c) => [c.position.x, c.position.z]) });
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -51,7 +51,7 @@ try {
   const entered = await page.evaluate(() => window.game.world.hotel.requestEnterLobby());
   await sleep(3000);
   await page.screenshot({ path: `${outDir}/2-lobby.png` });
-  const inside = await page.evaluate(() => ({ attached: window.game.world.parkRoot.parent !== null, train: window.game.world.train.distance }));
+  const inside = await page.evaluate(() => ({ attached: window.game.world.parkRoot ? window.game.world.parkRoot.parent !== null : true, train: window.game.world.train.distance, kids: window.game.world.npcs.all.map((c) => [c.position.x, c.position.z]) }));
   await sleep(Number(indoorS) * 1000);
   const stillInside = await page.evaluate(() => ({ train: window.game.world.train.distance, kids: window.game.world.npcs.all.map((c) => [c.position.x, c.position.z]) }));
   // Out through the lobby's own way out, behind its iris.
@@ -67,7 +67,7 @@ try {
     for (let k = 0; k < Math.min(a.length, b.length); k++) worstStep = Math.max(worstStep, Math.hypot(b[k][0] - a[k][0], b[k][1] - a[k][1]));
   }
   const closest = (kids) => { let m = Infinity; for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) m = Math.min(m, Math.hypot(kids[i][0] - kids[j][0], kids[i][1] - kids[j][1])); return m; };
-  const movedIndoors = before.kids.reduce((n, k, i) => n + (Math.hypot(k[0] - stillInside.kids[i][0], k[1] - stillInside.kids[i][1]) > 0.01 ? 1 : 0), 0);
+  const movedIndoors = inside.kids.reduce((n, k, i) => n + (Math.hypot(k[0] - stillInside.kids[i][0], k[1] - stillInside.kids[i][1]) > 0.01 ? 1 : 0), 0);
   const firstBack = back[0];
   const resumed = back.length > 1 ? back.at(-1).kids.reduce((n, k, i) => n + (Math.hypot(k[0] - firstBack.kids[i][0], k[1] - firstBack.kids[i][1]) > 0.05 ? 1 : 0), 0) : 0;
   console.log(JSON.stringify({

@@ -36,7 +36,7 @@ try {
     }
     await sleep(9000);
     const frames = (n) => page.evaluate((k) => new Promise((done) => { let left = k; const tick = () => (--left <= 0 ? done() : requestAnimationFrame(tick)); requestAnimationFrame(tick); }), n);
-    const setPark = (shown) => page.evaluate((s) => { for (const g of window.game.world.parkGroups) g.visible = s; }, shown);
+    const setPark = (shown) => page.evaluate((s) => { const w = window.game.world; for (const g of w.parkGroups) if (g !== w.npcs.group) g.visible = s; }, shown);
     const shot = async (tag) => { const png = await page.screenshot(); fs.writeFileSync(`${outDir}/${name}-${tag}.png`, png); return png.toString('base64'); };
     await setPark(true);
     await frames(3);
