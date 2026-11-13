@@ -11,7 +11,10 @@ Start ref: origin/perf/navgrid-other-space (#751 + the other-space follow-up). I
   `&& pnpm run check:nav-warm`, as `check:crowd` carries the npc checks. Do NOT also add it to a shard (it
   would run twice). Review fix, 13 Nov: unwired, `check:chain-coverage` was red on e427f160 ("check:nav-warm
   is defined in package.json but no workflow can reach it"); wired, it is green, 110 of 110 leaves reachable.
-  Neither nav check was RE-RUN after this wiring — only chain-coverage, tsc and typecheck:test.
+  `LGP_PARK_RESTART=1 pnpm run check:nav-spaces` on 759039b4 (AFTER the base merge; seed 5, Node) ran both
+  and exited 0: nav-spaces 295 room solids, 0 whole park rebuilds, 0.3 ms; nav-warm her lattice 182 slices,
+  longest 4.33 ms; children's 146 slices, longest 2.57 ms; mid-build colliders 169 slices, 1 patch, 40 of 40
+  dropped; every sliced lattice equals a whole rebuild. No mutation was re-run on the merged head.
   Mutations: `NAV_WARM_MUTATE=sync`, `NAV_WARM_MUTATE=short`.
 - Node checks here were run with `LGP_PARK_RESTART=1` (seed 5's accepted restart at four sibling source
   hashes): the acceptance loop at this hash costs ~7 min per restart on the shared Mac.
