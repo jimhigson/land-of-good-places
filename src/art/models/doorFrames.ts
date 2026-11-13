@@ -1,0 +1,470 @@
+/**
+ * **A doorway frame round an interior's way out** — no door, just the frame,
+ * so a child can see from across the room where the exit is.
+ *
+ * Jim, 11 November 2026: *"in the game when in interior spaces the exit to
+ * outside is usually a door in a hidden wall, with no visual indicator where
+ * the door is."* The hotel lobby's, the Reptile House's and the library's way
+ * out are all gaps in the wall nearest the camera — the wall that is hidden so
+ * the fixed camera can see in — so nothing at all was drawn there. The
+ * castle's is in a drawn wall, but behind its porch roof.
+ *
+ * The geometry is the 3D Artist's (`art/blend/doorframes_build.py` →
+ * `doorframes.glb`): per style, a **post** (stood once each side), a **lintel
+ * tile** (repeated across the posts and the gap) and a **crest** (once, on the
+ * lintel's middle). This file knows **no opening**: every room hands its own
+ * gap, from its own owner, to {@link buildDoorFrame}, and every figure about
+ * the frame itself — a post's width, depth and height, a tile's width and
+ * height — is **measured** off the shipped geometry here, so the kit is the one
+ * owner of those.
+ *
+ * ## Placed round the gap, never in it
+ *
+ * Each post's inner face stands **on** its gap edge, so the clear opening is
+ * exactly the gap the room's own walls leave — the frame narrows nothing.
+ * `check:doorframes` walks a player-sized body through every opening, both
+ * ways, at 5 cm and at `PLAYER_LONGEST_STEP`, with and without the frame, and
+ * holds the two to the same lanes; its control narrows a frame and must go red.
+ *
+ * ## Solid, from the drawn shape
+ *
+ * {@link registerDoorFrameSolids} gives each post a box over its drawn
+ * footprint (moss and all) to the lintel's top, which is what stands over it,
+ * and the lintel a box **banded** from its underside to its top, so only a
+ * flier ever meets it — a walker and a jump pass under, because every
+ * lintel's underside is built over her head at a jump's apex (`Collision.ts`'s
+ * `baseHeight`). Nothing about the frame is in the route lattice: the posts
+ * stand where each wall's own collider already was, and a banded box is never
+ * stamped.
+ *
+ * ## No face in a wall's plane
+ *
+ * `check:coplanar` sweeps hidden meshes too, and a post's inner face on the
+ * gap edge is exactly where the hidden wall's end face was. So each room draws
+ * its wall short of the gap by {@link doorFramePostWidth} — the post's own
+ * width, asked of the kit — and the post's outer face meets the wall's end
+ * face back to back (opposite normals never fight). The wall's **collider** is
+ * untouched.
+ */
+import { BackSide, BufferAttribute, Color, Group, Matrix4, Mesh, MeshBasicMaterial, type BufferGeometry, type Material } from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { PALETTE } from '../../core/palette';
+import { ART } from '../style/artPalette';
+import { DOORFRAMES_GLB_BASE64 } from '../assets/doorframesGlb';
+import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
+import { inkTint, markShared, outlineGeometry, solid, toonMaterial } from '../style/materials';
+import type { BoxCollider, CollisionWorld } from '../../world/Collision';
+
+/** The four interiors with a way out to the park, one style each. */
+export type DoorFrameStyle = 'hotel' | 'library' | 'reptile' | 'castle';
+export const DOOR_FRAME_STYLES: readonly DoorFrameStyle[] = ['hotel', 'library', 'reptile', 'castle'];
+
+/**
+ * **Every node's colour and outline** — the loader's to own, the kit is shape
+ * only. `doorframes_render.py` reads this table (by its `colour:` keys) so the
+ * review renders are the game's colours.
+ */
+const DOORFRAME_NODE_STYLES: Readonly<Record<string, { readonly colour: number; readonly outline?: number }>> = {
+  // The lobby: painted cream trim, a pink fan bonnet, a gold star.
+  // No outline on the two posts built of stepped blocks (plinth, shaft and
+  // capital; long and short quoins): a hull round one block lies within
+  // millimetres of its neighbour's face, which `check:coplanar` reports.
+  'doorframe-hotel-post': { colour: ART.cream },
+  'doorframe-hotel-lintel': { colour: ART.cream, outline: 0.018 },
+  'doorframe-hotel-crest': { colour: PALETTE.markerPink, outline: 0.018 },
+  'doorframe-hotel-crest-star': { colour: PALETTE.flowerYellow },
+  // The library: books in the reading room's own jolly spine colours.
+  'doorframe-library-post-a': { colour: PALETTE.markerSky, outline: 0.016 },
+  'doorframe-library-post-b': { colour: ART.jumperRed, outline: 0.016 },
+  'doorframe-library-post-c': { colour: PALETTE.markerMint, outline: 0.016 },
+  'doorframe-library-lintel-a': { colour: PALETTE.markerLemon, outline: 0.016 },
+  'doorframe-library-lintel-b': { colour: PALETTE.markerLilac, outline: 0.016 },
+  'doorframe-library-lintel-c': { colour: PALETTE.markerPink, outline: 0.016 },
+  'doorframe-library-crest-cover': { colour: ART.jumperRed, outline: 0.016 },
+  'doorframe-library-crest-pages': { colour: ART.cream },
+  // The Reptile House: warm sandstone with moss, and a green snake.
+  'doorframe-reptile-post': { colour: PALETTE.stonePinkLight, outline: 0.018 },
+  'doorframe-reptile-post-moss': { colour: PALETTE.leafLight },
+  'doorframe-reptile-lintel': { colour: PALETTE.leafMid, outline: 0.016 },
+  'doorframe-reptile-lintel-spots': { colour: PALETTE.flowerYellow },
+  'doorframe-reptile-crest': { colour: PALETTE.leafMid, outline: 0.016 },
+  'doorframe-reptile-crest-eyes': { colour: PALETTE.eyeWhite },
+  'doorframe-reptile-crest-pupils': { colour: PALETTE.ink },
+  'doorframe-reptile-crest-tongue': { colour: PALETTE.flowerRed },
+  // The castle: pale grey stone, a darker keystone.
+  'doorframe-castle-post': { colour: PALETTE.stoneGreyLight },
+  'doorframe-castle-lintel': { colour: PALETTE.stoneGreyLight, outline: 0.018 },
+  'doorframe-castle-crest': { colour: PALETTE.stoneGreyMid, outline: 0.018 },
+  // The gatehouse top over the door, above the porch roof: the castle's own
+  // pink on a pale stone block, so it reads from across the hall.
+  'doorframe-castle-crest-parapet': { colour: PALETTE.stoneGreyLight },
+  'doorframe-castle-crest-shield': { colour: PALETTE.markerPink, outline: 0.016 },
+};
+
+/** Dressing on a post — drawn and solid, but not what the lintel sits on. */
+const DRESSING_SUFFIX = '-moss';
+
+interface KitStyle {
+  readonly posts: readonly GlbPart[];
+  readonly lintels: readonly GlbPart[];
+  readonly crests: readonly GlbPart[];
+  /** A post's footprint, every node of it (moss and all), about its origin. */
+  readonly post: { readonly minX: number; readonly maxX: number; readonly minZ: number; readonly maxZ: number };
+  /** Where the lintel sits: the post's own top, dressing aside. */
+  readonly seat: number;
+  /** One lintel tile: its width across, height and half-depth. */
+  readonly tileWidth: number;
+  readonly lintelHeight: number;
+  readonly lintelHalfZ: number;
+}
+
+let decoded: Map<string, KitStyle> | null = null;
+
+function boundsOf(parts: readonly GlbPart[]): { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number } {
+  const out = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const part of parts) {
+    part.geometry.computeBoundingBox();
+    const box = part.geometry.boundingBox;
+    if (!box) continue;
+    out.minX = Math.min(out.minX, box.min.x);
+    out.maxX = Math.max(out.maxX, box.max.x);
+    // flat-ok: the kit part's own object-local geometry box
+    out.minY = Math.min(out.minY, box.min.y);
+    // flat-ok: the kit part's own object-local geometry box
+    out.maxY = Math.max(out.maxY, box.max.y);
+    out.minZ = Math.min(out.minZ, box.min.z);
+    out.maxZ = Math.max(out.maxZ, box.max.z);
+  }
+  return out;
+}
+
+/** The kit, decoded once and measured — every figure below is read off it. */
+function kit(style: DoorFrameStyle): KitStyle {
+  if (!decoded) {
+    const parts = readGlbParts(base64ToArrayBuffer(DOORFRAMES_GLB_BASE64));
+    decoded = new Map();
+    for (const name of DOOR_FRAME_STYLES) {
+      const prefix = `doorframe-${name}-`;
+      const of = (role: string): GlbPart[] =>
+        [...parts.values()].filter((p) => p.name === `${prefix}${role}` || p.name.startsWith(`${prefix}${role}-`)).sort((a, b) => a.name.localeCompare(b.name));
+      const posts = of('post');
+      const lintels = of('lintel');
+      const crests = of('crest');
+      if (posts.length === 0 || lintels.length === 0 || crests.length === 0) {
+        throw new Error(`doorFrames: doorframes.glb has no ${name} post, lintel or crest — run \`pnpm run blend:doorframes\``);
+      }
+      for (const part of [...posts, ...lintels, ...crests]) {
+        if (!DOORFRAME_NODE_STYLES[part.name]) throw new Error(`doorFrames: ${part.name} has no colour in DOORFRAME_NODE_STYLES`);
+        markShared(part.geometry);
+      }
+      const post = boundsOf(posts);
+      const stone = boundsOf(posts.filter((p) => !p.name.endsWith(DRESSING_SUFFIX)));
+      const lintel = boundsOf(lintels);
+      decoded.set(name, {
+        posts,
+        lintels,
+        crests,
+        post: { minX: post.minX, maxX: post.maxX, minZ: post.minZ, maxZ: post.maxZ },
+        seat: stone.maxY,
+        tileWidth: lintel.maxX - lintel.minX,
+        lintelHeight: lintel.maxY,
+        lintelHalfZ: Math.max(-lintel.minZ, lintel.maxZ),
+      });
+    }
+  }
+  const found = decoded.get(style);
+  if (!found) throw new Error(`doorFrames: no style ${style}`);
+  return found;
+}
+
+/**
+ * **A post's width across the wall** — how far each room draws its wall back
+ * from the gap edge, so the post stands where the wall's end was and no two
+ * faces share a plane. Measured, the drawn post's whole footprint.
+ */
+export function doorFramePostWidth(style: DoorFrameStyle): number {
+  const { post } = kit(style);
+  return post.maxX - post.minX;
+}
+
+/** Where a frame goes: the gap, in the room's own frame, on a wall running along X. */
+export interface DoorOpening {
+  /** The gap's two edges along X — straight from the room's owner of its doorway. */
+  readonly minX: number;
+  readonly maxX: number;
+  /** The wall's centre line. */
+  readonly z: number;
+  /** The floor under it. */
+  readonly floorY: number;
+}
+
+/** A frame as built: its meshes, and the figures its colliders and its check need. */
+export interface DoorFrame {
+  readonly style: DoorFrameStyle;
+  readonly group: Group;
+  readonly opening: DoorOpening;
+  /** Each post's drawn footprint, in the same frame as the opening. */
+  readonly posts: readonly { readonly minX: number; readonly maxX: number; readonly minZ: number; readonly maxZ: number }[];
+  /** The lintel's underside — the clear height of the opening — over the floor. */
+  readonly clearHeight: number;
+  /** The lintel's top over the floor. */
+  readonly lintelTop: number;
+  /** The lintel's half-depth about the wall line. */
+  readonly lintelHalfZ: number;
+  /** The crest's drawn box, plan in the opening's frame, heights over the floor. */
+  readonly crest: { readonly minX: number; readonly maxX: number; readonly minZ: number; readonly maxZ: number; readonly bottom: number; readonly top: number };
+  /** The highest anything in the frame reaches over the floor, crest included. */
+  readonly top: number;
+}
+
+/**
+ * One drawn part of a frame, placed: which node, and where (in the frame's own
+ * metres). {@link buildDoorFrame} collects these and bakes them into two
+ * meshes, so a frame costs **two draw calls** however many parts it has.
+ */
+interface PlacedPart {
+  readonly part: GlbPart;
+  readonly matrix: Matrix4;
+  /** Which post (0 left, 1 right), for a post's parts. */
+  readonly side?: number;
+}
+
+/**
+ * Where each part's vertices sit in the baked body mesh — so `check:doorframes`
+ * can measure each part's drawn bounds off the mesh in the scene.
+ */
+export interface DoorFramePartRange {
+  readonly name: string;
+  readonly side?: number;
+  readonly start: number;
+  readonly count: number;
+}
+
+let bodyMaterial: Material | null = null;
+let outlineMaterial: Material | null = null;
+
+/** A copy of `geometry` with every vertex coloured `hex` (in the working colour space). */
+function coloured(geometry: BufferGeometry, hex: number): BufferGeometry {
+  const colour = new Color(hex);
+  const count = geometry.getAttribute('position').count;
+  const values = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    values[i * 3] = colour.r;
+    values[i * 3 + 1] = colour.g;
+    values[i * 3 + 2] = colour.b;
+  }
+  geometry.setAttribute('color', new BufferAttribute(values, 3));
+  return geometry;
+}
+
+/** Only the attributes every part shares, so the merge never refuses a part. */
+function trimmed(geometry: BufferGeometry): BufferGeometry {
+  for (const name of Object.keys(geometry.attributes)) {
+    if (name !== 'position' && name !== 'normal') geometry.deleteAttribute(name);
+  }
+  return geometry.index ? geometry.toNonIndexed() : geometry;
+}
+
+/**
+ * **Bakes a frame's parts into two meshes**: the body, every part's own colour
+ * carried per vertex under one toon material, and the ink outline, every
+ * outlined part's hull in its own ink tint under one back-faced basic
+ * material — the very hull `addOutline` makes, part by part, only merged.
+ * PR #743's first cut drew each part as its own mesh with its own outline,
+ * which cost the library ~40 draw calls for one doorway (`check:render-budget`).
+ */
+function bakeFrame(parts: readonly PlacedPart[], name: string): { body: Mesh; outline: Mesh | null; ranges: DoorFramePartRange[] } {
+  const bodies: BufferGeometry[] = [];
+  const hulls: BufferGeometry[] = [];
+  const ranges: DoorFramePartRange[] = [];
+  let start = 0;
+  for (const { part, matrix, side } of parts) {
+    const style = DOORFRAME_NODE_STYLES[part.name];
+    if (!style) throw new Error(`doorFrames: ${part.name} has no colour`);
+    const body = coloured(trimmed(part.geometry.clone()).applyMatrix4(matrix), style.colour);
+    const count = body.getAttribute('position').count;
+    ranges.push(side === undefined ? { name: part.name, start, count } : { name: part.name, side, start, count });
+    start += count;
+    bodies.push(body);
+    if (style.outline !== undefined) {
+      hulls.push(coloured(trimmed(outlineGeometry(part.geometry, style.outline)).applyMatrix4(matrix), inkTint(style.colour)));
+    }
+  }
+  const merged = mergeGeometries(bodies, false);
+  if (!merged) throw new Error(`doorFrames: the ${name} frame's parts would not merge`);
+  for (const g of bodies) g.dispose();
+  if (!bodyMaterial) {
+    const material = toonMaterial(0xffffff);
+    material.vertexColors = true;
+    bodyMaterial = markShared(material);
+  }
+  const body = solid(new Mesh(merged, bodyMaterial));
+  body.name = `doorframe-${name}`;
+  body.userData['doorFrameParts'] = ranges;
+  let outline: Mesh | null = null;
+  if (hulls.length > 0) {
+    const hull = mergeGeometries(hulls, false);
+    for (const g of hulls) g.dispose();
+    if (hull) {
+      if (!outlineMaterial) outlineMaterial = markShared(new MeshBasicMaterial({ vertexColors: true, side: BackSide }));
+      outline = new Mesh(hull, outlineMaterial);
+      outline.name = `doorframe-${name}-outline`;
+      outline.castShadow = false;
+      outline.receiveShadow = false;
+      outline.renderOrder = -1;
+    }
+  }
+  return { body, outline, ranges };
+}
+
+/**
+ * **Builds a frame round `opening`**, in the opening's own frame (the room's
+ * local metres). Add `group` to the room; register the solids with
+ * {@link registerDoorFrameSolids}.
+ */
+export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): DoorFrame {
+  const k = kit(style);
+  const group = new Group();
+  group.name = `doorframe.${style}`;
+  // Each post's inner face on its gap edge: the left post's +X face, the
+  // right post's −X face.
+  const placed: PlacedPart[] = [];
+  const at = (x: number, y: number, z: number, sx = 1): Matrix4 => new Matrix4().makeScale(sx, 1, 1).setPosition(x, y, z);
+  const posts = [opening.minX - k.post.maxX, opening.maxX - k.post.minX].map((centre, side) => {
+    for (const part of k.posts) placed.push({ part, matrix: at(centre, opening.floorY, opening.z), side });
+    return { minX: centre + k.post.minX, maxX: centre + k.post.maxX, minZ: opening.z + k.post.minZ, maxZ: opening.z + k.post.maxZ };
+  });
+
+  // The lintel spans post to post, outer face to outer face, in whole tiles
+  // stretched a little to fit exactly.
+  const from = posts[0]?.minX ?? opening.minX;
+  const to = posts[1]?.maxX ?? opening.maxX;
+  const span = to - from;
+  const count = Math.max(1, Math.round(span / k.tileWidth));
+  const stretch = span / (count * k.tileWidth);
+  for (let i = 0; i < count; i += 1) {
+    const x = from + (span * (i + 0.5)) / count;
+    for (const part of k.lintels) placed.push({ part, matrix: at(x, opening.floorY + k.seat, opening.z, stretch) });
+  }
+
+  const middle = (opening.minX + opening.maxX) / 2;
+  const seat = k.seat + k.lintelHeight;
+  for (const part of k.crests) placed.push({ part, matrix: at(middle, opening.floorY + seat, opening.z) });
+  const baked = bakeFrame(placed, style);
+  group.add(baked.body);
+  if (baked.outline) group.add(baked.outline);
+  const c = boundsOf(k.crests);
+  const crest = {
+    minX: middle + c.minX,
+    maxX: middle + c.maxX,
+    minZ: opening.z + c.minZ,
+    maxZ: opening.z + c.maxZ,
+    // flat-ok: the crest parts' own object-local geometry box, over the floor
+    bottom: seat + c.minY,
+    top: seat + c.maxY, // flat-ok: the crest parts' own object-local geometry box, over the floor
+  };
+
+  return {
+    style,
+    group,
+    opening,
+    posts,
+    clearHeight: k.seat,
+    lintelTop: k.seat + k.lintelHeight,
+    lintelHalfZ: k.lintelHalfZ,
+    crest,
+    top: Math.max(seat, crest.top),
+  };
+}
+
+/** The colliders {@link registerDoorFrameSolids} registered. */
+export interface DoorFrameSolids {
+  readonly posts: readonly BoxCollider[];
+  readonly lintel: BoxCollider;
+  readonly crest: BoxCollider;
+}
+
+/**
+ * **The frame's solids**, in world metres: `originX`/`originZ` take the
+ * frame's local metres to the world (the room's origin, `originY` its height). Each post a crisp box
+ * over its drawn footprint to the lintel's top, which is what stands over it;
+ * the lintel a box over the opening **banded** from its underside — inert to
+ * a walk and to a jump, because the kit stands every lintel's underside over
+ * her head at the top of one (`doorframes_build.py`'s `JUMP_HEAD`;
+ * `check:doorframes` §5 runs the jumps) — and the crest a box banded over its
+ * own drawn box.
+ */
+export function registerDoorFrameSolids(collision: CollisionWorld, frame: DoorFrame, originX: number, originZ: number, originY = 0): DoorFrameSolids {
+  const floor = originY + frame.opening.floorY;
+  return collision.kinded('door frame', () => {
+    const posts = frame.posts.map((p) =>
+      collision.addBox(
+        originX + (p.minX + p.maxX) / 2,
+        originZ + (p.minZ + p.maxZ) / 2,
+        (p.maxX - p.minX) / 2,
+        (p.maxZ - p.minZ) / 2,
+        0,
+        0,
+        floor + frame.lintelTop,
+        false,
+        true,
+      ),
+    );
+    const lintel = collision.addBox(
+      originX + (frame.opening.minX + frame.opening.maxX) / 2,
+      originZ + frame.opening.z,
+      (frame.opening.maxX - frame.opening.minX) / 2,
+      frame.lintelHalfZ,
+      0,
+      0,
+      floor + frame.lintelTop,
+      false,
+      true,
+      floor + frame.clearHeight,
+    );
+    // The crest, banded over its own drawn box: out of every walker's and
+    // jumper's reach, there for a flier exactly where it is drawn.
+    const c = frame.crest;
+    const crest = collision.addBox(
+      originX + (c.minX + c.maxX) / 2,
+      originZ + (c.minZ + c.maxZ) / 2,
+      (c.maxX - c.minX) / 2,
+      (c.maxZ - c.minZ) / 2,
+      0,
+      0,
+      floor + c.top,
+      false,
+      true,
+      floor + c.bottom,
+    );
+    return { posts, lintel, crest };
+  });
+}
+
+/**
+ * **A wall's drawn spans, drawn back from a framed gap** by the post's width,
+ * so each post stands where the wall's end was and no face of the one lies in
+ * a face of the other (`check:coplanar`). A span ending on the gap's edge is
+ * shortened; every other span, and every collider, is left exactly as it was.
+ */
+export function drawnClearOfFrame(
+  drawn: readonly (readonly [number, number])[],
+  gap: readonly [number, number],
+  style: DoorFrameStyle,
+): [number, number][] {
+  const w = doorFramePostWidth(style);
+  return drawn.map(([a, b]): [number, number] => [
+    Math.abs(a - gap[1]) < 1e-6 ? a + w : a,
+    Math.abs(b - gap[0]) < 1e-6 ? b - w : b,
+  ]);
+}
+
+/** A frame as a room built it — what `check:doorframes` asks each room for. */
+export interface PlacedDoorFrame {
+  readonly frame: DoorFrame;
+  readonly solids: DoorFrameSolids;
+  /** The room's origin: the frame's local metres plus this are the world's. */
+  readonly originX: number;
+  readonly originZ: number;
+  readonly originY: number;
+}

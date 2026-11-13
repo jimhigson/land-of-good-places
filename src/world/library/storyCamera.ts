@@ -7,7 +7,7 @@ import type { CharacterModel } from '../../entities/CharacterModel';
 import { applyListeningPose } from '../../entities/ridePose';
 import { KID_HEIGHT } from '../../art/models/kidHeight';
 import { LIBRARY_FLOOR_Y, LIBRARY_FURNITURE, LIBRARY_INNER_X, LIBRARY_INNER_Z, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_STORY_CHAIR, LIBRARY_STORY_RUG, LIBRARY_WALL_HEIGHT } from './layout';
-import { OWL_BUBBLE_OVER_HEAD, owlPerch, type LibraryOwl } from './LibraryOwl';
+import type { LibraryOwl } from './LibraryOwl';
 import type { StoryPhase } from './storyTime';
 
 /**
@@ -341,7 +341,7 @@ export function herStandIn(player: Pick<StoryCameraPlayer, 'model'>): Object3D {
 export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>, player: Pick<StoryCameraPlayer, 'model'>): StoryStage {
   const handle = library.owl.handle;
   const owlLive = handle.root;
-  const perch = owlPerch();
+  const perch = library.owl.perch;
   const owl = standIn(owlLive, new Vector3(perch.x, perch.y, perch.z), (perch.facing * Math.PI) / 180);
   const inOwl = (node: Object3D): Object3D => twin(owlLive, owl, node);
   inOwl(handle.head).rotation.y = 0;
@@ -350,7 +350,7 @@ export function storyStage(library: Pick<StoryCameraLibrary, 'owl' | 'children'>
   inOwl(handle.body).scale.set(1, 1, 1);
   owl.updateMatrixWorld(true);
   // Her bubble's tail over the top of her head, wherever she is (`LibraryOwl.anchorBubble`): over the perch.
-  const bubble = new Vector3(perch.x, perch.y + handle.height + OWL_BUBBLE_OVER_HEAD, perch.z);
+  const bubble = new Vector3(perch.x, perch.y + handle.height + library.owl.bubbleOverHead, perch.z);
   if (owlLive.parent) bubble.applyMatrix4(owlLive.parent.matrixWorld);
   const children = library.children.map((child) => {
     const model = child.model;
@@ -378,7 +378,7 @@ export interface StoryCameraLibrary {
   readonly playerIsInside: boolean;
   readonly playerIsSeated: boolean;
   readonly storyPhase: StoryPhase;
-  readonly owl: Pick<LibraryOwl, 'perched' | 'handle' | 'bubble'>;
+  readonly owl: Pick<LibraryOwl, 'perched' | 'handle' | 'bubble' | 'perch' | 'bubbleOverHead'>;
   readonly children: readonly {
     readonly model: CharacterModel;
     readonly plan: { readonly seat: string };
