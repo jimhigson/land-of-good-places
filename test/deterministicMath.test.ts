@@ -107,3 +107,111 @@ describe('deterministic Math', () => {
     });
   }
 });
+
+/**
+ * **The ports' exact outputs, pinned.** Agreeing with native to an ulp is not
+ * enough here: every prebuilt park was solved with these functions, so a
+ * change that moves any output by one bit — a refactor for speed, say — is a
+ * different park on some seed. This hashes each function's 64-bit answers over
+ * a fixed sweep and compares them with the digests recorded from the shipped
+ * implementation. A digest may only change together with a deliberate change
+ * to what the functions compute, never as a side effect of how.
+ *
+ * The inputs are built from integer operations only (random bit patterns, and
+ * integers scaled by exact powers of two), so they are the same doubles on
+ * every platform; NaN answers hash as one canonical NaN, because the sign of a
+ * NaN that `x - x` produces is the CPU's choice, not fdlibm's.
+ *
+ * Recorded against `origin/main` at 9b5e89e3, before the step-6 allocation
+ * rewrite, and re-proved after it: 188 million calls compared old against new
+ * bit for bit, 0 differing, with a one-sign mutant of `remPio2` as the control
+ * (1,138,280 differing). The same mutant turns this test red on `sin`, `cos`
+ * and `tan` and leaves the other eleven digests alone.
+ */
+describe('deterministic Math: outputs are pinned bit for bit', () => {
+  const words = new Uint32Array(2);
+  const asDouble = new Float64Array(words.buffer);
+  let seed = 0x6a09e667;
+  const next32 = (): number => {
+    seed ^= seed << 13;
+    seed >>>= 0;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    seed >>>= 0;
+    return seed;
+  };
+  /** Any double at all: every exponent, subnormals, ±0, ±Infinity, NaN. */
+  const anyDouble = (): number => {
+    words[0] = next32();
+    words[1] = next32();
+    return asDouble[0]!;
+  };
+  /**
+   * A signed 32-bit integer scaled into (-2^shift, 2^shift): exact, so
+   * platform-free. The scale is built by halving, not with `**` (V8's own pow).
+   */
+  const scaled = (shift: number): number => {
+    let scale = 1;
+    for (let k = 0; k < 31 - shift; k += 1) scale /= 2;
+    return (next32() | 0) * scale;
+  };
+
+  const N = 20_000;
+  const inputs = (name: Name): number[][] => {
+    seed = 0x6a09e667;
+    const out: number[][] = [];
+    for (let i = 0; i < N; i += 1) {
+      const pick = i % 4;
+      const x = pick === 0 ? anyDouble() : pick === 1 ? scaled(1) : pick === 2 ? scaled(5) : scaled(21);
+      const y = pick === 0 ? anyDouble() : scaled(3);
+      out.push(name === 'atan2' || name === 'pow' ? [x, y] : [x]);
+    }
+    return out;
+  };
+  const digest = (name: Name): string => {
+    const fn = DETERMINISTIC_MATH[name] as (...args: number[]) => number;
+    // Two FNV-1a streams over the answer's two 32-bit words, read in opposite
+    // orders: 64 bits of digest from integer arithmetic alone.
+    let a = 0x811c9dc5;
+    let b = 0x01000193;
+    const cell = new Float64Array(1);
+    const cellWords = new Uint32Array(cell.buffer);
+    for (const args of inputs(name)) {
+      const r = fn(...args);
+      cell[0] = r;
+      if (r !== r) {
+        // Canonical quiet NaN: the sign of `x - x`'s NaN is the CPU's choice.
+        cellWords[1] = 0x7ff80000;
+        cellWords[0] = 0;
+      }
+      a = Math.imul(a ^ cellWords[0]!, 0x01000193) >>> 0;
+      a = Math.imul(a ^ cellWords[1]!, 0x01000193) >>> 0;
+      b = Math.imul(b ^ cellWords[1]!, 0x811c9dc5 | 1) >>> 0;
+      b = Math.imul(b ^ cellWords[0]!, 0x811c9dc5 | 1) >>> 0;
+    }
+    return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
+  };
+
+  const PINNED: Record<Name, string> = {
+    sin: '8779d7ab390e9055',
+    cos: '73dd18621a472554',
+    tan: 'c44634b764880165',
+    atan: '70efe38f25d40199',
+    atan2: 'f40516175dcc72cd',
+    asin: '2811f20f04a6e007',
+    acos: 'b75d310f4a4aa801',
+    exp: '35b6a5fc52d4eb70',
+    log: '2ce7fc297c1e6d31',
+    pow: '35f36a67f14d9fb1',
+    expm1: '580edffdd6975179',
+    sinh: '77b1575af15df3c4',
+    cosh: '51a140303bbc3bd0',
+    tanh: '1bfba8ce4d109f5e',
+  };
+
+  it('every function', () => {
+    const got = Object.fromEntries((Object.keys(DETERMINISTIC_MATH) as Name[]).map((name) => [name, digest(name)]));
+    process.stderr.write(`deterministic Math digests: ${JSON.stringify(got)}\n`);
+    expect(got).toEqual(PINNED);
+  });
+});

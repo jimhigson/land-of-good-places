@@ -1,5 +1,5 @@
 import { Mesh, type BufferGeometry, type CanvasTexture } from 'three';
-import { decal, markShared, toonMaterial } from './materials';
+import { decal, markShared, showMap, toonMaterial } from './materials';
 import {
   facePatchGeometry,
   paintExpressions,
@@ -58,8 +58,7 @@ export function sharedFacePatch(key: string, options: FacePatchOptions): FacePat
     mesh,
     expressions,
     setExpression(name: Expression) {
-      material.map = expressions[name];
-      material.needsUpdate = true;
+      showMap(material, expressions[name]);
     },
   };
 }

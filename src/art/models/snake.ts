@@ -19,7 +19,7 @@ import type { AssetHandle, CreatureHandle } from '../style/asset';
 import type { Expression } from '../style/faces';
 import { createFaceLife, type FaceLife } from '../style/faceLife';
 import { visibleBounds } from '../style/measure';
-import { inkTint, markShared, outlineGeometry, toonMaterial } from '../style/materials';
+import { inkTint, markShared, outlineGeometry, showMap, toonMaterial } from '../style/materials';
 import { reptileCreatureMesh } from './reptileCreaturesAssets';
 import { PET_RENDER_HEIGHT } from './pets';
 import { snakeFaceTextures, type SnakeExpression } from './snakeFace';
@@ -255,8 +255,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   headMesh.scale.setScalar(headScale);
   const faces = snakeFaceTextures();
   const headMaterial = headMesh.material as MeshToonMaterial;
-  headMaterial.map = faces.neutral;
-  headMaterial.needsUpdate = true;
+  showMap(headMaterial, faces.neutral);
   const tongue = reptileCreatureMesh('rr-snake-tongue');
   // Hidden by visibility for the flick, not by a 0.001 scale along its
   // length — that leaves the tongue's flat silhouette on the snout.
@@ -290,8 +289,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   const showFace = (expression: Expression): void => {
     const snake: SnakeExpression =
       expression === 'blink' ? 'blink' : expression === 'happy' ? 'happy' : expression === 'surprised' ? 'surprised' : 'neutral';
-    headMaterial.map = faces[snake];
-    headMaterial.needsUpdate = true;
+    showMap(headMaterial, faces[snake]);
   };
 
   const wavelength = 0.8;

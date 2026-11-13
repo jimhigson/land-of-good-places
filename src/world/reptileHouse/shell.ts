@@ -10,6 +10,7 @@ import { groundRadiusAt, solidInFrame, yAtRadius } from '../terrain';
 import { SPACE_GARDEN, spaceAt } from '../spaces';
 import { reptileHouseDrawnTopAt, reptileHouseTopInSector, reptileHouseTopOver } from '../../art/models/reptileHouseAssets';
 import { PALETTE } from '../../core/palette';
+import { buildDoorFrame, drawnClearOfFrame, registerDoorFrameSolids, type PlacedDoorFrame } from '../../art/models/doorFrames';
 import { solid, decal, softMaterial, toonMaterial } from '../../art/style/materials';
 import {
   REPTILE_ARCH_WIDTH,
@@ -358,8 +359,11 @@ export function buildForecourt(root: Group, surfaces: WalkSurfaces, originX: num
   // it lolls out of the mouth over the plinth's edge onto this paving.
 }
 
-/** The hall's floor plate, walls and rib arches, in `root` (at the hall origin). */
-export function buildHallShell(root: Group, collision: CollisionWorld, surfaces: WalkSurfaces): void {
+/**
+ * The hall's floor plate, walls and rib arches, in `root` (at the hall origin),
+ * and the doorway frame round its way out — which it returns.
+ */
+export function buildHallShell(root: Group, collision: CollisionWorld, surfaces: WalkSurfaces): PlacedDoorFrame {
   const originX = REPTILE_HOUSE_ORIGIN_X;
   const originZ = REPTILE_HOUSE_ORIGIN_Z;
 
@@ -400,10 +404,13 @@ export function buildHallShell(root: Group, collision: CollisionWorld, surfaces:
     // the same depth, so no two wall boxes share a corner column — the
     // hotel's butting walls run the full extent and their tops meet the
     // corner-closed walls' tops in one plane, which the coplanar sweep reports.
-    const drawn =
+    const cornered =
       along === 'x'
         ? cornerClosedSpans(spans, from, to, WALL_HALF_DEPTH)
         : spans.map(([a, b]): [number, number] => [a <= from + 1e-6 ? a + WALL_HALF_DEPTH : a, b >= to - 1e-6 ? b - WALL_HALF_DEPTH : b]);
+    // The south wall is drawn back from the way out by the doorway frame's
+    // posts, which stand where its ends were (`doorFrames.ts`).
+    const drawn = side === 'south' ? drawnClearOfFrame(cornered, reptileDoorGap(), 'reptile') : cornered;
     for (const [index, [a, b]] of spans.entries()) {
       if (b - a < 0.05) continue;
       const [drawnA, drawnB] = drawn[index] ?? [a, b];
@@ -446,6 +453,14 @@ export function buildHallShell(root: Group, collision: CollisionWorld, surfaces:
     rib.name = 'reptile.rib';
     root.add(rib);
   }
+
+  // **The way out's doorway frame** (Jim, 11 Nov 2026): mossy stone and a
+  // snake round the south gap, so the exit in the hidden wall can be seen.
+  const [doorMin, doorMax] = reptileDoorGap();
+  const frame = buildDoorFrame('reptile', { minX: doorMin, maxX: doorMax, z: REPTILE_HALF_Z, floorY: 0 });
+  root.add(frame.group);
+  const solids = registerDoorFrameSolids(collision, frame, originX, originZ, REPTILE_HOUSE_FLOOR_Y);
+  return { frame, solids, originX, originZ, originY: REPTILE_HOUSE_FLOOR_Y };
 }
 
 /** A polyline the rib tube follows. */
