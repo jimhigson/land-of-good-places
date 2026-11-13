@@ -35,3 +35,14 @@ boot set 4723 KB; libraryGlb.ts 586 KB and libraryDenGlb.ts 107 KB in boot.
 - tsc, typecheck:test green. check:library-glb green.
 - Owl bubble now made in Library.ts (createOwlBubble) and passed to LibraryOwl.
 - pagePictures gets library art via LIBRARY_ROOM.loaded.LIBRARY_PICTURE_ART; LazyBookReader loads room+reader.
+
+## Status (13 Nov)
+- PR #760 open. Local `pnpm run check` exit 0. check:library green. Browser play-through (dev server 5392, seed 5,
+  desktop+phone) all good incl. failure path and save-restore; preview pr-760-675d972 loads room only on entry.
+- local test:procgen: 40 files pass, 10 seeds hit the 1 h hook timeout in the acceptance loop (source hash changed,
+  Mac loaded) — environmental; CI Procgen invariants all green.
+- CI red: shard 9 check:book-reader paint timeout = known #749 flake, fix in flight as #761 (reader-flake).
+  shard 4 check:tap-dash seed 13 "door-sized band ... never fired" on a 95 m route. tap-dash picks routes with a
+  seeded Math.random replaced BEFORE the park is built, so my refactor shifted the stream (seed 5 longest route
+  243.3 -> 241.5; seed 13 237.0 -> 220.7 on CI). Surfaced a latent miss; reproducing with
+  LGP_SEEDS=5,13 build:parks then `LGP_TAP_DASH_CHILD=1 LGP_SEED=13 LGP_TAP_DASH_BAND=1 node ... check-tap-dash.mts`.
