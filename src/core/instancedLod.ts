@@ -51,7 +51,7 @@ export const LOD_LOW_BELOW_SHARE = 0.2;
  * How far the far level may stand from the authored surface, in metres of
  * world: see {@link simplifyWithin} for exactly what is bounded.
  */
-export const LOD_LOW_TOLERANCE_M = 0.01;
+export const LOD_LOW_TOLERANCE_M = 0.006;
 
 /** Below this many triangles a geometry is its own far level: nothing to save. */
 export const LOD_MIN_TRIANGLES = 48;
@@ -184,6 +184,13 @@ export function triangleCount(geometry: BufferGeometry): number {
  * facets of a faceted curve are not.
  */
 const CREASE_COS = 0.7;
+
+/**
+ * A corner whose normal is further than this from its own face's (a cosine:
+ * ~35°) sits on a fold its normals were smoothed round — see `pinned` in
+ * {@link simplifyWithin}.
+ */
+const FOLD_COS = 0.82;
 
 /** A collapse may turn a face by this much and no further (a cosine: ~78°). */
 const FLIP_COS = 0.2;
@@ -387,6 +394,37 @@ export function simplifyWithin(source: BufferGeometry, tolerance: number, textur
     }
   }
 
+  // ---- Folds: places whose own normal disagrees with their own faces. A
+  // smooth normal averaged round a sharp turn (a hem joining a shell's outer
+  // skin to its inner one, by `computeVertexNormals`) is not the surface's
+  // normal at all, and the ramp draws a band wherever it is interpolated: how
+  // wide that band is depends on exactly which triangles carry it. So such a
+  // place, and every place one edge from it, keeps its triangles as they are.
+  const pinned = new Uint8Array(placeTotal);
+  if (normal) {
+    const foldPlace = new Uint8Array(placeTotal);
+    for (let t = 0; t < sourceTriangles; t += 1) {
+      if (!live[t]) continue;
+      const a = tp[t * 3]!, b = tp[t * 3 + 1]!, c = tp[t * 3 + 2]!;
+      const ux = xs[b]! - xs[a]!, uy = ys[b]! - ys[a]!, uz = zs[b]! - zs[a]!;
+      const vx = xs[c]! - xs[a]!, vy = ys[c]! - ys[a]!, vz = zs[c]! - zs[a]!;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const length = Math.hypot(nx, ny, nz);
+      if (!(length > 0)) continue;
+      for (let k = 0; k < 3; k += 1) {
+        const w = tw[t * 3 + k]!;
+        const wx = normal.getX(w), wy = normal.getY(w), wz = normal.getZ(w);
+        const dot = (wx * nx + wy * ny + wz * nz) / (length * (Math.hypot(wx, wy, wz) || 1));
+        if (dot < FOLD_COS) foldPlace[tp[t * 3 + k]!] = 1;
+      }
+    }
+    for (let t = 0; t < sourceTriangles; t += 1) {
+      if (!live[t]) continue;
+      const a = tp[t * 3]!, b = tp[t * 3 + 1]!, c = tp[t * 3 + 2]!;
+      if (foldPlace[a] || foldPlace[b] || foldPlace[c]) pinned[a] = pinned[b] = pinned[c] = 1;
+    }
+  }
+
   /** Summed squared distance from where `v` stands to every plane `u` and `v` carry. */
   const costOf = (u: number, v: number): number => {
     const x = xs[v]!, y = ys[v]!, z = zs[v]!;
@@ -503,6 +541,8 @@ export function simplifyWithin(source: BufferGeometry, tolerance: number, textur
       else second = t;
     }
     if (shared === 0 || shared > 2) return false;
+    // A fold's triangles stay as they are (see `pinned`).
+    if (pinned[u]) return false;
 
     // A vertex on no kept edge is free; on exactly two, it slides along them;
     // anything else is a corner or an end, and stays.
@@ -548,11 +588,14 @@ export function simplifyWithin(source: BufferGeometry, tolerance: number, textur
       if (!(now > was * 1e-6) || ox * nx + oy * ny + oz * nz < FLIP_COS * was * now) return false;
     }
 
-    // Allowed. Every face that keeps going takes, at `v`, the look of the
-    // side of the edge it was on.
+    // Every face that keeps going takes, at `v`, the look of the side of the
+    // edge it was on.
     const firstFrom = wedgeAt(first, u), firstTo = wedgeAt(first, v);
     const secondFrom = second < 0 ? firstFrom : wedgeAt(second, u);
     const secondTo = second < 0 ? firstTo : wedgeAt(second, v);
+    const takes = (from: number): number => (unlike(from, firstFrom) <= unlike(from, secondFrom) ? firstTo : secondTo);
+
+    // Allowed.
     const into = around[v]!;
     for (const t of fan) {
       if (uses(t, v)) {
@@ -561,8 +604,7 @@ export function simplifyWithin(source: BufferGeometry, tolerance: number, textur
       }
       for (let k = 0; k < 3; k += 1) {
         if (tp[t * 3 + k] !== u) continue;
-        const from = tw[t * 3 + k]!;
-        tw[t * 3 + k] = unlike(from, firstFrom) <= unlike(from, secondFrom) ? firstTo : secondTo;
+        tw[t * 3 + k] = takes(tw[t * 3 + k]!);
         tp[t * 3 + k] = v;
       }
       into.push(t);
