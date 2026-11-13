@@ -97,6 +97,12 @@ const LAZY_MODULES = [
   'src/minigames/ferrisWheel/space.ts',
   'src/minigames/ferrisWheel/sparks.ts',
   'src/world/ferrisWheel/clouds.ts',
+  // The Land Hotel's inside, and the inside half of its kit (`world/interiors.ts`).
+  'src/world/hotel/interior.ts',
+  'src/world/hotel/dressing.ts',
+  'src/world/hotel/cinematic.ts',
+  'src/art/models/hotelInsideKit.ts',
+  'src/art/assets/hotelInsideGlb.ts',
   // Mini-games behind a stall's curtain (`MiniGameHost`).
   'src/minigames/dodgems/Dodgems.ts',
   'src/minigames/waterFight/WaterFight.ts',
