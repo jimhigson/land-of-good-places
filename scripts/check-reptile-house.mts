@@ -32,7 +32,8 @@
  *  7. The doors work both ways at a sprint stride, through the real
  *     `ReptileHouse` on the real harness.
  *  8. Every drawn solid taller than 0.6 m under the hall root has a collider
- *     at its middle, bar a named walk-through list.
+ *     at its middle, bar a named walk-through list. The baked doorway frame is
+ *     measured part by part (`doorFramePartBoxes`), with a control every run.
  *  9. Every animal is inside its own enclosure.
  * 10. The Tortoise Ride, on a real `Player`: boards by the link, and mid-lap
  *     a jump, the stick or a tap each put her off the shell on clear floor
@@ -57,6 +58,32 @@
  * lagoon stadium (13, −3)→(17, −3) half 3 at origin (600, −600), walls at
  * `REPTILE_ENCLOSURE_WALL_HEIGHT` 1.45. (Clause 9 stays green under that
  * mutation: animals are measured by position, not by collider.)
+ *
+ * **Clause 8 and the doorway frame, 13 November 2026.** Measured whole, the
+ * baked frame read `doorframe-reptile (4.21 m tall) has no collider at (6.00,
+ * 18.20)`: its box spans post to post, and (6.00, 18.20) is the open doorway,
+ * nothing drawn there under the lintel's 3.50 m. Not a hole — marched in the
+ * built park (seed 5 restart 1), 404 lane-walks 5 cm apart across the frame and
+ * 128 marches at that point, at 5 cm and `PLAYER_LONGEST_STEP`, put her body
+ * into drawn stone 0 times; with the posts' boxes removed, 234 and 55. Part by
+ * part, proved red against that geometry — reptile posts at hall-local x
+ * 4.10..4.70 and 7.30..7.90, z 17.59..18.41, moss to z 18.46, 0..3.50 m, the
+ * gap 4.70..7.30, the south wall's collider (half 0.3) running under both
+ * posts to the gap's edges — with no collider under the frame at all (its
+ * solids registered elsewhere, the south wall's not registered):
+ *
+ * ```
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post#0] (3.50 m tall) has no collider at (4.40, 18.00)
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post-moss#0] (2.50 m tall) has no collider at (4.42, 18.07)
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post#1] (3.50 m tall) has no collider at (7.60, 18.00)
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post-moss#1] (2.50 m tall) has no collider at (7.62, 18.07)
+ *   ✗ 72 tall drawn solids checked (495 plant instances among them), 4 with no collider
+ * ```
+ *
+ * With only the frame's own boxes out it stays green, honestly: the wall's
+ * collider is still at every part's middle. The 0.11–0.16 m of post and moss
+ * standing proud of the wall is `check:doorframes` §3's to see (58 problems
+ * under that mutation).
  *
  * Clause 10 proved red the same day with the one line in
  * `TortoiseRide.update` that reads the input commented out (the mouth-door
