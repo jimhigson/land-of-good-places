@@ -67,6 +67,14 @@ import { ShaderWarmup } from './boot/shaderWarmup';
  * the bus ride these are frames she is playing in.
  */
 const BACKGROUND_WARMUP_BUDGET_MS = 2;
+
+/**
+ * Metres round her that a cover's warm-up compiles whether or not this
+ * frame's camera sees them (`core/viewWarmup.ts`'s `drawnBy`). Every room is
+ * its own plate, hundreds of metres from the next, and none is wider than
+ * this from wherever she can stand in it, so it is the room she is in.
+ */
+const WARM_NEAR_RADIUS = 70;
 import { freezeParkStatics } from './world/parkStatics';
 import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
@@ -942,11 +950,16 @@ export class Game {
     // seat's RideCamera, alighting wipes back. The override is the third
     // render state Decision 1 specified — render() swaps cameras, nothing
     // else changes. Her own model hides while the eye is in her head.
+    // `cut` is the ride's own part of the swap — whatever it must not change
+    // until the iris is shut (a ride's new lights, its car and sky show), run
+    // first thing at the midpoint so the view the iris holds for is complete.
     const rideCamera = (
       camera: import('three').PerspectiveCamera | null,
       playerStaysVisible = false,
+      cut?: () => void,
     ) => {
       this.transitions.irisWipe(() => {
+        cut?.();
         this.cameraOverride = camera;
         this.player.group.visible = camera === null || playerStaysVisible;
       });
@@ -983,10 +996,11 @@ export class Game {
       if (this.cameraOverride === null) return;
       this.cameraOverride = camera;
     };
-    this.world.railRace.onRideChange = (riding) =>
+    this.world.railRace.onRideChange = (riding, cut) =>
       rideCamera(
         riding ? (this.world.railRace.rideView?.camera ?? null) : null,
         this.world.railRace.playerStaysVisible,
+        cut,
       );
     // The hotel's own camera moments — the food close-up, a picture on the
     // wall, the view out of a fiftieth-floor window (`hotel/cinematic.ts`).
@@ -1001,9 +1015,9 @@ export class Game {
       this.cameraOverride = camera;
     };
     this.world.ferrisWheel.touch = isTouchDevice();
-    this.world.ferrisWheel.onRideChange = (riding) => {
+    this.world.ferrisWheel.onRideChange = (riding, cut) => {
       if (riding) {
-        rideCamera(this.world.ferrisWheel.rideView?.camera ?? null);
+        rideCamera(this.world.ferrisWheel.rideView?.camera ?? null, false, cut);
         return;
       }
       // Getting *off* needs the teardown to happen at the wipe's midpoint,
@@ -2363,10 +2377,27 @@ export class Game {
    * whose lights are not the same set, so neither are its programs.
    */
   private warmPasses(warmup: ViewWarmup, camera: Camera): void {
-    warmup.add(this.engine.scene, camera);
+    // The room she is in, whole, and not just the part this frame's camera
+    // sees: she walks on, the camera follows, and the rest of it is a second
+    // away — see `drawnBy`.
+    const reach = {
+      centre: this.player.position,
+      radius: WARM_NEAR_RADIUS,
+      // What goes wherever she goes, whole: drawn here soon whatever it is
+      // doing now (`drawnBy`).
+      travelling: [
+        this.player.group,
+        this.parade.group,
+        this.heldBalloons.group,
+        this.highlights.group,
+        this.foliageFade.group,
+        this.tapNavigator.markerRoot,
+      ],
+    };
+    warmup.add(this.engine.scene, camera, reach);
     if (this.world.ferrisWheel.drawsCarInFront && this.cameraOverride) {
       this.cameraOverride.layers.set(VIEWMODEL_LAYER);
-      warmup.add(this.engine.scene, this.cameraOverride);
+      warmup.add(this.engine.scene, this.cameraOverride, reach);
       this.cameraOverride.layers.set(0);
     }
   }

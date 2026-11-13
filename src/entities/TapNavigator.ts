@@ -1,4 +1,4 @@
-import { Raycaster, Vector2, Vector3 } from 'three';
+import { Raycaster, Vector2, Vector3, type Object3D } from 'three';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { InputSystem } from '../core/input';
 import type { TapPoint } from '../core/input/PointerControls';
@@ -146,6 +146,15 @@ export class TapNavigator implements GameSystem {
   readonly name = 'tapNavigator';
 
   private readonly marker = new TapMarker();
+
+  /**
+   * The marker's root — for the warm-up behind a cover (`core/viewWarmup.ts`),
+   * which compiles the things that go wherever she goes before they are shown.
+   */
+  get markerRoot(): Object3D {
+    return this.marker.root;
+  }
+
   /**
    * Where a tap at (x, y, z) should really walk her, when that is not where the
    * finger landed — today only "on through an interior's way out"

@@ -222,7 +222,12 @@ export class FerrisWheelRide implements GameSystem {
   readonly group = new Group();
 
   rideView: RideCamera | null = null;
-  onRideChange: ((riding: boolean) => void) | null = null;
+  /**
+   * `Game`'s boarding wipe. `cut`, on the way on, is what must change only
+   * once the iris is shut — `Game` runs it at the wipe's midpoint; with
+   * nobody listening it is run at once.
+   */
+  onRideChange: ((riding: boolean, cut?: () => void) => void) | null = null;
   onMoment: ((moment: FerrisMoment) => void) | null = null;
   /** True on a touch device — only changes which words the cues use. */
   touch = false;
@@ -456,13 +461,22 @@ export class FerrisWheelRide implements GameSystem {
     this.rate = 1;
     this.cardTime = -1;
     this.waves = 0;
-    this.group.visible = true;
-    this.world.setParkWheelVisible(false);
-    // Another place entirely, and never meant to be seen from this one.
-    this.world.setElsewhereVisible(false);
+    // **Shown at the cut, behind the shut iris — not at the press.** Built
+    // above, but put on screen here, the car, the clouds and the sky show were
+    // drawn by every frame of the closing iris: sixteen new programs linked
+    // there one at a time, a 105 ms frame she watched (measured on the
+    // shipped build). At the cut nobody sees the frame that asks for them,
+    // and the iris holds shut until they are linked (`core/viewWarmup.ts`).
+    const showRide = (): void => {
+      this.group.visible = true;
+      this.world.setParkWheelVisible(false);
+      // Another place entirely, and never meant to be seen from this one.
+      this.world.setElsewhereVisible(false);
+    };
 
     this.player.beginRide(this.holder);
-    this.onRideChange?.(true);
+    if (this.onRideChange) this.onRideChange(true, showRide);
+    else showRide();
     this.rideView?.board();
 
     this.buildCues();

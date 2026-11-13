@@ -1,4 +1,4 @@
-import { Frustum, Matrix4, Object3D, type Camera, type Material, type Scene, type Sprite, type Texture, type WebGLRenderer } from 'three';
+import { Frustum, Matrix4, Object3D, Sphere, type Camera, type Material, type Scene, type Sprite, type Texture, type Vector3, type WebGLRenderer } from 'three';
 
 /**
  * **Nothing new is drawn on a frame a child can see** (120 fps plan, steps 8
@@ -71,39 +71,93 @@ interface TextureState {
 
 const _frustum = new Frustum();
 const _viewProjection = new Matrix4();
+const _sphere = new Sphere();
 
 /**
- * **Every renderable `camera` would draw of `scene` this frame** — three.js's
- * own cull (`WebGLRenderer`'s `projectObject`) without the drawing: a subtree
- * under an invisible node is skipped, layers are tested against the camera,
- * and a mesh, line, point cloud or sprite is kept if it is not frustum-culled
- * or its bounding sphere meets the frustum.
- *
- * Culled rather than the whole scene, because the whole scene is the wrong
- * answer twice over indoors: the park stays in the graph while she is in the
- * library, and compiling its hundreds of materials against the library's
- * lights would create programs nothing ever draws.
+ * What a warm-up covers beyond the frame's own frustum — see {@link drawnBy}.
  */
-export function drawnBy(scene: Object3D, camera: Camera, frustum: Frustum = _frustum): Object3D[] {
+export interface WarmReach {
+  /** Where she stands. */
+  readonly centre: Vector3;
+  /** Metres round her within which everything drawable is warmed, shown or not. */
+  readonly radius: number;
+  /**
+   * Roots of the things that go wherever she goes — her own model, her pets,
+   * the highlight, the tap marker — warmed whole, shown or not, wherever they
+   * happen to be standing when the cover went up.
+   */
+  readonly travelling: readonly Object3D[];
+}
+
+/**
+ * **Everything that can be drawn while she is where she is now**, without
+ * drawing it — three.js's own cull (`WebGLRenderer`'s `projectObject`)
+ * widened to the next few seconds:
+ *
+ * - **shown and in the frustum** — what this very frame draws (layers tested
+ *   against the camera, as three does);
+ * - **within `reach.radius` of her, shown or not** — the rest of the room. She
+ *   walks on, the camera follows, a twinkle on a secret shelf switches on, and
+ *   each of those was a link on a frame she could see (measured with the
+ *   frustum alone, the library's first walk-in: three);
+ * - **never frustum-culled, shown or not** — drawn from anywhere, so from here;
+ * - **everything under `reach.travelling`** — the highlight that rings
+ *   whatever she next walks up to was standing in the park when the cover went
+ *   up, and links on the first selection indoors otherwise.
+ *
+ * Not the whole scene: the park stays in the graph while she is in the
+ * library, and compiling its hundreds of materials against the library's
+ * lights would create programs nothing ever draws. Every space is its own
+ * plate hundreds of metres from the next, so a ball round her is the room
+ * she is in — and, outdoors, the stretch of park she reaches before the bus
+ * ride's warm-up (or `Game.warmTheRestInBackground`) has covered the rest.
+ */
+export function drawnBy(scene: Object3D, camera: Camera, reach?: WarmReach, frustum: Frustum = _frustum): Object3D[] {
   if (scene.matrixWorldAutoUpdate) scene.updateMatrixWorld();
   if (camera.parent === null && camera.matrixWorldAutoUpdate) camera.updateMatrixWorld();
   _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   frustum.setFromProjectionMatrix(_viewProjection);
-  const out: Object3D[] = [];
-  const visit = (object: Object3D): void => {
-    if (!object.visible) return;
+  const out = new Set<Object3D>();
+  const near = reach;
+  const nearby = (object: Object3D): boolean => {
+    if (!near) return false;
+    const geometry = (object as { geometry?: { boundingSphere: Sphere | null; computeBoundingSphere(): void } }).geometry;
+    const own = (object as { boundingSphere?: Sphere | null; computeBoundingSphere?: () => void });
+    // An instanced or batched mesh keeps a sphere round all its instances.
+    if (own.boundingSphere !== undefined && own.computeBoundingSphere) {
+      if (own.boundingSphere === null) own.computeBoundingSphere();
+      if (!own.boundingSphere) return false;
+      _sphere.copy(own.boundingSphere);
+    } else if (geometry) {
+      if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+      if (!geometry.boundingSphere) return false;
+      _sphere.copy(geometry.boundingSphere);
+    } else {
+      return false;
+    }
+    _sphere.applyMatrix4(object.matrixWorld);
+    return _sphere.center.distanceTo(near.centre) - _sphere.radius <= near.radius;
+  };
+  const visit = (object: Object3D, shownAbove: boolean): void => {
+    const shown = shownAbove && object.visible;
     if (object.layers.test(camera.layers)) {
       const o = object as Object3D & { isMesh?: boolean; isLine?: boolean; isPoints?: boolean; isSprite?: boolean };
-      if (o.isSprite === true) {
-        if (!object.frustumCulled || frustum.intersectsSprite(object as Sprite)) out.push(object);
-      } else if (o.isMesh === true || o.isLine === true || o.isPoints === true) {
-        if (!object.frustumCulled || frustum.intersectsObject(object)) out.push(object);
+      const sprite = o.isSprite === true;
+      if (sprite || o.isMesh === true || o.isLine === true || o.isPoints === true) {
+        const inFrustum = shown && object.frustumCulled && (sprite ? frustum.intersectsSprite(object as Sprite) : frustum.intersectsObject(object));
+        if (!object.frustumCulled || inFrustum || nearby(object)) out.add(object);
       }
     }
-    for (const child of object.children) visit(child);
+    for (const child of object.children) visit(child, shown);
   };
-  visit(scene);
-  return out;
+  visit(scene, true);
+  for (const root of reach?.travelling ?? []) {
+    root.traverse((object) => {
+      const o = object as Object3D & { isMesh?: boolean; isLine?: boolean; isPoints?: boolean; isSprite?: boolean };
+      if ((o.isMesh === true || o.isLine === true || o.isPoints === true || o.isSprite === true) && object.layers.test(camera.layers)) out.add(object);
+    });
+  }
+  return [...out];
 }
 
 /**
@@ -201,8 +255,8 @@ export class ViewWarmup {
    * Called once per pass the frame draws (`Game.warmPasses`): the park's,
    * and the ferris car's second pass on its own layer, whose lights differ.
    */
-  add(scene: Scene, camera: Camera): void {
-    const objects = drawnBy(scene, camera);
+  add(scene: Scene, camera: Camera, reach?: WarmReach): void {
+    const objects = drawnBy(scene, camera, reach);
     const programsBefore = this.renderer.info.programs?.length ?? 0;
     const started = performance.now();
     const compiled = this.renderer.compile(new ObjectList(objects), camera, scene);
