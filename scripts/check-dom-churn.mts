@@ -26,7 +26,51 @@
  * calls, and whether the chips are written every frame.
  *
  * Run against a dev server (`pnpm run check:served-dom-churn`): it reads
- * `window.game`, which only the dev build exposes.
+ * `window.game`, which only the dev build exposes. `SWIFTSHADER=1` runs it on
+ * the software rasteriser CI's runners have.
+ *
+ * ## Its frames draw no pixels — the whole frame runs, the rasteriser does not
+ *
+ * Everything asserted here is a count made by the frame's JavaScript or the
+ * page's style engine; nothing here looks at a pixel. But a frame of the park
+ * is ~600 GL draws plus a VSM shadow pass, and a hosted runner has no GPU, so
+ * SwiftShader rasterises them on its CPU. The 1200 frames this waits for (two
+ * samples of {@link SETTLE_FRAMES} + {@link SAMPLE_FRAMES}) took 18 s on an M4
+ * Pro's GPU and never arrived on the runner: its first wait, for 360 frames,
+ * timed out at 240 s (run 43439027681, shard 12, 13 Nov 2026) — under 1.5 fps.
+ * Measured at the spawn, seed 5, 1000×700, DPR 1, frames counted over 5 s:
+ *
+ * | M4 Pro, 13 Nov 2026                                              | fps     |
+ * |------------------------------------------------------------------|---------|
+ * | GPU                                                              | 120     |
+ * | SwiftShader                                                      | 3.0     |
+ * | SwiftShader, DSF 0.25 (a sixteenth of the pixels to fill)        | 3.3     |
+ * | SwiftShader, shadow map not re-rendered                          | 5.7     |
+ * | SwiftShader, sky only (`scene.visible = false`)                  | 120     |
+ * | SwiftShader, GL draw calls skipped                               | 120     |
+ * | SwiftShader on the efficiency cores (`taskpolicy -c background`) | 0.4–0.8 |
+ * | the same, GL draw calls skipped                                  | ~10     |
+ *
+ * It is the draws — not the fill, and not the DOM. So once the park is up,
+ * `ready()` replaces the context's draw entry points with a counter. The whole
+ * frame still runs: `Game.tick`, every HUD setter, the label resolve, and all
+ * of three's own side of `renderer.render` — traversal, culling,
+ * `onBeforeRender`, programs, uniforms, and the `info.render.calls` tally the
+ * draw-call figures below are read from. Only the rasteriser is left out, on
+ * a GPU exactly as on CI, so this is one instrument everywhere, not two.
+ *
+ * **Its control, asserted on both samples**: the draws skipped equal the draws
+ * three counted, at least one a frame. Unequal means something drew around
+ * `renderer.render`, or three draws through an entry point not skipped here
+ * and CI is paying for pixels again; none means nothing was skipped at all.
+ *
+ * Not fewer frames instead: an unguarded per-frame setter is 1.00 a frame at
+ * any frame rate, but the prompts, fades, CSS transitions and wandering NPCs
+ * the ceilings must sit above run on the clock. Below 12 fps every frame
+ * carries ten times the game time a 120 fps frame does (`MAX_FRAME_DELTA` is
+ * 1/12 s) and at 1 fps 120 times the wall-clock time, so a slow frame inflates
+ * precisely the noise this has to see past. Fast frames keep the sample the
+ * shape it has on the family's machines.
  */
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
@@ -83,6 +127,10 @@ interface Sample {
   readonly renders: number;
   readonly targetBinds: number;
   readonly draws: number;
+  /** Draw calls three counted over the sample (`info.render.calls`, summed). */
+  readonly drawsCounted: number;
+  /** GL draw calls the stub skipped over the same frames — the control. */
+  readonly drawsSkipped: number;
   readonly styleRecalcs: number;
   readonly layouts: number;
   readonly selected: string | null;
@@ -122,19 +170,40 @@ async function ready(page: Page): Promise<void> {
         renderer: {
           render: (...a: unknown[]) => void;
           setRenderTarget: (...a: unknown[]) => void;
+          getContext: () => WebGL2RenderingContext;
           info: { render: { calls: number } };
         };
       };
     };
     const renderer = game.engine.renderer;
-    const tally = { frames: 0, renders: 0, targets: 0, draws: 0, drawsThisFrame: 0 };
+    const tally = { frames: 0, renders: 0, targets: 0, draws: 0, drawsThisFrame: 0, drawsCounted: 0, drawsSkipped: 0 };
     const render = renderer.render.bind(renderer);
     renderer.render = (...a: unknown[]) => {
       tally.renders++;
       render(...a);
       // `info.render.calls` resets at each render call, so sum them per frame.
-      tally.drawsThisFrame += renderer.info.render.calls;
+      const calls = renderer.info.render.calls;
+      tally.drawsThisFrame += calls;
+      tally.drawsCounted += calls;
     };
+    // **No pixels** (see the file comment): every draw entry point WebGL 2
+    // has, and the two `WEBGL_multi_draw` ones three r185 calls, become a
+    // counter. Own properties shadow the prototype's; three looks each one up
+    // per call (`gl.drawElements(…)`), and `getExtension` hands back the same
+    // object three holds.
+    const gl = renderer.getContext();
+    const skip = (): void => {
+      tally.drawsSkipped++;
+    };
+    const entryPoints = gl as unknown as Record<string, unknown>;
+    for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements']) {
+      entryPoints[name] = skip;
+    }
+    const multiDraw = gl.getExtension('WEBGL_multi_draw') as unknown as Record<string, unknown> | null;
+    if (multiDraw) {
+      multiDraw['multiDrawArraysWEBGL'] = skip;
+      multiDraw['multiDrawElementsWEBGL'] = skip;
+    }
     const setTarget = renderer.setRenderTarget.bind(renderer);
     renderer.setRenderTarget = (...a: unknown[]) => {
       if (a[0]) tally.targets++;
@@ -171,13 +240,15 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
   await page.evaluate(() => {
     const w = window as unknown as {
       __domCounts: Map<string, number>;
-      __tally: { frames: number; renders: number; targets: number; draws: number };
+      __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
     };
     w.__domCounts.clear();
     w.__tally.frames = 0;
     w.__tally.renders = 0;
     w.__tally.targets = 0;
     w.__tally.draws = 0;
+    w.__tally.drawsCounted = 0;
+    w.__tally.drawsSkipped = 0;
   });
   const before = await metrics();
   await frames(page, SAMPLE_FRAMES);
@@ -186,7 +257,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
   const got = await page.evaluate(() => {
     const w = window as unknown as {
       __domCounts: Map<string, number>;
-      __tally: { frames: number; renders: number; targets: number; draws: number };
+      __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
       game: { selection?: { selected: { id?: string } | null }; player: { position: { x: number; z: number } } };
     };
     const selected = w.game.selection?.selected ?? null;
@@ -218,6 +289,8 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     renders: got.tally.renders,
     targetBinds: got.tally.targets,
     draws: got.tally.draws,
+    drawsCounted: got.tally.drawsCounted,
+    drawsSkipped: got.tally.drawsSkipped,
     styleRecalcs: (after['RecalcStyleCount'] ?? NaN) - (before['RecalcStyleCount'] ?? NaN),
     layouts: (after['LayoutCount'] ?? NaN) - (before['LayoutCount'] ?? NaN),
     selected: got.selected,
@@ -237,6 +310,24 @@ function report(label: string, s: Sample): void {
   );
   for (const [key, n] of s.top) say(`    ${String(n).padStart(5)}  ${(n / s.frames).toFixed(2)}/frame  ${key}`);
   say(`    running animations on unpainted elements: ${s.hiddenAnimations.length}${s.hiddenAnimations.length ? ` (${s.hiddenAnimations.join(', ')})` : ''}`);
+  say(`    control: GL draws skipped ${s.drawsSkipped}, three counted ${s.drawsCounted} (${per(s.drawsSkipped, s)}/frame) — no pixels drawn, the rest of every frame ran`);
+}
+
+/**
+ * The instrument's own control (file comment, "Its frames draw no pixels"):
+ * every draw three counted was skipped, and nothing was skipped that three did
+ * not count, at least one a frame. Off this, the counts above may be of a
+ * frame that is not the game's, or CI is rasterising again.
+ */
+function controlFailure(label: string, s: Sample): string | null {
+  if (s.drawsSkipped === s.drawsCounted && s.drawsSkipped >= s.frames) return null;
+  const why =
+    s.drawsSkipped === 0
+      ? 'nothing was skipped, so every frame is rasterised (and on CI times out)'
+      : s.drawsSkipped !== s.drawsCounted
+        ? 'a draw went around `renderer.render`, or three drew through an entry point this does not skip'
+        : 'under one draw a frame, so the park is not being drawn at all';
+  return `${label}: the GL draw stub skipped ${s.drawsSkipped} draws in ${s.frames} frames while three counted ${s.drawsCounted} — ${why}`;
 }
 
 try {
@@ -279,6 +370,8 @@ try {
     // has measured nothing: say that, rather than pass on 0 <= ceiling.
     if (!(idle.frames >= SAMPLE_FRAMES)) failures.push(`sampled ${idle.frames} frames, wanted ${SAMPLE_FRAMES} — nothing is measured`);
     if (!(idle.renders >= idle.frames)) failures.push(`counted ${idle.renders} render calls in ${idle.frames} frames — the renderer hook is not counting`);
+    const idleControl = controlFailure('idle', idle);
+    if (idleControl) failures.push(idleControl);
     if (!Number.isFinite(idle.styleRecalcs) || !Number.isFinite(idle.layouts)) {
       failures.push(`Chromium reported no style/layout counters (${idle.styleRecalcs}, ${idle.layouts}) — nothing is measured`);
     }
@@ -328,6 +421,8 @@ try {
     await ready(page);
     const selected = await sample(context, page);
     report(`selected (stood at ${stand.id}'s stand spot)`, selected);
+    const selectedControl = MEASURE ? null : controlFailure('selected', selected);
+    if (selectedControl) failures.push(selectedControl);
     if (selected.selected === null) {
       say('selected: NOT MEASURED — nothing was selected there, so the outline counts above are of an unselected park');
     } else if (!MEASURE && selected.renders / selected.frames > MAX_RENDER_CALLS_PER_FRAME) {
