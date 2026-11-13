@@ -1,3 +1,5 @@
+import { audioContext } from '../../core/audio';
+
 /**
  * The train's three noises, synthesised.
  *
@@ -10,26 +12,7 @@
  * thirty centimetres from their face.
  */
 
-let context: AudioContext | null = null;
 let noiseBuffer: AudioBuffer | null = null;
-
-function ensureContext(): AudioContext | null {
-  if (context) {
-    // Coming back from a background tab leaves it suspended.
-    if (context.state === 'suspended') void context.resume();
-    return context;
-  }
-  const Ctor =
-    window.AudioContext ??
-    (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  try {
-    context = new Ctor();
-  } catch {
-    return null;
-  }
-  return context;
-}
 
 /**
  * How loud the train is right now, 0..1 — set by `ParkTrain` from how far away
@@ -80,7 +63,7 @@ function tone(
  * gives it the breathy beating a single tone never has.
  */
 export function playTrainWhistle(): void {
-  const ctx = ensureContext();
+  const ctx = audioContext();
   if (!ctx || carry <= 0.02) return;
 
   const level = 0.05 * carry;
@@ -97,7 +80,7 @@ export function playTrainWhistle(): void {
 
 /** The station bell: two quick strikes, bright and short. */
 export function playStationBell(): void {
-  const ctx = ensureContext();
+  const ctx = audioContext();
   if (!ctx || carry <= 0.02) return;
 
   const level = 0.045 * carry;
@@ -117,7 +100,7 @@ export function playStationBell(): void {
  * over.
  */
 export function playChuff(strength: number): void {
-  const ctx = ensureContext();
+  const ctx = audioContext();
   if (!ctx || carry <= 0.02) return;
   hiss(ctx, 0, 0.16, 620 + strength * 420, 0.02 * strength * carry);
 }
