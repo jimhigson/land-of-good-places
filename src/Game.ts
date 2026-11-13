@@ -57,6 +57,7 @@ import { makeSessionUnsavable, type SavedPlace } from './state/save';
 import { libraryDenContains } from './world/library/layout';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from './world/spaces';
 import { PerfProbe, perfRequested } from './core/perfProbe';
+import { freezeParkStatics } from './world/parkStatics';
 import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
@@ -301,6 +302,9 @@ export class Game {
       this.camera,
       worldOptions,
     );
+    // Everything above is placed: the props that never move again stop being
+    // re-derived every frame (`world/parkStatics.ts`, 120 fps plan step 13).
+    freezeParkStatics(this.world);
 
     // Spawn at the park edge by the gate, looking into the park — or wherever a
     // continued game left off (see `resolveSpawn`).
