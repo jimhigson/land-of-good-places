@@ -8,8 +8,9 @@
  * frames is a different moment on every machine. On a GPU twenty frames are a
  * third of a second; on CI's SwiftShader every frame is clamped at 1/12 s and
  * twenty of them are nearly two. That is the whole of why `check:cull-audit`
- * audited the sky cruiser on its station on a Mac and half way up the chain
- * lift on the runner (386,120 off-screen triangles against 210,420), and why
+ * audited the sky cruiser a fraction of a second into its ride on a Mac and
+ * seconds into it on the runner (210,420 off-screen triangles against
+ * 386,120, CI run 43439027681), and why
  * its first author had to add slack for a ride that "read 17, 19 and 22 draws
  * over three runs of the same code".
  *

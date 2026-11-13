@@ -1214,9 +1214,14 @@ export class Game {
         if (lazyPartsFetching() > 0) return 'lazy part';
         return null;
       },
-      (dt, draw) => this.tick({ ...tick, dt }, draw),
+      // Each step a frame of its own, numbered as one: what is memoised per
+      // frame (`currentZones`) must not carry from one step to the next.
+      (dt, draw) => this.tick({ ...tick, dt, frame: (this.checkClockTicks += 1) }, draw),
     );
   }
+
+  /** Ticks run under `?clock=`, steps and drawn frames alike — each one's frame number. */
+  private checkClockTicks = 0;
 
   /** The `?perf=1` overlay, when the URL asked for it. */
   private perfOverlay: PerfOverlay | null = null;

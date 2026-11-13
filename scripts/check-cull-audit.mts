@@ -42,8 +42,9 @@
  * different amount of the world's time on every machine (on a GPU twenty are
  * a third of a second; on CI's SwiftShader each is clamped at 1/12 s), and a
  * ride's camera moves. That was the whole of CI run 43439027681's red: the sky
- * cruiser audited on its station on a Mac and half way up the chain lift on
- * the runner, 210,420 off-screen triangles against 386,120.
+ * cruiser audited a fraction of a second into its ride on a Mac and seconds
+ * into it on the runner, 210,420 off-screen triangles against 386,120 —
+ * reproduced exactly here with `SWIFTSHADER=1`.
  *
  * Each scene names its moment instead ({@link Scene.clock}) and opens with
  * `?clock=<seconds>` (`core/checkClock.ts`): the world is held from the first
