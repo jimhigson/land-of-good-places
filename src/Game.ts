@@ -57,7 +57,8 @@ import { makeSessionUnsavable, type SavedPlace } from './state/save';
 import { libraryDenContains } from './world/library/layout';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from './world/spaces';
 import { PerfProbe, perfRequested } from './core/perfProbe';
-import { freezeParkStatics } from './world/parkStatics';
+import { batchParkStatics, freezeParkStatics } from './world/parkStatics';
+import { staticBatchRequested } from './world/staticBatch';
 import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
@@ -306,6 +307,10 @@ export class Game {
     // Everything above is placed: the props that never move again stop being
     // re-derived every frame (`world/parkStatics.ts`, 120 fps plan step 13).
     freezeParkStatics(this.world);
+    // …and the ones that share a material are drawn a tile at a time rather
+    // than a mesh at a time (`world/parkStatics.ts`, step 14). `?staticBatch=0`
+    // leaves them drawing themselves, for comparing the two pictures.
+    if (staticBatchRequested()) batchParkStatics(this.world);
     // The live game takes every space she is not in out of the scene graph
     // (120 fps plan, step 2). Here rather than in `World`, on purpose: a
     // headless `World` built by a check keeps the one graph it always had —
