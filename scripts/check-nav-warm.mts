@@ -7,8 +7,18 @@
  * ```
  * pnpm run check:nav-warm
  * NAV_WARM_MUTATE=sync pnpm run check:nav-warm    # asks a question instead of warming: one long task, must go red
- * NAV_WARM_MUTATE=short pnpm run check:nav-warm   # the patch after a mid-build change reaches nothing: must go red
+ * NAV_WARM_MUTATE=short pnpm run check:nav-warm   # NOT a red proof — see below
  * ```
+ *
+ * **What is and is not proved red (13 Nov 2026, seed 5 restart 1, commit
+ * 051415e6).** `sync` goes red: 10 failures, "1 lattice(s) built as one long
+ * task" for each of the three lattices. `short` (the patch's reach scaled to 0
+ * after colliders land mid-build) ran **green**: the colliders arrive during
+ * the boundary pass, so the build's own later passes stamp them and a short
+ * patch has nothing left to get wrong. So the equality clause has never been
+ * seen to fail here — it leans on `verifyAgainstWhole`, which `check:library`
+ * proves live. It wants a mutation that breaks a slice (skip a band), and
+ * colliders dropped during the *levels* pass rather than the third slice.
  *
  * Builds the player's own lattice (`playerNavGrid`, the one `Game` builds) and
  * the park children's over the park by `NavGrid.warm` at the game's own

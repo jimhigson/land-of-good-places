@@ -12,12 +12,22 @@ Start ref: origin/perf/navgrid-other-space (#751 + the other-space follow-up). I
 - Node checks here were run with `LGP_PARK_RESTART=1` (seed 5's accepted restart at four sibling source
   hashes): the acceptance loop at this hash costs ~7 min per restart on the shared Mac.
 
+## Measured (seed 5 restart 1, Node, commit 051415e6 — before the base merge; the merge changed no nav file)
+- check:nav-warm green: her lattice 304 slices, longest 14.6 ms (lone run; 39–75 ms when four runs shared
+  the Mac), 0 built as one task, equals a whole rebuild. `sync` mutation red (10 failures). `short` mutation
+  stayed GREEN — the equality clause has no red proof (see the check's header).
+- check:nav-spaces green (0 whole park rebuilds, 0.5 ms) and red with NAV_SPACES_MUTATE=whole (1 whole, 1740 ms).
+- NOT run after merging origin/perf/120fps-base: any check. tsc + typecheck:test only.
+- `Hotel` ramp `covers()` (now in hotel/interior.ts): squared-distance far-reject; unmeasured.
+
 ## Not done (see the workflow result for detail)
 - Resumable A* (`findRoute` still one task per tap / NPC plan). Design: begin/advance/finish on NavGrid with
   `findRoute` = all three; `TapNavigator.planRoute` leaves the route empty while pending (it already steers
   straight at the target with no route); the parade shares her grid, so a pending search must not share
   the scratch buffers with a synchronous `findRoute`.
 - The park children's grid (`JourneyPlanner`) is not warmed: first plan still builds it in one task.
-- Step 7 (`Hotel.covers` squared-radius reject) waits on origin/perf/120fps-base; `surfaces.ts` has no
-  `Math.hypot`/`sqrt` at this ref.
+- `surfaces.ts` has no `Math.hypot`/`sqrt` at this ref: nothing changed there, allocation rate unmeasured.
+- Which pass the longest slice is in (48 solid rows, paving and the finish are one piece each) is unmeasured.
+- `warm` patches as soon as the revision moves: colliders registered over many frames in HER space are a
+  patch a frame (was one at the next question). A one-frame debounce was considered and not written.
 - Inherited: `check:nav-spaces` sits in `check:shard-6` from the predecessor's commit 40bdf7d0.
