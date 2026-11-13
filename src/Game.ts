@@ -2238,7 +2238,9 @@ export class Game {
       const camera = this.cameraOverride ?? this.camera.camera;
       // Only the children this camera can see are drawn (step 4 of
       // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
-      cullCrowdsFor(this.engine.scene, camera);
+      // The drawing buffer's height sizes each child in device pixels, which
+      // is what picks her level of detail (step 16; `core/instancedLod.ts`).
+      cullCrowdsFor(this.engine.scene, camera, renderer.domElement.height);
       renderer.render(this.engine.scene, camera);
       // The ferris wheel's car, drawn a second time over the finished frame.
       // The camera is bolted inside it, so nothing outside it should ever be in
