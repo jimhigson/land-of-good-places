@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BallPitSimulation, type PlayerContact } from '../../src/world/building/ballPhysics';
+import {
+  BALL_REDRAW_DEADBAND,
+  BallPitSimulation,
+  type PlayerContact,
+} from '../../src/world/building/ballPhysics';
 
 /**
  * **The ball pit is drawn smoothly at 120 Hz, and its physics did not change
@@ -181,12 +185,13 @@ describe('ball pit pacing at 120 Hz', () => {
     // "Moving" is measured on the physics, not assumed: a ball whose simulated
     // position moved at least MOVING_M in every sub-step of the window. The
     // first sub-step is left out — the frame before it is still the resting
-    // pile. The floor is far below anything visible and far above float32's
-    // resolution here (0.48 µm at 4–8 m): without one, a ball the pile nudged
-    // 15–30 nm in a sub-step counted as moving, and half of a 15 nm step
-    // cannot be represented, so it was "drawn in the same place twice" — two
-    // ball-frames of 101,952 when this was written, both of that kind.
-    const MOVING_M = 1e-5;
+    // pile. The floor is four times the simulation's own redraw dead band
+    // (0.4 mm a sub-step, 2.4 cm/s): a ball is deliberately not redrawn until
+    // it is a dead band from where it is drawn, so one creeping slower than
+    // two dead bands a sub-step is *meant* to be held on some 120 Hz frames —
+    // with the floor at 10 µm, 5024 of 72452 ball-frames were exactly that.
+    // Four, not two, leaves room for a ball that is slowing down.
+    const MOVING_M = BALL_REDRAW_DEADBAND * 4;
     const travelled = (frames: Float32Array[], frame: number, ball: number): number => {
       const a = frames[frame - 1] as Float32Array;
       const b = frames[frame] as Float32Array;
@@ -285,6 +290,66 @@ describe('ball pit pacing at 120 Hz', () => {
     // frame before (damping alone is about 5 % per sub-step).
     expect(Math.min(...drawnSpeeds)).toBeGreaterThan(0);
     expect(drawnWorst).toBeLessThan(1.25);
+  });
+
+  it('redraws nothing while the settled pile only shuffles on the spot', () => {
+    // The game's own pile, settled, nobody near it — the state the pit is in
+    // for nearly the whole of every session. It never sleeps outright (see the
+    // next test), so `BallPit` steps it on every frame for ever.
+    const sim = pit();
+    sim.settle(WARMUP_SUBSTEPS, Number.POSITIVE_INFINITY);
+
+    const FRAMES = 240;
+    let redrawn = 0;
+    let framesWithARedraw = 0;
+    let physicsChanges = 0;
+    let awake = 0;
+    let furthest = 0;
+    const before = new Float32Array(COUNT * 3);
+    for (let frame = 0; frame < FRAMES; frame += 1) {
+      before.set(sim.px, 0);
+      before.set(sim.py, COUNT);
+      before.set(sim.pz, COUNT * 2);
+      awake = sim.step(1 / 120, null).awake;
+      let dirty = 0;
+      for (let ball = 0; ball < COUNT; ball += 1) {
+        dirty += sim.drawDirty[ball] as number;
+        if (
+          before[ball] !== sim.px[ball] ||
+          before[ball + COUNT] !== sim.py[ball] ||
+          before[ball + COUNT * 2] !== sim.pz[ball]
+        ) {
+          physicsChanges += 1;
+        }
+        furthest = Math.max(
+          furthest,
+          Math.hypot(
+            (sim.drawX[ball] as number) - (sim.px[ball] as number),
+            (sim.drawY[ball] as number) - (sim.py[ball] as number),
+            (sim.drawZ[ball] as number) - (sim.pz[ball] as number),
+          ),
+        );
+      }
+      redrawn += dirty;
+      if (dirty > 0) framesWithARedraw += 1;
+    }
+    note(
+      `idle pile, 120 Hz, ${FRAMES} frames: ${awake} balls still awake, physics positions changed ` +
+        `${physicsChanges} times; matrices rewritten ${redrawn}, frames needing an instance-buffer ` +
+        `upload ${framesWithARedraw}; furthest any ball was drawn from its physics position ` +
+        `${(furthest * 1e6).toFixed(1)} µm (dead band ${BALL_REDRAW_DEADBAND * 1e6} µm)`,
+    );
+
+    // Control: the pile is not asleep and its physics is still moving, so a
+    // zero below is the dead band at work, not a pile with nothing to draw.
+    expect(awake).toBeGreaterThan(0);
+    expect(physicsChanges).toBeGreaterThan(FRAMES / 2);
+    // No ball redrawn, so no upload, on any frame...
+    expect(redrawn).toBe(0);
+    expect(framesWithARedraw).toBe(0);
+    // ...and nothing is drawn visibly away from where it is: the dead band,
+    // plus the one sub-step of travel interpolation lags by (70 µm here).
+    expect(furthest).toBeLessThan(BALL_REDRAW_DEADBAND * 2);
   });
 
   it('stops redrawing a pile once it has gone to sleep', () => {

@@ -46,6 +46,24 @@
  *  is counted in sub-steps — see {@link BallPitSimulation.settle}. */
 export const BALL_PHYSICS_STEP = 1 / 60;
 const FIXED_DT = BALL_PHYSICS_STEP;
+/**
+ * How far, in metres, a ball's drawn position may sit from where interpolation
+ * would put it before it is redrawn: a tenth of a millimetre, on a ball 56 cm
+ * across. Exported for the pacing test, whose "is this ball moving" floor has to
+ * sit above it.
+ *
+ * It exists for the pile at rest. The game's 900-ball pile never sleeps
+ * outright — 22 balls against the wall stay awake for good, three of them
+ * shuffling 26–70 µm a sub-step with no net drift — and with every float32
+ * change redrawn, those three cost a whole instance-buffer upload on **every
+ * frame, for ever**: measured 1200 uploads in 10 s at 120 Hz with nobody near
+ * the pit (600 before interpolation, which only redrew on sub-step frames).
+ * With the dead band it is 0. A ball really going somewhere leaves the band
+ * within a frame and is then drawn exactly where interpolation puts it, so the
+ * error is never more than this and never accumulates.
+ */
+export const BALL_REDRAW_DEADBAND = 1e-4;
+const REDRAW_DEADBAND_SQ = BALL_REDRAW_DEADBAND * BALL_REDRAW_DEADBAND;
 /** Matches MAX_FRAME_DELTA (core/constants.ts) / FIXED_DT, so one bad frame can
  *  always fully catch up. Duplicated as a plain cap rather than importing the
  *  constant — this file has no dependency on core/. */
@@ -391,7 +409,7 @@ export class BallPitSimulation {
       // where it is, not parked a fraction of a sub-step short of there.
       this.holdAtCurrent();
     } else {
-      this.interpolate(this.accumulator / FIXED_DT);
+      this.interpolate(this.accumulator / FIXED_DT, REDRAW_DEADBAND_SQ);
     }
 
     return { substeps, awake, ms: performance.now() - t0 };
@@ -435,14 +453,18 @@ export class BallPitSimulation {
    */
   private holdAtCurrent(): void {
     this.recordPrevious();
-    this.interpolate(1);
+    // Exactly: a pile that is about to stop being stepped must not be left
+    // drawn a dead band away from where it lies.
+    this.interpolate(1, 0);
   }
 
   /**
    * Draw each ball `alpha` of the way from where it was before the latest
    * sub-step to where it is now, and flag the ones whose drawn position moved.
+   * A ball less than `sqrt(deadbandSq)` from where it is already drawn is left
+   * there, unflagged ({@link BALL_REDRAW_DEADBAND}); zero redraws any change.
    */
-  private interpolate(alpha: number): void {
+  private interpolate(alpha: number, deadbandSq: number): void {
     const t = Math.min(1, Math.max(0, alpha));
     for (let i = 0; i < this.count; i += 1) {
       const x0 = at(this.prevX, i);
@@ -453,7 +475,12 @@ export class BallPitSimulation {
       const x = Math.fround(x0 + (at(this.px, i) - x0) * t);
       const y = Math.fround(y0 + (at(this.py, i) - y0) * t);
       const z = Math.fround(z0 + (at(this.pz, i) - z0) * t);
-      if (x === at(this.drawX, i) && y === at(this.drawY, i) && z === at(this.drawZ, i)) {
+      const dx = x - at(this.drawX, i);
+      const dy = y - at(this.drawY, i);
+      const dz = z - at(this.drawZ, i);
+      const offSq = dx * dx + dy * dy + dz * dz;
+      // `<=` so a zero dead band still means "unchanged is not redrawn".
+      if (offSq <= deadbandSq) {
         this.drawDirty[i] = 0;
         continue;
       }
