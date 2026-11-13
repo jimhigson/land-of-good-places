@@ -29,26 +29,29 @@ export const LOD_FULL = 0;
 export const LOD_LOW = 1;
 
 /**
- * An instance goes to full detail once its bounding sphere is drawn wider than
- * this many **CSS pixels**, and back to the far level once it is narrower than
- * {@link LOD_LOW_BELOW_CSS_PX}. Between the two it keeps whatever it had, so
- * nobody flickers on the boundary.
+ * An instance goes to full detail once its bounding sphere is drawn taller
+ * than this **share of the picture's height**, and back to the far level once
+ * it is shorter than {@link LOD_LOW_BELOW_SHARE}. Between the two it keeps
+ * whatever it had, so nobody flickers on the boundary.
+ *
+ * A share of the picture, not a count of pixels, so the choice is the same at
+ * device pixel ratio 1, 2 and 3, under every step of the resolution governor
+ * (`core/adaptiveResolution.ts`) and on a canvas of any size: the camera
+ * frames a fixed height of world (`CAMERA_VIEW_HEIGHT` at zoom 1), so the same
+ * child at the same zoom is the same share of every screen, and it is the
+ * zoom — her pinch, a ride, a cut-scene — that brings her close. In CSS
+ * pixels on a 900-pixel-tall window the switch is at 900 × this.
+ *
+ * The values, and the evidence for them, are with {@link LOD_LOW_TOLERANCE_M}.
  */
-export const LOD_FULL_ABOVE_CSS_PX = 480;
-export const LOD_LOW_BELOW_CSS_PX = 400;
+export const LOD_FULL_ABOVE_SHARE = 0.25;
+export const LOD_LOW_BELOW_SHARE = 0.2;
 
 /**
  * How far the far level may stand from the authored surface, in metres of
  * world: see {@link simplifyWithin} for exactly what is bounded.
  */
-export const LOD_LOW_TOLERANCE_M = 0.002;
-
-/**
- * The same bound for the level a **shadow** is cast from. A shadow map texel
- * is centimetres across and the map is blurred after it is drawn, so the
- * caster can be a great deal rougher than anything looked at directly.
- */
-export const LOD_SHADOW_TOLERANCE_M = 0.02;
+export const LOD_LOW_TOLERANCE_M = 0.01;
 
 /** Below this many triangles a geometry is its own far level: nothing to save. */
 export const LOD_MIN_TRIANGLES = 48;
@@ -61,28 +64,20 @@ export const LOD_MIN_TRIANGLES = 48;
 export const LOD_MIN_SAVING = 0.1;
 
 /**
- * The viewport height assumed, in CSS pixels, when a caller cannot say (a
- * headless check, a preview with no canvas to ask). A real render passes its
- * own.
- */
-export const LOD_DEFAULT_VIEWPORT_HEIGHT_CSS_PX = 900;
-
-/**
- * How many pixels wide a sphere of `radius` at world (x, y, z) is drawn.
+ * How tall a sphere of `radius` at world (x, y, z) is drawn, as a share of
+ * the picture's height (1 = the whole height).
  *
- * `viewProjection` is `projection × view`; `pixelsPerUnitAtW1` is
- * `projection.elements[5] × viewport height / 2`, and the answer is in
- * whatever pixels that height was given in — **CSS pixels** for anything
- * that will be compared with {@link LOD_FULL_ABOVE_CSS_PX}. Written against
- * clip-space `w` so the one formula serves a perspective lens (w is the
- * depth) and an orthographic one (w is 1), zoom included, with no camera type
- * test.
+ * `viewProjection` is `projection × view` and `lensScale` is
+ * `projection.elements[5]`. Written against clip-space `w` so the one formula
+ * serves a perspective lens (w is the depth) and an orthographic one (w is
+ * 1), zoom included, with no camera type test: clip-space y spans 2 across
+ * the picture, and a sphere's half-height there is `radius × lensScale / w`.
  *
  * At or behind the lens the answer is `Infinity`: as close as a thing gets.
  */
-export function projectedDiameterPx(
+export function projectedShare(
   viewProjection: Matrix4,
-  pixelsPerUnitAtW1: number,
+  lensScale: number,
   x: number,
   y: number,
   z: number,
@@ -91,7 +86,7 @@ export function projectedDiameterPx(
   const e = viewProjection.elements;
   const w = e[3]! * x + e[7]! * y + e[11]! * z + e[15]!;
   if (w <= 1e-6) return Infinity;
-  return (2 * radius * pixelsPerUnitAtW1) / w;
+  return (radius * lensScale) / w;
 }
 
 /**
@@ -114,7 +109,10 @@ function modeFromUrl(): LodMode {
 }
 let lodMode: LodMode = modeFromUrl();
 
-/** The mode in force. `off` also means a shadow is cast from the authored geometry. */
+/**
+ * The mode in force. `off` is the engine as it was before levels of detail:
+ * full detail everywhere, shadows included.
+ */
 export function getLodMode(): LodMode {
   return lodMode;
 }
@@ -128,11 +126,14 @@ export function setLodMode(mode: LodMode): void {
   lodMode = mode;
 }
 
-/** The level an instance drawn `cssPx` wide should use, given the one it has. */
-export function nextLodLevel(current: number, cssPx: number): number {
+/**
+ * The level an instance drawn `share` of the picture tall (see
+ * {@link projectedShare}) should use, given the one it has.
+ */
+export function nextLodLevel(current: number, share: number): number {
   if (lodMode !== 'auto') return lodMode === 'off' ? LOD_FULL : LOD_LOW;
-  if (cssPx > LOD_FULL_ABOVE_CSS_PX) return LOD_FULL;
-  if (cssPx < LOD_LOW_BELOW_CSS_PX) return LOD_LOW;
+  if (share > LOD_FULL_ABOVE_SHARE) return LOD_FULL;
+  if (share < LOD_LOW_BELOW_SHARE) return LOD_LOW;
   return current;
 }
 
