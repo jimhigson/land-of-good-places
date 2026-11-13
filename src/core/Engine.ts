@@ -8,6 +8,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { FOG_FAR, FOG_NEAR } from './constants';
+import { AdaptiveResolution, adaptiveResolutionRequested } from './adaptiveResolution';
 import { pixelRatioCap } from './device';
 import { PALETTE } from './palette';
 
@@ -29,6 +30,20 @@ export class Engine {
   private widthValue = 1;
   private heightValue = 1;
 
+  /**
+   * **The quality governor** (120 fps plan, step 17;
+   * `core/adaptiveResolution.ts`): steps the pixel ratio down when GPU-bound
+   * frames persist and back up when they stop. The one owner of the quality
+   * level — read `.quality`, or `.subscribe()` to hear it change. Always
+   * present: under `?adaptiveDpr=0` it is pinned at the screen's cap (one
+   * level, never changes) for A/B measurement.
+   */
+  readonly adaptiveResolution: AdaptiveResolution;
+
+  private readonly bufferCallbacks = new Set<(pixelRatio: number) => void>();
+  private frameStartMs = -1;
+  private lastCpuMs = 0;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
@@ -38,7 +53,8 @@ export class Engine {
       alpha: false,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(pixelRatioCap());
+    this.adaptiveResolution = new AdaptiveResolution(pixelRatioCap(), { pinned: !adaptiveResolutionRequested() });
+    this.renderer.setPixelRatio(this.adaptiveResolution.pixelRatio);
     // **The single biggest cause of mid-play stutter, and it is not our code.**
     // three.js checks every newly-linked shader program for errors the first
     // time it is used (`WebGLProgram`'s `onFirstUse`), and the check begins with
@@ -101,6 +117,56 @@ export class Engine {
     return () => this.resizeCallbacks.delete(callback);
   }
 
+  /**
+   * Registers a handler for the **drawing buffer** changing size without the
+   * canvas changing size on the page — the governor stepping the pixel ratio.
+   * Anything that owns a render target sized in device pixels (an outline or
+   * post-processing pass) resizes it here; `onResize` alone would never tell
+   * it, because the CSS size it reports has not moved. Called before the first
+   * draw at the new size.
+   */
+  onDrawingBufferResize(callback: (pixelRatio: number) => void): () => void {
+    this.bufferCallbacks.add(callback);
+    return () => this.bufferCallbacks.delete(callback);
+  }
+
+  /**
+   * Called by the game loop **before anything is drawn** each frame. Feeds the
+   * governor the frame that has just ended and applies its answer.
+   *
+   * Why here and not after the frame's last render: changing the pixel ratio
+   * reallocates the drawing buffer, which clears it. Done after the draw, the
+   * browser would composite that cleared buffer — one black frame, a flash on
+   * every step. Done first, the buffer is cleared and fully redrawn inside
+   * the same task and the only thing presented is a finished frame. The
+   * canvas's CSS box is untouched (`setPixelRatio` resizes with
+   * `updateStyle: false`), so nothing in the page reflows and the DOM UI,
+   * which the browser rasterises at the real device ratio, stays as crisp as
+   * it was.
+   *
+   * `busy` (a transition is covering the screen) and `scene` (a key that
+   * changes with the space she is in) pause adaptation — see the governor.
+   */
+  beginFrame(busy = false, scene?: string | number): void {
+    const now = performance.now();
+    const ratio = this.adaptiveResolution.frame(now, this.lastCpuMs, busy, scene);
+    this.frameStartMs = now;
+    if (ratio !== this.renderer.getPixelRatio()) this.applyPixelRatio(ratio);
+  }
+
+  /** Called by the game loop after the frame's last render call: closes the CPU measurement. */
+  endFrame(): void {
+    this.lastCpuMs = this.frameStartMs < 0 ? 0 : performance.now() - this.frameStartMs;
+  }
+
+  private applyPixelRatio(ratio: number): void {
+    // `setPixelRatio` resizes the drawing buffer (three calls
+    // `setSize(w, h, false)`), so only on a change — the governor's hysteresis
+    // keeps those rare.
+    this.renderer.setPixelRatio(ratio);
+    for (const callback of this.bufferCallbacks) callback(ratio);
+  }
+
   dispose(): void {
     this.resizeObserver.disconnect();
     window.removeEventListener('resize', this.handleResize);
@@ -115,7 +181,10 @@ export class Engine {
 
     this.widthValue = width;
     this.heightValue = height;
-    this.renderer.setPixelRatio(pixelRatioCap());
+    // The screen's cap can change on a resize (a window dragged to another
+    // monitor); the controller restarts from the top of the new ladder.
+    this.adaptiveResolution.setCap(pixelRatioCap());
+    this.renderer.setPixelRatio(this.adaptiveResolution.pixelRatio);
     this.renderer.setSize(width, height, false);
     for (const callback of this.resizeCallbacks) callback(width, height);
   };

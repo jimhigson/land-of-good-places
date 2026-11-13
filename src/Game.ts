@@ -1163,17 +1163,35 @@ export class Game {
       const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
       this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
+        this.beginEngineFrame();
         probe.begin();
         this.tick(tick);
         probe.end();
+        this.engine.endFrame();
       });
     } else {
-      this.loop = new Loop((tick) => this.tick(tick));
+      this.loop = new Loop((tick) => {
+        this.beginEngineFrame();
+        this.tick(tick);
+        this.engine.endFrame();
+      });
     }
   }
 
   /** The `?perf=1` overlay, when the URL asked for it. */
   private perfOverlay: PerfOverlay | null = null;
+
+  /**
+   * The quality governor's frame bracket (120 fps plan, step 17): `Engine`
+   * times the frame and may change the pixel ratio here, before anything is
+   * drawn. Adaptation pauses while a wipe covers the screen and when she
+   * changes space — a room's first frames are slow for reasons pixels cannot
+   * fix. See `core/adaptiveResolution.ts`.
+   */
+  private beginEngineFrame(): void {
+    const { x, z } = this.player.position;
+    this.engine.beginFrame(this.transitions.wiping, spaceAt(x, z));
+  }
 
   /** What the perf overlay's JSON says about where and on what it was measured. */
   private perfContext(): Record<string, unknown> {
@@ -1186,6 +1204,7 @@ export class Game {
       gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
+      adaptiveResolution: this.engine.adaptiveResolution.state(),
       canvas: [gl.drawingBufferWidth, gl.drawingBufferHeight],
       viewport: [window.innerWidth, window.innerHeight],
       hardwareConcurrency: navigator.hardwareConcurrency,
