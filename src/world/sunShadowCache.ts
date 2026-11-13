@@ -13,6 +13,8 @@ import {
   NearestFilter,
   Object3D,
   RGFormat,
+  RedFormat,
+  UnsignedByteType,
   ShaderMaterial,
   Sphere,
   WebGLRenderTarget,
@@ -166,6 +168,16 @@ export class SunShadowCache {
   private staticCount = 0;
   private staticSeen = 0;
   private staticTarget: WebGLRenderTarget | null = null;
+  /**
+   * Where the static pass's depth is **kept**. Three's VSM blur ends by
+   * clearing the map it has just blurred — depth included — so the depth the
+   * static pass drew is gone by the time `render` returns. {@link tap} copies
+   * it here first, and this is what the {@link sentinel} restores from.
+   */
+  private keepTarget: WebGLRenderTarget | null = null;
+  /** Drawn last in the static pass (it draws nothing); its `onAfterShadow` copies the finished depth out. */
+  private readonly tap: Mesh;
+  private renderer: WebGLRenderer | null = null;
   /** Light pose the cache was drawn from. */
   private readonly cachedLight = new Matrix4();
   private readonly cachedTarget = new Matrix4();
@@ -221,6 +233,29 @@ export class SunShadowCache {
         }
       `,
     });
+    // The tap: the same triangle, every fragment discarded.
+    this.tap = new Mesh(triangle, new MeshBasicMaterial());
+    this.tap.name = 'sunShadowCache.tap';
+    this.tap.castShadow = true;
+    this.tap.frustumCulled = false;
+    this.tap.customDepthMaterial = new ShaderMaterial({
+      name: 'sunShadowCache.tap',
+      vertexShader: /* glsl */ `
+        void main() {
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        void main() {
+          discard;
+        }
+      `,
+    });
+    this.tap.onAfterShadow = () => {
+      const from = this.staticTarget?.depthTexture;
+      const to = this.keepTarget?.depthTexture;
+      if (this.renderer && from && to) this.renderer.copyTextureToTexture(from, to);
+    };
     this.sentinel = new Mesh(triangle, new MeshBasicMaterial());
     this.sentinel.name = 'sunShadowCache.sentinel';
     this.sentinel.castShadow = true;
@@ -248,6 +283,7 @@ export class SunShadowCache {
     // Three's own pass must never touch the sun again: the wrapper owns it.
     this.light.shadow.autoUpdate = false;
     this.light.shadow.needsUpdate = false;
+    this.renderer = renderer;
     const shadowMap = renderer.shadowMap;
     const original = shadowMap.render.bind(shadowMap) as ShadowRender;
     shadowMap.render = (lights: Light[], scene: Scene, camera: Camera): void => {
@@ -488,7 +524,21 @@ export class SunShadowCache {
     depth.magFilter = NearestFilter;
     target.depthTexture = depth;
     this.staticTarget = target;
-    this.sentinelDepth.uniforms['staticDepth']!.value = depth;
+    // The kept copy: only its depth matters; the colour is the smallest three allows.
+    this.keepTarget?.depthTexture?.dispose();
+    this.keepTarget?.dispose();
+    const keep = new WebGLRenderTarget(width, height, { format: RedFormat, type: UnsignedByteType, generateMipmaps: false });
+    keep.texture.name = 'sunShadowCache.keep';
+    const keepDepth = new DepthTexture(width, height, FloatType);
+    keepDepth.name = 'sunShadowCache.keepDepth';
+    keepDepth.format = DepthFormat;
+    keepDepth.compareFunction = null;
+    keepDepth.minFilter = NearestFilter;
+    keepDepth.magFilter = NearestFilter;
+    keep.depthTexture = keepDepth;
+    this.renderer?.initRenderTarget(keep);
+    this.keepTarget = keep;
+    this.sentinelDepth.uniforms['staticDepth']!.value = keepDepth;
     return target;
   }
 
@@ -529,9 +579,12 @@ export class SunShadowCache {
     const real = shadow.map;
     shadow.map = target;
     shadow.needsUpdate = true;
+    // Last child of the root, so three's walk draws it after every caster.
+    this.scene.children.push(this.tap);
     try {
       original([this.light], this.scene, camera);
     } finally {
+      this.scene.children.pop();
       shadow.map = real;
       shadow.needsUpdate = false;
       for (let i = 0; i < hidden.length; i++) {
