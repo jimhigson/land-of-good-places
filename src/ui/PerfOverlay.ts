@@ -1,3 +1,4 @@
+import type { AdaptiveResolutionState } from '../core/adaptiveResolution';
 import {
   FRAME_BUDGET_MS,
   type PerfProbe,
@@ -95,7 +96,7 @@ export class PerfOverlay {
   private redraw(): void {
     const s = this.probe.summary(WINDOW_FRAMES);
     const context = this.probe.describe();
-    this.text.textContent = formatSummary(s, String(context['space'] ?? '?'));
+    this.text.textContent = formatSummary(s, String(context['space'] ?? '?'), formatPixelRatio(context));
     // Green under budget, amber when CPU alone is over it, red when frames are being missed.
     this.element.style.color =
       s.missedVsync > 0.02 ? '#ff9a9a' : s.cpuP50 > FRAME_BUDGET_MS ? '#ffd27a' : '#e8ffe8';
@@ -136,8 +137,38 @@ const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
 const count = (n: number): string =>
   n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e4 ? `${(n / 1e3).toFixed(0)} k` : String(n);
 
+/**
+ * The quality governor's line (120 fps plan, step 17;
+ * `core/adaptiveResolution.ts`): the pixel ratio the frame is drawn at, the
+ * level that is on the governor's ladder, what the governor is doing, and the
+ * frame budget it measured off this display —
+ * `dpr 1.50 of 2  level 1/2  recovering 2.1/4.0 s  budget 8.3 ms  3 changes`.
+ */
+export function formatPixelRatio(context: Record<string, unknown>): string {
+  const ratio = Number(context['pixelRatio'] ?? NaN);
+  const governor = context['adaptiveResolution'];
+  if (!governor || typeof governor !== 'object') return `dpr ${ratio.toFixed(2)}`;
+  const g = governor as AdaptiveResolutionState;
+  const seconds = (n: number): string => (n / 1000).toFixed(1);
+  const doing =
+    g.phase === 'recovering'
+      ? `recovering ${seconds(g.calmMs)}/${seconds(g.upHoldMs)} s`
+      : g.phase === 'paused'
+        ? `paused ${seconds(g.pausedMs)} s`
+        : g.phase === 'watching'
+          ? `watching ${g.recentMisses} gpu-miss`
+          : g.phase;
+  return [
+    `dpr ${ratio.toFixed(2)} of ${g.cap}`,
+    `level ${g.level}/${g.levels - 1}`,
+    doing,
+    `budget ${g.periodMs.toFixed(1)} ms`,
+    `${g.changes} change${g.changes === 1 ? '' : 's'}`,
+  ].join('  ');
+}
+
 /** The overlay's text. Exported so its wording is checked without a DOM. */
-export function formatSummary(s: PerfSummary, space: string): string {
+export function formatSummary(s: PerfSummary, space: string, pixelRatio = ''): string {
   const heap =
     s.heapChurnMBps !== null && s.heapMB !== null
       ? `heap  ${s.heapMB.toFixed(0)} MB  +${s.heapChurnMBps.toFixed(1)} MB/s`
@@ -149,5 +180,6 @@ export function formatSummary(s: PerfSummary, space: string): string {
     `missed 120Hz ${pct(s.missedVsync)}  >16.7 ${pct(s.over16)}`,
     `draws ${count(s.drawsMax)}  tris ${count(s.trisMax)} (max)`,
     heap,
+    ...(pixelRatio ? [pixelRatio] : []),
   ].join('\n');
 }

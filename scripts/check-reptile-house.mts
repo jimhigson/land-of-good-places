@@ -117,6 +117,8 @@ import {
   type ExhibitShape,
   type LocalPoint,
 } from '../src/world/reptileHouse/layout.ts';
+import { REPTILE_LIGHT_POOL_COUNT, REPTILE_POINT_LIGHT_BUDGET } from '../src/world/reptileHouse/lighting.ts';
+import { LIGHT_POOLS_MESH_NAME } from '../src/world/reptileHouse/lightPools.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
 const OX = REPTILE_HOUSE_ORIGIN_X;
@@ -903,11 +905,36 @@ console.log('\nANIMALS — every one inside its own enclosure:');
 
 console.log('\nHOUSEKEEPING:');
 {
+  // The light budget (perf step 15). Every point light is evaluated on every
+  // lit pixel in the hall, so the rig is a key, a sky and a few point lights —
+  // and the six warm pools that used to be lights are painted on the floor.
+  // This used to be a floor of eight lights; it is a ceiling on point lights
+  // now, with a floor of "lit at all" so an empty rig cannot pass it.
   let lights = 0;
+  let pointLights = 0;
   house.hallRoot.traverse((object) => {
     if ((object as { isLight?: boolean }).isLight) lights += 1;
+    if ((object as { isPointLight?: boolean }).isPointLight) pointLights += 1;
   });
-  say(lights >= 8, `${lights} lights under the hall root`);
+  say(
+    lights > pointLights && pointLights >= 1 && pointLights <= REPTILE_POINT_LIGHT_BUDGET,
+    `${lights} lights under the hall root, ${pointLights} of them point lights (budget ${REPTILE_POINT_LIGHT_BUDGET}, and at least one that is not a point light)`,
+  );
+  {
+    // Counted off the built mesh, not off the list that built it: a disc's
+    // middle is the one vertex at the pool's full colour, so the vertices at
+    // the mesh's brightest are its discs.
+    const pools = house.hallRoot.getObjectByName(LIGHT_POOLS_MESH_NAME) as Mesh | undefined;
+    const colour = pools?.geometry.getAttribute('color') as BufferAttribute | undefined;
+    let peak = 0;
+    for (let i = 0; colour && i < colour.count; i += 1) peak = Math.max(peak, colour.getX(i));
+    let discs = 0;
+    for (let i = 0; colour && i < colour.count; i += 1) if (peak > 0 && colour.getX(i) >= peak * 0.999) discs += 1;
+    say(
+      Boolean(pools) && pools?.visible === true && discs === REPTILE_LIGHT_POOL_COUNT,
+      `${discs} painted light pools on the hall floor (${pools ? `mesh '${pools.name}'` : 'NO POOLS MESH'}), ${REPTILE_LIGHT_POOL_COUNT} wanted — one for each light that used to hang there`,
+    );
+  }
   say(spaceAt(OX, OZ) === SPACE_REPTILE_HOUSE, `spaceAt the hall origin is '${spaceAt(OX, OZ)}'`);
   say(scene.children.includes(house.hallRoot), 'the hall root is in the scene');
   {

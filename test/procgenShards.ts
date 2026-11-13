@@ -64,6 +64,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/geo/types.test.ts',
     'test/groundClaims.test.ts',
     'test/input/sub-frame-tap.test.ts',
+    'test/building/ballPacing.test.ts',
   ],
   // 5
   [
@@ -73,7 +74,9 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/railRaceRefusals.test.ts',
     'test/input/text-entry-guard.test.ts',
     'test/input/wheel-zoom.test.ts',
+    'test/adaptiveResolution.test.ts',
     'test/lazy/lazyRooms.test.ts',
+    'test/lazy/hotelKitSplit.test.ts',
     'test/parkChangingSwitches.test.ts',
     'test/parkSolveBounded.test.ts',
   ],

@@ -49,6 +49,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
 import { gameStore } from '../state';
 import { playOpenChime, playSurpriseChime } from '../ui/chime';
+import { setDataFlag } from '../ui/dataFlag';
 import { FacePaintPanel, type FacePaintLook } from '../ui/FacePaintPanel';
 import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderDriver';
 
@@ -791,7 +792,8 @@ function buildHint(uiRoot: HTMLElement): HTMLElement {
 
 function setHintVisible(hint: HTMLElement | null, visible: boolean): void {
   if (!hint) return;
-  hint.dataset.show = visible ? 'true' : 'false';
+  // Called every frame: written only when it changes (`ui/dataFlag.ts`).
+  setDataFlag(hint, 'show', visible ? 'true' : 'false');
 }
 
 function disposeGroup(root: Group): void {

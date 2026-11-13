@@ -49,6 +49,7 @@ import type { Player, RideHolder } from '../entities/Player';
 import { gameStore, discoverSecret, type InventoryItem } from '../state';
 import { shopWords } from '../state/wording';
 import { playOpenChime, playSurpriseChime } from '../ui/chime';
+import { setDataFlag } from '../ui/dataFlag';
 import { keychainItems, type ShopItem } from './building/shops/catalogue';
 
 /**
@@ -1658,5 +1659,6 @@ function buildCloseButton(uiRoot: HTMLElement, onClose: () => void): HTMLElement
 
 function setCloseButtonVisible(button: HTMLElement | null, visible: boolean): void {
   if (!button) return;
-  button.dataset.show = visible ? 'true' : 'false';
+  // Called every frame: written only when it changes (`ui/dataFlag.ts`).
+  setDataFlag(button, 'show', visible ? 'true' : 'false');
 }

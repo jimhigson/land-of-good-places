@@ -97,7 +97,13 @@ jobs:
         # 10 is `check:served-render-budget` (120 fps plan, step 0): six deep
         # links booted under the software renderer, on its own runner so it
         # cannot push 8 or 9 towards their watchdog.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        #
+        # 11 is `check:served-cull-audit` (120 fps landing): eleven spaces booted
+        # under the software renderer, the same shape as 10 and so on its own
+        # runner. 12 is the two short served audits from the same landing,
+        # `check:served-static-freeze` and `check:served-dom-churn`. None of the
+        # three had run on a hosted runner when they were wired in.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       # When this job started, for the watchdog: its budget is the job's cap
       # less what the steps before it already spent, so a slow Chromium

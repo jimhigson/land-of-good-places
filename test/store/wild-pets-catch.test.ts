@@ -264,6 +264,33 @@ describe('wild pets in the roof garden', () => {
     expect(gone.size, 'creatures must cycle, or the roof is the same four forever').toBeGreaterThan(3);
     expect(seen.size).toBeGreaterThan(gone.size - 1);
   });
+
+  /**
+   * **The roof was already going when she arrives** (120 fps plan, step 3).
+   *
+   * Nothing on the roof runs while it is not drawn — `Building` calls
+   * `passUnseen` instead of `update` — and that must not turn into a roof that
+   * starts when she looks at it. A fresh roof's first creature is 1.5 s away,
+   * so the control (no time banked) has nobody out on the first frame; with a
+   * minute banked, the first drawn frame lives it and the roof is full.
+   */
+  it('lives the time it was not drawn on the first frame it is, so she arrives to a full roof', () => {
+    const at = new Vector3(200, 0, 200);
+    const control = new WildPets(TOP_DECK, camera);
+    control.update(frame(60, 1 / 60, at));
+    expect(control.interactZones().length, 'control: a roof with no banked time has nobody out yet').toBe(0);
+
+    pets.passUnseen(60);
+    pets.update(frame(60, 1 / 60, at));
+    // Four out (the population), all of them up out of their burrows and offering a catch.
+    expect(pets.interactZones().length, 'a minute unseen must leave the roof populated on arrival').toBe(4);
+
+    // And it goes on from there: banked time is spent once, not every frame.
+    const before = pets.interactZones().map((z) => ({ id: z.id, x: z.standX, z: z.standZ }));
+    run(pets, 3, at);
+    const after = pets.interactZones().map((z) => ({ id: z.id, x: z.standX, z: z.standZ }));
+    expect(after.some((a) => before.some((b) => b.id === a.id && Math.hypot(a.x - b.x, a.z - b.z) > 1))).toBe(true);
+  });
 });
 
 /**

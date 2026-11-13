@@ -1228,7 +1228,12 @@ function rideInThenPlay(
           // **The completion signal, and there is only one.** A park object in
           // hand — not a timer that hopes to match how long one takes to build.
           director.noteParkReady();
-          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
+          // The spaces she is not in are out of the graph (`DrawnSpaces`), so
+          // the warm-up is handed them: it compiles what it always compiled.
+          const spaces = handOverGame.world.drawnSpaces;
+          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera, () =>
+            spaces.detachedRoots(),
+          );
           skip.show();
         })
         // **Without this the ride has no bottom.** The generation-failure path
@@ -1264,6 +1269,9 @@ function rideInThenPlay(
     // pictures into render targets under their own light rigs, so not one of
     // the park's programs serves it — a first book opened cold would link a
     // dozen mid-frame. Whole steps only, like the park's slices.
+    // Her route lattice, a slice a ride frame, for the same reason as the
+    // shaders below (step 1b of the 120 fps plan — `Game.warmNavigation`).
+    handOverGame?.warmNavigation();
     if (warmup && director.shouldWarmShaders()) {
       const budget = director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS);
       if (!warmup.ready) {

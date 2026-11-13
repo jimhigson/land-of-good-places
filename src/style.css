@@ -1786,6 +1786,15 @@ kbd {
   visibility: hidden;
 }
 
+/* `visibility: hidden` above takes effect at once (it is not in the panel's
+   transition), so from that same moment nothing of the disc is painted — but
+   an infinite animation on a hidden element still ticks style on the main
+   thread every frame. Held, not removed, so it carries on from where it was
+   when the panel comes back (120 fps plan, item 17; `check:dom-churn`). */
+.lift-panel[data-show='false'] .lift-call-disc {
+  animation-play-state: paused;
+}
+
 .lift-plate {
   position: relative;
   pointer-events: auto;

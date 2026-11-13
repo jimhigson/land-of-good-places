@@ -10,6 +10,7 @@ import {
   Vector3,
   type BufferGeometry,
 } from 'three';
+import { refreshInstanceBounds } from '../core/tiledInstances';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../core/palette';
 import { Rng, TAU, clamp01, lerp, smoothstep } from '../core/mathUtils';
@@ -323,9 +324,7 @@ export class Flowers implements GameSystem {
       this.spawnAt(i, true);
       this.writeMatrix(i);
     }
-    this.stems.instanceMatrix.needsUpdate = true;
-    this.heads.instanceMatrix.needsUpdate = true;
-    this.petals.instanceMatrix.needsUpdate = true;
+    this.flushMatrices();
     if (this.stems.instanceColor) this.stems.instanceColor.needsUpdate = true;
     if (this.heads.instanceColor) this.heads.instanceColor.needsUpdate = true;
     if (this.petals.instanceColor) this.petals.instanceColor.needsUpdate = true;
@@ -370,9 +369,7 @@ export class Flowers implements GameSystem {
     }
 
     if (matrixDirty) {
-      this.stems.instanceMatrix.needsUpdate = true;
-      this.heads.instanceMatrix.needsUpdate = true;
-      this.petals.instanceMatrix.needsUpdate = true;
+      this.flushMatrices();
     }
 
     this.pickEffect.update(dt);
@@ -530,9 +527,7 @@ export class Flowers implements GameSystem {
     this.respawnTimer[index] = this.rng.range(RESPAWN_DELAY_MIN, RESPAWN_DELAY_MAX);
     this.wiggle[index] = 0;
     this.writeMatrix(index); // scales it to nothing until it respawns
-    this.stems.instanceMatrix.needsUpdate = true;
-    this.heads.instanceMatrix.needsUpdate = true;
-    this.petals.instanceMatrix.needsUpdate = true;
+    this.flushMatrices();
   }
 
   /**
@@ -685,9 +680,7 @@ export class Flowers implements GameSystem {
       this.spawnAt(i, true);
       this.writeMatrix(i);
     }
-    this.stems.instanceMatrix.needsUpdate = true;
-    this.heads.instanceMatrix.needsUpdate = true;
-    this.petals.instanceMatrix.needsUpdate = true;
+    this.flushMatrices();
   }
 
   /**
@@ -726,9 +719,7 @@ export class Flowers implements GameSystem {
       this.spawnAt(i, true);
       this.writeMatrix(i);
     }
-    this.stems.instanceMatrix.needsUpdate = true;
-    this.heads.instanceMatrix.needsUpdate = true;
-    this.petals.instanceMatrix.needsUpdate = true;
+    this.flushMatrices();
   }
 
   private insideAnyAnchor(x: number, z: number, margin: number): boolean {
@@ -738,6 +729,25 @@ export class Flowers implements GameSystem {
       if (Math.hypot(dx, dz) < anchor.boundingRadius + margin) return true;
     }
     return false;
+  }
+
+  /**
+   * Uploads the instance matrices just written **and re-measures what three
+   * culls each mesh by**. three caches an `InstancedMesh`'s bounding sphere the
+   * first time it draws it and never looks again, but these flowers grow, and
+   * a picked one comes back somewhere else — so the cached sphere went stale
+   * and a bloom outside it could be culled while on screen (`check:cull-audit`
+   * found a petal row outside its mesh's bound on the slide's camera).
+   * Matrices are only flushed while something is growing, wiggling or
+   * respawning, so a settled park pays nothing here.
+   */
+  private flushMatrices(): void {
+    this.stems.instanceMatrix.needsUpdate = true;
+    this.heads.instanceMatrix.needsUpdate = true;
+    this.petals.instanceMatrix.needsUpdate = true;
+    refreshInstanceBounds(this.stems);
+    refreshInstanceBounds(this.heads);
+    refreshInstanceBounds(this.petals);
   }
 
   /**

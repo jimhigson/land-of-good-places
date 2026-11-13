@@ -1,7 +1,10 @@
 /**
  * **A `.glb` cut down to some of its nodes** — for a kit that ships in two
  * pieces (`pack:library`: the building with the park, the reading room when she
- * goes in; `src/art/models/libraryKitSplit.ts` owns which node goes where).
+ * goes in; `src/art/models/libraryKitSplit.ts` owns which node goes where —
+ * and `pack:hotel`: the tower with the park, the furniture when she walks in;
+ * `src/art/models/hotelKitSplit.ts`). **The one cutter**: two were written the
+ * same day (#760 and #762) and this is the one kept.
  *
  * Every node kept carries its mesh, and every mesh its accessors and their
  * buffer views, copied byte for byte into a fresh binary chunk and renumbered;

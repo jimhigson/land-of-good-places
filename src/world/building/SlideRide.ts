@@ -1,8 +1,10 @@
 import {
+  BackSide,
   BufferAttribute,
   BufferGeometry,
   CatmullRomCurve3,
   DoubleSide,
+  FrontSide,
   Group,
   Matrix4,
   Mesh,
@@ -198,8 +200,10 @@ export class SlideRide {
   /**
    * The see-through half of the chute (#228), kept so
    * {@link SlideRide.setCastsShadow} can go on refusing to let it cast one.
+   * Two meshes over one geometry — far wall, then near wall; see the
+   * constructor for why it is not one `DoubleSide` mesh.
    */
-  private readonly clear: Mesh;
+  private readonly clear: readonly Mesh[];
 
   private readonly sampleTarget = new Vector3();
 
@@ -233,32 +237,59 @@ export class SlideRide {
     chute.receiveShadow = true;
     this.group.add(chute);
 
-    // **`DoubleSide`, so the trap CLAUDE.md records cannot apply here.** The
-    // hood faces went invisible because a `FrontSide` material was handed a
-    // mesh wound the other way round and every face was culled. This mesh is
-    // the same sweep, with the same winding, as the opaque one beside it, and
-    // both are drawn from both sides — if one is visible the other is.
-    this.clear = new Mesh(
-      buildChute(frames, (arc) => isClearBand(arc, this.length)),
-      toonMaterial(colour, {
-        side: DoubleSide,
-        transparent: true,
-        opacity: CLEAR_OPACITY,
-        // Off, so the tube's own far wall shows through its near wall the way
-        // a length of coloured perspex does, instead of the two fighting over
-        // which was drawn first.
-        depthWrite: false,
-      }),
-    );
-    this.clear.name = `${options.name}-chute-clear`;
-    // **Deliberately casts no shadow**, which is the point rather than a
-    // saving: the shadow the ride lays on the grass comes out dashed, one bar
-    // per solid section, so the pattern is legible from the ground as well as
-    // from the seat. A see-through section that threw a solid shadow would
-    // read as a rendering mistake.
-    this.clear.castShadow = false;
-    this.clear.receiveShadow = true;
-    this.group.add(this.clear);
+    // **Both faces drawn, so the trap CLAUDE.md records cannot apply here.**
+    // The hood faces went invisible because a `FrontSide` material was handed
+    // a mesh wound the other way round and every face was culled. This is the
+    // same sweep, with the same winding, as the opaque mesh beside it, and
+    // between them the two meshes below draw it from both sides — if the
+    // opaque half is visible, so is this one.
+    //
+    // **Two single-sided meshes over one geometry, not one `DoubleSide` mesh
+    // (#763).** three.js draws a transparent `DoubleSide` material in two
+    // passes — back faces, then front faces — by flipping `material.side` and
+    // setting `material.needsUpdate` before each, every frame, for every such
+    // mesh on screen. Each of those re-validates the material: program
+    // parameters and a cache key rebuilt per draw, ~200 times a second with
+    // both slides in view, all of it garbage. These two meshes are exactly
+    // those two passes, said out loud: the same two programs (`BackSide` is
+    // the flipped-normal variant three's own back pass compiles), in the same
+    // order, with no flag to flip.
+    //
+    // The order is what keeps the picture identical. Both meshes share one
+    // world matrix, so the transparent sort ties on depth and falls through to
+    // object id — creation order. **The back-face mesh must therefore be
+    // created first**; `check:hot-path-churn` holds that, and holds
+    // that no ride part goes back to the two-pass material.
+    const clearGeometry = buildChute(frames, (arc) => isClearBand(arc, this.length));
+    const clear: Mesh[] = [];
+    for (const [side, suffix] of [
+      [BackSide, 'chute-clear-far'],
+      [FrontSide, 'chute-clear'],
+    ] as const) {
+      const mesh = new Mesh(
+        clearGeometry,
+        toonMaterial(colour, {
+          side,
+          transparent: true,
+          opacity: CLEAR_OPACITY,
+          // Off, so the tube's own far wall shows through its near wall the
+          // way a length of coloured perspex does, instead of the two
+          // fighting over which was drawn first.
+          depthWrite: false,
+        }),
+      );
+      mesh.name = `${options.name}-${suffix}`;
+      // **Deliberately casts no shadow**, which is the point rather than a
+      // saving: the shadow the ride lays on the grass comes out dashed, one
+      // bar per solid section, so the pattern is legible from the ground as
+      // well as from the seat. A see-through section that threw a solid
+      // shadow would read as a rendering mistake.
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      clear.push(mesh);
+    }
+    this.clear = clear;
 
     const railMaterial = toonMaterial(options.railColour ?? PALETTE.slideRail);
     for (const side of [-1, 1] as const) {
@@ -281,7 +312,7 @@ export class SlideRide {
     // the traverse rather than trusted to callers: this method exists to be
     // called with `true`, and a blanket traverse would otherwise quietly undo
     // the dashed shadow the bands are for.
-    this.clear.castShadow = false;
+    for (const mesh of this.clear) mesh.castShadow = false;
   }
 
   /** World position on the slide floor at `t` in [0, 1]. */

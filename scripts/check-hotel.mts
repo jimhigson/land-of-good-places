@@ -124,15 +124,8 @@ import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 import { walkableGroundAt } from '../src/world/building/surfaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { HOTEL_LOBBY_Z, HOTEL_ORIGIN_X } from '../src/core/constants.ts';
-import {
-  CAFE_TABLE_A,
-  CAFE_TABLE_B,
-  TABLE_TOP,
-  TOWER_DOOR_HALF,
-  TOWER_FACADE_ALONG,
-  RECEPTION_X,
-  RECEPTION_Z,
-} from '../src/world/hotel/Hotel.ts';
+import { TOWER_DOOR_HALF, TOWER_FACADE_ALONG } from '../src/world/hotel/Hotel.ts';
+import { CAFE_TABLE_A, CAFE_TABLE_B, TABLE_TOP, RECEPTION_X, RECEPTION_Z } from '../src/world/hotel/interior.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { gameStore, walksInParade } from '../src/state/index.ts';
 import { shopItem, ALL_CATALOGUE_ITEMS } from '../src/world/building/shops/catalogue.ts';
@@ -145,6 +138,7 @@ import { standingAt } from './lib/standable.mts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { BUILDING_STEP_UP } from '../src/core/constants.ts';
 import { hotelTowerFindings } from './lib/hotelTower.mts';
+import type { DoorFramePartRange } from '../src/art/models/doorFrames.ts';
 
 /**
  * **How far BELOW the surface that supports her counts as falling.**
@@ -3305,25 +3299,84 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
 //
 // Proven red before trusted green: on the pre-fix build it reports all four
 // corners open in every room — see the commit message for the run.
+//
+// **A doorway frame's posts are wall, where they stand** (13 Nov 2026). The
+// lobby's south wall is drawn back from the front door by the width of the
+// frame's post, and the post stands where the wall's end was
+// (`doorFrames.ts`'s `drawnClearOfFrame` — a wall face in a post's face is
+// `check:coplanar`'s to refuse). But a frame is **baked into one mesh**, posts,
+// lintel and crest together, whose own box is 0.90 m deep and spans the whole
+// doorway: too thick to be found as a wall, and, were it thinner, a "wall"
+// straight across the door. So this probe read the 0.44 m each side of the
+// door as open air — 32 samples, `south at -1.70 … -1.35` and their mirror, on
+// both fibres — from the day the frames merged (#743), eager hotel or lazy.
+// Nothing a child could walk through: the wall's **collider** was never drawn
+// back, and the posts have boxes of their own (`check:doorframes` marches at
+// them). So a baked mesh is measured **part by part** — each part's own
+// vertices, off the mesh in the scene — and each part is held to the same
+// tall-and-thin rule as any other mesh: a post is, a lintel and a crest are
+// not.
+//
+// Proven red with this in place, on seed 5, against this geometry — gap
+// ±1.30, post 0.44 wide and 3.50 tall, wall drawn to ±1.74: the frame left off
+// the lobby's shell, **32** unwalled (`south at -1.70…`); the wall drawn back
+// twice the post's width, **36** (`south at -2.15…`). Green, the report line
+// says how many samples only a post walls — 32 of 21688 — so a frame that
+// moves shows up as a number that moved.
+/** A wall-like box on a room shell, and whether it is one part of a baked mesh. */
+interface WallBox {
+  readonly box: Box3;
+  /** One part of a mesh baked from several — a doorway frame's post. */
+  readonly bakedPart: boolean;
+}
+
+/** Tall and thin: what a wall is, to these probes. */
+function isWallLike(box: Box3): boolean {
+  const height = box.max.y - box.min.y;
+  const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
+  return height >= 1.4 && thickness <= 0.6;
+}
+
 /**
  * Every wall-like box on a room shell, found structurally (tall thin boxes),
  * never by name — so no probe using these can be satisfied by naming alone.
  * Shared by probes 15 (perimeter) and 18 (partition ends).
+ *
+ * A mesh baked from several parts (`userData.doorFrameParts`, the vertex range
+ * each part occupies) is measured one part at a time, never as a whole — see
+ * above. The ranges only say which vertices are one part; the box is still
+ * read off the vertices that are there.
  */
-function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): Box3[] {
-  const wallBoxes: Box3[] = [];
+function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): WallBox[] {
+  const wallBoxes: WallBox[] = [];
+  const vertex = new Vector3();
   shell.traverse((object) => {
     if (!(object instanceof Mesh)) return;
+    const parts = object.userData['doorFrameParts'] as readonly DoorFramePartRange[] | undefined;
+    if (parts) {
+      const position = object.geometry.getAttribute('position');
+      for (const part of parts) {
+        const box = new Box3();
+        for (let i = part.start; i < part.start + part.count; i += 1) {
+          box.expandByPoint(vertex.fromBufferAttribute(position, i).applyMatrix4(object.matrixWorld));
+        }
+        if (isWallLike(box)) wallBoxes.push({ box: box.expandByScalar(1e-4), bakedPart: true });
+      }
+      return;
+    }
     object.geometry.computeBoundingBox();
     const bounds = object.geometry.boundingBox;
     if (!bounds) return;
     const box = bounds.clone().applyMatrix4(object.matrixWorld);
-    const height = box.max.y - box.min.y;
-    const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
-    if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
+    if (isWallLike(box)) wallBoxes.push({ box: box.expandByScalar(1e-4), bakedPart: false });
   });
   return wallBoxes;
 }
+
+/** Probe 15's own count, for the report: every perimeter sample it took… */
+let perimeterSamples = 0;
+/** …and how many of them only a doorway frame's post walls. */
+let perimeterSamplesOnPosts = 0;
 
 {
   hotel.hotelRoot.updateMatrixWorld(true);
@@ -3358,7 +3411,12 @@ function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): 
             1.2,
             room.originZ + (along === 'x' ? fibre : t),
           );
-          if (wallBoxes.some((box) => box.containsPoint(point))) continue;
+          perimeterSamples += 1;
+          const walledBy = wallBoxes.filter(({ box }) => box.containsPoint(point));
+          if (walledBy.length > 0) {
+            if (walledBy.every(({ bakedPart }) => bakedPart)) perimeterSamplesOnPosts += 1;
+            continue;
+          }
           openings += 1;
           if (spots.length < 4) spots.push(`${side} at ${t.toFixed(2)}`);
         }
@@ -3515,7 +3573,7 @@ function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): 
             1.1,
             room.originZ + (run.along === 'x' ? run.at : t),
           );
-          if (wallBoxes.some((box) => box.containsPoint(point))) continue;
+          if (wallBoxes.some(({ box }) => box.containsPoint(point))) continue;
           problems.push(
             `${room.space}: partition ${index} (along ${run.along} at ${run.at}) ends at ` +
               `${end.toFixed(2)} in open air — neither a declared doorway jamb nor abutting a ` +
@@ -5549,6 +5607,8 @@ console.log(
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
     `${mustBeSolid.length + 1} props solid, 3 beds solid and walked up onto; ` +
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
+    `${perimeterSamples} perimeter wall samples, ${perimeterSamplesOnPosts} of them walled by a ` +
+    `doorway frame's post alone; ` +
     `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
     `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +
     `${furnitureWallGrazes.length} grazed (warnings); ` +
