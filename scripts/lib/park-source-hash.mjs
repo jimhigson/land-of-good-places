@@ -28,10 +28,28 @@
  *   outside the closure's own scripts, which read only their inputs);
  * - a bare (package) import — covered by the lockfile and `package.json`.
  *
- * `scripts/build-parks.mts` writes it into `.parks/manifest.json`,
- * `vite.config.ts` recomputes it before shipping those files, the CI parks
- * cache is keyed on it (`node scripts/lib/park-source-hash.mjs` prints it), and
- * `acceptanceSourceHash` builds on it. Plain JavaScript so that all of them can
+ * **It no longer decides whether a park is solved** (13 November 2026, Jim:
+ * *"how about if we checked in the result of the solve so we don't have to do
+ * it every time?"*). Until then a park was cached under this hash, and since
+ * the closure includes render code, a render-only edit re-solved all sixteen
+ * parks — 12-30 minutes a seed — for identical decisions. Now the solved parks
+ * are **checked in** (`parks/`, `docs/design/PREBUILT-PARKS.md`, "Checked
+ * in"), and what keeps one honest is `pnpm run validate:parks`: the current
+ * code hydrates the file and asks it every acceptance measure. A change to
+ * this hash re-solves nothing. Nothing compares a park against it. What it is
+ * still for:
+ * - **the runtime save stamp** — `parkStampOf` (`checked-in-parks.mjs`) mixes
+ *   it with the placement digest, so `vite build` and the dev server stamp each
+ *   served park and a saved position is restored only into the same park built
+ *   by the same code;
+ * - **`validate:parks`' local skip** — outside CI, a checked-in file already
+ *   accepted at byte-identical source is not measured again
+ *   (`.cache/lgp-parks-validated/<this hash>/`); and the explicit
+ *   `accept:parks` sweep's cache (`acceptanceSourceHash`) builds on it;
+ * - **a note** — `build:parks` records it as a manifest line's `solvedUnder`,
+ *   which nothing reads back.
+ * `node scripts/lib/park-source-hash.mjs` prints it; `--files` lists the
+ * closure. Plain JavaScript so that `vite.config.ts` and the scripts can all
  * import the one function.
  */
 import { createHash } from 'node:crypto';

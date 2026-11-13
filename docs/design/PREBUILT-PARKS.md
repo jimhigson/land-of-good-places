@@ -7,6 +7,87 @@ this that is the park's layout as json, but not every mesh etc, so that the
 client can load a reasonably small park with all decisions made, but not just
 some huge 3d model or models."*
 
+## Checked in, 13 November 2026
+
+Jim, 13 November: *"why do we need these long park solves? park geometry
+shouldn't be changing now"*, *"how about if we checked in the result of the
+solve so we don't have to do it every time?"*, and *"great yes, do the checkin
+of solved parks to the repo, to speed up CI and local builds"*.
+
+Until then a solved park was cached under a hash of the solver's whole import
+closure (`scripts/lib/park-source-hash.mjs`). That closure includes render code,
+so a render-only edit re-solved all sixteen parks — 12-30 minutes a seed on a
+loaded Mac, 30-45 minutes of CI — for byte-identical decisions (measured: the
+sixteen parks' `restart`, `features` and `planOrder` were identical across eleven
+Mac solves and the live site over four weeks and eleven source hashes). On 13
+November that stopped a dozen engineers opening the game at all.
+
+**What changed.** The section "4. Build pipeline" below said *"committed
+artefacts were rejected: they are a second copy of the generator's output kept
+in step by hand"*. That is withdrawn. They are kept in step by a machine:
+
+- **`parks/<seed>.json` and `parks/manifest.json` are tracked in git.** The
+  manifest has one line a seed: `restart`, `file` (sha256 of the file's bytes),
+  `layout` (the placement digest, below) and `solvedUnder` (the source hash it
+  was solved at — a note, never compared). Files are content-deterministic: no
+  wall times, no source hash, `build` left "unstamped".
+- **Nothing solves by default.** `vite build`, the dev server, every check and
+  the invariant suite read the checked-in files. A missing file or manifest line
+  is an error naming the fix, never a silent solve (`builtParks.mts`,
+  `acceptedPark.mts`, `dev-parks.mjs`, `vite.config.ts`).
+- **What keeps a file honest is `pnpm run validate:parks`**, not a hash. Each
+  checked-in park is hydrated by the *current* code in a fresh process and asked
+  the same acceptance attempt a freshly solved park gets (`park-attempt.mts`,
+  one owner of the measures: every invariant, every check measure, `check:park`,
+  the simulated checks, `check:rail-race` and `check:stall-accommodate`), with
+  nothing searched, then held to its manifest line's sha and placement digest.
+  CI runs one seed per runner (`parks.yml`, "Park N still accepted"); a rejected
+  seed turns both required checks red by name and blocks the deploy.
+- **Only a rejected seed is solved again**: `pnpm run build:parks` validates
+  first, keeps every accepted park untouched, re-stamps a manifest line whose
+  placement moved (no solve), and re-solves only the rejected seeds — then you
+  commit what it changed in `parks/` with the change that made it necessary. It
+  never deletes a tracked park: solves happen in `.cache/lgp-parks/attempts/`.
+  If every seed asked for is rejected it stops (`LGP_SOLVE_ALL=1` overrides):
+  that is almost always one broken instrument, not sixteen bad parks.
+- **The placement digest** (`scripts/lib/parkLayoutDigest.mts`) is sha256 over a
+  canonical serialisation of every ground claim and the boundary radii — not
+  meshes, not colliders, so a render edit cannot move it. The old whole-scene
+  digest moved on every art edit and is no longer checked in. A reshaped
+  collider is judged by the acceptance measures, not by the digest.
+- **`check:stall-accommodate` is asked of checked-in parks too.** It used to
+  need the stalls builder a world-phase search had driven, which made every
+  hydrated attempt solve the seed again just for it; it now resumes the same
+  builder over the hydrated park's registry and booths
+  (`stallBuilder.ts`' `resumedStallBuilder`). `check-stall-accommodate.mts` in
+  shard 7 still solves the canonical seed, so the builder a search drove is
+  measured too.
+- **A returning player's save** is stamped with `sha256(layout + source hash)`
+  (`parkStampOf` in `scripts/lib/checked-in-parks.mjs`, one owner for `vite build` and the dev server), not the mesh digest, so a saved position is
+  restored only into the same park built by the same code. See "What is no
+  longer guaranteed" below for the cost.
+
+**Merge conflicts in `parks/`.** `.gitattributes` makes each park file a whole
+file (`-merge`), so a conflict leaves one side intact and parseable. Rule: take
+main's (`git checkout origin/main -- parks/`), run `pnpm run build:parks` under
+the merged code (it re-solves only what that code rejects), commit.
+
+**What is no longer guaranteed, stated plainly.**
+
+- The shipped park need not be the park this source's generator would solve at
+  that restart — only a park this source *accepts*. That is the owner's ruling.
+  `check:prebuilt-park` says on every run whether the canonical seed still
+  solves to byte-identical decisions.
+- The layout rung's false-refusal proof is a second solve, so validation cannot
+  ask it; it is asked when a park is solved, and only arises on a park whose
+  rung fired (none of the sixteen today). `validate:parks` says so every run.
+- The search-subject checks (`check:every-seed-builds`' search path, the
+  scatter measures, `check:layout-rung`) measure a fresh solve, which may now
+  differ from the shipped park.
+- A returning player is put at the default spawn on any deploy that changed a
+  file in the park closure, not only on one that changed a mesh — and once on
+  the first deploy of this change.
+
 ## As built, 24 September 2026 (PR #705)
 
 Jim's two rulings of 24 September changed the proposal below in two ways:
