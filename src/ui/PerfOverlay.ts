@@ -1,3 +1,4 @@
+import type { AdaptiveResolutionState } from '../core/adaptiveResolution';
 import {
   FRAME_BUDGET_MS,
   type PerfProbe,
@@ -137,18 +138,33 @@ const count = (n: number): string =>
   n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e4 ? `${(n / 1e3).toFixed(0)} k` : String(n);
 
 /**
- * The pixel-ratio line: what the frame is drawn at, and whether the adaptive
- * resolution (120 fps plan, step 17; `core/adaptiveResolution.ts`) has stepped
- * it down from the screen's cap — `dpr 1.50 of 2 (adaptive, 2 changes)`.
+ * The quality governor's line (120 fps plan, step 17;
+ * `core/adaptiveResolution.ts`): the pixel ratio the frame is drawn at, the
+ * level that is on the governor's ladder, what the governor is doing, and the
+ * frame budget it measured off this display —
+ * `dpr 1.50 of 2  level 1/2  recovering 2.1/4.0 s  budget 8.3 ms  3 changes`.
  */
 export function formatPixelRatio(context: Record<string, unknown>): string {
   const ratio = Number(context['pixelRatio'] ?? NaN);
-  const adaptive = context['adaptiveResolution'];
-  if (adaptive && typeof adaptive === 'object') {
-    const a = adaptive as { cap: number; changes: number; periodMs: number };
-    return `dpr ${ratio.toFixed(2)} of ${a.cap} (adaptive, ${a.changes} change${a.changes === 1 ? '' : 's'}, vsync ${a.periodMs.toFixed(1)} ms)`;
-  }
-  return `dpr ${ratio.toFixed(2)} (fixed: ?adaptiveDpr=0)`;
+  const governor = context['adaptiveResolution'];
+  if (!governor || typeof governor !== 'object') return `dpr ${ratio.toFixed(2)}`;
+  const g = governor as AdaptiveResolutionState;
+  const seconds = (n: number): string => (n / 1000).toFixed(1);
+  const doing =
+    g.phase === 'recovering'
+      ? `recovering ${seconds(g.calmMs)}/${seconds(g.upHoldMs)} s`
+      : g.phase === 'paused'
+        ? `paused ${seconds(g.pausedMs)} s`
+        : g.phase === 'watching'
+          ? `watching ${g.recentMisses} gpu-miss`
+          : g.phase;
+  return [
+    `dpr ${ratio.toFixed(2)} of ${g.cap}`,
+    `level ${g.level}/${g.levels - 1}`,
+    doing,
+    `budget ${g.periodMs.toFixed(1)} ms`,
+    `${g.changes} change${g.changes === 1 ? '' : 's'}`,
+  ].join('  ');
 }
 
 /** The overlay's text. Exported so its wording is checked without a DOM. */

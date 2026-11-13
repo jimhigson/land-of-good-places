@@ -1155,25 +1155,35 @@ export class Game {
       const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
       this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
-        const start = performance.now();
+        this.beginEngineFrame();
         probe.begin();
         this.tick(tick);
         probe.end();
-        this.engine.frameTimed(start, performance.now() - start);
+        this.engine.endFrame();
       });
     } else {
-      // Timed for the adaptive resolution (120 fps plan, step 17): two clock
-      // reads a frame, and `Engine.frameTimed` decides the next frame's DPR.
       this.loop = new Loop((tick) => {
-        const start = performance.now();
+        this.beginEngineFrame();
         this.tick(tick);
-        this.engine.frameTimed(start, performance.now() - start);
+        this.engine.endFrame();
       });
     }
   }
 
   /** The `?perf=1` overlay, when the URL asked for it. */
   private perfOverlay: PerfOverlay | null = null;
+
+  /**
+   * The quality governor's frame bracket (120 fps plan, step 17): `Engine`
+   * times the frame and may change the pixel ratio here, before anything is
+   * drawn. Adaptation pauses while a wipe covers the screen and when she
+   * changes space — a room's first frames are slow for reasons pixels cannot
+   * fix. See `core/adaptiveResolution.ts`.
+   */
+  private beginEngineFrame(): void {
+    const { x, z } = this.player.position;
+    this.engine.beginFrame(this.transitions.wiping, spaceAt(x, z));
+  }
 
   /** What the perf overlay's JSON says about where and on what it was measured. */
   private perfContext(): Record<string, unknown> {
@@ -1186,7 +1196,7 @@ export class Game {
       gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
-      adaptiveResolution: this.engine.adaptiveResolution?.state() ?? 'off (?adaptiveDpr=0)',
+      adaptiveResolution: this.engine.adaptiveResolution.state(),
       canvas: [gl.drawingBufferWidth, gl.drawingBufferHeight],
       viewport: [window.innerWidth, window.innerHeight],
       hardwareConcurrency: navigator.hardwareConcurrency,

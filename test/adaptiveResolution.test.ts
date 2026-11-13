@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   AdaptiveResolution,
   DOWN_MISSES,
+  LADDER,
   ladderFor,
   MAX_UP_HOLD_MS,
+  PAUSE_AFTER_BUSY_MS,
+  PAUSE_AFTER_GAP_MS,
+  PAUSE_AFTER_HITCH_MS,
+  type QualityLevel,
   UP_HOLD_MS,
 } from '../src/core/adaptiveResolution';
 
@@ -25,16 +30,16 @@ class Trace {
   /** Every pixel ratio the controller answered, one per frame. */
   readonly ratios: number[] = [];
 
-  constructor(cap: number) {
-    this.controller = new AdaptiveResolution(cap);
+  constructor(cap: number, options: { pinned?: boolean } = {}) {
+    this.controller = new AdaptiveResolution(cap, options);
     this.controller.frame(this.t, 1); // the first frame has no interval
   }
 
   /** `frames` frames, each shown for `interval` ms with `cpu` ms of main-thread work. */
-  run(frames: number, interval: number, cpu: number): this {
+  run(frames: number, interval: number, cpu: number, busy = false, scene?: string): this {
     for (let i = 0; i < frames; i++) {
       this.t += interval;
-      this.ratios.push(this.controller.frame(this.t, cpu));
+      this.ratios.push(this.controller.frame(this.t, cpu, busy, scene));
     }
     return this;
   }
@@ -179,5 +184,115 @@ describe('screen changes', () => {
     const trace = new Trace(2).run(1200, HZ120, 3).run(60 * 60, HZ60, 3);
     expect(trace.controller.state().periodMs).toBeCloseTo(HZ60, 3);
     expect(trace.ratio).toBe(2);
+  });
+});
+
+describe('the ladder never leaves the device\'s own range', () => {
+  it('no rung is above the cap or below 1, for any cap a screen can report', () => {
+    for (const cap of [0.75, 1, 1.1, 1.25, 1.3, 1.5, 1.75, 2]) {
+      const ladder = ladderFor(cap);
+      expect(ladder[0]).toBe(cap);
+      for (const rung of ladder) {
+        expect(rung).toBeLessThanOrEqual(cap);
+        expect(rung).toBeGreaterThanOrEqual(Math.min(1, cap));
+      }
+    }
+    expect(Math.min(...LADDER)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('?adaptiveDpr=0 pins it: one level, never moves, phase says fixed', () => {
+    const trace = new Trace(2, { pinned: true }).run(240, HZ120, 3).run(600, HZ60, 3);
+    expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
+    expect(trace.controller.state().phase).toBe('fixed');
+    expect(trace.controller.quality.levels).toBe(1);
+  });
+});
+
+describe('one-off hitches are not evidence', () => {
+  const warm = (): Trace => new Trace(2).run(240, HZ120, 3, false, 'park');
+
+  it('GPU-bound-looking frames under an iris wipe, and for a while after it, do not step down', () => {
+    const trace = warm();
+    // The wipe: 0.6 s of 16.7 ms frames with an idle main thread.
+    trace.run(36, HZ60, 3, true, 'park');
+    expect(trace.controller.state().phase).toBe('paused');
+    // …and the room's first-entry compiles, still inside the pause.
+    trace.run(Math.floor(PAUSE_AFTER_BUSY_MS / HZ60) - 1, HZ60, 3, false, 'park');
+    expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
+    // The room really is GPU-bound: once the pause is over, it steps down.
+    trace.run(DOWN_MISSES + 2, HZ60, 3, false, 'park');
+    expect(trace.ratio).toBe(1.5);
+  });
+
+  it('a space change with no wipe pauses just the same', () => {
+    const trace = warm();
+    trace.run(DOWN_MISSES - 1, HZ60, 3, false, 'park');
+    trace.run(DOWN_MISSES * 3, HZ60, 3, false, 'hotel');
+    expect(trace.controller.state().phase).toBe('paused');
+    expect(trace.ratio).toBe(2);
+    // The misses seen in the park were forgotten at the door.
+    expect(trace.controller.state().recentMisses).toBe(0);
+  });
+
+  it('coming back from a hidden tab pauses, so the catch-up frames are not evidence', () => {
+    const trace = warm();
+    trace.run(1, 30_000, 1);
+    trace.run(Math.floor(PAUSE_AFTER_GAP_MS / HZ60) - 1, HZ60, 3);
+    expect(trace.ratio).toBe(2);
+    expect(trace.controller.state().recentMisses).toBe(0);
+  });
+
+  it('a CPU hitch (a compile, a GC) pauses: the GPU draining afterwards is not evidence', () => {
+    const trace = warm();
+    for (let i = 0; i < 20; i++) {
+      trace.run(1, 120, 110); // the hitch itself
+      trace.run(Math.floor(PAUSE_AFTER_HITCH_MS / HZ60) - 1, HZ60, 3); // the drain
+    }
+    expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
+  });
+
+  it('pauses do not forfeit calm already earned: walking in and out of rooms still recovers', () => {
+    const trace = warm().run(DOWN_MISSES, HZ60, 3, false, 'park');
+    expect(trace.ratio).toBe(1.5);
+    // A door every 2.5 s: 1.5 s paused, 1 s of calm frames (0.75 s of it counted).
+    let doors = 0;
+    for (; doors < 40 && trace.ratio !== 2; doors++) {
+      trace.run(Math.round(2500 / HZ120), HZ120, 3, false, `room-${doors}`);
+    }
+    expect(trace.ratio).toBe(2);
+    expect(doors).toBeGreaterThan(2);
+    expect(doors).toBeLessThan(12);
+  });
+});
+
+describe('the quality signal', () => {
+  it('subscribe hears every change of level, once each, and nothing else', () => {
+    const trace = new Trace(2);
+    const heard: QualityLevel[] = [];
+    const stop = trace.controller.subscribe((q) => heard.push(q));
+    trace.run(240, HZ120, 3);
+    expect(heard).toEqual([]);
+    trace.run(DOWN_MISSES, HZ60, 3);
+    expect(heard).toEqual([{ level: 1, levels: 3, pixelRatio: 1.5, cap: 2 }]);
+    trace.run(Math.ceil((UP_HOLD_MS + 2000) / HZ120), HZ120, 3);
+    expect(heard.map((q) => q.level)).toEqual([1, 0]);
+    expect(trace.controller.quality).toEqual({ level: 0, levels: 3, pixelRatio: 2, cap: 2 });
+    stop();
+    trace.run(240, HZ60, 3);
+    expect(trace.ratio).toBeLessThan(2);
+    expect(heard.length).toBe(2);
+  });
+
+  it('the phase names what the governor is doing', () => {
+    const trace = new Trace(2).run(240, HZ120, 3);
+    expect(trace.controller.state().phase).toBe('watching');
+    trace.run(DOWN_MISSES, HZ60, 3);
+    expect(trace.controller.state().phase).toBe('settling');
+    trace.run(120, HZ120, 3);
+    expect(trace.controller.state().phase).toBe('recovering');
+    expect(new Trace(1).run(10, HZ60, 3).controller.state().phase).toBe('fixed');
   });
 });

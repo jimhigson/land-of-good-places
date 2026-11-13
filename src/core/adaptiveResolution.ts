@@ -1,42 +1,58 @@
 import { FRAME_BUDGET_MS } from './perfProbe';
 
 /**
- * **Adaptive resolution: give up pixels before giving up frames** (120 fps
+ * **The quality governor: give up pixels before giving up frames** (120 fps
  * plan, step 17; `docs/perf/FRAME-DROPS-2026-11.md` §10 on #746).
  *
- * The target is 8.3 ms a frame. Some scenes miss it on the GPU, not the CPU:
- * the reptile house's eleven point lights, measured on an M4 Pro at DPR 2,
- * dropped 11 frames over a walk with the main thread idle; at DPR 1 the same
- * walk dropped none. Fill cost scales with the pixel count, and DPR 2 → 1.5 is
- * 44 % fewer pixels for a softness most people cannot see on a phone. So when
- * frames keep missing vsync *while the main thread was idle*, this steps the
- * renderer's pixel ratio down the {@link LADDER}, and back up once the frames
- * have been calm for a while.
+ * The target is one display refresh a frame. Some scenes miss it on the GPU,
+ * not the CPU: the reptile house's eleven point lights, measured on an M4 Pro
+ * at DPR 2, dropped 11 frames over a walk with the main thread idle; at DPR 1
+ * the same walk dropped none. Fill cost scales with the pixel count, and DPR
+ * 2 → 1.5 is 44 % fewer pixels for a softness most people cannot see on a
+ * phone. So when frames keep missing vsync *while the main thread was idle*,
+ * this steps the renderer's pixel ratio down the {@link LADDER}, and back up
+ * once the frames have been calm for a while.
  *
  * Pure and DOM-free: it is fed one `(start, cpu)` pair per frame and answers
  * the pixel ratio to draw at, so its hysteresis is unit-tested on synthetic
  * traces (`test/adaptiveResolution.test.ts`) rather than trusted. `Engine`
  * owns applying the answer.
  *
+ * ## It is the one owner of "how hard is this device being pushed?"
+ *
+ * {@link AdaptiveResolution.quality} is the quality level and
+ * {@link AdaptiveResolution.subscribe} announces every change of it. Today only
+ * the drawing buffer listens (through `Engine`). Anything that later wants to
+ * shed work under load — shadow cadence, crowd LOD distance — reads this
+ * signal rather than growing a second frame-time detector that would disagree
+ * with this one about when the device is struggling.
+ *
  * ## What counts as a GPU-bound miss
  *
- * A frame whose interval (start to previous start) is more than 1.5 refresh
- * periods — it was shown at least twice — **and** whose main-thread work was
- * under three quarters of a period. A frame that missed because the *CPU* was
- * slow (a shader link, the NavGrid rebuild, a GC) is not evidence: fewer pixels
- * would not have saved it, and stepping down on it would cost sharpness for
- * nothing.
+ * A frame whose interval (its start to the next frame's start) is more than
+ * 1.5 refresh periods — it was shown at least twice — **and** whose own
+ * main-thread work was under three quarters of a period. A frame that missed
+ * because the *CPU* was slow (a shader link, the NavGrid rebuild, a GC) is not
+ * evidence: fewer pixels would not have saved it, and stepping down on it
+ * would cost sharpness for nothing.
  *
- * ## The refresh period, which is not always 8.3 ms
+ * That is as far as a browser lets us see. There is no portable GPU timer
+ * (`EXT_disjoint_timer_query_webgl2` is absent on iOS and was measured as
+ * relative-only on the plan's harness), so "the display skipped while the main
+ * thread sat idle" is the signature, and main-thread work *outside* the frame
+ * callback (another rAF, a timer, a GC between frames) is invisible to it.
+ *
+ * ## The budget is the display's, measured — not 8.3 ms
  *
  * On a 60 Hz phone every frame is 16.7 ms, and "missed 120 Hz" would be true
  * of all of them; the controller would sink to its floor on a device that is
  * keeping up perfectly. So the period is **measured**: the shortest interval
  * seen over the last few seconds ({@link PERIOD_BLOCK_FRAMES} ×
- * {@link PERIOD_BLOCKS}), never shorter than the 8.3 ms budget (a 240 Hz
- * screen is still held to 120 fps, not 240). It is a rolling minimum, not a
- * session one, so iOS Low Power Mode capping the screen to 60 Hz mid-game is
- * re-learnt within seconds rather than read as permanent overload.
+ * {@link PERIOD_BLOCKS}), never shorter than the game's own target
+ * (`FRAME_BUDGET_MS`, owned by `perfProbe`: a 240 Hz screen is still held to
+ * 120 fps, not 240). It is a rolling minimum, not a session one, so iOS Low
+ * Power Mode capping the screen to 60 Hz mid-game is re-learnt within seconds
+ * rather than read as permanent overload.
  *
  * The limit of that, said plainly: a scene that is GPU-bound at *exactly*
  * two periods from the very first frame for longer than the window looks
@@ -58,7 +74,27 @@ import { FRAME_BUDGET_MS } from './perfProbe';
  * - **Every change is followed by {@link SETTLE_FRAMES} frames of ignoring
  *   evidence**: resizing the drawing buffer is itself a hitch, and the window
  *   is cleared so a decision at the new level rests on frames drawn at it.
- * - **Hidden-tab gaps** (> {@link GAP_MS}) are not frames and are ignored.
+ *
+ * ## One-off hitches are not evidence
+ *
+ * Adaptation **pauses** — no evidence gathered, no calm accrued, nothing
+ * decided — around the moments a frame is slow for a reason pixels cannot fix:
+ *
+ * - **a space change or an iris wipe** (`busy`, or a new `scene` key): the
+ *   first frames of a room link its shaders and upload its textures, in the
+ *   GPU process, with the main thread idle — exactly the GPU-bound signature,
+ *   and exactly wrong. Paused while busy and for {@link PAUSE_AFTER_BUSY_MS}
+ *   after; the evidence window is thrown away, since it described the room
+ *   she just left.
+ * - **a hidden tab** (an interval over {@link GAP_MS} is not a frame): paused
+ *   for {@link PAUSE_AFTER_GAP_MS} after she comes back, while the browser
+ *   catches up.
+ * - **a CPU hitch** (main-thread work over {@link HITCH_PERIODS} periods — a
+ *   compile, a big GC): the frames straight after one are the GPU draining
+ *   its queue; {@link PAUSE_AFTER_HITCH_MS} of them are ignored.
+ *
+ * A pause never resets the calm already earned towards a step up, so a child
+ * walking in and out of rooms cannot hold the resolution down for ever.
  */
 
 /** The pixel ratios the controller may use, best first. Never below 1.25 unless the screen itself is lower. */
@@ -79,6 +115,14 @@ export const REGRET_MS = 10_000;
 export const SETTLE_FRAMES = 30;
 /** An interval longer than this is a hidden tab or a debugger, not a frame. */
 export const GAP_MS = 250;
+/** Adaptation stays paused this long after an iris wipe or a space change ends. */
+export const PAUSE_AFTER_BUSY_MS = 1500;
+/** …and this long after a hidden tab comes back. */
+export const PAUSE_AFTER_GAP_MS = 1000;
+/** Main-thread work over this many refresh periods is a hitch, not a frame. */
+export const HITCH_PERIODS = 4;
+/** Adaptation stays paused this long after a CPU hitch. */
+export const PAUSE_AFTER_HITCH_MS = 500;
 /** The rolling minimum is kept in blocks of this many frames… */
 export const PERIOD_BLOCK_FRAMES = 120;
 /** …this many blocks long (~5 s at 120 fps). */
@@ -90,20 +134,49 @@ const MIN_PLAUSIBLE_PERIOD_MS = 3;
  * The ladder for a screen whose own cap is `cap`: the cap itself first, then
  * every rung below it. A DPR-1 screen gets `[1]` and the controller is inert —
  * which is also why CI's headless runs at `deviceScaleFactor: 1` are untouched.
+ * `pinned` (`?adaptiveDpr=0`) is the same one-rung ladder on any screen.
+ *
+ * Never above the cap (the device's own ratio, already clamped by
+ * `device.pixelRatioCap`), and never below 1 unless the device itself is: the
+ * lowest rung is 1.25, and a cap at or under that has nothing beneath it.
  */
-export function ladderFor(cap: number): number[] {
+export function ladderFor(cap: number, pinned = false): number[] {
+  if (pinned) return [cap];
   const rungs = LADDER.filter((r) => r < cap - 1e-6);
   return [cap, ...rungs];
 }
 
-export interface AdaptiveResolutionState {
+/** What the governor is doing this frame — the `?perf=1` overlay prints it. */
+export type GovernorPhase =
+  /** One rung only: a DPR ≤ 1.25 screen, or `?adaptiveDpr=0`. */
+  | 'fixed'
+  /** Ignoring frames around a space change, a hidden tab or a hitch. */
+  | 'paused'
+  /** Ignoring the frames straight after its own change of level. */
+  | 'settling'
+  /** Below the cap, with calm accruing towards a step back up. */
+  | 'recovering'
+  /** Gathering evidence. */
+  | 'watching';
+
+/**
+ * The quality-level signal: what {@link AdaptiveResolution.subscribe} hands
+ * out. `level` 0 is full quality; `levels - 1` is the floor.
+ */
+export interface QualityLevel {
+  /** Index into the ladder; 0 is the cap. */
+  readonly level: number;
+  /** How many levels this device has (1 means the governor is inert). */
+  readonly levels: number;
   /** The pixel ratio to draw at. */
   readonly pixelRatio: number;
   /** The best this screen allows. */
   readonly cap: number;
-  /** Index into the ladder; 0 is the cap. */
-  readonly level: number;
-  /** The refresh period the controller believes in, ms. */
+}
+
+export interface AdaptiveResolutionState extends QualityLevel {
+  readonly phase: GovernorPhase;
+  /** The refresh period the controller believes in, ms — the frame budget. */
   readonly periodMs: number;
   /** GPU-bound misses in the current down window. */
   readonly recentMisses: number;
@@ -111,30 +184,37 @@ export interface AdaptiveResolutionState {
   readonly calmMs: number;
   /** The hold the next step up needs, ms. */
   readonly upHoldMs: number;
+  /** ms of pause still to run. */
+  readonly pausedMs: number;
   /** Total steps taken, both directions, since construction. */
   readonly changes: number;
 }
 
 export class AdaptiveResolution {
   private ladder: number[];
+  private readonly pinned: boolean;
   private levelValue = 0;
   private readonly window: boolean[] = [];
   private missesInWindow = 0;
   private previousStart = -1;
   private settle = 0;
   private calm = 0;
+  private pausedUntil = -Infinity;
+  private scene: string | number | undefined;
   /** Per level, the calm needed to step up *to* it. */
   private readonly holds: number[];
   /** When we last stepped up to each level, for regret. */
   private readonly steppedUpAt: number[];
   private changesValue = 0;
+  private readonly listeners = new Set<(quality: QualityLevel) => void>();
   // Rolling minimum of the interval, in blocks.
   private blockMin = Infinity;
   private blockFrames = 0;
   private readonly blockMins: number[] = [];
 
-  constructor(cap: number) {
-    this.ladder = ladderFor(cap);
+  constructor(cap: number, options: { pinned?: boolean } = {}) {
+    this.pinned = options.pinned ?? false;
+    this.ladder = ladderFor(cap, this.pinned);
     this.holds = this.ladder.map(() => UP_HOLD_MS);
     this.steppedUpAt = this.ladder.map(() => -Infinity);
   }
@@ -147,13 +227,28 @@ export class AdaptiveResolution {
     return this.ladder[0]!;
   }
 
+  /** The quality level right now. */
+  get quality(): QualityLevel {
+    return { level: this.levelValue, levels: this.ladder.length, pixelRatio: this.pixelRatio, cap: this.cap };
+  }
+
+  /**
+   * Calls `listener` on every change of level (either direction, and on a new
+   * screen cap) — not once a frame. Answers the unsubscribe. Read
+   * {@link quality} for the value at subscription time.
+   */
+  subscribe(listener: (quality: QualityLevel) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   /**
    * The screen's own cap changed (a window dragged to another monitor). Starts
    * again from the top of the new ladder rather than guessing a mapping.
    */
   setCap(cap: number): void {
     if (Math.abs(cap - this.cap) < 1e-6) return;
-    this.ladder = ladderFor(cap);
+    this.ladder = ladderFor(cap, this.pinned);
     this.holds.length = 0;
     this.steppedUpAt.length = 0;
     for (let i = 0; i < this.ladder.length; i++) {
@@ -162,9 +257,10 @@ export class AdaptiveResolution {
     }
     this.levelValue = 0;
     this.restartEvidence();
+    this.announce();
   }
 
-  /** The refresh period currently believed in, never shorter than the budget. */
+  /** The refresh period currently believed in, never shorter than the game's target. */
   get periodMs(): number {
     let min = this.blockMin;
     for (const m of this.blockMins) if (m < min) min = m;
@@ -172,22 +268,38 @@ export class AdaptiveResolution {
   }
 
   /**
-   * Feeds one frame. `start` is `performance.now()` at the start of the
-   * frame, `cpu` the ms of main-thread work in it. Returns the pixel ratio to
-   * draw the **next** frame at.
+   * Feeds one frame, **at the start of the next**: `start` is
+   * `performance.now()` as the new frame begins, `cpu` the main-thread ms of
+   * the frame that has just ended — so the interval ending now and the work
+   * that filled it describe the same frame. Returns the pixel ratio to draw
+   * the frame now starting at.
+   *
+   * `busy` is true while a transition covers the screen; `scene` is any key
+   * that changes when she changes space. Either pauses adaptation (see the
+   * file comment).
    */
-  frame(start: number, cpu: number): number {
+  frame(start: number, cpu: number, busy = false, scene?: string | number): number {
     const interval = this.previousStart < 0 ? 0 : start - this.previousStart;
     this.previousStart = start;
-    if (interval <= 0 || interval > GAP_MS) return this.pixelRatio;
+    const sceneChanged = scene !== undefined && this.scene !== undefined && scene !== this.scene;
+    if (scene !== undefined) this.scene = scene;
+    if (interval <= 0) return this.pixelRatio;
+    if (interval > GAP_MS) {
+      this.pause(start + PAUSE_AFTER_GAP_MS, true);
+      return this.pixelRatio;
+    }
     this.notePeriod(interval);
     if (this.ladder.length < 2) return this.pixelRatio;
+
+    const period = this.periodMs;
+    if (busy || sceneChanged) this.pause(start + PAUSE_AFTER_BUSY_MS, true);
+    else if (cpu > period * HITCH_PERIODS) this.pause(start + PAUSE_AFTER_HITCH_MS, false);
+    if (start < this.pausedUntil) return this.pixelRatio;
     if (this.settle > 0) {
       this.settle--;
       return this.pixelRatio;
     }
 
-    const period = this.periodMs;
     const gpuMiss = interval > period * 1.5 && cpu < period * 0.75;
     this.window.push(gpuMiss);
     if (gpuMiss) this.missesInWindow++;
@@ -201,34 +313,64 @@ export class AdaptiveResolution {
       this.levelValue++;
       this.changesValue++;
       this.restartEvidence();
+      this.announce();
       return this.pixelRatio;
     }
 
-    if (this.levelValue > 0 && this.window.length >= DOWN_WINDOW / 2 && this.missesInWindow <= CALM_MISSES) {
-      this.calm += interval;
-      if (this.calm >= this.holds[this.levelValue - 1]!) {
-        this.levelValue--;
-        this.steppedUpAt[this.levelValue] = start;
-        this.changesValue++;
-        this.restartEvidence();
+    if (this.levelValue > 0) {
+      if (this.missesInWindow > CALM_MISSES) {
+        this.calm = 0;
+      } else if (this.window.length >= DOWN_WINDOW / 2) {
+        // A window still refilling (after a pause) neither earns calm nor
+        // forfeits what was earned.
+        this.calm += interval;
+        if (this.calm >= this.holds[this.levelValue - 1]!) {
+          this.levelValue--;
+          this.steppedUpAt[this.levelValue] = start;
+          this.changesValue++;
+          this.restartEvidence();
+          this.announce();
+        }
       }
-    } else {
-      this.calm = 0;
     }
     return this.pixelRatio;
   }
 
   state(): AdaptiveResolutionState {
+    const pausedMs = Math.max(0, this.pausedUntil - this.previousStart);
+    const phase: GovernorPhase =
+      this.ladder.length < 2
+        ? 'fixed'
+        : pausedMs > 0
+          ? 'paused'
+          : this.settle > 0
+            ? 'settling'
+            : this.levelValue > 0 && this.calm > 0
+              ? 'recovering'
+              : 'watching';
     return {
-      pixelRatio: this.pixelRatio,
-      cap: this.cap,
-      level: this.levelValue,
+      ...this.quality,
+      phase,
       periodMs: this.periodMs,
       recentMisses: this.missesInWindow,
       calmMs: this.calm,
       upHoldMs: this.levelValue > 0 ? this.holds[this.levelValue - 1]! : 0,
+      pausedMs,
       changes: this.changesValue,
     };
+  }
+
+  /** Ignore frames until `until`; `forget` also throws away the evidence so far. */
+  private pause(until: number, forget: boolean): void {
+    if (until > this.pausedUntil) this.pausedUntil = until;
+    if (!forget) return;
+    this.window.length = 0;
+    this.missesInWindow = 0;
+  }
+
+  private announce(): void {
+    const quality = this.quality;
+    for (const listener of this.listeners) listener(quality);
   }
 
   private restartEvidence(): void {
