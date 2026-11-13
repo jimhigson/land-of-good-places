@@ -113,7 +113,11 @@ for (let i = 0; i < 90 && !place; i += 1) {
 console.log(`  saved place: ${JSON.stringify(place)}`);
 verdict(place !== null, 'the game saved her place inside the hotel');
 if (place) {
+  const before = await state();
   await page.goto(`http://localhost:${port}/?seed=${seed}`, { waitUntil: 'load', timeout: 120000 });
+  // A returning player is asked first; she keeps playing.
+  await page.waitForSelector('.welcome-keep', { timeout: 600000 });
+  await page.click('.welcome-keep');
   await ready();
   const restored0 = await state();
   console.log(`  first frame after reload: ${JSON.stringify(restored0)}`);
@@ -121,7 +125,7 @@ if (place) {
   await page.waitForTimeout(4000);
   const restored = await state();
   verdict(
-    restored.inside && Math.hypot(restored.x - place.x, restored.z - place.z) < 1.5,
+    restored.inside && Math.hypot(restored.x - before.x, restored.z - before.z) < 1.5,
     `she is back where she was saved, inside (${JSON.stringify(restored)})`,
   );
   await shot(`${outDir}/${size}-r2-restored.png`);
