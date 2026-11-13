@@ -3,7 +3,7 @@ import { ART } from '../style/artPalette';
 import { planarUvCanvasTexture } from '../style/glb';
 import { markShared } from '../style/materials';
 import { paintFace, type FacePaintOptions } from '../style/faces';
-import { LIBRARY_FACES, type LibraryFaceFigures } from '../assets/libraryGlb';
+import { LIBRARY_FACES, type LibraryFaceFigures } from '../assets/libraryRoomGlb';
 
 /**
  * **The library creatures' faces** — the owl librarian's, the baby dragon's and

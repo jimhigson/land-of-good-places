@@ -7,6 +7,9 @@ import type { AssetHandle, CreatureHandle } from '../style/asset';
 import type { Expression } from '../style/faces';
 import { LIBRARY_GLB_STYLES, libraryKitMesh } from './libraryAssets';
 import { kitBounds, libraryPart } from './libraryKit';
+// The owl, the dragon, the cat and the book pile are the reading room's nodes:
+// their piece of the kit (and the style table's check of it) loads with this.
+import './libraryRoomAssets';
 import { catFaceTextures, dragonFaceTextures, owlFaceTextures, type CatFace, type DragonFace, type OwlFace } from './libraryFaces';
 
 /**

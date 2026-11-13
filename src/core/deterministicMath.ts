@@ -102,6 +102,32 @@ const tiny = 1.0e-300;
 // ---------------------------------------------------------------------------
 // Trigonometric kernels, valid on [-π/4, π/4].
 
+/**
+ * **The trig pipeline's registers: allocation-free by construction.**
+ *
+ * `remPio2` leaves the reduced argument here as `[y0, y1]`; each kernel reads
+ * its `x, y` from here and writes its answer back into `[0]`; `sin`/`cos`/`tan`
+ * read that answer. Nothing between them is passed or returned as a double.
+ *
+ * That is the whole point of the shape (the 120 fps plan, step 6). V8 boxes a
+ * double into a 16-byte HeapNumber whenever it crosses a boundary it cannot
+ * keep raw: a write to a module-level `let` (how the reduced argument used to
+ * be kept), a double argument to a call TurboFan did not inline, and a double
+ * returned from one. The kernels and `remPio2` are too large to all inline
+ * into `sin`, so each of those crossings allocated, about 80 bytes per `sin`
+ * or `cos` — measured at 41 MB/s in the park, 30 % of all its garbage, since
+ * three.js's `setFromEuler` and everything that rotates call them hundreds of
+ * thousands of times a second. A typed array's element is a raw double, and a
+ * store or load allocates nothing.
+ *
+ * The arithmetic is untouched, so the bits are too: a `Float64Array` holds
+ * exactly the double stored (signed zeros included), and every operation
+ * happens in the same order on the same values as fdlibm. `deterministicMath.test.ts`
+ * pins the outputs over a fixed sweep, which is what keeps every prebuilt park
+ * the park it was.
+ */
+const reduced = new Float64Array(2);
+
 const S1 = -1.66666666666666324348e-1;
 const S2 = 8.33333333332248946124e-3;
 const S3 = -1.98412698298579493134e-4;
@@ -109,14 +135,22 @@ const S4 = 2.75573137070700676789e-6;
 const S5 = -2.50507602534068634195e-8;
 const S6 = 1.58969099521155010221e-10;
 
-function kernelSin(x: number, y: number, iy: number): number {
+function kernelSin(iy: number): void {
+  const x = reduced[0]!;
+  const y = reduced[1]!;
   const ix = hiWord(x) & 0x7fffffff;
-  if (ix < 0x3e400000 && Math.trunc(x) === 0) return x;
+  if (ix < 0x3e400000 && Math.trunc(x) === 0) {
+    reduced[0] = x;
+    return;
+  }
   const z = x * x;
   const v = z * x;
   const r = S2 + z * (S3 + z * (S4 + z * (S5 + z * S6)));
-  if (iy === 0) return x + v * (S1 + z * r);
-  return x - ((z * (0.5 * y - v * r) - y) - v * S1);
+  if (iy === 0) {
+    reduced[0] = x + v * (S1 + z * r);
+    return;
+  }
+  reduced[0] = x - ((z * (0.5 * y - v * r) - y) - v * S1);
 }
 
 const C1 = 4.16666666666666019037e-2;
@@ -126,16 +160,24 @@ const C4 = -2.75573143513906633035e-7;
 const C5 = 2.08757232129817482790e-9;
 const C6 = -1.13596475577881948265e-11;
 
-function kernelCos(x: number, y: number): number {
+function kernelCos(): void {
+  const x = reduced[0]!;
+  const y = reduced[1]!;
   const ix = hiWord(x) & 0x7fffffff;
-  if (ix < 0x3e400000 && Math.trunc(x) === 0) return 1;
+  if (ix < 0x3e400000 && Math.trunc(x) === 0) {
+    reduced[0] = 1;
+    return;
+  }
   const z = x * x;
   const r = z * (C1 + z * (C2 + z * (C3 + z * (C4 + z * (C5 + z * C6)))));
-  if (ix < 0x3fd33333) return 1 - (0.5 * z - (z * r - x * y));
+  if (ix < 0x3fd33333) {
+    reduced[0] = 1 - (0.5 * z - (z * r - x * y));
+    return;
+  }
   const qx = ix > 0x3fe90000 ? 0.28125 : fromWords(ix - 0x00200000, 0);
   const hz = 0.5 * z - qx;
   const a = 1 - qx;
-  return a - (hz - (z * r - x * y));
+  reduced[0] = a - (hz - (z * r - x * y));
 }
 
 const T = [
@@ -147,14 +189,20 @@ const T = [
 const pio4 = 7.85398163397448278999e-1;
 const pio4lo = 3.06161699786838301793e-17;
 
-function kernelTan(xIn: number, yIn: number, iy: number): number {
-  let x = xIn;
-  let y = yIn;
+function kernelTan(iy: number): void {
+  let x = reduced[0]!;
+  let y = reduced[1]!;
   const hx = hiWord(x);
   const ix = hx & 0x7fffffff;
   if (ix < 0x3e300000 && Math.trunc(x) === 0) {
-    if (((ix | loWord(x)) | (iy + 1)) === 0) return 1 / fabs(x);
-    if (iy === 1) return x;
+    if (((ix | loWord(x)) | (iy + 1)) === 0) {
+      reduced[0] = 1 / fabs(x);
+      return;
+    }
+    if (iy === 1) {
+      reduced[0] = x;
+      return;
+    }
     // -1 / (x + y), computed carefully.
     const w = x + y;
     const z = clearLow(w);
@@ -162,7 +210,8 @@ function kernelTan(xIn: number, yIn: number, iy: number): number {
     const a = -1 / w;
     const t = clearLow(a);
     const s = 1 + t * z;
-    return t + a * (s + t * v);
+    reduced[0] = t + a * (s + t * v);
+    return;
   }
   if (ix >= 0x3fe59428) {
     if (hx < 0) {
@@ -184,15 +233,19 @@ function kernelTan(xIn: number, yIn: number, iy: number): number {
   w = x + r;
   if (ix >= 0x3fe59428) {
     v = iy;
-    return (1 - ((hx >> 30) & 2)) * (v - 2.0 * (x - ((w * w) / (w + v) - r)));
+    reduced[0] = (1 - ((hx >> 30) & 2)) * (v - 2.0 * (x - ((w * w) / (w + v) - r)));
+    return;
   }
-  if (iy === 1) return w;
+  if (iy === 1) {
+    reduced[0] = w;
+    return;
+  }
   z = clearLow(w);
   v = r - (z - x);
   const a = -1.0 / w;
   const t = clearLow(a);
   const s2 = 1.0 + t * z;
-  return t + a * (s2 + t * v);
+  reduced[0] = t + a * (s2 + t * v);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,17 +259,17 @@ const pio2_2t = 2.02226624879595063154e-21;
 const pio2_3 = 2.02226624871116645580e-21;
 const pio2_3t = 8.47842766036889956997e-32;
 
-/** The reduced argument, written here rather than allocated per call. */
-let y0 = 0;
-let y1 = 0;
-
-/** Returns the quadrant, 0..3; the reduced argument is left in {@link y0}, {@link y1}. */
-function remPio2(x: number): number {
+/**
+ * Reduces the `x` waiting in `reduced[0]`. Returns the quadrant, 0..3; the
+ * reduced argument is left in {@link reduced}.
+ */
+function remPio2(): number {
+  const x = reduced[0]!;
   const hx = hiWord(x);
   const ix = hx & 0x7fffffff;
   if (ix <= 0x3fe921fb) {
-    y0 = x;
-    y1 = 0;
+    reduced[0] = x;
+    reduced[1] = 0;
     return 0;
   }
   if (ix < 0x4002d97c) {
@@ -224,29 +277,34 @@ function remPio2(x: number): number {
     if (hx > 0) {
       let z = x - pio2_1;
       if (ix !== 0x3ff921fb) {
-        y0 = z - pio2_1t;
-        y1 = (z - y0) - pio2_1t;
+        const y0 = z - pio2_1t;
+        reduced[0] = y0;
+        reduced[1] = (z - y0) - pio2_1t;
       } else {
         z -= pio2_2;
-        y0 = z - pio2_2t;
-        y1 = (z - y0) - pio2_2t;
+        const y0 = z - pio2_2t;
+        reduced[0] = y0;
+        reduced[1] = (z - y0) - pio2_2t;
       }
       return 1;
     }
     let z = x + pio2_1;
     if (ix !== 0x3ff921fb) {
-      y0 = z + pio2_1t;
-      y1 = (z - y0) + pio2_1t;
+      const y0 = z + pio2_1t;
+      reduced[0] = y0;
+      reduced[1] = (z - y0) + pio2_1t;
     } else {
       z += pio2_2;
-      y0 = z + pio2_2t;
-      y1 = (z - y0) + pio2_2t;
+      const y0 = z + pio2_2t;
+      reduced[0] = y0;
+      reduced[1] = (z - y0) + pio2_2t;
     }
     return 3;
   }
   if (ix >= 0x7ff00000) {
-    y0 = x - x;
-    y1 = y0;
+    const y0 = x - x;
+    reduced[0] = y0;
+    reduced[1] = y0;
     return 0;
   }
   if (ix > 0x413921fb) return remPio2Large(x, hx);
@@ -258,7 +316,7 @@ function remPio2(x: number): number {
   let r = t0 - fn * pio2_1;
   let w = fn * pio2_1t;
   const j = ix >> 20;
-  y0 = r - w;
+  let y0 = r - w;
   let i = j - ((hiWord(y0) >> 20) & 0x7ff);
   if (i > 16) {
     let t = r;
@@ -275,13 +333,15 @@ function remPio2(x: number): number {
       y0 = r - w;
     }
   }
-  y1 = (r - y0) - w;
+  const y1 = (r - y0) - w;
   const n = fn % 4;
   if (hx < 0) {
-    y0 = -y0;
-    y1 = -y1;
+    reduced[0] = -y0;
+    reduced[1] = -y1;
     return (4 - n) % 4;
   }
+  reduced[0] = y0;
+  reduced[1] = y1;
   return n;
 }
 
@@ -337,55 +397,116 @@ function remPio2Large(x: number, hx: number): number {
   const big = frac * PIO2_128;
   const scale = fromWords((1023 - 256) << 20, 0); // 2^-256, exactly
   const hi = Number(big);
-  y0 = hi * scale;
+  const y0 = hi * scale;
   const rest = big - BigInt(hi);
-  y1 = Number(rest) * scale;
+  const y1 = Number(rest) * scale;
   if (hx < 0) {
-    y0 = -y0;
-    y1 = -y1;
+    reduced[0] = -y0;
+    reduced[1] = -y1;
     return (4 - quadrant) & 3;
   }
+  reduced[0] = y0;
+  reduced[1] = y1;
   return quadrant;
 }
 
+// `sin`, `cos` and `tan` are each one store, one call and one load: small
+// enough for TurboFan to inline into their callers (three.js's `setFromEuler`,
+// the walk cycles, every bob and sway), and an inlined call's answer is never
+// boxed. The work is in the `…Into` functions behind them, which take `x` from
+// {@link reduced} and leave the answer there, so nothing crosses that call as
+// a double either.
+
 export function sin(x: number): number {
+  reduced[0] = x;
+  sinInto();
+  return reduced[0]!;
+}
+
+function sinInto(): void {
+  const x = reduced[0]!;
   const ix = hiWord(x) & 0x7fffffff;
-  if (ix <= 0x3fe921fb) return kernelSin(x, 0, 0);
-  if (ix >= 0x7ff00000) return x - x;
-  switch (remPio2(x)) {
+  if (ix <= 0x3fe921fb) {
+    reduced[1] = 0;
+    kernelSin(0);
+    return;
+  }
+  if (ix >= 0x7ff00000) {
+    reduced[0] = x - x;
+    return;
+  }
+  switch (remPio2()) {
     case 0:
-      return kernelSin(y0, y1, 1);
+      kernelSin(1);
+      return;
     case 1:
-      return kernelCos(y0, y1);
+      kernelCos();
+      return;
     case 2:
-      return -kernelSin(y0, y1, 1);
+      kernelSin(1);
+      reduced[0] = -reduced[0]!;
+      return;
     default:
-      return -kernelCos(y0, y1);
+      kernelCos();
+      reduced[0] = -reduced[0]!;
   }
 }
 
 export function cos(x: number): number {
+  reduced[0] = x;
+  cosInto();
+  return reduced[0]!;
+}
+
+function cosInto(): void {
+  const x = reduced[0]!;
   const ix = hiWord(x) & 0x7fffffff;
-  if (ix <= 0x3fe921fb) return kernelCos(x, 0);
-  if (ix >= 0x7ff00000) return x - x;
-  switch (remPio2(x)) {
+  if (ix <= 0x3fe921fb) {
+    reduced[1] = 0;
+    kernelCos();
+    return;
+  }
+  if (ix >= 0x7ff00000) {
+    reduced[0] = x - x;
+    return;
+  }
+  switch (remPio2()) {
     case 0:
-      return kernelCos(y0, y1);
+      kernelCos();
+      return;
     case 1:
-      return -kernelSin(y0, y1, 1);
+      kernelSin(1);
+      reduced[0] = -reduced[0]!;
+      return;
     case 2:
-      return -kernelCos(y0, y1);
+      kernelCos();
+      reduced[0] = -reduced[0]!;
+      return;
     default:
-      return kernelSin(y0, y1, 1);
+      kernelSin(1);
   }
 }
 
 export function tan(x: number): number {
+  reduced[0] = x;
+  tanInto();
+  return reduced[0]!;
+}
+
+function tanInto(): void {
+  const x = reduced[0]!;
   const ix = hiWord(x) & 0x7fffffff;
-  if (ix <= 0x3fe921fb) return kernelTan(x, 0, 1);
-  if (ix >= 0x7ff00000) return x - x;
-  const n = remPio2(x);
-  return kernelTan(y0, y1, 1 - ((n & 1) << 1));
+  if (ix <= 0x3fe921fb) {
+    reduced[1] = 0;
+    kernelTan(1);
+    return;
+  }
+  if (ix >= 0x7ff00000) {
+    reduced[0] = x - x;
+    return;
+  }
+  const n = remPio2();
+  kernelTan(1 - ((n & 1) << 1));
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { geometryTriangles, measureTriangleSets, type MeasuredTop } from '../../
 import { LIBRARY_GLB_BASE64 } from '../assets/libraryGlb';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
 import { eachGlbVertex, glbBounds, glbFirstHit, glbTreads, type KitBounds } from '../style/glbMeasure';
+import { LIBRARY_SHELL_NODES } from './libraryKitSplit';
 
 /**
  * **The Library kit's bare geometry, read once, and every figure the park
@@ -23,18 +24,43 @@ import { eachGlbVertex, glbBounds, glbFirstHit, glbTreads, type KitBounds } from
  * `library.shell` is nodes `shell-plinth`, `shell-steps`, ….
  */
 
+/**
+ * **Every node read so far** — the boot piece (`libraryGlb.ts`: the building,
+ * and the bookcase and cushion the boot measures) from the start, and the
+ * reading room's piece once its lazy chunk has arrived and registered it
+ * ({@link registerLibraryRoomParts}, from `libraryRoomKit.ts`).
+ * `libraryKitSplit.ts` owns which node is in which piece.
+ */
 const parts: Map<string, GlbPart> = readGlbParts(base64ToArrayBuffer(LIBRARY_GLB_BASE64));
+let roomRegistered = false;
 
-/** One node of `library.glb`, or a throw naming every node the file has. */
+/**
+ * The reading room's nodes, read from its own piece (`libraryRoomKit.ts`, in
+ * the room's lazy chunk) — from then on every function here measures them as
+ * it measures the building's. Once only.
+ */
+export function registerLibraryRoomParts(room: ReadonlyMap<string, GlbPart>): void {
+  if (roomRegistered) throw new Error('libraryKit: the reading room\'s nodes were registered twice');
+  for (const [name, part] of room) {
+    if (parts.has(name)) throw new Error(`libraryKit: '${name}' is in both pieces of library.glb`);
+    parts.set(name, part);
+  }
+  roomRegistered = true;
+}
+
+/** One node of `library.glb`, or a throw naming every node read so far. */
 export function libraryPart(name: string): GlbPart {
   const part = parts.get(name);
   if (!part) {
-    throw new Error(`libraryKit: '${name}' is not a node in library.glb. The file has: ${[...parts.keys()].sort().join(', ')}.`);
+    throw new Error(
+      `libraryKit: '${name}' is not a node read from library.glb. Read so far: ${[...parts.keys()].sort().join(', ')}.` +
+        (roomRegistered ? '' : ' The reading room\'s piece is not loaded: import it through libraryRoomKit.ts (a lazy chunk, `world/interiors.ts`).'),
+    );
   }
   return part;
 }
 
-/** Every node name in the file. */
+/** Every node name read so far (the boot piece's, and the room's once it is registered). */
 export function libraryPartNames(): readonly string[] {
   return [...parts.keys()];
 }
@@ -100,19 +126,8 @@ export function libraryTopOver(names: readonly string[], x: number, z: number): 
 // The exterior's plan
 // ---------------------------------------------------------------------------
 
-/** The shell's nodes, every one of them. */
-export const LIBRARY_SHELL_NODES = [
-  'shell-plinth',
-  'shell-steps',
-  'shell-walls',
-  'shell-windows',
-  'shell-door',
-  'shell-columns',
-  'shell-entablature',
-  'shell-pediment',
-  'shell-pedimentBook',
-  'shell-roof',
-] as const;
+/** The shell's nodes, every one of them — `libraryKitSplit.ts`'s, which owns the split. */
+export { LIBRARY_SHELL_NODES };
 
 /**
  * **The drawn exterior's plan**, building-local (origin on the ground at the
