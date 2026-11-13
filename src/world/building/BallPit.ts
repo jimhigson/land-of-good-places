@@ -230,6 +230,14 @@ export class BallPit {
     this.lastAwake = this.sim.count; // wake the fast-path check below immediately
   }
 
+  /**
+   * Still settling the freshly-spawned pile (see `WARMUP_SECONDS`) — work that
+   * has to finish wherever she is, so the pit is never seen settling.
+   */
+  get settling(): boolean {
+    return this.warmupSubstepsRemaining > 0;
+  }
+
   update(dt: number, elapsed: number): void {
     void elapsed; // kept in the signature: Building.ts calls update(dt, elapsed)
 
