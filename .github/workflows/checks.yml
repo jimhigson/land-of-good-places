@@ -93,7 +93,11 @@ jobs:
         # `check:served-walking` in 8 it ran shard 8 out of its 27-min watchdog
         # on its first CI run, 38580957653, killed after 19 min in it), and
         # `check:served-menu-reach` after it (PR #721).
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        #
+        # 10 is `check:served-render-budget` (120 fps plan, step 0): six deep
+        # links booted under the software renderer, on its own runner so it
+        # cannot push 8 or 9 towards their watchdog.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       # When this job started, for the watchdog: its budget is the job's cap
       # less what the steps before it already spent, so a slow Chromium
