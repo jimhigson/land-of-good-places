@@ -104,9 +104,11 @@ const lowCache = new WeakMap<BufferGeometry, BufferGeometry>();
  * triangles. Computed once per geometry and shared by everything drawing it.
  *
  * Returns `source` itself when there is nothing to gain or it cannot be done
- * safely (tiny, multi-material groups, morph targets) — so a caller can always
- * draw what it gets back, and compares with `===` to learn there is no second
- * level.
+ * safely (tiny, morph targets) — so a caller can always draw what it gets
+ * back, and compares with `===` to learn there is no second level.
+ *
+ * **For single-material draws only**: the far level has no `groups`, so a mesh
+ * drawn with a material array must not use it.
  */
 export function lowDetailGeometry(source: BufferGeometry): BufferGeometry {
   const cached = lowCache.get(source);
@@ -158,7 +160,10 @@ const FINEST_GRID = 48;
  */
 export function clusterSimplify(source: BufferGeometry, maxTriangles: number): BufferGeometry | null {
   const position = source.getAttribute('position');
-  if (!position || source.groups.length > 0) return null;
+  // `groups` are not carried over, and need not be: this is for instanced
+  // draws with one material, which never read them. (Every box- and
+  // extrude-derived geometry has groups whether or not anything uses them.)
+  if (!position) return null;
   for (const targets of Object.values(source.morphAttributes)) {
     if ((targets?.length ?? 0) > 0) return null;
   }
