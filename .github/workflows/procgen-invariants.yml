@@ -11,8 +11,8 @@ name: Procgen invariants
 # expected to extend `test/procgen/invariants.ts` in the same PR — see
 # CLAUDE.md, "Expanding the procedural generation".
 on:
-  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
-  # run, so the parks it restores are already in this run's cache.
+  # Called from ci.yml. The parks it builds from are the checked-in ones
+  # (`parks/`), read straight from this checkout: nothing is solved or restored.
   workflow_call:
 
 # No `concurrency:` here: ci.yml, the caller, owns it.
@@ -63,9 +63,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Restore the accepted parks
-        uses: ./.github/actions/restore-parks
 
       - name: Procgen invariant suite, this shard
         env:

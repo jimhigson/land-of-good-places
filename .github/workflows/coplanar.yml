@@ -34,8 +34,8 @@ name: Coplanar faces
 # CLAUDE.md describes under "A check that never runs is worse than a check that
 # fails".
 on:
-  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
-  # run, so the parks it restores are already in this run's cache.
+  # Called from ci.yml. The parks it builds from are the checked-in ones
+  # (`parks/`), read straight from this checkout: nothing is solved or restored.
   workflow_call:
 
 # No `concurrency:` here: ci.yml, the caller, owns it.
@@ -75,9 +75,6 @@ jobs:
         # Registry hiccups are common enough to be worth retrying — same
         # reasoning as deploy.yml; the counts live in `.npmrc`.
         run: pnpm install --frozen-lockfile
-
-      - name: Restore the accepted parks
-        uses: ./.github/actions/restore-parks
 
       - name: Coplanar sweep
         run: pnpm run check:coplanar

@@ -25,11 +25,22 @@
  * fails the build, and so does running out of `MAX_RESTARTS`, with the log.
  *
  * The file carries the accepted `restart` and `acceptance` — every attempt and
- * what forced it (`acceptanceMetadata`). Nothing is recorded by hand: the
- * output is keyed by the source hash (`park-source-hash.mjs`), so a change to
- * the generator or to a measure searches again on its own.
+ * what forced it (`acceptanceMetadata`). It is written to `parks/` and its
+ * manifest line stamped, for the author to commit with the change that made
+ * the re-solve necessary.
  *
- * ## The proof, on the accepted file
+ * ## Checked in, and validated rather than re-solved
+ *
+ * The solved parks are tracked (`parks/`, `checked-in-parks.mjs`), and nothing
+ * here decides to solve one because the source changed. {@link validatePark}
+ * is what holds a checked-in park to the current source: it hydrates the file
+ * in a fresh process and asks it **the same acceptance attempt** a freshly
+ * solved file gets (`park-attempt.mts`, the one owner of the measures), told
+ * only that no solve may be started to judge it; then it requires the
+ * placement digest the manifest line records (`parkLayoutDigest.mts`).
+ * `build:parks` re-solves exactly the seeds that fails.
+ *
+  * ## The proof, on the accepted file
  *
  * **hydrate** — the file offered before anything forces the plan, the park
  * built from it and digested in a fresh process — must equal the solve's
@@ -45,15 +56,16 @@
  * contents at all, and every "equal" above means nothing.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 import type { ParkFile } from '../../src/world/prebuilt/parkFile.ts';
-import { PARK_FILE_FORMAT, PREBUILT_PARKS_MANIFEST, SUPPORTED_PARK_SEEDS, type PrebuiltParksManifest } from '../../src/world/prebuilt/parkFileName.ts';
-import type { AttemptVerdict } from '../park-attempt.mts';
-import { acceptanceMetadata, acceptPark, acceptParkInRange, attemptInFreshProcess, type AcceptanceMetadata, type RestartRecord } from './acceptedPark.mts';
+import { PARK_FILE_FORMAT, PREBUILT_PARKS_MANIFEST, PREBUILT_PARKS_OUT, type CheckedInPark } from '../../src/world/prebuilt/parkFileName.ts';
+import type { AttemptFailure, AttemptVerdict } from '../park-attempt.mts';
+import { acceptanceMetadata, acceptPark, attemptInFreshProcess, type AcceptanceMetadata, type RestartRecord } from './acceptedPark.mts';
+import { checkedInParkText, parkFilePath, parkFileSha, readParksManifest, writeParksManifest, writeWhole } from './checked-in-parks.mjs';
 import { parkSourceHash } from './park-source-hash.mjs';
 
 const run = promisify(execFile);
@@ -73,6 +85,9 @@ export interface ProbeResult {
   readonly restartFrom: 'record' | 'file';
   readonly generationSeed: number;
   readonly park: string;
+  /** The placement digest (`parkLayoutDigest.mts`) of the park this probe built. */
+  readonly layout: string;
+  readonly layoutClaims: number;
   readonly meshes: number;
   readonly byName: Readonly<Record<string, string>>;
   readonly hydrated: boolean;
@@ -90,7 +105,11 @@ export interface SeedOutcome {
   /** The accepted restart. */
   readonly restart: number;
   readonly acceptance: AcceptanceMetadata;
+  /** Wall seconds the whole accept loop took for this seed. */
+  readonly seconds: number;
   readonly file: string;
+  /** Whether the file was written to `parks/` and its manifest line stamped: only a proven one is. */
+  readonly installed: boolean;
   readonly solved: ProbeResult;
   readonly hydrated: ProbeResult;
   readonly raw: number;
@@ -192,6 +211,12 @@ function compare(seed: number, recorded: number, solved: ProbeResult, hydrated: 
         `${moved.length} mesh name(s) differ: ${moved.slice(0, 12).join(', ')}${moved.length > 12 ? ', …' : ''}`,
     );
   }
+  if (solved.layout !== hydrated.layout) {
+    problems.push(
+      `the hydrated park's placement digest is ${hydrated.layout} (${hydrated.layoutClaims} claims), the solved park's ` +
+        `${solved.layout} (${solved.layoutClaims} claims) — the file does not put things where the solve did`,
+    );
+  }
   return problems;
 }
 
@@ -211,6 +236,8 @@ function buildFailed(seed: number, restart: number, message: string, wallMs: num
     notAsked: null,
     stageCpuMs: [],
     parkFile: null,
+    layout: null,
+    askedOfASolveOnly: [],
   };
 }
 
@@ -251,37 +278,69 @@ function fileAttempt(scratch: string, solves: Map<string, ProbeResult>) {
   };
 }
 
+/** Where solves in flight keep their files: never in `parks/`, which is tracked. */
+function scratchDir(root: string): string {
+  return join(root, '.cache', 'lgp-parks', 'attempts', String(process.pid));
+}
+
 /**
- * **Every seed's accepted park, as a proven file in `outDir`.** Each seed runs
- * the one accept loop (`acceptPark`) with {@link fileAttempt} as its attempt —
+ * The control on both digests, on one proven file: hydrated again with the Sky
+ * Cruiser raised and a tree moved (`perturb`), each digest must *differ*.
+ */
+async function controlProblemOf(seed: number, file: string, hydrated: ProbeResult, log: (line: string) => void): Promise<string | null> {
+  const perturbed = await probe('perturb', seed, file);
+  const blind: string[] = [];
+  if (perturbed.park === hydrated.park) {
+    blind.push(`the whole-park digest is ${perturbed.park} with the Sky Cruiser raised 0.5 m, the same as the unperturbed file`);
+  }
+  if (perturbed.layout === hydrated.layout) {
+    blind.push(`the placement digest is ${perturbed.layout} with a tree moved 1 m, the same as the unperturbed file`);
+  }
+  log(
+    `  control: seed ${seed} perturbed (cruiser +0.5 m, a tree +1 m) — whole-park ${perturbed.park} vs ${hydrated.park}, ` +
+      `placement ${perturbed.layout} vs ${hydrated.layout} — ${blind.length > 0 ? 'BLIND' : 'both differ, as they must'}`,
+  );
+  return blind.length > 0 ? `CONTROL FAILED on seed ${seed}: ${blind.join('; ')} — the comparison cannot see what is in the file` : null;
+}
+
+/** Stamp (or replace) one seed's manifest line. Read-modify-write, synchronous: lanes cannot interleave inside it. */
+export function stampManifestLine(root: string, seed: number, line: CheckedInPark): void {
+  const manifest = readParksManifest(root);
+  const seeds = manifest && manifest.format === PARK_FILE_FORMAT ? { ...manifest.seeds } : {};
+  seeds[String(seed)] = line;
+  writeParksManifest(root, { format: PARK_FILE_FORMAT, seeds });
+}
+
+/**
+ * **Solve `seeds` again, and check each proven park in.** Each seed runs the
+ * one accept loop (`acceptPark`) with {@link fileAttempt} as its attempt —
  * restart 0, 1, 2, … until the hydrated file passes every measure — `lanes`
- * seeds at a time. Then each accepted file is proven (hydrate digest == solve
- * digest, nothing searched) and the perturbed-file control runs once.
+ * seeds at a time, in a scratch directory under `.cache/`. Each accepted file
+ * is then proven (hydrate digests == solve digests, nothing searched), the
+ * perturbed-file control runs once, and only a proven file under a seeing
+ * control is written to `parks/<seed>.json` with its manifest line.
  * `problems` per seed and `controlProblem` say what failed; a thrown error is
  * a broken instrument or a seed that exhausted `MAX_RESTARTS`.
+ *
+ * **This is the only thing that solves a park**, and only `build:parks` (for
+ * the seeds validation rejected) calls it.
  */
 export async function buildAcceptedParks(
   seeds: readonly number[],
-  outDir: string,
+  root: string,
   lanes: number,
   log: (line: string) => void,
   restartLanes = 1,
-  /**
-   * One block of each seed's restarts, `[from, to)`, instead of all of them
-   * (`LGP_RESTART_BLOCK`). A seed with no accepted restart in the block is
-   * returned in `none`, not thrown: another block finds it (`merge-parks.mts`).
-   */
-  block: { readonly from: number; readonly to: number } | null = null,
-): Promise<{ outcomes: SeedOutcome[]; none: number[]; controlProblem: string | null }> {
-  const scratch = join(outDir, '.attempts');
+): Promise<{ outcomes: SeedOutcome[]; controlProblem: string | null }> {
+  const scratch = scratchDir(root);
   rmSync(scratch, { recursive: true, force: true });
   mkdirSync(scratch, { recursive: true });
-  const sourceHash = parkSourceHash(process.cwd());
+  const sourceHash = parkSourceHash(root);
   const solves = new Map<string, ProbeResult>();
   const attempt = fileAttempt(scratch, solves);
 
   const outcomes: SeedOutcome[] = [];
-  const none: number[] = [];
+  let control: Promise<string | null> | null = null;
   const queue = [...seeds].reverse();
   await Promise.all(
     Array.from({ length: Math.min(Math.max(1, lanes), seeds.length) }, async () => {
@@ -297,31 +356,33 @@ export async function buildAcceptedParks(
                   : `rejected by ${record.forcedBy.map((f) => f.measure).join(' | ').slice(0, 240)} (${(record.wallMs / 1000).toFixed(0)} s)`),
             ),
         };
-        const found = block ? (await acceptParkInRange(seed, block.from, block.to, options)).accepted : await acceptPark(seed, options);
-        if (!found) {
-          none.push(seed);
-          log(`  seed ${String(seed).padStart(2)}: no restart in ${block?.from}..${(block?.to ?? 1) - 1} accepted — a later block's`);
-          continue;
-        }
-        const accepted = found;
-        const acceptance = acceptanceMetadata(accepted, sourceHash);
+        const accepted = await acceptPark(seed, options);
+        const acceptance = acceptanceMetadata(accepted);
         const winner = join(scratch, `${seed}-r${accepted.restart}.json`);
         const solved = solves.get(winner) as ProbeResult;
-        const file = join(outDir, `${seed}.json`);
-        renameSync(winner, file);
-        const hydrated = await probe('hydrate', seed, file);
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as ParkFile;
+        const hydrated = await probe('hydrate', seed, winner);
+        const parsed = JSON.parse(readFileSync(winner, 'utf8')) as ParkFile;
         const problems = compare(seed, accepted.restart, solved, hydrated, parsed);
         // `acceptance` is read by people, never by the game: added after the
         // proof, it changes nothing the proof covered.
-        const shipped = JSON.stringify({ ...parsed, acceptance, digest: solved.park });
-        writeFileSync(file, shipped);
+        const shipped = checkedInParkText({ ...parsed, acceptance });
         const bytes = Buffer.from(shipped);
+        let installed = false;
+        if (problems.length === 0) {
+          control ??= controlProblemOf(seed, winner, hydrated, log);
+          if ((await control) === null) {
+            writeWhole(parkFilePath(root, seed), shipped);
+            stampManifestLine(root, seed, { restart: accepted.restart, file: parkFileSha(bytes), layout: hydrated.layout, solvedUnder: sourceHash });
+            installed = true;
+          }
+        }
         outcomes.push({
           seed,
           restart: accepted.restart,
           acceptance,
-          file,
+          seconds: Math.round(accepted.wallMs / 1000),
+          file: parkFilePath(root, seed),
+          installed,
           solved,
           hydrated,
           raw: bytes.length,
@@ -331,142 +392,256 @@ export async function buildAcceptedParks(
         });
         log(
           `  seed ${String(seed).padStart(2)}: restart ${accepted.restart} after ${accepted.attempts.length} attempt(s), ` +
-            `${problems.length === 0 ? 'proven' : 'FAILED'}: digest ${solved.park}/${hydrated.park}, ` +
-            `plan ${solved.planCpuMs} ms searched -> ${hydrated.planCpuMs} ms hydrated (${(accepted.wallMs / 1000).toFixed(0)} s)`,
+            `${problems.length === 0 ? 'proven' : 'FAILED'}: digest ${solved.park}/${hydrated.park}, placement ${solved.layout}/${hydrated.layout}, ` +
+            `plan ${solved.planCpuMs} ms searched -> ${hydrated.planCpuMs} ms hydrated (${(accepted.wallMs / 1000).toFixed(0)} s)` +
+            (installed ? ` — written to ${PREBUILT_PARKS_OUT}/${seed}.json` : ' — NOT written'),
         );
       }
     }),
   );
   outcomes.sort((a, b) => seeds.indexOf(a.seed) - seeds.indexOf(b.seed));
   rmSync(scratch, { recursive: true, force: true });
-
-  // The control, on the first seed that was proven.
-  // A block that accepted nothing has nothing to perturb, and that is not a
-  // fault: the control runs in whichever block's job proves that seed.
-  let controlProblem: string | null =
-    block && outcomes.length === 0 ? null : 'no seed was proven, so the control had nothing to perturb';
-  const first = outcomes.find((o) => o.problems.length === 0);
-  if (first) {
-    const perturbed = await probe('perturb', first.seed, first.file);
-    controlProblem =
-      perturbed.park === first.hydrated.park
-        ? `CONTROL FAILED: seed ${first.seed}'s file with the Sky Cruiser raised 0.5 m built digest ${perturbed.park}, ` +
-          'the same as the unperturbed file — the comparison cannot see what is in the file'
-        : null;
-    log(
-      `  control: seed ${first.seed} perturbed (cruiser +0.5 m) digest ${perturbed.park} vs ${first.hydrated.park} — ` +
-        (controlProblem ? 'BLIND' : 'differs, as it must'),
-    );
-  }
-  return { outcomes, none, controlProblem };
+  const controlProblem = control ? await control : 'no seed was proven, so the control had nothing to perturb';
+  return { outcomes, controlProblem };
 }
 
 /**
  * **The codec's proof on one park, without the accept loop**: solve `seed` at
  * `restart` into a file, hydrate a second process from it, compare the two
- * built parks (whole-park digest, nothing searched on the hydrated side, the
- * file's restart), and run the perturbed-file control. What `build:parks` does
- * to every file it ships, minus finding which restart to ship — so a check that
- * only asks "does a file build the park it was solved from" (`check:prebuilt-park`)
- * pays one solve, not a seed's whole run of attempts and their measures.
+ * built parks (whole-park digest, placement digest, nothing searched on the
+ * hydrated side, the file's restart), and run the perturbed-file control. What
+ * `build:parks` does to every file it checks in, minus finding which restart
+ * to ship — so a check that only asks "does a file build the park it was
+ * solved from" (`check:prebuilt-park`) pays one solve, not a seed's whole run
+ * of attempts and their measures.
  */
 export async function proveParkFile(
   seed: number,
   restart: number,
   outDir: string,
   log: (line: string) => void,
-): Promise<{ readonly solved: ProbeResult; readonly hydrated: ProbeResult; readonly raw: number; readonly problems: string[] }> {
+): Promise<{ readonly file: string; readonly solved: ProbeResult; readonly hydrated: ProbeResult; readonly raw: number; readonly problems: string[] }> {
   const file = join(outDir, `${seed}.json`);
   const solved = await probe('solve', seed, file, restart);
   const hydrated = await probe('hydrate', seed, file);
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as ParkFile;
   const problems = compare(seed, restart, solved, hydrated, parsed);
-  const perturbed = await probe('perturb', seed, file);
-  if (perturbed.park === hydrated.park) {
-    problems.push(
-      `CONTROL FAILED: seed ${seed}'s file with the Sky Cruiser raised 0.5 m built digest ${perturbed.park}, ` +
-        'the same as the unperturbed file — the comparison cannot see what is in the file',
-    );
-  }
-  log(
-    `  seed ${seed} restart ${restart}: solved ${solved.park}, hydrated ${hydrated.park}; control (cruiser +0.5 m) ` +
-      `${perturbed.park} — ${perturbed.park === hydrated.park ? 'BLIND' : 'differs, as it must'}`,
-  );
-  return { solved, hydrated, raw: Buffer.byteLength(readFileSync(file)), problems };
-}
-
-/**
- * One block's verdict on one seed (`build-parks.mts`, `LGP_RESTART_BLOCK`):
- * the restarts it covered, `[from, to)`, and the lowest of them that was
- * accepted, or null when none was. `merge-parks.mts` reads these.
- */
-export interface ParkBlockRecord {
-  readonly sourceHash: string;
-  readonly seed: number;
-  readonly from: number;
-  readonly to: number;
-  readonly restart: number | null;
-}
-
-/** The manifest for `outcomes`, built from `sourceHash`. */
-export function parksManifest(sourceHash: string, outcomes: readonly SeedOutcome[]): PrebuiltParksManifest {
-  return {
-    format: PARK_FILE_FORMAT,
-    sourceHash,
-    seeds: outcomes.map((o) => o.seed),
-    restarts: Object.fromEntries(outcomes.map((o) => [String(o.seed), o.restart])),
-    digests: Object.fromEntries(outcomes.map((o) => [String(o.seed), o.solved.park])),
-  };
+  const controlProblem = await controlProblemOf(seed, file, hydrated, log);
+  if (controlProblem) problems.push(controlProblem);
+  log(`  seed ${seed} restart ${restart}: solved ${solved.park} / placement ${solved.layout}, hydrated ${hydrated.park} / placement ${hydrated.layout}`);
+  return { file, solved, hydrated, raw: Buffer.byteLength(readFileSync(file)), problems };
 }
 
 export { builtRestartOf } from './builtParks.mts';
 
 /**
- * **Is `dir` this tree's parks, as they were proven?** For parks built by
- * another workflow run (CI reuses them across branches by source hash): the
- * manifest must be this tree's source and format and cover every supported
- * seed, and each file, hydrated in a fresh process exactly as the proof
- * hydrates it, must build the digest and restart the manifest records with
- * nothing searched. Returns the problems; empty means trust it.
+ * What {@link validatePark} found.
+ *
+ * - `accepted` — this source accepts the checked-in park, and hydrates it into
+ *   the placements its manifest line records. Nothing to do.
+ * - `restamp` — this source accepts it, but the manifest line's placement
+ *   digest is missing or is not what the current code builds: the same
+ *   decisions now make a (slightly) different park. No solve is needed;
+ *   `build:parks` rewrites the line, and the diff says the park moved.
+ * - `rejected` — a clause failed, or the file is missing or not the one the
+ *   manifest records. `build:parks` solves this seed again.
+ * - `broken` — a measure could not measure. A bug in an instrument or in the
+ *   hydrating code; no re-solve can fix it, so nothing is solved.
  */
-export async function verifyParks(
-  dir: string,
+export interface ParkValidation {
+  readonly seed: number;
+  readonly status: 'accepted' | 'restamp' | 'rejected' | 'broken';
+  readonly seconds: number;
+  /** Read from the local "already validated at this source" cache rather than measured now. */
+  readonly cached: boolean;
+  readonly restart: number | null;
+  /** The placement digest the current code builds from the file; null when it was never built. */
+  readonly layout: string | null;
+  readonly recordedLayout: string | null;
+  readonly fileSha: string | null;
+  readonly failures: readonly AttemptFailure[];
+  readonly broken: string | null;
+  readonly measuresAsked: number;
+  /** Measures only a solve can be asked, so not asked here (`park-attempt.mts`). */
+  readonly askedOfASolveOnly: readonly string[];
+}
+
+const validatedDir = (root: string, sourceHash: string): string => join(root, '.cache', 'lgp-parks-validated', sourceHash);
+
+interface ValidatedRecord {
+  readonly file: string;
+  readonly layout: string;
+  readonly restart: number;
+  readonly measuresAsked: number;
+  readonly askedOfASolveOnly: readonly string[];
+}
+
+/**
+ * **Does the current source still accept seed `seed`'s checked-in park?**
+ * Never solves. In order:
+ *
+ * 1. the file is there, parses, and is this seed at this format; when the
+ *    manifest has a line for it, the file is the one the line records (sha256)
+ *    at the restart it records;
+ * 2. hydrated in a fresh process, it passes **the acceptance attempt** — every
+ *    invariant, every check measure, `check:park`, the simulated checks and
+ *    `check:rail-race`, with nothing searched (`hydrate`) and nothing broken.
+ *    The one owner of that list is `park-attempt.mts`; this passes
+ *    `solveBacked: false`, so the measures that need a live search are named
+ *    in `askedOfASolveOnly` rather than asked;
+ * 3. the placement digest of the park it built is the manifest line's.
+ *
+ * `fresh: false` may answer from `.cache/lgp-parks-validated/<source hash>/`:
+ * the same file already accepted at byte-identical source. Never in CI.
+ */
+export async function validatePark(root: string, seed: number, options: { readonly fresh?: boolean } = {}): Promise<ParkValidation> {
+  const began = performance.now();
+  const seconds = (): number => Math.round((performance.now() - began) / 100) / 10;
+  const base = { seed, cached: false, restart: null, layout: null, recordedLayout: null, fileSha: null, broken: null, measuresAsked: 0, askedOfASolveOnly: [] };
+  const refused = (measure: string, why: string): ParkValidation => ({
+    ...base,
+    status: 'rejected',
+    seconds: seconds(),
+    failures: [{ measure, count: 1, first: [why] }],
+  });
+
+  const manifest = readParksManifest(root);
+  if (manifest && manifest.format !== PARK_FILE_FORMAT) {
+    return refused('format', `${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST} is format ${manifest.format}, this source reads ${PARK_FILE_FORMAT}`);
+  }
+  const path = parkFilePath(root, seed);
+  if (!existsSync(path)) return refused('checked-in file', `there is no ${PREBUILT_PARKS_OUT}/${seed}.json`);
+  const bytes = readFileSync(path);
+  const fileSha = parkFileSha(bytes);
+  let file: ParkFile;
+  try {
+    file = JSON.parse(bytes.toString('utf8')) as ParkFile;
+  } catch (error) {
+    return refused('checked-in file', `${PREBUILT_PARKS_OUT}/${seed}.json does not parse (${String(error).slice(0, 120)})`);
+  }
+  if (file.seed !== seed || file.format !== PARK_FILE_FORMAT || !Number.isInteger(file.restart)) {
+    return refused('checked-in file', `${PREBUILT_PARKS_OUT}/${seed}.json says seed ${file.seed}, format ${file.format}, restart ${file.restart}`);
+  }
+  const entry = manifest?.seeds[String(seed)] ?? null;
+  if (entry && (entry.file !== fileSha || entry.restart !== file.restart)) {
+    return refused(
+      'checked-in file',
+      `${PREBUILT_PARKS_OUT}/${seed}.json (sha256 ${fileSha.slice(0, 12)}, restart ${file.restart}) is not the file its manifest line records ` +
+        `(${String(entry.file).slice(0, 12)}, restart ${entry.restart}) — it was changed by something other than build:parks`,
+    );
+  }
+  const recordedLayout = entry?.layout || null;
+  const verdictOf = (layout: string): 'accepted' | 'restamp' => (recordedLayout !== null && layout === recordedLayout ? 'accepted' : 'restamp');
+
+  const sourceHash = parkSourceHash(root);
+  const record = join(validatedDir(root, sourceHash), `${seed}.json`);
+  const mayCache = !options.fresh && process.env['CI'] !== 'true';
+  if (mayCache && existsSync(record)) {
+    const known = JSON.parse(readFileSync(record, 'utf8')) as ValidatedRecord;
+    if (known.file === fileSha && known.restart === file.restart) {
+      return {
+        ...base,
+        status: verdictOf(known.layout),
+        seconds: seconds(),
+        cached: true,
+        restart: file.restart,
+        layout: known.layout,
+        recordedLayout,
+        fileSha,
+        failures: [],
+        measuresAsked: known.measuresAsked,
+        askedOfASolveOnly: known.askedOfASolveOnly,
+      };
+    }
+  }
+
+  const verdict = await attemptInFreshProcess(seed, file.restart, path, undefined, { solveBacked: false });
+  const measured = {
+    ...base,
+    seconds: seconds(),
+    restart: file.restart,
+    layout: verdict.layout,
+    recordedLayout,
+    fileSha,
+    failures: verdict.failures,
+    broken: verdict.broken,
+    measuresAsked: verdict.measuresAsked,
+    askedOfASolveOnly: verdict.askedOfASolveOnly,
+  };
+  if (verdict.parkFile === null) {
+    return { ...measured, status: 'broken', broken: `the acceptance attempt did not hydrate ${PREBUILT_PARKS_OUT}/${seed}.json — it measured some other park` };
+  }
+  if (verdict.broken !== null) return { ...measured, status: 'broken' };
+  if (!verdict.accepted || verdict.layout === null) return { ...measured, status: 'rejected' };
+  // A verdict is about exactly the source it was measured at: remembered only
+  // if nothing changed underneath it, and only outside CI.
+  if (process.env['CI'] !== 'true' && parkSourceHash(root) === sourceHash) {
+    const known: ValidatedRecord = {
+      file: fileSha,
+      layout: verdict.layout,
+      restart: file.restart,
+      measuresAsked: verdict.measuresAsked,
+      askedOfASolveOnly: verdict.askedOfASolveOnly,
+    };
+    writeWhole(record, `${JSON.stringify(known)}\n`);
+  }
+  return { ...measured, status: verdictOf(verdict.layout) };
+}
+
+/** The command that puts one seed right, for a failure message. */
+const fixCommand = (seed: number): string => `LGP_SEEDS=${seed} pnpm run build:parks`;
+
+/**
+ * One validation as the line(s) a person reads — on stderr, per seed, from
+ * both `validate:parks` and `build:parks`. A rejection names the clause and
+ * says exactly what to run.
+ */
+export function describeValidation(v: ParkValidation): string {
+  const how = v.cached ? 'already accepted at this exact source (cached)' : `in ${v.seconds.toFixed(0)} s`;
+  if (v.status === 'accepted') {
+    return `seed ${v.seed} accepted ${how} — restart ${v.restart}, ${v.measuresAsked} measures, placement ${v.layout}`;
+  }
+  if (v.status === 'restamp') {
+    return (
+      `seed ${v.seed} PLACEMENT MOVED: accepted ${how} (${v.measuresAsked} measures), but this source builds placement digest ${v.layout} from ` +
+      `${PREBUILT_PARKS_OUT}/${v.seed}.json where its manifest line records ${v.recordedLayout ?? '(none — never stamped)'}. The same decisions now make a ` +
+      `different park. If you meant that, re-stamp it — no solve needed: run \`${fixCommand(v.seed)}\` and commit ${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST}. ` +
+      'If you did not, your change moved the park.'
+    );
+  }
+  if (v.status === 'broken') {
+    return (
+      `seed ${v.seed} COULD NOT BE MEASURED (${v.seconds.toFixed(0)} s): ${v.broken}. That is a bug in a measure or in the code that ` +
+      'hydrates a park, which no re-solve can fix — nothing will be solved for it. Fix the cause.'
+    );
+  }
+  const clauses = v.failures.map((f) => `${f.measure} x${f.count}: ${(f.first[0] ?? '').split('\n').join(' ').slice(0, 300)}`);
+  return (
+    `seed ${v.seed} REJECTED by ${clauses[0] ?? '(no clause named)'}` +
+    (clauses.length > 1 ? ` [and ${clauses.length - 1} more: ${clauses.slice(1).map((c) => c.split(':')[0]).join(', ')}]` : '') +
+    ` (${v.seconds.toFixed(0)} s). This source no longer accepts the checked-in park. If you meant to change park geometry, a footprint or a ` +
+    `measure, run \`${fixCommand(v.seed)}\` (it re-solves only this seed) and commit ${PREBUILT_PARKS_OUT}/${v.seed}.json and ` +
+    `${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST} with your change. If you did not, your change broke the park.`
+  );
+}
+
+/** {@link validatePark} over `seeds`, `lanes` at a time, each verdict said on stderr as it lands. In seed order. */
+export async function validateParks(
+  root: string,
+  seeds: readonly number[],
   lanes: number,
-  log: (line: string) => void,
-): Promise<string[]> {
-  const problems: string[] = [];
-  const path = join(dir, PREBUILT_PARKS_MANIFEST);
-  if (!existsSync(path)) return [`${dir}: no manifest`];
-  const manifest = JSON.parse(readFileSync(path, 'utf8')) as PrebuiltParksManifest;
-  const sourceHash = parkSourceHash(process.cwd());
-  if (manifest.format !== PARK_FILE_FORMAT) problems.push(`format ${manifest.format}, this tree reads ${PARK_FILE_FORMAT}`);
-  if (manifest.sourceHash !== sourceHash) problems.push(`source ${manifest.sourceHash.slice(0, 12)}, this tree is ${sourceHash.slice(0, 12)}`);
-  for (const seed of SUPPORTED_PARK_SEEDS) if (!manifest.seeds.includes(seed)) problems.push(`seed ${seed} missing`);
-  if (problems.length > 0) return problems;
-  const queue = [...manifest.seeds].reverse();
+  options: { readonly fresh?: boolean; readonly label: string },
+): Promise<ParkValidation[]> {
+  const found: ParkValidation[] = [];
+  const queue = [...seeds].reverse();
   await Promise.all(
-    Array.from({ length: Math.max(1, lanes) }, async () => {
+    Array.from({ length: Math.min(Math.max(1, lanes), seeds.length) }, async () => {
       for (let seed = queue.pop(); seed !== undefined; seed = queue.pop()) {
-        const file = join(dir, `${seed}.json`);
-        if (!existsSync(file)) {
-          problems.push(`seed ${seed}: no file`);
-          continue;
-        }
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as ParkFile;
-        const hydrated = await probe('hydrate', seed, file);
-        const want = { digest: manifest.digests[String(seed)], restart: manifest.restarts[String(seed)] };
-        const wrong: string[] = [];
-        if (hydrated.park !== want.digest) wrong.push(`digest ${hydrated.park}, manifest says ${want.digest}`);
-        if (hydrated.restart !== want.restart || parsed.restart !== want.restart) {
-          wrong.push(`restart ${hydrated.restart} (file ${parsed.restart}), manifest says ${want.restart}`);
-        }
-        if (!hydrated.hydrated || hydrated.driverRan || hydrated.worldSolverRan || hydrated.builtSearched.length > 0) {
-          wrong.push('it was searched, not hydrated');
-        }
-        for (const w of wrong) problems.push(`seed ${seed}: ${w}`);
-        log(`  seed ${String(seed).padStart(2)}: ${wrong.length === 0 ? 'verified' : 'WRONG'} — digest ${hydrated.park}, restart ${hydrated.restart}`);
+        const validation = await validatePark(root, seed, options);
+        process.stderr.write(`${options.label}: ${describeValidation(validation)}\n`);
+        found.push(validation);
       }
     }),
   );
-  return problems;
+  return found.sort((a, b) => seeds.indexOf(a.seed) - seeds.indexOf(b.seed));
 }

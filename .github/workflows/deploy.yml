@@ -3,10 +3,12 @@ name: Deploy
 # Builds the game and publishes dist/ to Cloudflare Workers (static assets)
 # on every push to main. Can also be run by hand from the Actions tab.
 on:
-  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
-  # run, so the parks it restores are already in this run's cache.
+  # Called from ci.yml. The parks it builds from are the checked-in ones
+  # (`parks/`), read straight from this checkout: nothing is solved or restored.
   workflow_call:
-  # By hand, from the Actions tab, on a branch whose parks CI has cached.
+  # By hand, from the Actions tab. (It ships that branch's checked-in parks
+  # without asking whether its source still accepts them — `ci.yml` is what
+  # puts the Parks validation in front of a deploy.)
   workflow_dispatch:
 
 # The deploy queue is on the job below, not here: a called workflow's
@@ -71,8 +73,7 @@ jobs:
     # The durable fix is not a bigger number: it is for this job to stop
     # re-running a 15-minute QA suite that has already run on the same commit.
     # See DEPLOY_NOTES.md, 2026-08-29, for the measurement and the proposal.
-    # Back to 30: the parks are found by the Parks workflow and restored here
-    # (the `parks` job above does the waiting), so nothing is solved in this job.
+    # 30: the parks are checked in, so nothing is solved in this job.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -97,12 +98,11 @@ jobs:
         # counts live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
 
-      # The accepted parks, found once per tree by the Parks workflow
-      # (`parks.yml`: build:parks's accept loop and proof, one runner per
-      # seed) and restored here; `vite build` below ships them and fails
-      # without them (LGP_REQUIRE_PARKS). Nothing is solved in this job.
-      - name: Restore the accepted parks
-        uses: ./.github/actions/restore-parks
+      # The parks are checked in (`parks/`): `vite build` below ships them
+      # from this checkout and fails if one is missing or is not the file its
+      # manifest line records. Nothing is solved or restored in this job, and
+      # it only runs once `parks.yml` has shown this commit still accepts them
+      # (`ci.yml`).
 
       # **`build` builds. It does not check.**
       #
@@ -120,10 +120,8 @@ jobs:
       # If you ever put the checks back into `build`, this step goes back to
       # taking 16 minutes and the cap below starts mattering again.
       - name: Build
-        # Fails rather than ship a bundle whose parks are missing or were
-        # solved from other code (`prebuiltParksPlugin` in vite.config.ts).
-        env:
-          LGP_REQUIRE_PARKS: '1'
+        # Fails rather than ship a bundle with a park missing
+        # (`prebuiltParksPlugin` in vite.config.ts).
         run: pnpm run build
 
       # `wrangler deploy` is idempotent, so a flaky-network failure is safe to

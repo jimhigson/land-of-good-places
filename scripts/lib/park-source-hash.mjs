@@ -46,6 +46,7 @@ export const PARK_SOURCE_ENTRIES = [
   'scripts/build-parks.mts',
   'scripts/park-file-probe.mts',
   'scripts/park-attempt.mts',
+  'scripts/validate-parks.mts',
   'scripts/ts-extension-resolver-register.mjs',
   'test/procgen/invariants.ts',
   'test/procgen/parkFacts.ts',

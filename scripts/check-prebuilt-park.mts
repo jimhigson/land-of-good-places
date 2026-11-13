@@ -11,17 +11,28 @@
  * (`boot/prebuiltPark.ts`). Proved of `bootstrap.ts`'s static imports, with a
  * control: the game's own entry (`main.ts`) must be caught.
  *
- * The canonical seed only, because the chain is where it runs. Every seed that
- * actually ships is proven the same way by `build:parks` itself, in the deploy
- * that ships it — this check exists so a change to the codec or to a plan type
- * goes red on the PR that makes it, not on the next deploy.
+ * The canonical seed only, because the chain is where it runs, and it is **one
+ * solve**: the only one the check chain still pays for. Every checked-in park
+ * was proven the same way by `build:parks` when it was solved; this check
+ * exists so a change to the codec or to a plan type goes red on the PR that
+ * makes it.
+ *
+ * **And it is the tell for a generator that has drifted from the parks.** The
+ * parks are checked in and are not re-solved when the code changes, so the
+ * park this source's generator *would* solve for a seed need no longer be the
+ * one that ships. Every run says, on stderr, whether the fresh solve of the
+ * canonical seed made byte-identical decisions to `parks/<seed>.json`. A
+ * difference is a note, not a failure: the checked-in park is still the park,
+ * for as long as `validate:parks` accepts it.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
-import { buildAcceptedParks, builtRestartOf, proveParkFile } from './lib/parkFiles.mts';
+import { PREBUILT_PARKS_OUT } from '../src/world/prebuilt/parkFileName.ts';
+import { checkedInPark } from './lib/checked-in-parks.mjs';
+import { proveParkFile } from './lib/parkFiles.mts';
 import { PARK_MODULES_AFTER_FILE, staticImportClosure } from './lib/bootStaticImports.mts';
 
 {
@@ -47,32 +58,36 @@ import { PARK_MODULES_AFTER_FILE, staticImportClosure } from './lib/bootStaticIm
 
 const outDir = mkdtempSync(join(tmpdir(), 'lgp-prebuilt-park-'));
 try {
-  // **At the shipped restart, when there is one** — the proof is about the
-  // codec, not about which restart is accepted, so it needs one solve, not the
-  // accept loop's whole run of attempts and measures: on #708 the canonical
-  // seed accepts at restart 3, and asking all four with every measure took
-  // this check past its shard's watchdog (run 37221975719). With no fresh
-  // `.parks/` it falls back to the accept loop, which finds a restart that
-  // solves.
-  const shipped = builtRestartOf(process.cwd(), CANONICAL_PARK_SEED);
-  let problems: string[];
-  let summary: string;
-  if (shipped !== null) {
-    const proof = await proveParkFile(CANONICAL_PARK_SEED, shipped, outDir, (line) => console.log(line));
-    problems = proof.problems.map((p) => `seed ${CANONICAL_PARK_SEED}: ${p}`);
-    summary =
-      `seed ${CANONICAL_PARK_SEED} restart ${shipped} digest ${proof.solved.park} both ways; ` +
-      `plan ${proof.solved.planCpuMs} ms searched, ${proof.hydrated.planCpuMs} ms hydrated; file ${proof.raw} bytes`;
-  } else {
-    const { outcomes, controlProblem } = await buildAcceptedParks([CANONICAL_PARK_SEED], outDir, 1, (line) => console.log(line));
-    problems = [...outcomes.flatMap((o) => o.problems.map((p) => `seed ${o.seed}: ${p}`)), ...(controlProblem ? [controlProblem] : [])];
-    const o = outcomes[0];
-    summary =
-      `seed ${o?.seed} digest ${o?.solved.park} both ways; ` +
-      `plan ${o?.solved.planCpuMs} ms searched, ${o?.hydrated.planCpuMs} ms hydrated; file ${o?.raw} bytes`;
-  }
+  // **At the checked-in restart** — the proof is about the codec, not about
+  // which restart is accepted, so it needs one solve, not the accept loop's
+  // whole run of attempts and measures: on #708 the canonical seed accepts at
+  // restart 3, and asking all four with every measure took this check past its
+  // shard's watchdog (run 37221975719). A tree with no checked-in park for the
+  // canonical seed is broken, and `checkedInPark` throws saying how to mend it.
+  const shipped = checkedInPark(process.cwd(), CANONICAL_PARK_SEED);
+  const restart = shipped.entry.restart;
+  const proof = await proveParkFile(CANONICAL_PARK_SEED, restart, outDir, (line) => console.log(line));
+  const problems = proof.problems.map((p) => `seed ${CANONICAL_PARK_SEED}: ${p}`);
+  const summary =
+    `seed ${CANONICAL_PARK_SEED} restart ${restart} digest ${proof.solved.park} and placement ${proof.solved.layout} both ways; ` +
+    `plan ${proof.solved.planCpuMs} ms searched, ${proof.hydrated.planCpuMs} ms hydrated; file ${proof.raw} bytes`;
+
+  // The tell: is the park this source would solve still the park that is checked in?
+  const fresh = JSON.parse(readFileSync(proof.file, 'utf8')) as Record<string, unknown>;
+  const decided = ['features', 'planOrder', 'measures'] as const;
+  const differing = decided.filter((key) => JSON.stringify(fresh[key]) !== JSON.stringify(shipped.park[key]));
   process.stderr.write(
-    'check:prebuilt-park NOTE: covers the canonical seed only. Every shipped seed is proven by build:parks in the deploy that ships it.\n',
+    differing.length === 0
+      ? `check:prebuilt-park NOTE: this source still solves seed ${CANONICAL_PARK_SEED} restart ${restart} to decisions byte-identical to ` +
+          `${PREBUILT_PARKS_OUT}/${CANONICAL_PARK_SEED}.json (${decided.join(', ')}); placement ${proof.solved.layout}, the manifest records ${shipped.entry.layout}.\n`
+      : `check:prebuilt-park NOTE: THE GENERATOR HAS DRIFTED FROM THE CHECKED-IN PARK — a fresh solve of seed ${CANONICAL_PARK_SEED} restart ${restart} ` +
+          `differs from ${PREBUILT_PARKS_OUT}/${CANONICAL_PARK_SEED}.json in ${differing.join(', ')}. Not a failure: the checked-in park is the ` +
+          'park that ships for as long as validate:parks accepts it. But the search-subject checks now measure a park that is not the shipped one; ' +
+          `\`LGP_SEEDS=${CANONICAL_PARK_SEED} pnpm run build:parks -- --force\` brings them back together.\n`,
+  );
+  process.stderr.write(
+    'check:prebuilt-park NOTE: covers the canonical seed only. Every checked-in park was proven this way by build:parks when it was solved, ' +
+      'and is held to this source by validate:parks.\n',
   );
   if (problems.length > 0) {
     for (const problem of problems) console.error(`check:prebuilt-park FAILED: ${problem}`);
