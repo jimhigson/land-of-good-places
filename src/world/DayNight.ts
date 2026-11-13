@@ -36,8 +36,10 @@ export const SUN_STEP_HEIGHT = 5;
 /** How far that shadow tip may lag the true sun before the light steps (m) — about a texel. */
 export const SUN_STEP_TOLERANCE = 0.03;
 
+/** The light's frame as last placed (`followPlayer`); module scratch, one `DayNight` per game. */
 const shadowAxisX = new Vector3();
 const shadowAxisY = new Vector3();
+const shadowOffset = new Vector3();
 
 /**
  * Whether the sun has moved far enough from `placed` that a
@@ -764,9 +766,10 @@ export class DayNight implements GameSystem {
    * light redraws the whole static shadow cache ({@link SunShadowCache}), so
    * the light moves only when it has to:
    *
-   * - **she has walked {@link SHADOW_RECENTRE_DISTANCE}** from the frustum's
-   *   centre. 26 m of frustum either side, so she is never nearer its edge
-   *   than 24 m;
+   * - **she has moved {@link SHADOW_RECENTRE_DISTANCE}** across the light's
+   *   view from the frustum's centre. 26 m of frustum either side, so she is
+   *   never nearer its edge than 24 m; at full speed (7.4 m/s) that is under
+   *   four steps a second;
    * - **the sun has swung far enough to move a shadow** —
    *   {@link SUN_STEP_TOLERANCE} at the tip of a {@link SUN_STEP_HEIGHT}-tall
    *   thing, about a texel of the 2048² map, which VSM's blur spreads over
@@ -780,10 +783,12 @@ export class DayNight implements GameSystem {
    */
   private followPlayer(playerPosition: Vector3): void {
     const sun = this.sunDirection;
-    const dx = playerPosition.x - this.shadowCentre.x;
-    const dz = playerPosition.z - this.shadowCentre.z;
-    const far = dx * dx + dz * dz > SHADOW_RECENTRE_DISTANCE * SHADOW_RECENTRE_DISTANCE
-      || Math.abs(playerPosition.y - this.shadowCentre.y) > SHADOW_RECENTRE_DISTANCE;
+    // Distance across the light's view, not along it: the frustum is 190 m
+    // deep, so a jump or a climb never needs it to move; walking sideways to
+    // the sun does.
+    shadowOffset.subVectors(playerPosition, this.shadowCentre);
+    const across = shadowOffset.dot(shadowAxisX) ** 2 + shadowOffset.dot(shadowAxisY) ** 2;
+    const far = across > SHADOW_RECENTRE_DISTANCE * SHADOW_RECENTRE_DISTANCE;
     if (this.shadowPlaced && !far && !sunStepNeeded(this.placedSunDirection, sun)) return;
 
     // The light's frame, as `Object3D.lookAt` builds it for the shadow camera
