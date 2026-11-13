@@ -44,7 +44,7 @@ import type { ShopStand } from '../../world/building/shops/Shops';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 import type { ActivityBudget } from './activities/activity';
-import { SPACE_CASTLE_MALL, SPACE_GARDEN, spaceAt } from '../../world/spaces';
+import { SPACE_CASTLE_MALL, SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 import { faceOnGround } from '../../world/up';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
@@ -555,6 +555,16 @@ export class NpcSystem implements GameSystem {
    */
   private readonly visitRemaining = new Map<NpcCharacter, number>();
   /**
+   * **The spaces the park's crowd lives in**: the garden, and every space an
+   * attraction it may choose stands in — today the castle's mall, whose shops
+   * the children go to (#350). Asked of the attractions themselves, so a space
+   * the crowd starts visiting tomorrow is one of these without anybody being
+   * told. See {@link crowdLiveAt}.
+   */
+  private readonly crowdSpaces: ReadonlySet<SpaceId>;
+  /** {@link crowdLiveAt} for this frame's player, set at the top of {@link update}. */
+  private crowdLive = true;
+  /**
    * Who is stepped this frame, and with how much time — simulation LOD, step
    * 11 of docs/perf/FRAME-DROPS-2026-11.md. See `simLod.ts`. Public so
    * `check:npc-sim-lod` and the perf harness can read its counts and switch it
@@ -676,6 +686,7 @@ export class NpcSystem implements GameSystem {
       ...gardenAttractions(sample),
       ...castleAttractions(shopStands),
     ];
+    this.crowdSpaces = new Set([SPACE_GARDEN, ...attractions.map((attraction) => attraction.space)]);
     this.planner = new JourneyPlanner(
       collision,
       sample,
@@ -962,10 +973,33 @@ export class NpcSystem implements GameSystem {
     }
   }
 
+  /**
+   * **Is the park's crowd living, while she stands at `(x, z)`?** Yes in the
+   * garden and in every other space the crowd goes to ({@link crowdSpaces}:
+   * the castle's mall); no in a room the crowd never visits — the hotel, the
+   * library, the Reptile House, the castle's great hall and roof.
+   *
+   * There, nothing of the crowd can be seen (the park is out of the graph,
+   * `World.parkDrawn`) and nothing of it can come in, so its children stand
+   * exactly where they were — marked {@link elsewhere}, like a room's
+   * residents when she is not in their room — until she is back in a space it
+   * lives in, and then carry on from where they stood (120 fps plan, step 3).
+   * The train goes still with them (`World.update`), so nobody is carried by
+   * a carriage nothing else of them is following, and nobody queues for one.
+   *
+   * The mall is the reason this is not simply "is she in the garden": its
+   * shoppers come in from the garden, and a garden held still while she shops
+   * would empty the mall in a minute.
+   */
+  crowdLiveAt(x: number, z: number): boolean {
+    return this.crowdSpaces.has(spaceAt(x, z));
+  }
+
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     if (dt <= 0) return;
 
+    this.crowdLive = this.crowdLiveAt(context.playerPosition.x, context.playerPosition.z);
     this.simLod.beginFrame();
     this.view.tick();
     this.playerPosition.copy(context.playerPosition);
@@ -1001,9 +1035,12 @@ export class NpcSystem implements GameSystem {
       // Left exactly where they stood, so walking in on them shows them where
       // they were rather than teleporting or popping them into place.
       if (this.elsewhere.has(character)) {
-        // Deliberately not lived, so not banked either.
+        // Deliberately not lived, so not banked either — and not committed:
+        // she has not moved, so what is in the crowd's buffer is where she
+        // stands. Committing her anyway re-packed the whole crowd every frame
+        // for children nobody could see.
         this.simLod.forget(i);
-        this.commitSkipped[i] = 0;
+        this.commitSkipped[i] = 1;
         continue;
       }
 
@@ -1317,6 +1354,8 @@ export class NpcSystem implements GameSystem {
   /** Trots each pet along behind its child. */
   private updatePets(dt: number, elapsed: number): void {
     for (const pet of this.petList) {
+      // Still with her child, wherever that child is held still.
+      if (this.elsewhere.has(pet.owner)) continue;
       const owner = pet.owner.position;
       const facing = pet.owner.facingAngle;
 
@@ -1362,6 +1401,7 @@ export class NpcSystem implements GameSystem {
    */
   private updatePinnedPets(dt: number, elapsed: number): void {
     for (const { member, owner } of this.pinnedPets) {
+      if (this.elsewhere.has(owner)) continue;
       const facing = owner.facingAngle;
       const targetX = owner.position.x - Math.sin(facing) * PET_TRAIL;
       const targetZ = owner.position.z - Math.cos(facing) * PET_TRAIL;
@@ -1599,36 +1639,29 @@ export class NpcSystem implements GameSystem {
       if (!character) continue;
       const space = spaceAt(character.position.x, character.position.z);
       if (space === playerSpace) continue;
-      // **Interiors only. The park's own crowd is never frozen.**
+      // **The garden's children are frozen only while the crowd is not
+      // living** ({@link crowdLiveAt}): while she is in a room the crowd never
+      // visits. In the garden and the mall they live, as they always have.
       //
-      // Jim's words are "we don't simulate inside *rooms* the player isn't
-      // in", and the garden is not a room. Marking it too was tried and backed
-      // out, for two reasons found by measuring rather than by argument:
+      // This used to be "interiors only, the park's crowd is never frozen",
+      // for two reasons, and both have changed (120 fps plan, step 3):
       //
-      // 1. It buys nothing. The measured cost of simulating everybody the
-      //    player cannot see is 0.147 ms a frame, and essentially all of it is
-      //    the seven hotel residents, who are off-space for the *whole
-      //    session*. The garden crowd is only ever off-space for the minute or
-      //    two somebody spends indoors.
-      // 2. It is not free of risk. `ParkTrain.carryPassengers` writes a rider's
-      //    position from outside `NpcSystem` every frame, so a frozen child on
-      //    a moving train would be carried along while nothing else about them
-      //    advanced — a body moving with no simulation behind it, which is the
-      //    same class of inconsistency this whole change exists to remove.
+      // 1. "It buys nothing" — 0.147 ms a frame, measured before the park's
+      //    other systems were. Measured again (13 Nov 2026, M4 Pro, the hotel
+      //    lobby, seed 5): `NpcSystem.update` was 49 ms of every second spent
+      //    on a crowd six hundred metres away, the largest single updater left
+      //    running for a park nobody could see — and four times that on the
+      //    plan's phone stand-in.
+      // 2. The train: `ParkTrain.carryPassengers` writes a rider's position
+      //    from outside this class, so a frozen child on a moving train would
+      //    be carried with nothing else of her advancing. The train is now
+      //    held still by exactly the same question (`World.update` asks
+      //    `crowdLiveAt` for both), so a frozen rider sits in a carriage that
+      //    is not moving either.
       //
-      // What this is *not*: a correctness fix. An earlier version of this
-      // comment claimed the narrowing captured "the entire correctness payoff",
-      // because indoor NPCs at coordinates six hundred metres away had corrupted
-      // crowd measurements. That does not survive checking:
-      // `check-npc-dispersal.mts` already filters its crowd by `SPACE_GARDEN`
-      // and *that* is what fixed the 276 m RMS reading; `check-npc-jitter.mts`
-      // already re-baselines across `stepThroughDoor`; and freezing a body does
-      // not remove it from a positional census at all — a marked child still
-      // stands at x≈600. Not moving is not the same as not being there.
-      //
-      // So the reason to mark interiors and not the garden is only the two
-      // points above: the garden buys nothing and carries the train hazard.
-      if (space === SPACE_GARDEN) continue;
+      // Not a correctness fix, and freezing does not remove anybody from a
+      // positional census: a marked child still stands where she stood.
+      if (space === SPACE_GARDEN && this.crowdLive) continue;
       if (character.isAirborne) continue;
       // Newly frozen this frame: hand back anything shared before they stop
       // being stepped. A child frozen mid-chat would otherwise hold one of the
@@ -1655,6 +1688,11 @@ export class NpcSystem implements GameSystem {
    * to recover from.
    */
   private updateIndoorVisits(dt: number): void {
+    // While the crowd is held still, so are its visits: a shopper whose time
+    // ran out would be put out on the castle's doorstep into a garden that is
+    // not moving, and every one after her onto the same spot — a pile of
+    // children waiting at the door for her to come back out.
+    if (!this.crowdLive) return;
     const out = this.planner.portalToward(SPACE_CASTLE_MALL, SPACE_GARDEN);
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
@@ -1694,6 +1732,15 @@ export class NpcSystem implements GameSystem {
   /** Who is present-but-not-simulated right now. Read by `check:npc-presence`. */
   get markedElsewhere(): readonly NpcCharacter[] {
     return [...this.elsewhere];
+  }
+
+  /**
+   * Is this child held still this frame ({@link elsewhere})? For a system
+   * that poses children from outside this class — `TreeClimbing` — to leave a
+   * held child exactly as still as this class does. No allocation.
+   */
+  isHeldStill(character: NpcCharacter): boolean {
+    return this.elsewhere.has(character);
   }
 
   /** Every pill and bubble over the crowd, for `World` to register with the park's `LabelManager`. */
