@@ -682,7 +682,7 @@ interface ClockState {
  * the page's own (`?clock=`), so how fast this machine draws changes how long
  * the wait is and nothing else.
  */
-async function settle(page: Page, scene: Scene): Promise<ClockState> {
+async function settle(page: Page, scene: Scene, loads: readonly string[]): Promise<{ clock: ClockState; loadsAtStop: number }> {
   type Perf = { frameCount: number; context(): Record<string, unknown> };
   const stoppedAt = await page.waitForFunction(
     () => {
@@ -697,6 +697,10 @@ async function settle(page: Page, scene: Scene): Promise<ClockState> {
     { timeout: BOOT_TIMEOUT_MS, polling: 200 },
   );
   const { missing, frame } = (await stoppedAt.jsonValue()) as { missing: boolean; frame: number };
+  // A boot that reloaded before its clock stopped is harmless — the page
+  // audited is the last, whole one, its clock run from nothing — but one that
+  // reloads after this is not: see `runScene`.
+  const loadsAtStop = loads.length;
   if (missing) {
     throw new Error('the page reports no `clock` — this game has no `?clock=` (core/checkClock.ts), so no moment can be pinned');
   }
@@ -707,6 +711,9 @@ async function settle(page: Page, scene: Scene): Promise<ClockState> {
   );
   const context = await page.evaluate(() => (window as unknown as { __perf: Perf }).__perf.context());
   const clock = context['clock'] as ClockState;
+  if (!clock.stopped || Math.abs(clock.seconds - scene.clock) > 1e-6) {
+    throw new Error(`the world's clock reads ${clock.seconds.toFixed(3)} s (${clock.stopped ? 'stopped' : 'running'}), not stopped at ${scene.clock} s — not the moment asked for`);
+  }
   const where = String(context['space']);
   if (!where.startsWith(scene.space)) {
     throw new Error(`at ${clock.seconds.toFixed(3)} s on the world's clock she is in '${where}', not '${scene.space}…' — the moment audited is not in this space`);
@@ -714,7 +721,7 @@ async function settle(page: Page, scene: Scene): Promise<ClockState> {
   if (scene.riding && context['riding'] !== true) {
     throw new Error(`at ${clock.seconds.toFixed(3)} s on the world's clock she is not riding — the moment audited is not on the ride`);
   }
-  return clock;
+  return { clock, loadsAtStop };
 }
 
 /**
@@ -736,10 +743,11 @@ async function sweepStale(page: Page): Promise<{ findings: StaleFinding[]; looks
     timeout: BOOT_TIMEOUT_MS,
     polling: 200,
   });
-  return page.evaluate(() => {
+  const swept = await page.evaluate(() => {
     const w = window as unknown as { __checkClock: Clock; __staleSweep: { findings(): StaleFinding[]; looks(): number } };
-    return { findings: w.__staleSweep.findings(), looks: w.__staleSweep.looks(), from: 0, to: w.__checkClock.state().seconds };
-  }).then((r) => ({ ...r, from }));
+    return { findings: w.__staleSweep.findings(), looks: w.__staleSweep.looks(), to: w.__checkClock.state().seconds };
+  });
+  return { ...swept, from };
 }
 
 async function runScene(
@@ -751,6 +759,8 @@ async function runScene(
   clock?: ClockState;
   gpu?: string;
   sweep?: { findings: StaleFinding[]; looks: number; from: number; to: number };
+  /** Loads before the moment, when there was more than one: the last is the boot audited. */
+  reloadedBefore?: readonly string[];
   error?: string;
 }> {
   const args = ['--mute-audio', ...(process.env.SWIFTSHADER === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])];
@@ -767,11 +777,13 @@ async function runScene(
       const said = /park seed (\d+)/.exec(message.text());
       if (said) seeds.push(Number(said[1]));
     });
-    // A page that loads twice (a dev server's full reload, an update gate) has
-    // started its clock again; whatever it measured is of a second boot.
+    // Every load of the page, so a reload cannot pass unseen: a dev server's
+    // full reload (vite sends one to the first page after a source edit), an
+    // update gate. One after the moment would mean the audit or the sweep ran
+    // on a boot that was not at it.
     page.on('load', () => loads.push(`${((Date.now() - opened) / 1000).toFixed(1)} s ${page.url()}`));
     await page.goto(at(scene), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    const clock = await settle(page, scene);
+    const { clock, loadsAtStop } = await settle(page, scene, loads);
     const result = await page.evaluate(auditInPage, OVERSIZED_RADIUS_M);
     const facts = await page.evaluate(() => {
       const context = (window as unknown as { __perf: { context(): Record<string, unknown> } }).__perf.context();
@@ -783,8 +795,10 @@ async function runScene(
     if (seeds.length === 0) return { error: `${name}: the page never reported its park seed, so the pin to ${SEED} is unproven` };
     if (wrong.length > 0) return { error: `${name}: asked for park seed ${SEED}, the page built ${wrong.join(', ')}` };
     if (errors.length > 0) return { error: `${name}: page errors: ${errors.slice(0, 3).join(' | ')}` };
-    if (loads.length > 1) return { error: `${name}: the page loaded ${loads.length} times during the audit (${loads.join('; ')}) — what it measured is of a second boot` };
-    return { result, space: facts.space, gpu: facts.gpu, clock, sweep };
+    if (loads.length !== loadsAtStop) {
+      return { error: `${name}: the page loaded again after its moment (${loads.join('; ')}) — the audit or the sweep ran on another boot` };
+    }
+    return { result, space: facts.space, gpu: facts.gpu, clock, sweep, ...(loads.length > 1 ? { reloadedBefore: [...loads] } : {}) };
   } catch (error) {
     return { error: `${name} (${scene.path}): ${String((error as Error)?.message ?? error).split('\n')[0]}${errors.length ? ` — page errors: ${errors.slice(0, 3).join(' | ')}` : ''}` };
   } finally {
@@ -813,7 +827,7 @@ let measured = 0;
 for (const [name, scene] of Object.entries(BUDGETS)) {
   if (only && !only.has(name)) continue;
   const started = Date.now();
-  const { result, space, clock, gpu, sweep, error } = await runScene(name, scene);
+  const { result, space, clock, gpu, sweep, reloadedBefore, error } = await runScene(name, scene);
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   if (error || !result || !clock || !sweep) {
     failures.push(error ?? `${name}: no result`);
@@ -828,6 +842,7 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
   dump[name] = { space, clock, gpu, passes: result, sweep };
   const held = Object.entries(clock.heldBy).map(([on, frames]) => `${on} for ${frames} frames`).join(', ') || 'nothing';
   say(`${name.padEnd(14)} the moment: ${clock.seconds.toFixed(3)} s on the world's clock (asked ${scene.clock} s; it waited on ${held}) — ${gpu}`);
+  if (reloadedBefore) say(`  the page loaded ${reloadedBefore.length} times before its moment (${reloadedBefore.join('; ')}); audited the last, whole boot`);
   let offDraws = 0;
   let offTris = 0;
   for (const audit of result) {
