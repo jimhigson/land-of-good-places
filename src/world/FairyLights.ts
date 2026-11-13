@@ -3,7 +3,6 @@ import {
   Color,
   CylinderGeometry,
   Group,
-  InstancedMesh,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -15,6 +14,7 @@ import {
   Vector3,
 } from 'three';
 import { PALETTE } from '../core/palette';
+import { TiledInstances } from '../core/tiledInstances';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt, yAtAltitude } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -256,13 +256,19 @@ export class FairyLights implements GameSystem {
   /** 0 = off (daytime), 1 = fully lit. Set by World from DayNight. */
   nightFactor = 0;
 
-  private readonly bulbs: InstancedMesh;
+  /**
+   * Every bulb in the park, split into ground tiles so that three culls the
+   * strings she cannot see (`core/tiledInstances.ts`; it was one mesh with an
+   * 81 m sphere, drawn whole whenever one bulb was on screen). Bulb `i` here is
+   * still bulb `i` of `bulbColours` / `bulbBase`.
+   */
+  private readonly bulbs: TiledInstances;
+  private readonly bulbGeometry: SphereGeometry;
   private readonly bulbMaterial: MeshBasicMaterial;
   private readonly bulbColours: Color[] = [];
   private readonly bulbBase: Color[] = [];
   private readonly lights: PointLight[] = [];
   private readonly strings: Mesh[] = [];
-  private readonly bulbMatrix = new Matrix4();
   private readonly scratchColour = new Color();
   private readonly litCandidates: { at: Vector3; index: number }[] = [];
 
@@ -451,9 +457,7 @@ export class FairyLights implements GameSystem {
       color: 0xffffff,
       fog: true,
     });
-    const bulbGeometry = new SphereGeometry(0.145, 8, 6);
-    this.bulbs = new InstancedMesh(bulbGeometry, this.bulbMaterial, bulbPositions.length);
-    this.bulbs.name = 'fairy-bulbs';
+    this.bulbGeometry = new SphereGeometry(0.145, 8, 6);
 
     const quaternion = new Quaternion();
     // A bulb is a sphere stretched 1.25 along its own long axis, so that axis
@@ -462,25 +466,28 @@ export class FairyLights implements GameSystem {
     // already the leaned ones, so the tilt is read straight off each of them
     // rather than re-derived from a flat height.
     const scale = new Vector3(1, 1.25, 1);
+    const bulbMatrices: Matrix4[] = [];
     bulbPositions.forEach((position, index) => {
       tiltToSphere(position.x, position.y, position.z, quaternion);
-      this.bulbMatrix.compose(position, quaternion, scale);
-      this.bulbs.setMatrixAt(index, this.bulbMatrix);
+      bulbMatrices.push(new Matrix4().compose(position, quaternion, scale));
       const base = new Color(bulbColours[index % bulbColours.length] as number);
       this.bulbBase.push(base);
-      const current = base.clone();
-      this.bulbColours.push(current);
-      this.bulbs.setColorAt(index, current);
+      this.bulbColours.push(base.clone());
     });
-    this.bulbs.instanceMatrix.needsUpdate = true;
-    if (this.bulbs.instanceColor) this.bulbs.instanceColor.needsUpdate = true;
-    this.group.add(this.bulbs);
+    this.bulbs = new TiledInstances({
+      name: 'fairy-bulbs',
+      geometry: this.bulbGeometry,
+      material: this.bulbMaterial,
+      matrices: bulbMatrices,
+      colors: this.bulbColours,
+    });
+    this.group.add(this.bulbs.group);
   }
 
   update({ elapsed }: FrameContext): void {
     const lit = clamp01(this.nightFactor);
 
-    if (this.bulbs.instanceColor) {
+    {
       // Each bulb breathes on its own phase so the strings shimmer gently
       // instead of pulsing in unison.
       for (let i = 0; i < this.bulbColours.length; i += 1) {
@@ -493,7 +500,9 @@ export class FairyLights implements GameSystem {
         target.copy(this.scratchColour);
         this.bulbs.setColorAt(i, target);
       }
-      this.bulbs.instanceColor.needsUpdate = true;
+      // Marks only the tiles written; three uploads a tile's colours only on a
+      // frame it actually draws that tile.
+      this.bulbs.commit();
     }
 
     for (let i = 0; i < this.lights.length; i += 1) {
@@ -512,7 +521,8 @@ export class FairyLights implements GameSystem {
 
   dispose(): void {
     this.bulbMaterial.dispose();
-    this.bulbs.geometry.dispose();
+    this.bulbGeometry.dispose();
+    for (const tile of this.bulbs.tiles) tile.dispose();
     for (const line of this.strings) line.geometry.dispose();
   }
 }
