@@ -40,5 +40,15 @@ same functions). x4: library 14.5,17.6 -> 7.1,8.0; reptile 17.8,21.5 -> 14.9,14.
 - Not gated, deliberately: `CastleFire.update` (two emissive intensities a deck, pure function of the clock);
   `World.interactZones` still lists park zones indoors (the park map's taps read them).
 
+## Checks run locally on 065b0e3c (each exit code read directly, all 0)
+tsc --noEmit, typecheck:test, check:undrawn-still (+ --mutate exit 1), chain-coverage, hotel, library, reptile-house,
+castle, castle-floors, hall-solid, npc-sim-lod, jitter, labels, exits, speech-bubbles, space-night, statue-occlusion,
+park-map, tap-dash, nav-spaces, npc-presence (not in chain), park, solids, solids-park (795 s), served-render-budget,
+served-cull-audit (green here; red on main's CI at 34f20970 — flaky), served-static-freeze, served-deep-links,
+served-book-reader. render-budget census: library scene graph 883 objects in / park 'garden/the-park' out.
+
 ## State
-- Checks running (`$SP/runchecks.sh`, summary `$SP/checks/summary.txt`).
+- Focused A/B (park, hotel, great hall; 3 alternations) running: `$SP/ab2.sh`, `$SP/ab2-x{1,4}.jsonl`.
+- `save-indoors.mjs`: on BOTH builds the restore put her at the park spawn when "keep playing" was pressed the moment
+  it appeared (place.park stamp vs `parkStamp()` read in `continueGame` — likely the park file not offered yet: a race
+  on main, not this branch). Re-running with a 6 s read before the press.
