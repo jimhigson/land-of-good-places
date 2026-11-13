@@ -752,6 +752,13 @@ class ArcTread implements MovingPlatform {
   covers(x: number, z: number): boolean {
     const dx = x - this.centreX;
     const dz = z - this.centreZ;
+    // Step 7 of the 120 fps plan: the ground sampler asks this of every cell of
+    // a route lattice, nearly all of them nowhere near the ring (24 % of a park
+    // lattice build was this root). Rejected on the squared distance with a
+    // hair of slack either side, so anything near an edge is still decided by
+    // the exact test below and the answer is what it always was.
+    const squared = dx * dx + dz * dz;
+    if (squared > this.outerRadius * this.outerRadius * 1.0001 || squared < this.innerRadius * this.innerRadius * 0.9999) return false;
     const radius = Math.hypot(dx, dz);
     if (radius < this.innerRadius || radius > this.outerRadius) return false;
     // The game's yaw convention: 0 is +Z, turning toward −X (`Math.atan2(x, z)`

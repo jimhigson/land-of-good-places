@@ -328,12 +328,12 @@ function wallFootprintDepth(wall: Readonly<WallCollider>, x: number, z: number):
 const HOP_STEP_ABOVE = 0.02;
 
 /**
- * How many past revisions {@link CollisionWorld.forEachChangeSince} can name the
- * footprint of. A cache further behind than this rebuilds whole. Story time
- * moves the revision a handful of times; the park's construction moves it
- * thousands, and a lattice built before that is rebuilt whole, as it should be.
+ * The furthest behind a cache may be for {@link CollisionWorld.forEachChangeSince}
+ * to walk the changes it missed one by one; further behind, it rebuilds whole.
+ * A lazy room registers a few hundred colliders at once (the reptile hall: 453);
+ * a story time a handful. Past this, walking the log costs more than it saves.
  */
-const CHANGE_LOG = 256;
+const CHANGE_WALK_LIMIT = 8192;
 
 /**
  * **Where a body of `radius` walking from `(fromX, fromZ)` towards `(toX, toZ)`
@@ -1793,41 +1793,56 @@ export class CollisionWorld {
   }
 
   /**
-   * **Where each of the last {@link CHANGE_LOG} revisions changed the world** —
-   * the plan footprint (x/z bounds) of the collider that moved it, so a cache of
-   * this world (`NavGrid`'s lattice) can redo just that patch instead of
-   * rebuilding everything. Found the hard way (docs/perf/FRAME-DROPS-2026-11.md):
-   * the library owl's flight takes her body and her desk's capsule out and puts
-   * them back, every such toggle bumped the revision, and every lattice in the
-   * game then rebuilt itself whole — 0.5 s on an M4 Pro and 2 s on a phone-class
-   * CPU, twice per story time.
+   * **Where every revision changed the world** — the plan footprint (x/z
+   * bounds) of the collider that moved it, so a cache of this world
+   * (`NavGrid`'s lattice) can redo just that patch, or nothing at all for a
+   * change in another space, instead of rebuilding everything. Found the hard
+   * way (docs/perf/FRAME-DROPS-2026-11.md): the library owl's flight toggles her
+   * colliders and every lattice rebuilt whole (0.5 s on an M4 Pro, twice per
+   * story time); and a lazy room registers hundreds of colliders 279 m from the
+   * park, after which the park's lattice rebuilt whole (QA on #759, 459–517 ms).
+   * A first version kept only the last 256 footprints plus coarse blocks behind
+   * them; a block reached back into the park's construction, spanned the park,
+   * and `check:nav-spaces` went red — so the log is exact.
    *
-   * A ring of fixed size, filled without allocating; a change of unknown extent
-   * ({@link clear}, a re-topping of many circles, a demotion pass) records
-   * itself in {@link everywhereAt} instead, and anyone asking across it is told
-   * to rebuild whole.
+   * A change of unknown extent ({@link clear}, a re-topping of many circles, a
+   * demotion pass) is logged as NaN and recorded in {@link everywhereAt}, and
+   * anyone asking across it is told to rebuild whole.
    */
-  private readonly changeRevision = new Float64Array(CHANGE_LOG).fill(-1);
-  private readonly changeBounds = new Float64Array(CHANGE_LOG * 4);
+  /**
+   * Revision `r`'s footprint at `(r - 1) · 4`: min x, min z, max x, max z, or
+   * NaN for a change with none. Every change since the world was made, four
+   * numbers each (the park's construction is a few thousand); grown by
+   * doubling, never per change.
+   */
+  private changeLog = new Float64Array(4096);
   /** The latest revision whose change had no footprint to give: everywhere. */
   private everywhereAt = 0;
+
+  private logChange(minX: number, minZ: number, maxX: number, maxZ: number): void {
+    const at = (this.revisionCounter - 1) * 4;
+    if (at + 4 > this.changeLog.length) {
+      const grown = new Float64Array(this.changeLog.length * 2);
+      grown.set(this.changeLog);
+      this.changeLog = grown;
+    }
+    this.changeLog[at] = minX;
+    this.changeLog[at + 1] = minZ;
+    this.changeLog[at + 2] = maxX;
+    this.changeLog[at + 3] = maxZ;
+  }
 
   /** Bumps {@link revision} for a change confined to this plan rectangle. */
   private changed(minX: number, minZ: number, maxX: number, maxZ: number): void {
     this.revisionCounter += 1;
-    const slot = this.revisionCounter % CHANGE_LOG;
-    this.changeRevision[slot] = this.revisionCounter;
-    const at = slot * 4;
-    this.changeBounds[at] = minX;
-    this.changeBounds[at + 1] = minZ;
-    this.changeBounds[at + 2] = maxX;
-    this.changeBounds[at + 3] = maxZ;
+    this.logChange(minX, minZ, maxX, maxZ);
   }
 
   /** Bumps {@link revision} for a change with no one footprint. */
   private changedEverywhere(): void {
     this.revisionCounter += 1;
     this.everywhereAt = this.revisionCounter;
+    this.logChange(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
   }
 
   private changedCircle(circle: { readonly x: number; readonly z: number; readonly radius: number }): void {
@@ -1853,19 +1868,19 @@ export class CollisionWorld {
 
   /**
    * **Every change since `revision`, by its plan footprint** — `visit` once per
-   * revision in between, oldest first. Returns false, having visited nothing
-   * that matters, when the log cannot answer: the changes are older than the
-   * ring holds, or one of them had no footprint ({@link changedEverywhere}).
-   * Then the caller must rebuild whole, exactly as before this existed.
+   * revision, oldest first. Returns false when the log cannot answer — one of
+   * the changes had no footprint ({@link changedEverywhere}), or the cache is
+   * more than {@link CHANGE_WALK_LIMIT} changes behind — and the caller must
+   * then rebuild whole, exactly as before this existed.
    */
   forEachChangeSince(revision: number, visit: (minX: number, minZ: number, maxX: number, maxZ: number) => void): boolean {
     if (revision < 0 || this.everywhereAt > revision) return false;
-    if (this.revisionCounter - revision > CHANGE_LOG) return false;
+    if (this.revisionCounter - revision > CHANGE_WALK_LIMIT) return false;
     for (let r = revision + 1; r <= this.revisionCounter; r += 1) {
-      const slot = r % CHANGE_LOG;
-      if (this.changeRevision[slot] !== r) return false;
-      const at = slot * 4;
-      visit(this.changeBounds[at] ?? 0, this.changeBounds[at + 1] ?? 0, this.changeBounds[at + 2] ?? 0, this.changeBounds[at + 3] ?? 0);
+      const at = (r - 1) * 4;
+      const minX = this.changeLog[at] ?? Number.NaN;
+      if (Number.isNaN(minX)) return false;
+      visit(minX, this.changeLog[at + 1] ?? 0, this.changeLog[at + 2] ?? 0, this.changeLog[at + 3] ?? 0);
     }
     return true;
   }
