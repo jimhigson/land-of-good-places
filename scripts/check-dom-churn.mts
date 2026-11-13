@@ -74,9 +74,9 @@
  *
  * ## Proved red, 13 Nov 2026
  *
- * On 39adb126 (main c1bdb168 plus this file's draw stub), seed 5, standing at
- * the spawn (-1.6, 51.6), 1000×700, DPR 1, 360 frames settled then 240
- * sampled:
+ * On 87d4f415 (main 23b6f0db plus this file), `pnpm run check:served-dom-churn`
+ * on an M4 Pro, seed 5's checked-in park, standing at the spawn (-1.6, 51.6),
+ * 1000×700, DPR 1, 360 frames settled then 240 sampled:
  *
  * - **SwiftShader, `Hud.setGamepadConnected` with its guard removed**, so it
  *   writes the same `data-connected` every frame — the bug `ui/dataFlag.ts`
@@ -90,14 +90,18 @@
  *   ceiling, not the style one, that sees this class of bug.
  * - **GPU, `drawElements` left out of the stub** — the control:
  *   ```
- *   idle: the GL draw stub skipped 41229 draws in 245 frames while three counted
- *   134425 — a draw went around `renderer.render`, or three drew through an
+ *   idle: the GL draw stub skipped 39713 draws in 244 frames while three counted
+ *   132464 — a draw went around `renderer.render`, or three drew through an
  *   entry point this does not skip
  *   ```
  *
- * Green on the same code: GPU 15.5 s; SwiftShader 30.1 s; SwiftShader with the
- * browser held to the efficiency cores, 213 s — where main's version timed out
- * after 300.7 s on the same `frames` → `sample` stack as CI's.
+ * Green on that commit: GPU 18.7 s, SwiftShader 35.8 s, whole runs including
+ * the dev server. Against main c1bdb168, on SwiftShader with the browser held
+ * to the efficiency cores (`taskpolicy -c background`, the nearest this Mac
+ * comes to a runner): 213 s, where main's own version timed out after 300.7 s
+ * on CI's own stack (`frames` ← `sample`); and the whole of shard 12 under its
+ * watchdog, every process held there, in 6m11s of the 30m cap — slowest single
+ * wait 71.4 s of the 240 s allowed.
  */
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
