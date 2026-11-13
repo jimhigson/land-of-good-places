@@ -34,7 +34,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type CompanionRide, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
 import type { OpenAreaPoint } from '../dismount';
 
 import { BallPit } from './BallPit';
@@ -1885,7 +1885,6 @@ export class Building implements GameSystem {
    * splash, its companions and its camera, just sooner.
    */
   private readonly slideHolder: RideHolder = (() => {
-    const building = this;
     return {
       holding: 'a slide',
       letGo: () => {
@@ -1893,13 +1892,11 @@ export class Building implements GameSystem {
         const player = this.player;
         if (ride && player) this.finishRide(ride, player);
       },
-      // Down the ginormous slide her companion rides the chute behind her,
-      // carried by the ride itself (`ridePetsDownSlide`, #468); a little
-      // slide has room for nobody but her, and it rides in her backpack.
-      // Asked as she boards, once `startRide` has said which slide it is.
-      get companion(): CompanionRide {
-        return building.ride?.giant === true ? 'carried by the ride' : 'in her backpack';
-      },
+      // Down any slide her companion rides the chute behind her, carried by
+      // the ride itself (`ridePetsDownSlide`, #468) — the ginormous one and
+      // the little ones alike (Jim, 19 Oct 2026: *"one rides on the seat
+      // alongside the player"*: on a slide, the chute behind her is the seat).
+      companion: 'carried by the ride',
     };
   })();
 
@@ -2098,7 +2095,9 @@ export class Building implements GameSystem {
     // arrive somewhere the ride is not. The seats come from
     // `slide/petRiders.ts`; the parade owns the animals, and this file never
     // touches one.
-    if (ride.giant) this.chaseCompanions = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
+    // Down a little slide too: her companion comes down behind her on every chute.
+    const riders = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
+    if (ride.giant) this.chaseCompanions = riders;
 
     if (ride.giant && this.grownUpComing) {
       // In front, and lying down. Clamped to the end of the chute so the

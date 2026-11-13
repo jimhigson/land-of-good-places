@@ -1105,6 +1105,13 @@ export interface CatBusHandle {
   /** Where a passenger sits, by the door. One of {@link seats}. */
   readonly passengerSeat: Group;
   /**
+   * **Her companion's seat** — the one across the gangway from hers, in her
+   * row (Jim, 19 Oct 2026: *"all the pets except one jump into her backpack on
+   * getting on any ride, then one rides on the seat alongside the player"*).
+   * One of {@link seats}; no child of the crowd takes it.
+   */
+  readonly companionSeat: Group;
+  /**
    * **The twelve seats**, each an anchor at floor level for one child.
    *
    * Exposed so the arrival can fill them and so a check can count what was
@@ -1985,6 +1992,11 @@ export function createCatBus(): CatBusHandle {
       passengerSeat = seat;
     }
   }
+  // Across the gangway from hers, in her row — never hers: with no seat
+  // beside hers the bus is built wrong, and saying so beats seating her
+  // companion in her lap.
+  const companionSeat = seats.find((seat) => seat !== passengerSeat && Math.abs(seat.position.z - passengerSeat.position.z) < 1e-6);
+  if (!companionSeat) throw new Error('createCatBus: no seat across the gangway from hers for her companion');
 
   // --- tiger stripes ---------------------------------------------------------
   // **One pass, one owner of the drape's parameters.** Every striped mesh's UVs
@@ -2050,6 +2062,7 @@ export function createCatBus(): CatBusHandle {
     cabin,
     driverSeat,
     passengerSeat,
+    companionSeat,
     seats,
     doorDrop,
 
