@@ -195,6 +195,8 @@
     "check:served-book-reader": "pnpm run with-dev-server pnpm run check:book-reader",
     "check:served-menu-reach": "pnpm run with-dev-server pnpm run check:menu-reach",
     "check:served-render-budget": "pnpm run with-dev-server pnpm run check:render-budget",
+    "check:static-freeze": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-static-freeze.mts",
+    "check:served-static-freeze": "pnpm run with-dev-server pnpm run check:static-freeze",
     "check:render-budget": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-render-budget.mts",
     "check:served-deep-links": "pnpm run with-dev-server pnpm run check:deep-links",
     "build:parks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/build-parks.mts",
