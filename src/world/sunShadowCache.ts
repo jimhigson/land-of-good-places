@@ -115,9 +115,9 @@ export function sunShadowCacheRequested(): boolean {
  * - **The map is exact**: {@link SunShadowCache.audit} finds 0 differing texels
  *   against three's own pass in every scene tried, moving or still.
  * - **It is not invisible.** The light moves in steps. With the sun crossing
- *   the sky in 150 s (`DAY_LENGTH_SECONDS`) a step moves a 7 m structure's
- *   shadow ~2 px at 1280×720, six times a second at noon, where three's own
- *   pass slides it. Steps small enough to hide on the park's tall casters
+ *   the sky in 150 s (`DAY_LENGTH_SECONDS`) a step moves the Rail Race ring's
+ *   shadow (rails 9.5 m up) ~2 px at 1280×720, six times a second at noon,
+ *   where three's own pass slides it. Steps small enough to hide on tall casters
  *   redraw the cache on about half of all sunlit frames.
  * - **It is not a clear win.** The survey that keeps it exact costs ~0.4 ms a
  *   frame, a redraw frame pays it on top of a full pass, and so the

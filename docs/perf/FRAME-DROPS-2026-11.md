@@ -350,8 +350,9 @@ with **~70 k triangles** (crowd 1.67 M tris / 24 kids, the face patches alone
     survey gives 59–96 k differing texels, movers dropped 106–113 k. The audit
     found one real hole (a swapped position attribute or index went unseen:
     85,885 stale texels), now closed.
-  - **It is not invisible.** The light moves in steps; on a sun step a 7 m
-    structure's shadow jumps ~2 px at 1280×720, six times a second at noon and
+  - **It is not invisible.** The light moves in steps; on a sun step the Rail
+    Race ring's shadow (rails 9.5 m up) jumps ~2 px at 1280×720 — the criterion
+    allows 0.6 % of a caster's height, 5.7 cm here — six times a second at noon and
     up to every frame near sunrise and sunset (`steps.mjs`: a step changes
     ~16 k pixels by > 8 levels where three's continuous light changes ~2 k a
     frame). Taller casters jump further. Steps small enough to hide on the
