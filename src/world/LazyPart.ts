@@ -34,6 +34,25 @@
 export const LAZY_PART_TIMEOUT_MS = 20_000;
 
 /**
+ * **The dev server has no hang guard** — `null`, never a deadline.
+ *
+ * Vite's dev server compiles a module graph the first time it is asked for, so
+ * a lazy chunk's first load there is not a disk read: the book reader's graph
+ * (a hundred-odd modules, the 600 KB story-props kit among them) measured 14 s
+ * to arrive and 24 s to build on a cold server under SwiftShader, either side
+ * of the 20 s deadline. That race was #752's flaky `check:book-reader`: on a
+ * slow runner the reader was given up on five seconds before it arrived, the
+ * book never opened, and the check timed out two minutes later; re-run on a
+ * warm cache, it passed. Every served check runs on the dev server, so a
+ * deadline there makes them all depend on how fast the runner compiles. The
+ * built game keeps the guard: its chunks are precached files.
+ */
+function defaultTimeoutMs(): number | null {
+  const env = (import.meta as { env?: { DEV?: boolean } }).env;
+  return env?.DEV ? null : LAZY_PART_TIMEOUT_MS;
+}
+
+/**
  * After a failed fetch, how long before another `load()` may try again, in
  * milliseconds. Until then `load()` answers with the same failure at once.
  *
@@ -44,8 +63,11 @@ export const LAZY_PART_RETRY_AFTER_MS = 4_000;
 
 /** How a `LazyPart` is built. */
 export interface LazyPartOptions<T> {
-  /** {@link LAZY_PART_TIMEOUT_MS} unless a test needs it shorter. */
-  readonly timeoutMs?: number;
+  /**
+   * {@link LAZY_PART_TIMEOUT_MS} in a built game, none on the dev server
+   * (`defaultTimeoutMs`); `null` for none at all.
+   */
+  readonly timeoutMs?: number | null;
   /** {@link LAZY_PART_RETRY_AFTER_MS} unless a test needs it shorter. */
   readonly retryAfterMs?: number;
   /**
@@ -66,11 +88,19 @@ export interface LazyPartOptions<T> {
 export class LazyPart<T> {
   readonly name: string;
   private readonly loader: () => Promise<T>;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | null;
   private readonly retryAfterMs: number;
   private readonly refetch: ((attempt: number) => Promise<T>) | null;
   private value: T | null = null;
   private pending: Promise<T> | null = null;
+  /**
+   * The fetch itself, without the deadline — **kept when the deadline gives up
+   * on it**. A fetch that is slow rather than hung still lands, into
+   * {@link loaded}, and the next `load()` joins it instead of starting another.
+   * Dropping it was half of #752's flake: the reader arrived five seconds after
+   * it had been given up on, and was thrown away.
+   */
+  private inflight: Promise<T> | null = null;
   /** Fetches that have failed so far; the next attempt after one goes through {@link refetch}. */
   private failures = 0;
   /** The last failure, and when another attempt may be made. */
@@ -80,7 +110,7 @@ export class LazyPart<T> {
   constructor(name: string, loader: () => Promise<T>, options: LazyPartOptions<T> = {}) {
     this.name = name;
     this.loader = loader;
-    this.timeoutMs = options.timeoutMs ?? LAZY_PART_TIMEOUT_MS;
+    this.timeoutMs = options.timeoutMs === undefined ? defaultTimeoutMs() : options.timeoutMs;
     this.retryAfterMs = options.retryAfterMs ?? LAZY_PART_RETRY_AFTER_MS;
     this.refetch = options.refetch ?? null;
   }
@@ -104,19 +134,39 @@ export class LazyPart<T> {
     if (this.pending) return this.pending;
     if (this.failures > 0 && Date.now() < this.retryAt) return Promise.reject(this.lastError);
     const attempt = this.failures;
-    // After a timeout the first fetch may still be on its way, and the plain
-    // loader then joins it rather than fetching a second copy; after a real
-    // failure it rejects at once and the fresh URL is tried.
-    const fetchIt = (): Promise<T> => {
-      if (attempt === 0 || !this.refetch) return this.loader();
-      const refetch = this.refetch;
-      return this.loader().catch(() => refetch(attempt));
-    };
+    let fetch = this.inflight;
+    if (!fetch) {
+      // After a real failure the plain loader rejects at once (the browser
+      // remembers it) and the fresh URL is tried.
+      const fetchIt = (): Promise<T> => {
+        if (attempt === 0 || !this.refetch) return this.loader();
+        const refetch = this.refetch;
+        return this.loader().catch(() => refetch(attempt));
+      };
+      const started: Promise<T> = Promise.resolve().then(fetchIt);
+      fetch = started;
+      this.inflight = started;
+      started.then(
+        (value) => {
+          this.value = value;
+          if (this.inflight === started) this.inflight = null;
+        },
+        () => {
+          if (this.inflight === started) this.inflight = null;
+        },
+      );
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${this.name} did not arrive within ${this.timeoutMs} ms`)), this.timeoutMs);
-    });
-    const pending = Promise.race([Promise.resolve().then(fetchIt), timeout])
+    const raced =
+      this.timeoutMs === null
+        ? fetch
+        : Promise.race([
+            fetch,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error(`${this.name} did not arrive within ${this.timeoutMs} ms`)), this.timeoutMs ?? 0);
+            }),
+          ]);
+    const pending = raced
       .finally(() => clearTimeout(timer))
       .then(
         (value) => {
