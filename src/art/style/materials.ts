@@ -118,6 +118,36 @@ export function ownTextures(material: Material, textures: Iterable<Texture>): vo
 }
 
 /**
+ * **`material.clone()`, without serialising the textures it owns.**
+ *
+ * `Material.copy` deep-copies `userData` through `JSON.stringify`, and
+ * {@link ownTextures} keeps a material's spare textures in there — so a clone
+ * of a face material ran `Texture.toJSON` on every expression canvas the face
+ * owns, and that encodes each canvas as a PNG (`canvas.toDataURL`). The crowd
+ * clones its face material once per expression per eye colour: 152 ms of the
+ * great hall banquet's build in Chromium (QA on #759), on the frame she walks
+ * into the castle, and the same again for the park's crowd at boot. All of it
+ * thrown away: the clone came out holding the PNGs as plain JSON, not as
+ * textures, and owning nothing (Node checks saw it as `three`'s "Unable to
+ * serialize Texture" warning, which `park-harness.mts` filters).
+ *
+ * The clone owns none of those textures here either — the original still
+ * does, and {@link disposeTree} frees them through it. Every other key of
+ * `userData` is copied exactly as `clone()` copies it.
+ */
+export function cloneMaterial<T extends Material>(material: T): T {
+  const data = (material as unknown as HasUserData).userData;
+  if (!(OWNED_TEXTURES in data)) return material.clone();
+  const owned = data[OWNED_TEXTURES];
+  delete data[OWNED_TEXTURES];
+  try {
+    return material.clone();
+  } finally {
+    data[OWNED_TEXTURES] = owned;
+  }
+}
+
+/**
  * **Show `texture` in `material.map` — the one way to swap a face.**
  *
  * `material.needsUpdate = true` does not mean "the map changed". It bumps the
