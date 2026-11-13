@@ -36,4 +36,11 @@ did the reptile hall; exterior (tower, its collider, outer doors) stays boot.
 ## Status
 - [x] 1 pack split (60108cba)
 - [x] 2 class split, 3 residents, 4 wiring (d8cb8a6f); guard proved red
-- [ ] check, test:procgen, Playwright desktop+phone, PR
+- [x] check:hotel green; check:exits + flat-primitives baselines moved to interior.ts
+- [x] Playwright desktop+phone 9/9 (`scripts/qa-lazy-hotel.mjs 5791 <out> desktop|phone`,
+      dev server `vite --port 5791 --strictPort`, QA_SEED=5, park cached in .parks/dev)
+- [x] draft PR #762 (rebased on 34f9d8df)
+- [ ] full `check` (running), `test:procgen` (first local run: 7 seed files hit the
+      3600 s beforeAll timeout under load ~120 — re-run when quiet / rely on CI)
+- [ ] `scripts/qa-lazy-hotel-restore.mjs` (/hotel + save restore) not yet run
+- [ ] preview URL /hotel check, remove draft
