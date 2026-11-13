@@ -9,7 +9,7 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { ART } from './artPalette';
-import { decal, isShared, markShared, ownTextures, toonMaterial } from './materials';
+import { decal, isShared, markShared, ownTextures, showMap, toonMaterial } from './materials';
 
 /**
  * Faces are PAINTED, not built.
@@ -760,8 +760,7 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
     material,
     expressions,
     setExpression(name: Expression) {
-      material.map = expressions[name];
-      material.needsUpdate = true;
+      showMap(material, expressions[name]);
     },
     setFill(next: number) {
       if (next === colour) return;
@@ -877,8 +876,7 @@ export function createFacePatch(options: FacePatchOptions): FacePatch {
     mesh,
     expressions,
     setExpression(name: Expression) {
-      material.map = expressions[name];
-      material.needsUpdate = true;
+      showMap(material, expressions[name]);
     },
   };
 }
@@ -1277,8 +1275,7 @@ export function createFacePaintOverlay(radius: number, options: { spreadX?: numb
         mesh.visible = false;
         return;
       }
-      material.map = facePaintOverlayTexture(design, size);
-      material.needsUpdate = true;
+      showMap(material, facePaintOverlayTexture(design, size));
       mesh.visible = true;
     },
   };

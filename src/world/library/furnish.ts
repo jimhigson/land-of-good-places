@@ -15,13 +15,13 @@ import {
 import { Rng, damp } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
+import { createLibraryCushion, libraryBookcaseSize, libraryCushionSize, type BookcaseKind } from '../../art/models/libraryAssets';
 import {
   bakeModel,
   bakedBodyMaterial,
   bakedGlowMaterial,
   bakedOutlineMaterial,
   createLibraryArmchair,
-  createLibraryCushion,
   createLibraryDesk,
   createLibraryFloorLamp,
   createLibraryReadingLamp,
@@ -31,10 +31,8 @@ import {
   createShelfBook,
   libraryArmchairParts,
   libraryBookcaseBaked,
-  libraryBookcaseSize,
   libraryBookMaterial,
   libraryBookShapes,
-  libraryCushionSize,
   libraryDeskSize,
   libraryFloorLampSize,
   libraryReadingLampSize,
@@ -43,9 +41,8 @@ import {
   LIBRARY_BOOK_COLOURS,
   type BakedModel,
   type BookShape,
-  type BookcaseKind,
   type LampHandle,
-} from '../../art/models/libraryAssets';
+} from '../../art/models/libraryRoomAssets';
 import type { LibraryDenNiche } from '../../art/models/libraryDenKit';
 import { KID_REACH_HEIGHT } from '../../art/models/kid';
 import type { LibraryProps } from './props';

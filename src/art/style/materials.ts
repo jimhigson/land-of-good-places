@@ -117,6 +117,39 @@ export function ownTextures(material: Material, textures: Iterable<Texture>): vo
   (material as unknown as HasUserData).userData[OWNED_TEXTURES] = [...textures];
 }
 
+/**
+ * **Show `texture` in `material.map` — the one way to swap a face.**
+ *
+ * `material.needsUpdate = true` does not mean "the map changed". It bumps the
+ * material's version, and three.js answers a new version by rebuilding the
+ * material's program parameters and cache key (`WebGLPrograms.getParameters`)
+ * on its next draw — measured at 9.5 MB/s of garbage and ~0.12 ms a frame in
+ * the park, from faces swapping one canvas for another (the 120 fps plan,
+ * step 5). Swapping one map for another needs none of that: the renderer
+ * re-reads `material.map` into its uniform at the first draw of the material
+ * in every render. The shader only changes if the swap changes something it
+ * was compiled for — whether there is a map at all, the UV channel it reads,
+ * or (for video) its colour space — and only then is the flag set.
+ *
+ * Swapping to the texture already showing is free, so a caller may call this
+ * every frame. (`faceLife.ts` still only swaps on a transition; a blink that
+ * never changes the texture should not even get here.)
+ */
+export function showMap(material: Material & { map: Texture | null }, texture: Texture | null): void {
+  const was = material.map;
+  if (was === texture) return;
+  material.map = texture;
+  if (
+    was === null ||
+    texture === null ||
+    was.channel !== texture.channel ||
+    was.colorSpace !== texture.colorSpace ||
+    (was as { isVideoTexture?: boolean }).isVideoTexture !== (texture as { isVideoTexture?: boolean }).isVideoTexture
+  ) {
+    material.needsUpdate = true;
+  }
+}
+
 let rampTexture: DataTexture | null = null;
 
 /** The shared 4-step gradient map. Built once, reused by every toon material. */

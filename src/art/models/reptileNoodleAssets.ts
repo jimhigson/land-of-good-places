@@ -3,6 +3,7 @@ import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
 import { REPTILE_NOODLE_GLB_BASE64 } from '../assets/reptileNoodleGlb';
 import type { AssetHandle } from '../style/asset';
+import { showMap } from '../style/materials';
 import { visibleTop } from '../style/measure';
 import {
   REPTILE_ISLAND_RADIUS,
@@ -112,8 +113,7 @@ export function createNoodleRock(): NoodleRock {
     coil,
     snoutReach,
     setFace(expression) {
-      material.map = faces[expression];
-      material.needsUpdate = true;
+      showMap(material, faces[expression]);
     },
   };
 }
