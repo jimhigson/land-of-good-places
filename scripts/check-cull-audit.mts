@@ -139,6 +139,9 @@ interface Audit {
     readonly infoTris: number;
     readonly offPixels: number;
     readonly onPixels: number;
+    /** Objects three drew that the walk did not predict, and the reverse — both empty when the control holds. */
+    readonly walkMissed: readonly string[];
+    readonly walkInvented: readonly string[];
   };
   readonly offenders: readonly Offender[];
   /** Instanced meshes whose cached bound no longer contains their live instances. */
@@ -206,7 +209,8 @@ function auditInPage(oversizedRadius: number): Audit[] {
 
     const nameOf = (o: Any): string => {
       const parts: string[] = [];
-      for (let n = o; n && n !== scene; n = n.parent) parts.push(n.name || n.type);
+      // A tile of `core/tiledInstances.ts` keeps its mesh's original name; its key tells tiles apart.
+      for (let n = o; n && n !== scene; n = n.parent) parts.push((n.name || n.type) + (n.userData?.tile ? `@${n.userData.tile}` : ''));
       return parts.reverse().join('/');
     };
 
@@ -230,6 +234,7 @@ function auditInPage(oversizedRadius: number): Audit[] {
       if (drawCount === 0) return -1;
       const instances = object.isInstancedMesh ? object.count : 1;
       if (object.isInstancedMesh && instances === 0) return -1;
+      if (object.isSprite) return drawCount / 3; // a sprite is a quad: three counts its two triangles
       if (!object.isMesh) return 0; // lines and points are counted as draws, not triangles
       return (drawCount / 3) * instances;
     };
@@ -274,9 +279,11 @@ function auditInPage(oversizedRadius: number): Audit[] {
       if (object.layers.test(camera.layers)) {
         if (object.isSprite) {
           // none in the park today; counted as a draw if present
-          if (!object.frustumCulled || true) {
+          const items = drawItems(object);
+          if (items.draws > 0) {
             drawnMeshes.push(object);
-            drawnDraws += 1;
+            drawnDraws += items.draws;
+            drawnTris += items.tris;
           }
         } else if (object.isMesh || object.isLine || object.isPoints) {
           if (object.isBatchedMesh) throw new Error(`BatchedMesh ${nameOf(object)} — the audit does not model it yet`);
@@ -414,9 +421,25 @@ function auditInPage(oversizedRadius: number): Audit[] {
         if (!TargetCtor && o.isLight && o.shadow && o.shadow.map) TargetCtor = o.shadow.map.constructor;
       });
     }
-    renderer.render(scene, camera);
+    // Record what three really hands to the GPU, so a failed control names the
+    // objects the walk got wrong instead of two numbers that differ.
+    const reallyDrawn = new Set<Any>();
+    const renderBufferDirect = renderer.renderBufferDirect;
+    renderer.renderBufferDirect = function (this: Any, ...args: Any[]): Any {
+      reallyDrawn.add(args[4]);
+      return renderBufferDirect.apply(this, args);
+    };
+    try {
+      renderer.render(scene, camera);
+    } finally {
+      renderer.renderBufferDirect = renderBufferDirect;
+    }
     const infoDraws = renderer.info.render.calls;
     const infoTris = renderer.info.render.triangles;
+    const predicted = new Set<Any>(drawnMeshes);
+    const describe = (o: Any): string => `${nameOf(o) || o.type}${o.parent ? '' : ' (not in the scene graph)'}`;
+    const walkMissed = [...reallyDrawn].filter((o) => !predicted.has(o)).map(describe);
+    const walkInvented = drawnMeshes.filter((o: Any) => !reallyDrawn.has(o)).map(describe);
 
     // ------------------------------------------------ control 2: off-screen draws nothing
     let offPixels = -1;
@@ -497,7 +520,7 @@ function auditInPage(oversizedRadius: number): Audit[] {
       pass: pass.name,
       drawn: { meshes: drawnMeshes.length, draws: drawnDraws, tris: drawnTris },
       off: { draws: offDraws, tris: offTris },
-      control: { infoDraws, infoTris, offPixels, onPixels },
+      control: { infoDraws, infoTris, offPixels, onPixels, walkMissed, walkInvented },
       offenders,
       stale,
       unculled,
@@ -630,7 +653,8 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
     // Controls fail the check whatever MEASURE says: an instrument that fails its control measured nothing.
     if (c.infoDraws !== audit.drawn.draws || c.infoTris !== audit.drawn.tris) {
       failures.push(
-        `${name}: CONTROL — the walk predicted ${audit.drawn.draws} draws / ${audit.drawn.tris} tris, three drew ${c.infoDraws} / ${c.infoTris}; the audit is not describing the frame`,
+        `${name}: CONTROL — the walk predicted ${audit.drawn.draws} draws / ${audit.drawn.tris} tris, three drew ${c.infoDraws} / ${c.infoTris}; the audit is not describing the frame` +
+          ` (three drew but the walk missed: ${c.walkMissed.slice(0, 5).join(', ') || 'nothing'}; the walk predicted but three skipped: ${c.walkInvented.slice(0, 5).join(', ') || 'nothing'})`,
       );
     }
     if (c.offPixels !== 0) failures.push(`${name}: CONTROL — what the audit called off-screen lit ${c.offPixels} pixels; its "off-screen" is wrong`);

@@ -181,7 +181,13 @@ export class LiveInstanceBounds {
 }
 
 export interface TiledInstancesOptions {
-  /** Each tile mesh is named `${name}@${tileX},${tileZ}`; the group is `name`. */
+  /**
+   * **Every tile mesh keeps exactly this name** — the name the single mesh
+   * had — because checks find drawn things by their mesh's own name
+   * (`check:solids`' foliage rule is `/^(bushes|tree-canopies|…)(\[|$)/` on
+   * it, `drawnTops`' ignore list likewise). The tile's key goes in
+   * `userData.tile` (`"tileX,tileZ"`), and the group is `${name}:tiles`.
+   */
   readonly name: string;
   readonly geometry: BufferGeometry;
   readonly material: Material | Material[];
@@ -227,7 +233,7 @@ export class TiledInstances {
   constructor(options: TiledInstancesOptions) {
     const { name, geometry, material, matrices, colors } = options;
     const tileSize = options.tileSize ?? DEFAULT_TILE_SIZE_M;
-    this.group.name = name;
+    this.group.name = `${name}:tiles`;
     this.count = matrices.length;
     this.boundsMargin = options.boundsMargin ?? 0;
     this.slotTile = new Uint16Array(matrices.length);
@@ -252,7 +258,8 @@ export class TiledInstances {
     const tiles: InstancedMesh[] = [];
     for (const [key, bucket] of buckets) {
       const mesh = new InstancedMesh(geometry, material, bucket.members.length);
-      mesh.name = `${name}@${key}`;
+      mesh.name = name;
+      mesh.userData['tile'] = key;
       mesh.castShadow = options.castShadow ?? false;
       mesh.receiveShadow = options.receiveShadow ?? false;
       const tileIndex = tiles.length;

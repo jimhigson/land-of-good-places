@@ -838,8 +838,9 @@ function buildTreeline(): Group {
   // No shadows out here: the treeline sits far outside the sun's shadow frustum
   // and adding it would only cost fill rate.
   group.add(
-    makeInstanced('treeline-trunks', trunkGeometry, foliageMaterial(0.95), trunks, false),
-    makeInstanced('treeline-canopies', canopyGeometry, foliageMaterial(0.9), canopies, false),
+    // Tiled for frustum culling (perf step 10, `core/tiledInstances.ts`): the band rings the whole park.
+    TiledInstances.fromInstancedMesh(makeInstanced('treeline-trunks', trunkGeometry, foliageMaterial(0.95), trunks, false)).group,
+    TiledInstances.fromInstancedMesh(makeInstanced('treeline-canopies', canopyGeometry, foliageMaterial(0.9), canopies, false)).group,
   );
 
   return group;
@@ -1373,8 +1374,9 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
   }
 
   group.add(
-    makeInstanced('wall-collars', new SphereGeometry(0.13, 12, 9), copingMaterial, collars, false),
-    makeInstanced('wall-finials', new SphereGeometry(0.19, 14, 11), finialMaterial, finials, true),
+    // Tiled for frustum culling (perf step 10, `core/tiledInstances.ts`): one mesh spanned every wall in the park.
+    TiledInstances.fromInstancedMesh(makeInstanced('wall-collars', new SphereGeometry(0.13, 12, 9), copingMaterial, collars, false)).group,
+    TiledInstances.fromInstancedMesh(makeInstanced('wall-finials', new SphereGeometry(0.19, 14, 11), finialMaterial, finials, true)).group,
   );
 
   return group;
