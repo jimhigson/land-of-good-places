@@ -238,6 +238,12 @@ function auditInPage(oversizedRadius: number): Audit[] {
       if (!object.isMesh) return 0; // lines and points are counted as draws, not triangles
       return (drawCount / 3) * instances;
     };
+    /**
+     * How many times three draws one item: a transparent, double-sided material
+     * is drawn twice — back faces, then front (`WebGLRenderer.renderObject`,
+     * unless `forceSinglePass`). `2` is three's `DoubleSide`.
+     */
+    const passes = (m: Any): number => (m.transparent === true && m.side === 2 && m.forceSinglePass === false ? 2 : 1);
     /** Draw items three pushes for one object: one per visible material group, or one. */
     const drawItems = (object: Any): { draws: number; tris: number; trisPerInstanceSet: number } => {
       const material = object.material;
@@ -249,8 +255,8 @@ function auditInPage(oversizedRadius: number): Audit[] {
           if (m && m.visible) {
             const t = drawTris(object, group);
             if (t >= 0) {
-              draws += 1;
-              tris += t;
+              draws += passes(m);
+              tris += t * passes(m);
             }
           }
         }
@@ -259,7 +265,7 @@ function auditInPage(oversizedRadius: number): Audit[] {
       if (!material || !material.visible) return { draws: 0, tris: 0, trisPerInstanceSet: 0 };
       const t = drawTris(object, null);
       if (t < 0) return { draws: 0, tris: 0, trisPerInstanceSet: 0 };
-      return { draws: 1, tris: t, trisPerInstanceSet: t };
+      return { draws: passes(material), tris: t * passes(material), trisPerInstanceSet: t * passes(material) };
     };
     /** The sphere three culls this object by, in world space — `Frustum.intersectsObject`. */
     const cullSphere = (object: Any): Any => {
@@ -278,8 +284,16 @@ function auditInPage(oversizedRadius: number): Audit[] {
       if (object.visible === false) return;
       if (object.layers.test(camera.layers)) {
         if (object.isSprite) {
-          // none in the park today; counted as a draw if present
-          const items = drawItems(object);
+          // `Frustum.intersectsSprite`: a unit quad's half-diagonal, wider by how far its centre is offset.
+          let drawn = !object.frustumCulled;
+          if (!drawn) {
+            const offset = Math.hypot((object.center?.x ?? 0.5) - 0.5, (object.center?.y ?? 0.5) - 0.5);
+            scratch.center.set(0, 0, 0);
+            scratch.radius = 0.7071067811865476 + offset;
+            scratch.applyMatrix4(object.matrixWorld);
+            drawn = sphereIn(scratch.center.x, scratch.center.y, scratch.center.z, scratch.radius);
+          }
+          const items = drawn ? drawItems(object) : { draws: 0, tris: 0 };
           if (items.draws > 0) {
             drawnMeshes.push(object);
             drawnDraws += items.draws;
@@ -438,7 +452,7 @@ function auditInPage(oversizedRadius: number): Audit[] {
     const infoTris = renderer.info.render.triangles;
     const predicted = new Set<Any>(drawnMeshes);
     const describe = (o: Any): string => `${nameOf(o) || o.type}${o.parent ? '' : ' (not in the scene graph)'}`;
-    const walkMissed = [...reallyDrawn].filter((o) => !predicted.has(o)).map(describe);
+    const walkMissed = [...reallyDrawn].filter((o) => !predicted.has(o) && !(o.isInstancedMesh && o.count === 0)).map(describe);
     const walkInvented = drawnMeshes.filter((o: Any) => !reallyDrawn.has(o)).map(describe);
 
     // ------------------------------------------------ control 2: off-screen draws nothing
