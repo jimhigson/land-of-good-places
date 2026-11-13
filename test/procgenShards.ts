@@ -65,6 +65,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/groundClaims.test.ts',
     'test/input/sub-frame-tap.test.ts',
     'test/building/ballPacing.test.ts',
+    'test/store/drawn-spaces.test.ts',
   ],
   // 5
   [

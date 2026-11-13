@@ -2780,10 +2780,25 @@ if (inPart('park')) {
       // she can stand on — and it never moves.
       {
         const span = LOCO_LENGTH + 3 * CARRIAGE_LENGTH + 3 * CAR_GAP;
+        // Clear of a station is clear of its platform *beside* the line (the
+        // 2.2 m across that `spotsAt` asks), not just of the line's middle,
+        // which a platform never covers. Asked there alone, on seed 5 a
+        // carriage stood beside the platform under the station canopy at
+        // (-81.2, 21.6): its overhang met her head at the top of each jump and
+        // shoved her ~0.5 m, until four jumps put her off the carriage's side
+        // onto the track bed — and once she was 1.95 m off the line the train
+        // rightly went on, which this clause then read as moving under her.
+        const lineDir = new Vector3();
         const openLine = (): boolean => {
           for (let k = -2; k <= span + 4; k += 1) {
-            route.pointAt(route.wrap(train.noseDistance() - k), at);
-            if (train.stations.some((s) => s.covers(at.x, at.z)) || train.bridges.some((b) => b.covers(at.x, at.z))) return false;
+            const along = route.wrap(train.noseDistance() - k);
+            route.pointAt(along, at);
+            route.tangentAt(along, lineDir);
+            for (const side of [-2.2, 0, 2.2]) {
+              const x = at.x + lineDir.z * side;
+              const z = at.z - lineDir.x * side;
+              if (train.stations.some((s) => s.covers(x, z)) || train.bridges.some((b) => b.covers(x, z))) return false;
+            }
           }
           return train.runningSpeed > 0.5;
         };

@@ -453,6 +453,14 @@ export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): 
 export async function acceptedRestartOf(
   seed: number,
 ): Promise<{ readonly restart: number; readonly how: string; readonly log: readonly string[] }> {
+  const hydrated = hydratedRestartOf(seed);
+  if (hydrated !== null) {
+    return {
+      restart: hydrated.restart,
+      how: `LGP_PARK_FILE ${hydrated.path} is seed ${seed} restart ${hydrated.restart}: that file's park, hydrated whatever the source — no acceptance verdict taken`,
+      log: [],
+    };
+  }
   const built = builtRestartOf(REPO, seed);
   if (built !== null) {
     return { restart: built, how: 'build:parks found it at this source (.parks/manifest.json)', log: [] };
@@ -465,6 +473,28 @@ export async function acceptedRestartOf(
       : `the acceptance loop, run now at source ${accepted.sourceHash}`,
     log: describeRestarts(accepted),
   };
+}
+
+/**
+ * **The park this process was told to build (`LGP_PARK_FILE`), when it is seed
+ * `seed`'s** — its path and restart, or null.
+ *
+ * Under `LGP_PARK_FILE` the `--import` hook (`ts-extension-resolver-register.mjs`)
+ * has already pinned the file's restart (`__LGP_PARK_RESTART__`) and offered the
+ * file, so the park this process builds *is* that file's, whatever the source
+ * hash. Asking the acceptance loop instead ran a whole solve — with
+ * `LGP_PARK_FILE` stripped from its children — to name a restart the process
+ * was going to ignore: `check:park` sat silent for its full 600 s step timeout
+ * with no `.parks/` manifest at this source (13 Nov 2026). The pin is the hook's
+ * proof it hydrated: a search script or a park-changing switch makes it skip
+ * the file, leaves the pin unset, and the loop is asked as before.
+ */
+function hydratedRestartOf(seed: number): { readonly path: string; readonly restart: number } | null {
+  const path = process.env['LGP_PARK_FILE'];
+  const pinned = (globalThis as { __LGP_PARK_RESTART__?: unknown }).__LGP_PARK_RESTART__;
+  if (!path || typeof pinned !== 'number') return null;
+  const file = JSON.parse(readFileSync(path, 'utf8')) as { readonly seed?: unknown; readonly restart?: unknown };
+  return file.seed === seed && file.restart === pinned ? { path, restart: pinned } : null;
 }
 
 /** One line per restart, for a log or the park file's metadata. */
