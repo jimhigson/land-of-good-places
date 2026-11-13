@@ -9,8 +9,10 @@ import {
   MeshToonMaterial,
   Object3D,
   Quaternion,
+  Sphere,
   SphereGeometry,
   Vector3,
+  type BufferGeometry,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
@@ -81,9 +83,46 @@ const UNIT_SPHERE = markShared(new SphereGeometry(1, 14, 10));
 const UNIT_OUTLINE = markShared(outlineGeometry(UNIT_SPHERE, 0.08));
 
 /**
+ * **The wave, in numbers a bound can be built from.** A segment is thrown
+ * sideways by `radius · WAVE_AMPLITUDE · wriggle`, times {@link POKE_SWING}
+ * while a poke lasts, times {@link NECK_SWING} at the neck; `setWriggle` never
+ * goes past {@link MAX_WRIGGLE} (the nursery's tumble asks for exactly that).
+ * A segment is drawn at `(r, SEGMENT_SQUASH · r, SEGMENT_STRETCH · r)`.
+ */
+const WAVE_AMPLITUDE = 0.5;
+const POKE_SWING = 2.2;
+const NECK_SWING = 0.35;
+const MAX_WRIGGLE = 3;
+const SEGMENT_SQUASH = 0.86;
+const SEGMENT_STRETCH = 1.3;
+
+/** How far one instance of `geometry` reaches from its own origin at scale 1, whichever way it is turned. */
+function reachOf(geometry: BufferGeometry): number {
+  if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+  const sphere = geometry.boundingSphere!;
+  return sphere.center.length() + sphere.radius;
+}
+
+/**
+ * How far a segment's drawn sphere — body or ink outline, as three bounds it
+ * (the geometry's sphere through the instance matrix, scaled by its largest
+ * axis) — reaches from the segment's centre, per metre of segment radius.
+ */
+const SEGMENT_REACH = SEGMENT_STRETCH * Math.max(reachOf(UNIT_SPHERE), reachOf(UNIT_OUTLINE));
+
+/**
  * A fixed pool of instanced segments shared by many snakes. Add {@link meshes}
  * to the scene where the snakes' roots live; each snake writes its own slots
  * every frame in that parent's space.
+ *
+ * **Its bound is set once, never cached by three** ({@link holdWithin}). three
+ * works out an instanced mesh's bound the first time it culls it and never
+ * again, and every snake rewrites its segments every frame — so the bound it
+ * cached went stale as they slithered, and a stale bound is a snake three may
+ * cull while it is on screen (`check:cull-audit` found ten: the hall's two
+ * pools, the plush, the hat and the balloon, body and outline each). A
+ * shared pool's owner knows where its snakes live and says so; a snake with a
+ * private pool works out everywhere its own wave can take it.
  */
 export class SnakeSegmentPool {
   readonly body: InstancedMesh;
@@ -111,6 +150,18 @@ export class SnakeSegmentPool {
     this.outline.count = 0;
     this.meshes = [this.body, this.outline];
     parent.add(this.body, this.outline);
+  }
+
+  /**
+   * **The sphere three culls this pool by, for good** — in the parent's
+   * space, which is the meshes' own (they hang from it untransformed). It must
+   * hold every segment of every snake in the pool for as long as they live:
+   * three never looks again, so a segment outside it can be culled while she
+   * is looking at it. Costs nothing a frame.
+   */
+  holdWithin(bound: Sphere): void {
+    this.body.boundingSphere = bound.clone();
+    this.outline.boundingSphere = bound.clone();
   }
 
   /** Reserves `count` slots; returns the first. Throws rather than silently drawing nothing. */
@@ -315,6 +366,40 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
     }
   }
 
+  /** Segment `i`'s radius: the body's, tapering to `taper` of it at the tail. */
+  const segmentRadius = (i: number): number => radius * (1 - (1 - taper) * (i / Math.max(1, count - 1)));
+
+  // **A private pool's bound: everywhere this snake's segments can ever be**,
+  // in its own body's space (`SnakeSegmentPool.holdWithin`). A segment's
+  // centre is its spine point lifted by its radius, swayed sideways by the
+  // wave at its biggest; three's sphere for it reaches `SEGMENT_REACH` radii
+  // further. A crawler's segments go all the way round the loop, so it is
+  // bounded by the whole path — sampled finer than its own spacing, with the
+  // gap between samples added. A shared pool's owner sets its own.
+  if (privatePool) {
+    const sway = radius * WAVE_AMPLITUDE * MAX_WRIGGLE * POKE_SWING;
+    const bound = new Sphere();
+    const piece = new Sphere();
+    if (rest) {
+      for (let i = 0; i < count; i += 1) {
+        const r = segmentRadius(i);
+        piece.center.fromArray(rest, i * 6);
+        piece.center.y += r;
+        piece.radius = sway * (i === 0 ? NECK_SWING : 1) + SEGMENT_REACH * r;
+        bound.union(piece);
+      }
+    } else {
+      const samples = Math.max(64, Math.ceil(pathLength / (spacing / 4)));
+      for (let j = 0; j < samples; j += 1) {
+        sampleSpine(path, j / samples, piece.center, SCRATCH_TANGENT);
+        piece.center.y += radius;
+        piece.radius = sway + SEGMENT_REACH * radius + radius * (1 - taper) + pathLength / samples;
+        bound.union(piece);
+      }
+    }
+    pool.holdWithin(bound);
+  }
+
   const update = (dt: number, elapsed: number): void => {
     if (crawl > 0) headAt = (headAt + crawl * dt) % pathLength;
     // A house snake's wave runs on its own clock. A parade snake's is the
@@ -325,7 +410,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
     if (walkPhase === null) wave += waveSpeed * dt;
     else wave = elapsed * 0.6 + walkPhase * Math.PI * 2 * waveSpeed;
     if (reaction > 0) reaction = Math.max(0, reaction - dt);
-    const amplitude = radius * 0.5 * wriggle * (reaction > 0 ? 2.2 : 1);
+    const amplitude = radius * WAVE_AMPLITUDE * wriggle * (reaction > 0 ? POKE_SWING : 1);
 
     tongueFor -= dt;
     nextTongue -= dt;
@@ -355,9 +440,9 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
       SCRATCH_NORMAL.set(-SCRATCH_TANGENT.z, 0, SCRATCH_TANGENT.x);
       if (SCRATCH_NORMAL.lengthSq() < 1e-6) SCRATCH_NORMAL.set(1, 0, 0);
       SCRATCH_NORMAL.normalize();
-      const offset = amplitude * Math.sin(k * s - wave) * (i === 0 ? 0.35 : 1);
+      const offset = amplitude * Math.sin(k * s - wave) * (i === 0 ? NECK_SWING : 1);
       SCRATCH_POSITION.addScaledVector(SCRATCH_NORMAL, offset);
-      const r = radius * (1 - (1 - taper) * (i / Math.max(1, count - 1)));
+      const r = segmentRadius(i);
       SCRATCH_POSITION.y += r;
       if (i === 0) {
         head.position.copy(SCRATCH_POSITION);
@@ -366,7 +451,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
         head.lookAt(SCRATCH_LOOK.applyMatrix4(body.matrixWorld));
       }
       SCRATCH_QUATERNION.setFromUnitVectors(FORWARD, SCRATCH_TANGENT);
-      SCRATCH_SCALE.set(r, r * 0.86, r * 1.3);
+      SCRATCH_SCALE.set(r, r * SEGMENT_SQUASH, r * SEGMENT_STRETCH);
       SCRATCH_MATRIX.compose(SCRATCH_POSITION, SCRATCH_QUATERNION, SCRATCH_SCALE);
       if (!privatePool) SCRATCH_MATRIX.premultiply(SCRATCH_TO_POOL);
       pool.setMatrix(first + i, SCRATCH_MATRIX);
@@ -399,7 +484,8 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
       tongueFor = 0.15;
     },
     setWriggle(amount) {
-      wriggle = amount;
+      // Never past `MAX_WRIGGLE`: a private pool's bound is built on it.
+      wriggle = Math.min(MAX_WRIGGLE, Math.max(0, amount));
     },
   };
 }
