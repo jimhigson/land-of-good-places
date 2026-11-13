@@ -169,6 +169,7 @@
     "check:castle-floors": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-castle-floors.mts",
     "sweep:fountain-hop": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-fountain-hop.mts",
     "check:hall-solid": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hall-solid.mts",
+    "check:hot-path-churn": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hot-path-churn.mts",
     "check:benches": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-benches.mts",
     "check:coplanar": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-coplanar.mts",
     "check:solids": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-solids.mts --part=core",
