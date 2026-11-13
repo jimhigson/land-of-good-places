@@ -1324,11 +1324,32 @@ async function finishLaunch(
       part.load().catch((error: unknown) => console.error(`Land of Good Places: ${part.name} failed to load`, error)),
     ),
   ]);
+  // Built behind the bus — and its programs compiled there (`ShaderWarmup`) —
+  // or built just now, with nothing compiled at all.
+  const rodeIn = handOverGame !== null;
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
+  // **No bus, so no warm-up yet: the first frames are held back until the
+  // view she starts in is warm** (`core/viewWarmup.ts`). A continued save or
+  // a deep link used to link thirty-odd programs and upload forty megabytes
+  // of textures in its first frame — 174 ms on the M4 Pro — with forty-odd
+  // more over the next few. Held, the canvas keeps nothing drawn for those
+  // few frames, and the HUD waits with it, so the park and its buttons still
+  // arrive together, just without the stall.
+  const firstFramesWarm = rodeIn ? Promise.resolve() : game.holdFirstFrames();
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
   // park's, and the park is what is about to be on screen.
-  uiRoot.style.visibility = '';
+  if (rodeIn) uiRoot.style.visibility = '';
+  else {
+    uiRoot.style.visibility = 'hidden';
+    void firstFramesWarm.then(() => {
+      uiRoot.style.visibility = '';
+      // …and then everything else, behind her, a slice a frame — what the
+      // bus ride would have compiled, so the first walk to the far side of
+      // the park links nothing either.
+      game.warmTheRestInBackground();
+    });
+  }
 
   // **Nothing stands in front of the arrival.** `WhatsNew` opens itself from
   // `Game`'s constructor when there is unseen content, and it pauses the park
@@ -1490,9 +1511,12 @@ async function finishLaunch(
   // Unmissable red "DEV" watermark — never present in a production build.
   DevBadge.mountIfDev(uiRoot);
 
-  // Give the first frame a moment to land before revealing the park.
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => splash?.classList.add('hidden'));
+  // Give the first frame a moment to land before revealing the park — the
+  // first *warm* frame, on a boot with no bus (`holdFirstFrames` above).
+  void firstFramesWarm.then(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => splash?.classList.add('hidden'));
+    });
   });
 
   // Handy for poking at the world from the browser console during development.

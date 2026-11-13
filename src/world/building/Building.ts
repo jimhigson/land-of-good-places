@@ -302,9 +302,11 @@ export interface InteriorControls {
    * With `ready`, the iris **holds shut** until it settles before running
    * `midpoint` — a room whose furnishings are still being fetched
    * (`world/LazyPart.ts`) is never shown half-built, and the screen is the
-   * closed iris rather than a frozen frame.
+   * closed iris rather than a frozen frame. A function is called only once
+   * the iris is shut, so the work it starts is never on a frame she sees
+   * (`SpaceManager.changeToFurnished`).
    */
-  iris(midpoint: () => void, ready?: Promise<unknown>): void;
+  iris(midpoint: () => void, ready?: Promise<unknown> | (() => Promise<unknown>)): void;
   /** A soft blink. */
   flash(): void;
   /** Put the camera exactly on the player, with no travelling. */

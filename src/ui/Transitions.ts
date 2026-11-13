@@ -28,6 +28,16 @@ export class Transitions {
   private irisRunning = false;
   /** The midpoint of a wipe still closing — see {@link irisWipe}. */
   private pendingMidpoint: (() => void) | null = null;
+  /** Counts wipes, so a reveal that a newer wipe overtook during its hold does not open the newer one's iris. */
+  private wipeSerial = 0;
+  /**
+   * What must be done behind the shut iris, after the midpoint and before it
+   * opens — `Game`'s `RevealHold` (`core/viewWarmup.ts`): the view the
+   * midpoint has just put behind the iris, warmed, so the first frame it
+   * opens on links no program and uploads nothing. Null until the game sets
+   * it, and then the iris opens straight after the midpoint as it always did.
+   */
+  private holdOpen: (() => Promise<void>) | null = null;
 
   constructor(container: HTMLElement) {
     this.iris = document.createElement('div');
@@ -58,14 +68,31 @@ export class Transitions {
   }
 
   /**
+   * The work the iris waits for between its midpoint and opening — see
+   * {@link holdOpen}. Set once, by `Game`.
+   */
+  setHoldOpen(hold: () => Promise<void>): void {
+    this.holdOpen = hold;
+  }
+
+  /**
    * Closes the iris, runs `midpoint` behind it, then opens it again.
    *
    * `midpoint` is where the world changes — the teleport, the camera snap, the
    * collision boundary moving. It runs exactly once, on a timer rather than on a
    * transition event, because a backgrounded tab never fires `transitionend` and
    * a child coming back to the game would find the screen permanently dark.
+   *
+   * `ready`, when given, holds the iris shut until it settles. **A function is
+   * called only once the iris is shut**, and its promise waited on: work that
+   * must not be seen — building a room (`SpaceManager.changeToFurnished`) —
+   * starts behind the closed iris rather than in the frame that asked for it,
+   * which is a frame a child is still looking at.
+   *
+   * After the midpoint, the iris stays shut until {@link holdOpen} says the
+   * view behind it is warm (`core/viewWarmup.ts`).
    */
-  irisWipe(midpoint: () => void, onOpened?: () => void, ready?: Promise<unknown>): void {
+  irisWipe(midpoint: () => void, onOpened?: () => void, ready?: Promise<unknown> | (() => Promise<unknown>)): void {
     window.clearTimeout(this.closeTimer);
     window.clearTimeout(this.openTimer);
     // **A wipe that starts while another is still closing runs the first one's
@@ -81,27 +108,44 @@ export class Transitions {
     this.irisRunning = true;
     this.iris.dataset.closed = 'true';
     this.pendingMidpoint = midpoint;
+    const serial = ++this.wipeSerial;
     // **`ready`: hold shut until a room being fetched has landed** (a lazy
     // interior, `world/LazyPart.ts`). Settled either way — a failed fetch still
     // runs the midpoint, which is the owner's to refuse, so the iris can never
-    // stay shut for ever.
+    // stay shut for ever. A promise is watched from now; a function is not
+    // called until the iris is shut (see above).
     let settled = ready === undefined;
-    ready?.then(
-      () => (settled = true),
-      () => (settled = true),
-    );
-    const open = (): void => {
-      if (this.pendingMidpoint !== midpoint) return;
-      this.pendingMidpoint = null;
-      midpoint();
+    if (ready !== undefined && typeof ready !== 'function') {
+      ready.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+    }
+    const reveal = (): void => {
+      // A newer wipe started while this one held: it owns the iris now.
+      if (serial !== this.wipeSerial) return;
       this.iris.dataset.closed = 'false';
       this.openTimer = window.setTimeout(() => {
         this.irisRunning = false;
         onOpened?.();
       }, IRIS_OPEN_SECONDS * 1000);
     };
+    const open = (): void => {
+      if (this.pendingMidpoint !== midpoint) return;
+      this.pendingMidpoint = null;
+      midpoint();
+      // **Still shut until what the midpoint put behind it is warm**: its
+      // programs linked and its textures up, then drawn once where nobody sees
+      // the frame it costs (`core/viewWarmup.ts`). Without this the first frame
+      // of a new room is the one that links its programs — 44–111 ms measured,
+      // on the frame the iris starts opening.
+      const held = this.holdOpen?.();
+      if (held) held.then(reveal, reveal);
+      else reveal();
+    };
     this.closeTimer = window.setTimeout(() => {
-      if (settled || !ready) {
+      const waitFor = typeof ready === 'function' ? ready() : ready;
+      if (settled || !waitFor) {
         open();
         return;
       }
@@ -110,7 +154,7 @@ export class Transitions {
         delete this.iris.dataset.waiting;
         open();
       };
-      ready.then(done, done);
+      waitFor.then(done, done);
     }, IRIS_CLOSE_SECONDS * 1000);
   }
 
