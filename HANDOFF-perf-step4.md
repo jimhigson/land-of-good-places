@@ -1,0 +1,75 @@
+# HANDOFF — perf step 4: cull the crowd
+
+Branch `perf-step4-cull-crowd`, worktree `.claude/worktrees/perf-step4`
+(and `.claude/worktrees/perf-step4-base` = origin/main for before-builds; remove both at the end).
+Spec: docs/perf/FRAME-DROPS-2026-11.md item 4 (on PR #746's branch).
+
+## Design (implemented)
+1. `InstancedCrowd.commit` records each member's chosen variant + matrix (no buffer writes).
+2. `flush` packs every variant mesh with only the members wearing it (slots 0..count-1,
+   `count`, `visible = count>0`, `boundingSphere` = union of those instances + 0.1 m,
+   `frustumCulled = true`) and stores a per-member sphere. Always correct to draw.
+3. `cullCrowdsFor(scene, camera)` (called in `Game.render` right before the world draw)
+   repacks NON-shadow-casting parts with only members whose sphere meets the frustum.
+   Shadow casters keep everyone (shared buffer feeds the shadow pass; >1 shadow light).
+- Slot != member now; nothing reads crowd instance ids (Highlights only for Flowers).
+
+## Check
+`scripts/check-crowd-cull.mts` (`check:crowd-cull`, appended to `check:crowd`).
+Truth = committed member skeletons (watched via patched commit), part enclosing spheres
+computed by the check itself. Asserts no on-screen / in-shadow-frustum part culled or
+missing from the buffer; off-screen tris/pose <= budget (park, interior).
+Mutations: `--mutate=centre|stale|uncull`.
+Dev runs: `LGP_PARK_RESTART=1 ROUNDS=1` (seed 5 accepted restart is 1) — otherwise the
+harness runs the park acceptance loop (~4 min/restart) because src changed.
+
+## Findings
+- Before (main code, ROUNDS=1): park 64 crowd draws/pose, 1,645,472 crowd tris, 1,602,306 off screen;
+  interiors (origin poses) 1,643,779 of 1,645,472 off screen.
+- Old check bugs fixed: box-vs-frustum truth (conservative corners) -> use spheres;
+  float32 slot comparison at 600 m; interiors hidden headless -> show crowd ancestors.
+
+- After (ROUNDS=1, seed 5): park 31.6 draws/pose, 131,898 crowd tris, 0 non-shadow off screen,
+  86,986 shadow-casting off screen; interior (4234 poses, banquet-heavy) 1,252,327 tris,
+  0 non-shadow off screen, 435,527 shadow. PASS (exit 0, 208 s).
+- Red proofs: --mutate=centre exit 1 (27,160 failures: missing on-screen instances),
+  --mutate=stale exit 1 (16,108: culled from main pass), --mutate=uncull exit 1
+  (293,565 non-shadow off-screen tris/pose park).
+
+## Status
+- [x] check numbers  - [x] red proofs  - [ ] browser A/B (build base + branch, harness run.mjs)
+- [x] PR #756 (draft)
+
+## Browser A/B v1 (head 974b8bea, before the bounds optimisation)
+Harness: PR #746's run.mjs + my ab.sh (scratchpad), Chrome for Testing 1234 headless, M4 Pro,
+vite preview of base (9b5e89e3) on :5871 and branch on :5872, seed 5.
+Tris p50: park 3.66 M -> 1.47 M; reptile 2.09 -> 0.45; library 1.99 -> 0.35;
+castle hall 14.47 -> 1.67; castle mall 2.63 -> 0.19. Draws -40..-95.
+CPU p50 park went UP ~0.5 ms: node bench showed flush on the 111-seat banquet (0.28 ms) +
+culling the hidden banquet (0.08 ms). Fixed in "per-child boxes" commit: banquet flush 0.059,
+cull skipped when hidden; park crowd total 0.103 ms vs main 0.109. Re-measuring (v2).
+Note: `pnpm run build` exits 1 on main and here (PWA precache limit, #749); dist is complete.
+Parks are source-hash gated: rebuild with `LGP_SEEDS=5 LGP_RESTART_LANES=2 pnpm run build:parks`.
+
+## After merging main (#749), head after 3d44cf12
+- check:crowd-cull default (ROUNDS=2, banquet every 3rd diner): exit 0, 519 s local under load.
+  Park 2200 poses: 32.9 draws, 135,292 tris/pose, 0 non-shadow off screen, 95,654 shadow (budget 110k).
+  Interior 1582 poses: 0 non-shadow off screen, 396,601 shadow (budget 500k).
+- Browser CPU is too noisy on the shared Mac for single runs; interleaved desktop park
+  a-b mean +0.08 ms; 4x stand-in order-balanced +0.8 ms (+-2 ms noise). Node bench is the
+  controlled figure: park crowd 0.103 vs 0.109 ms; banquet hidden in park 0.732 vs 0.641 ms.
+- PR body draft: scratchpad pr-body.md. Remaining: CI green, report.
+
+## Review round 1 (changes requested: evidence) — answered
+- v3 A/B (ABBA, 4/side, main f3e0b6b8 vs e6bb019d): CPU p50 paired park -0.62, phone -0.05, reptile -0.13,
+  library +0.10, castle hall -1.10, castle mall -0.45, hotel -0.20 ms. Tris: park 3.66->1.48 M, hall 14.49->2.02 M.
+- Red proofs at e6bb019d (seed 5 restart 1 ROUNDS=1): none 0 (83 s), centre 1 (9,324), stale 1 (16,347), uncull 1.
+- PR body source: /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/pr756-body.md (outside the worktree).
+- NEXT: when #752 (check:render-budget) merges, merge main here, lower its BUDGETS draw/tri ceilings
+  for the spaces the crowd touches, prove the check, push.
+
+## #752 merged in (34f9d8df); render-budget ceilings lowered (9f7e7a4b)
+- New BUDGETS = max(Metal x2, SwiftShader x1), seed 5: park 569/1,470,630; library 257/464,190;
+  reptile 371/473,082; castle 332/185,674; hotel 272/154,488; rail race 2154/2,341,524.
+- Proved: green exit 0 at 9f7e7a4b; red exit 1 with main's InstancedCrowd (park 3,664,324 > 1,617,694).
+- Remaining: CI green on the pushed head.

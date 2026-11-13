@@ -78,6 +78,7 @@ import { BookGlance } from './world/library/bookGlance';
 import { StoryCamera } from './world/library/storyCamera';
 import { OwlLensFade } from './world/library/owlLensFade';
 import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
+import { cullCrowdsFor } from './entities/npc/InstancedCrowd';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -2235,6 +2236,9 @@ export class Game {
       this.sky.render(renderer);
       renderer.clearDepth();
       const camera = this.cameraOverride ?? this.camera.camera;
+      // Only the children this camera can see are drawn (step 4 of
+      // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
+      cullCrowdsFor(this.engine.scene, camera);
       renderer.render(this.engine.scene, camera);
       // The ferris wheel's car, drawn a second time over the finished frame.
       // The camera is bolted inside it, so nothing outside it should ever be in
