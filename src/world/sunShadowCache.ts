@@ -23,6 +23,7 @@ import {
   type Light,
   type Material,
   type Scene,
+  type Texture,
   type WebGLRenderer,
 } from 'three';
 
@@ -108,17 +109,39 @@ export function sunShadowCacheRequested(): boolean {
  */
 export const SUN_SHADOW_CACHE_DEFAULT = false;
 
+/**
+ * Everything about one mesh that three's shadow pass reads, as it was when the
+ * survey last looked. A mesh whose snapshot no longer matches has changed.
+ *
+ * Buffers are held **by identity as well as by version**: a freshly made
+ * attribute starts at version 0 like the one it replaced, so a geometry given
+ * a new position array or index compared equal by version alone — the audit
+ * found it (85,885 stale texels from one swapped attribute on a fairy pole).
+ */
 interface Entry {
   readonly matrix: Float64Array;
   geometry: BufferGeometry | null;
+  /** The position attribute, or the interleaved buffer that holds it. */
+  position: object | null;
   positionVersion: number;
+  index: object | null;
   indexVersion: number;
+  instanceMatrix: object | null;
   instanceVersion: number;
   count: number;
   drawStart: number;
   drawCount: number;
   material: Material | Material[] | null;
-  materialVisible: boolean;
+  /** Which of the materials draw (bit `i` for `material[i]`; bit 0 for a single one). */
+  materialVisible: number;
+  /** What three's depth pass copies off a single material (`WebGLShadowMap.getDepthMaterial`). */
+  side: number;
+  shadowSide: number | null;
+  alphaTest: number;
+  /** The textures it alpha-tests with; null when `alphaTest` is 0, as three then ignores them. */
+  alphaMap: Texture | null;
+  map: Texture | null;
+  wireframe: boolean;
   /** `performance.now()` when a change was last seen; −∞ for "never". */
   changedAt: number;
   /** Whether this mesh is in the static cache as it was last drawn. */
@@ -178,11 +201,36 @@ export interface SunShadowAudit {
   readonly staticMeshes: number;
 }
 
-/** An interleaved attribute keeps its version on its buffer. */
-function positionVersion(geometry: BufferGeometry): number {
+/** An interleaved attribute keeps its data, and its version, on its buffer. */
+function positionSource(geometry: BufferGeometry): { version: number } | null {
   const attribute = geometry.attributes['position'];
-  if (attribute === undefined) return -1;
-  return 'isInterleavedBufferAttribute' in attribute ? attribute.data.version : attribute.version;
+  if (attribute === undefined) return null;
+  return 'isInterleavedBufferAttribute' in attribute ? attribute.data : attribute;
+}
+
+/** A material's `map` or `alphaMap`, which only some material types have. */
+function textureOf(material: Material, key: 'map' | 'alphaMap'): Texture | null {
+  return ((material as unknown as Record<string, unknown>)[key] as Texture | null | undefined) ?? null;
+}
+
+/** Bit `i` set when material `i` draws; a single material is bit 0. */
+function visibilityMask(material: Material | Material[] | null): number {
+  if (material === null) return 0;
+  if (!Array.isArray(material)) return material.visible ? 1 : 0;
+  let mask = 0;
+  for (let i = 0, n = Math.min(material.length, 31); i < n; i++) if (material[i]?.visible) mask |= 1 << i;
+  return mask;
+}
+
+/**
+ * A mesh whose shape is decided in the vertex shader from state the survey
+ * cannot compare cheaply — bones, morph weights — is treated as moving every
+ * frame: drawn per frame, never cached. None exist in the park today; this is
+ * so the first one does not freeze its own shadow.
+ */
+function deformsInShader(object: Object3D): boolean {
+  const mesh = object as Mesh & { isSkinnedMesh?: boolean };
+  return mesh.isSkinnedMesh === true || (mesh.morphTargetInfluences !== undefined && mesh.morphTargetInfluences.length > 0);
 }
 
 type ShadowRender = (lights: Light[], scene: Object3D, camera: Camera) => void;
@@ -328,10 +376,23 @@ export class SunShadowCache {
     const shadowMap = renderer.shadowMap;
     const original = shadowMap.render.bind(shadowMap) as ShadowRender;
     shadowMap.render = (lights: Light[], scene: Scene, camera: Camera): void => {
+      // Three's own switch for the whole pass, read before its render clears
+      // `needsUpdate`. Off, three draws nothing — and nor may the cache, or it
+      // would mark a map it never drew as valid (`check:cull-audit` renders
+      // with the pass off to count the main pass's draws alone).
+      const passOn = shadowMap.enabled && (shadowMap.autoUpdate || shadowMap.needsUpdate);
       original(lights, scene, camera);
-      if (scene !== this.scene || (camera.layers.mask & 1) === 0) return;
+      if (!passOn || scene !== this.scene || (camera.layers.mask & 1) === 0) return;
       if (!lights.includes(this.light)) return;
-      this.renderSun(renderer, original, camera);
+      const oneShot = !shadowMap.autoUpdate;
+      try {
+        // A one-shot global update (`autoUpdate` off, `needsUpdate` on) was
+        // spent by the call above; the sun's own calls need it again.
+        if (oneShot) shadowMap.autoUpdate = true;
+        this.renderSun(renderer, original, camera);
+      } finally {
+        if (oneShot) shadowMap.autoUpdate = false;
+      }
     };
   }
 
@@ -528,15 +589,25 @@ export class SunShadowCache {
       entry = {
         matrix: new Float64Array(16),
         geometry: null,
+        position: null,
         positionVersion: -1,
+        index: null,
         indexVersion: -1,
+        instanceMatrix: null,
         instanceVersion: -1,
         count: -1,
         drawStart: -1,
         drawCount: -1,
         material: null,
-        materialVisible: true,
-        changedAt: -Infinity,
+        materialVisible: 0,
+        side: -1,
+        shadowSide: null,
+        alphaTest: 0,
+        alphaMap: null,
+        map: null,
+        wireframe: false,
+        // A mesh that deforms in its shader is a mover from the first frame.
+        changedAt: deformsInShader(object) ? now : -Infinity,
         inStatic: false,
         outside: false,
         frustumStamp: -1,
@@ -591,6 +662,7 @@ export class SunShadowCache {
   }
 
   private changed(object: Object3D, entry: Entry): boolean {
+    if (deformsInShader(object)) return true;
     const m = object.matrixWorld.elements;
     const s = entry.matrix;
     for (let i = 0; i < 16; i++) if (m[i] !== s[i]) return true;
@@ -598,18 +670,33 @@ export class SunShadowCache {
     const geometry = (mesh.geometry as BufferGeometry | undefined) ?? null;
     if (geometry !== entry.geometry) return true;
     if (geometry !== null) {
-      if (positionVersion(geometry) !== entry.positionVersion) return true;
-      if ((geometry.index?.version ?? -1) !== entry.indexVersion) return true;
+      const position = positionSource(geometry);
+      if (position !== entry.position || (position?.version ?? -1) !== entry.positionVersion) return true;
+      const index = geometry.index;
+      if (index !== entry.index || (index?.version ?? -1) !== entry.indexVersion) return true;
       if (geometry.drawRange.start !== entry.drawStart || geometry.drawRange.count !== entry.drawCount) return true;
     }
     const instanced = object as unknown as { isInstancedMesh?: boolean; instanceMatrix?: { version: number }; count?: number };
     if (instanced.isInstancedMesh === true) {
-      if ((instanced.instanceMatrix?.version ?? -1) !== entry.instanceVersion) return true;
+      const matrices = instanced.instanceMatrix ?? null;
+      if (matrices !== entry.instanceMatrix || (matrices?.version ?? -1) !== entry.instanceVersion) return true;
       if ((instanced.count ?? -1) !== entry.count) return true;
     }
     const material = (mesh.material as Material | Material[] | undefined) ?? null;
     if (material !== entry.material) return true;
-    if (material !== null && !Array.isArray(material) && material.visible !== entry.materialVisible) return true;
+    if (visibilityMask(material) !== entry.materialVisible) return true;
+    if (material !== null && !Array.isArray(material)) {
+      const alphaTest = material.alphaTest;
+      if (
+        material.side !== entry.side ||
+        material.shadowSide !== entry.shadowSide ||
+        alphaTest !== entry.alphaTest ||
+        ((material as Material & { wireframe?: boolean }).wireframe === true) !== entry.wireframe ||
+        (alphaTest > 0 && (textureOf(material, 'alphaMap') !== entry.alphaMap || textureOf(material, 'map') !== entry.map))
+      ) {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -618,16 +705,28 @@ export class SunShadowCache {
     const mesh = object as Mesh;
     const geometry = (mesh.geometry as BufferGeometry | undefined) ?? null;
     entry.geometry = geometry;
-    entry.positionVersion = geometry === null ? -1 : positionVersion(geometry);
+    const position = geometry === null ? null : positionSource(geometry);
+    entry.position = position;
+    entry.positionVersion = position?.version ?? -1;
+    entry.index = geometry?.index ?? null;
     entry.indexVersion = geometry?.index?.version ?? -1;
     entry.drawStart = geometry?.drawRange.start ?? -1;
     entry.drawCount = geometry?.drawRange.count ?? -1;
     const instanced = object as unknown as { isInstancedMesh?: boolean; instanceMatrix?: { version: number }; count?: number };
-    entry.instanceVersion = instanced.isInstancedMesh === true ? (instanced.instanceMatrix?.version ?? -1) : -1;
+    const matrices = instanced.isInstancedMesh === true ? (instanced.instanceMatrix ?? null) : null;
+    entry.instanceMatrix = matrices;
+    entry.instanceVersion = matrices?.version ?? -1;
     entry.count = instanced.isInstancedMesh === true ? (instanced.count ?? -1) : -1;
     const material = (mesh.material as Material | Material[] | undefined) ?? null;
     entry.material = material;
-    entry.materialVisible = material !== null && !Array.isArray(material) ? material.visible : true;
+    entry.materialVisible = visibilityMask(material);
+    const single = material !== null && !Array.isArray(material) ? material : null;
+    entry.side = single?.side ?? -1;
+    entry.shadowSide = single?.shadowSide ?? null;
+    entry.alphaTest = single?.alphaTest ?? 0;
+    entry.wireframe = (single as (Material & { wireframe?: boolean }) | null)?.wireframe === true;
+    entry.alphaMap = single !== null && single.alphaTest > 0 ? textureOf(single, 'alphaMap') : null;
+    entry.map = single !== null && single.alphaTest > 0 ? textureOf(single, 'map') : null;
   }
 
   private ensureStaticTarget(): WebGLRenderTarget {
