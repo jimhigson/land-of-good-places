@@ -243,6 +243,19 @@ export const NAV_GRID_BUILDS = {
   patchMs: 0,
   worstFullMs: 0,
   worstPatchMs: 0,
+  /**
+   * Whole lattices laid a slice a frame by {@link NavGrid.warm} rather than in
+   * one task — a subset of `full` — with how many slices they took and the
+   * longest single one. `forced` counts sliced builds a synchronous question
+   * (a tap, a plan) had to finish in one go because it could not wait, and
+   * `worstForcedMs` the longest such finish. So "whole lattices built as one
+   * long task" is `full - sliced + forced`.
+   */
+  sliced: 0,
+  slices: 0,
+  worstSliceMs: 0,
+  forced: 0,
+  worstForcedMs: 0,
   patching: true,
   verify: false,
   /** How far past a change's footprint a patch reaches, as a share of the real margin. 1 in the game; a check sets 0 to prove the verifier sees a short patch. */
@@ -256,6 +269,26 @@ export const NAV_GRID_BUILDS = {
  * rebuild instead — past it, copying the untouched cells' levels saves little.
  */
 const PATCH_MAX_SHARE = 0.25;
+
+/**
+ * How a sliced build ({@link NavGrid.warm}) cuts each pass, between looks at
+ * the clock: rows of the boundary's `contains` sweep, rows of solids (every
+ * collider is offered to each band, so wider is cheaper overall), rows of the
+ * bridge exemption, and cells of levels. Small enough that one piece is a
+ * fraction of a millisecond to a few on the whole park; the budget, not these,
+ * decides how many pieces a frame runs.
+ */
+const BUILD_BOUNDARY_ROWS = 8;
+const BUILD_SOLID_ROWS = 48;
+const BUILD_BRIDGE_ROWS = 16;
+const BUILD_LEVEL_CELLS = 128;
+
+/**
+ * Milliseconds of lattice building a frame may spend in {@link NavGrid.warm} —
+ * the one owner, for `Game` (her own lattice, every frame and every frame of
+ * the cat-bus ride). About a quarter of the 8.3 ms frame the game is held to.
+ */
+export const NAV_WARM_BUDGET_MS = 2;
 
 /** Nodes popped per piece of a sliced flood ({@link NavGrid.floodFromSearch}). */
 const FLOOD_PIECE = 4096;
@@ -929,6 +962,22 @@ export class NavGrid {
     // is what the player's own grid wants and what this has always done.
     const boundary = this.pinnedBoundary ?? this.collision.playBounds;
 
+    // A build {@link warm} left part-laid: this asker cannot wait a frame, so
+    // the rest of it is laid now — the remainder only, never a fresh start.
+    const pending = this.pendingBuild;
+    if (pending) {
+      if (pending.boundary === boundary) {
+        const began = performance.now();
+        this.advanceBuild(pending, sample, Infinity);
+        const took = performance.now() - began;
+        NAV_GRID_BUILDS.fullMs += took;
+        NAV_GRID_BUILDS.forced += 1;
+        NAV_GRID_BUILDS.worstForcedMs = Math.max(NAV_GRID_BUILDS.worstForcedMs, took);
+      } else {
+        this.pendingBuild = null;
+      }
+    }
+
     if (this.built && this.builtBoundary === boundary) {
       if (this.builtRevision === this.collision.revision) return true;
       // A collider came or went since this lattice was laid: redo the cells it
@@ -955,7 +1004,20 @@ export class NavGrid {
   }
 
   private rebuild(boundary: ParkBoundary, sample: GroundSampler): void {
+    this.pendingBuild = null;
     const levels = this.levelsOf(sample);
+    if (!this.frameLattice(boundary)) return;
+    const side = this.cells;
+    const total = side * side;
+    this.rebuildFramed(boundary, sample, levels, side, total);
+  }
+
+  /**
+   * Sizes and places the lattice over `boundary` and clears its cell arrays —
+   * the head of every whole build, one-shot or sliced. False (and `built`
+   * false) when the boundary has no extent to lay a lattice over.
+   */
+  private frameLattice(boundary: ParkBoundary): boolean {
     // Sized and centred on the boundary's own extent rather than on a radius
     // about a centre: the park's edge is neither circular nor, for the castle
     // interior, centred on the origin.
@@ -966,7 +1028,7 @@ export class NavGrid {
     let side = Math.ceil(((reach + MARGIN) * 2) / CELL);
     if (side <= 0) {
       this.built = false;
-      return;
+      return false;
     }
 
     // Cell (0, 0)'s centre, half a cell in from the corner of the square.
@@ -994,7 +1056,10 @@ export class NavGrid {
       this.hopBand.fill(0);
       this.paved.fill(0);
     }
+    return true;
+  }
 
+  private rebuildFramed(boundary: ParkBoundary, sample: GroundSampler, levels: GroundSampler, side: number, total: number): void {
     // The soft boundary first: everything the resolver would push her back
     // inside of is simply not part of the map.
     // Asked of the boundary itself, so the lattice and `CollisionWorld`'s
@@ -1076,6 +1141,146 @@ export class NavGrid {
     this.nodeCount = nodes;
     this.finishBuild(boundary);
     NAV_GRID_BUILDS.full += 1;
+  }
+
+  // ------------------------------------------------------- the sliced build
+
+  /** A whole build in flight: which boundary, the revision it began at, and how far each pass has got. */
+  private pendingBuild: { boundary: ParkBoundary; revision: number; phase: number; row: number; index: number; nodes: number } | null = null;
+
+  /**
+   * **Brings this lattice up to date a slice at a time**, spending about
+   * `budgetMs` and returning true once it describes the space as it stands —
+   * step 1b of the 120 fps plan (`docs/perf/FRAME-DROPS-2026-11.md`). Called
+   * every frame by whoever owns the grid, so the lattice is laid behind the
+   * cat bus and the first frames of a room rather than inside the first tap
+   * (measured: one 526 ms task on an M4 Pro).
+   *
+   * A lattice already laid over this boundary is patched as ever (a patch is
+   * small by construction); one that is not, or that cannot be patched, is
+   * built whole **in slices**: the very passes `rebuild` runs — boundary,
+   * solids, bridge exemption, paving, levels — over bands of rows and runs of
+   * cells, in the same order. Every stamp only ever writes a 1 and every band
+   * offers each collider whole, so the bands' union is `rebuild`'s one pass;
+   * `NAV_GRID_BUILDS.verify` proves it cell for cell.
+   *
+   * The build is stamped with the revision it **began** at, so a collider that
+   * came or went while it was being laid is a patch's to redo, by the patch's
+   * own rule: nothing outside a change's footprint depends on it.
+   *
+   * A question that cannot wait (`findRoute`, `canStandAt`) finishes whatever
+   * is left in one go — see `ensureLattice` — so nothing is ever answered from
+   * a half-laid lattice.
+   */
+  warm(sample: GroundSampler, budgetMs: number): boolean {
+    const boundary = this.pinnedBoundary ?? this.collision.playBounds;
+    if (this.built && this.builtBoundary === boundary) {
+      if (this.builtRevision === this.collision.revision) return true;
+      if (NAV_GRID_BUILDS.patching) {
+        const began = performance.now();
+        if (this.patch(boundary, sample)) {
+          const took = performance.now() - began;
+          NAV_GRID_BUILDS.patchMs += took;
+          NAV_GRID_BUILDS.worstPatchMs = Math.max(NAV_GRID_BUILDS.worstPatchMs, took);
+          if (NAV_GRID_BUILDS.verify) this.verifyAgainstWhole(boundary, sample);
+          return true;
+        }
+      }
+    }
+
+    const began = performance.now();
+    let pending = this.pendingBuild;
+    if (!pending || pending.boundary !== boundary) {
+      this.pendingBuild = null;
+      this.built = false;
+      // Whoever holds a flood of the old lattice must hear that it is gone.
+      this.builtBoundary = null;
+      this.builtRevision = -1;
+      if (!this.frameLattice(boundary)) return false;
+      pending = { boundary, revision: this.collision.revision, phase: 0, row: 0, index: 0, nodes: 0 };
+      this.pendingBuild = pending;
+    }
+    const done = this.advanceBuild(pending, sample, began + budgetMs);
+    const took = performance.now() - began;
+    NAV_GRID_BUILDS.fullMs += took;
+    NAV_GRID_BUILDS.slices += 1;
+    NAV_GRID_BUILDS.worstSliceMs = Math.max(NAV_GRID_BUILDS.worstSliceMs, took);
+    if (done) {
+      NAV_GRID_BUILDS.sliced += 1;
+      if (NAV_GRID_BUILDS.verify && this.builtRevision === this.collision.revision) this.verifyAgainstWhole(boundary, sample);
+    }
+    return done && this.builtRevision === this.collision.revision;
+  }
+
+  /**
+   * Runs a pending build's passes until `deadline` (a `performance.now()`
+   * time; `Infinity` to finish). True once the lattice is built.
+   */
+  private advanceBuild(
+    pending: { boundary: ParkBoundary; revision: number; phase: number; row: number; index: number; nodes: number },
+    sample: GroundSampler,
+    deadline: number,
+  ): boolean {
+    const side = this.cells;
+    const last = side - 1;
+    const total = side * side;
+    const boundary = pending.boundary;
+    for (;;) {
+      if (pending.phase === 0) {
+        const to = Math.min(last, pending.row + BUILD_BOUNDARY_ROWS - 1);
+        this.stampBoundary(boundary, 0, last, pending.row, to, this.blocked);
+        pending.row = to + 1;
+        if (pending.row > last) {
+          pending.phase = 1;
+          pending.row = 0;
+        }
+      } else if (pending.phase === 1) {
+        const to = Math.min(last, pending.row + BUILD_SOLID_ROWS - 1);
+        this.stampSolids(sample, 0, last, pending.row, to, this.blocked, this.hopBand);
+        pending.row = to + 1;
+        if (pending.row > last) {
+          pending.phase = 2;
+          pending.row = 0;
+        }
+      } else if (pending.phase === 2) {
+        const to = Math.min(last, pending.row + BUILD_BRIDGE_ROWS - 1);
+        this.exemptBridges(0, last, pending.row, to, this.blocked, this.hopBand);
+        pending.row = to + 1;
+        if (pending.row > last) pending.phase = 3;
+      } else if (pending.phase === 3) {
+        forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
+        this.flatCost = this.paved.includes(1) ? 1 : OFF_PATH_COST_MULTIPLIER;
+        this.growNodes(total + 64);
+        pending.index = 0;
+        pending.nodes = 0;
+        pending.phase = 4;
+      } else if (pending.phase === 4) {
+        const levels = this.levelsOf(sample);
+        const stop = Math.min(total, pending.index + BUILD_LEVEL_CELLS);
+        let nodes = pending.nodes;
+        for (let index = pending.index; index < stop; index += 1) {
+          this.levelStart[index] = nodes;
+          if (this.blocked[index] === 1) continue;
+          if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) this.growNodes(this.nodeHeight.length * 2);
+          nodes = this.levelCell(index, levels, this.nodeHeight, this.nodeCell, nodes);
+        }
+        pending.index = stop;
+        pending.nodes = nodes;
+        if (stop >= total) {
+          this.levelStart[total] = nodes;
+          this.nodeCount = nodes;
+          pending.phase = 5;
+        }
+      } else {
+        this.finishBuild(boundary);
+        // Stamped with the revision the build began at: see {@link warm}.
+        this.builtRevision = pending.revision;
+        this.pendingBuild = null;
+        NAV_GRID_BUILDS.full += 1;
+        return true;
+      }
+      if (performance.now() >= deadline) return false;
+    }
   }
 
   /** The tail every build shares: search buffers sized, connectors tied to nodes, the build stamped. */

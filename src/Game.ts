@@ -39,7 +39,7 @@ import {
   WornKeychain,
 } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
-import type { NavGrid } from './world/NavGrid';
+import { NAV_WARM_BUDGET_MS, type NavGrid } from './world/NavGrid';
 import { playerNavGrid } from './world/playerLattice';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
@@ -1765,8 +1765,21 @@ export class Game {
   /** See `entities/frameStrides.ts`: once a frame, or once a stride while dashing. */
   private readonly strides = new FrameStrides();
 
+  /**
+   * **Her route lattice, a slice at a time** (step 1b of the 120 fps plan,
+   * `docs/perf/FRAME-DROPS-2026-11.md`): laid behind the cat bus (`main.ts`
+   * calls this every ride frame) and over the first frames of any space she
+   * walks into, never inside the first tap — that was one 526 ms task. True
+   * once the lattice describes the space she is in. See `NavGrid.warm`.
+   */
+  warmNavigation(): boolean {
+    const sampler = this.player.groundSampler;
+    return sampler ? this.navGrid.warm(sampler, NAV_WARM_BUDGET_MS) : false;
+  }
+
   private tick(tick: LoopTick): void {
     this.input.update();
+    this.warmNavigation();
 
     // Changing her look rebuilds the player's model in place, which a ride or
     // a climb is not prepared for — see `Hud.setLookAvailable`, which owns the

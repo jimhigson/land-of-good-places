@@ -55,6 +55,7 @@
     "check:reptile-house": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-reptile-house.mts",
     "check:library": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-library.mts",
     "check:nav-spaces": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-nav-spaces.mts",
+    "check:nav-warm": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-nav-warm.mts",
     "check:camera-breath": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-camera-breath.mts",
     "check:labels": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-labels.mts",
     "check:exhibit-camera": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-exhibit-camera.mts",

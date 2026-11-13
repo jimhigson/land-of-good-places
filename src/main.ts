@@ -1263,6 +1263,9 @@ function rideInThenPlay(
     // pictures into render targets under their own light rigs, so not one of
     // the park's programs serves it — a first book opened cold would link a
     // dozen mid-frame. Whole steps only, like the park's slices.
+    // Her route lattice, a slice a ride frame, for the same reason as the
+    // shaders below (step 1b of the 120 fps plan — `Game.warmNavigation`).
+    handOverGame?.warmNavigation();
     if (warmup && director.shouldWarmShaders()) {
       const budget = director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS);
       if (!warmup.ready) {
