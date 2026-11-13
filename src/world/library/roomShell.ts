@@ -8,6 +8,7 @@ import { solid, toonMaterial } from '../../art/style/materials';
 import { libraryBookcaseSize } from '../../art/models/libraryAssets';
 import { createLibraryDen, createLibraryDenLantern, type LibraryDenHandle } from '../../art/models/libraryDenAssets';
 import { LIBRARY_DEN_PLAN, type LibraryDenNiche, type LibraryDenPlan } from '../../art/models/libraryDenKit';
+import { buildDoorFrame, drawnClearOfFrame, registerDoorFrameSolids, type DoorFrame, type DoorFrameSolids } from '../../art/models/doorFrames';
 import { shelveDenNiches } from './furnish';
 import { LIBRARY_INTERIOR_LIFT } from './lighting';
 import type { LibraryProps } from './props';
@@ -73,6 +74,10 @@ export interface ReadingRoomFabric {
 
 /** What {@link buildReadingRoomShell} built. */
 export interface ReadingRoomShell {
+  /** The doorway frame round the way out, in the room's own metres (`doorFrames.ts`). */
+  readonly exitFrame: DoorFrame;
+  /** Its colliders, world metres. */
+  readonly exitFrameSolids: DoorFrameSolids;
   /** Every room wall's collider, in registration order, the west wall's two spans either side of the den's doorway among them. */
   readonly walls: readonly WallCollider[];
   /**
@@ -150,10 +155,13 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
     // North and south take the corners; east and west stop short of them by
     // the wall's depth, so no two boxes share a corner column (the reptile
     // hall's rule, which `check:coplanar` taught it).
-    const drawn =
+    const cornered =
       along === 'x'
         ? cornerClosedSpans(spans, from, to, LIBRARY_WALL_HALF)
         : spans.map(([a, b]): [number, number] => [a <= from + 1e-6 ? a + LIBRARY_WALL_HALF : a, b >= to - 1e-6 ? b - LIBRARY_WALL_HALF : b]);
+    // The south wall is drawn back from the way out by the doorway frame's
+    // posts, which stand where its ends were (`doorFrames.ts`).
+    const drawn = side === 'south' ? drawnClearOfFrame(cornered, libraryDoorGap(), 'library') : cornered;
     const west = side === 'west';
     for (const [index, [a, b]] of spans.entries()) {
       if (b - a < 0.05) continue;
@@ -190,7 +198,13 @@ export function buildReadingRoomShell(root: Group, collision: CollisionWorld, su
     }
   }
 
-  return { walls, westWall, westMaterial, fabric: { floor: floorMaterial, wall: material } };
+  // **The way out's doorway frame** (Jim, 11 Nov 2026): a frame of books
+  // round the south gap, so the exit in the hidden wall can be seen.
+  const [doorMin, doorMax] = libraryDoorGap();
+  const exitFrame = buildDoorFrame('library', { minX: doorMin, maxX: doorMax, z: LIBRARY_HALF_Z, floorY: 0 });
+  root.add(exitFrame.group);
+  const exitFrameSolids = registerDoorFrameSolids(collision, exitFrame, originX, originZ, LIBRARY_FLOOR_Y);
+  return { walls, westWall, westMaterial, exitFrame, exitFrameSolids, fabric: { floor: floorMaterial, wall: material } };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG, TOWER_DOOR_BAND_OUTER, TOWER_JAMB_REACH, TOWER_JAMB_HALF_THICKNESS } from './towerDimensions';
+import { buildDoorFrame, drawnClearOfFrame, registerDoorFrameSolids, type PlacedDoorFrame } from '../../art/models/doorFrames';
 import {
   BoxGeometry,
   type PerspectiveCamera,
@@ -3306,6 +3307,15 @@ export class Hotel implements GameSystem {
 
   // ------------------------------------------------------------- builders
 
+  /** The doorway frame round the lobby's front door, once the lobby is built. */
+  private lobbyExitFrame: PlacedDoorFrame | null = null;
+
+  /** The doorway frame round the lobby's way out to the park (`doorFrames.ts`). */
+  get exitDoorFrame(): PlacedDoorFrame {
+    if (!this.lobbyExitFrame) throw new Error('Hotel: the lobby has no doorway frame — its south gap is gone');
+    return this.lobbyExitFrame;
+  }
+
   private buildRoomShell(room: HotelRoom): void {
     const shell = new Group();
     shell.name = `hotel:${room.space}`;
@@ -3379,8 +3389,12 @@ export class Hotel implements GameSystem {
       // Jim's "the walls don't abut each other properly". Only the drawn box
       // is extended; the collider keeps the logical span, which changes
       // nothing a child can reach.
-      const drawn =
+      const cornered =
         along === 'x' ? cornerClosedSpans(spans, from, to, WALL_HALF_DEPTH) : spans;
+      // The lobby's south wall is drawn back from the front door by the
+      // doorway frame's posts, which stand where its ends were (`doorFrames.ts`).
+      const exitGap = room === LOBBY && side === 'south' ? gap : undefined;
+      const drawn = exitGap ? drawnClearOfFrame(cornered, exitGap, 'hotel') : cornered;
 
       for (const [index, [a, b]] of spans.entries()) {
         if (b - a < 0.05) continue;
@@ -3416,6 +3430,17 @@ export class Hotel implements GameSystem {
           this.collision.addWall(wx1, wz1, wx2, wz2, 0.3, height, false, true),
         );
       }
+    }
+
+    // **The front door's doorway frame** (Jim, 11 Nov 2026): painted wood
+    // trim round the lobby's way out to the park, in the south wall the camera
+    // looks through — so a child can see where the door is.
+    const exitGap = room === LOBBY ? room.gaps.south : undefined;
+    if (exitGap) {
+      const frame = buildDoorFrame('hotel', { minX: exitGap[0], maxX: exitGap[1], z: room.halfZ, floorY: 0 });
+      shell.add(frame.group);
+      const solids = registerDoorFrameSolids(this.collision, frame, room.originX, room.originZ, 0);
+      this.lobbyExitFrame = { frame, solids, originX: room.originX, originZ: room.originZ, originY: 0 };
     }
 
     // The lift alcove: three walls poking out of the west gap, so the "car"

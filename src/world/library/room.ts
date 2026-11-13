@@ -3,6 +3,7 @@ import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import type { SpeechBubble } from '../../ui/SpeechBubble';
+import type { PlacedDoorFrame } from '../../art/models/doorFrames';
 import { KID_HIP_HEIGHT } from '../../art/models/kid';
 import { libraryCushionSize } from '../../art/models/libraryAssets';
 import { LibraryLighting } from './lighting';
@@ -17,6 +18,7 @@ import { LibraryCat } from './LibraryCat';
 import { buildLibraryDenShell, buildReadingRoomShell, type LibraryDenShell } from './roomShell';
 import { CAT_ZONE_ID, DRAGON_ZONE_ID } from './roomIds';
 import {
+  LIBRARY_FLOOR_Y,
   LIBRARY_HALF_X,
   LIBRARY_HALF_Z,
   LIBRARY_ORIGIN_X,
@@ -102,6 +104,8 @@ export interface LibraryRoomContent {
   readonly props: LibraryProps;
   /** The reading room's own four walls' colliders. */
   readonly roomWalls: readonly WallCollider[];
+  /** The doorway frame round the room's way out (`doorFrames.ts`), built with the shell. */
+  readonly exitDoorFrame: PlacedDoorFrame;
   readonly westWall: Group;
   readonly westMaterial: MeshToonMaterial;
   readonly denShell: LibraryDenShell;
@@ -172,6 +176,7 @@ export function furnishLibraryRoom(deps: LibraryRoomDeps): LibraryRoomContent {
   return {
     props,
     roomWalls: shell.walls,
+    exitDoorFrame: { frame: shell.exitFrame, solids: shell.exitFrameSolids, originX: LIBRARY_ORIGIN_X, originZ: LIBRARY_ORIGIN_Z, originY: LIBRARY_FLOOR_Y },
     westWall: shell.westWall,
     westMaterial: shell.westMaterial,
     denShell,

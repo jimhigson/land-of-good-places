@@ -1,4 +1,5 @@
 import { Group, Vector3, type MeshToonMaterial, type Object3D } from 'three';
+import type { PlacedDoorFrame } from '../../art/models/doorFrames';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -554,6 +555,16 @@ export class Library implements GameSystem {
   /** The reading room's own four walls' colliders (the west wall's two spans either side of the den's doorway among them). */
   get roomWalls(): readonly WallCollider[] {
     return this.furnishedRoom.roomWalls;
+  }
+
+  /**
+   * The doorway frame round the reading room's way out (`doorFrames.ts`). It is
+   * built with the room's shell, whose south wall it stands in, so it is there
+   * only once the room is furnished: ask {@link furnished} first from anywhere
+   * that runs before she has gone in (`World.doorwayExits` does).
+   */
+  get exitDoorFrame(): PlacedDoorFrame {
+    return this.furnishedRoom.exitDoorFrame;
   }
 
   /** What `buildLibraryDenShell` built: the drawn den, its niche books and lanterns, and its bodies. */
