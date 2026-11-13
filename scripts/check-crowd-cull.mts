@@ -44,7 +44,11 @@
  *    meshes — never both (two surfaces fighting), never neither, under every
  *    pose. On the **park poses at zoom 1** — the ordinary follow camera — that
  *    one is the far level; on the **poses at `CAMERA_ZOOM_MAX`** it is full
- *    detail; the interiors assert one level, not which. The level is chosen by
+ *    detail for every child whose body alone fills the switch's share of the
+ *    picture (measured here from her own parts; the sphere the code sizes her
+ *    by encloses them, so it is larger still) — one far up a zoomed frame is
+ *    small, and either level is right for her; the interiors assert one
+ *    level, not which. The level is chosen by
  *    the share of the picture a child fills, which nothing about the screen's
  *    pixels enters (`cullCrowdsFor` is given none), so these hold at every
  *    device pixel ratio; the run states both clauses in CSS pixels on its own
@@ -404,17 +408,43 @@ function measure(label: string, kind: 'park' | 'interior', expect: 'far' | 'full
   const membersNearScreen = new Set<object>();
   for (const crowd of crowds) {
     const { parts, members } = insides(crowd);
+    // Whether this crowd is drawn at all (an interior she is not in is not).
+    // Asked of the crowd, never of a part's mesh: since step 16 a mesh holding
+    // nobody this draw is hidden, and the full-detail one usually is.
+    if (!visibleChain(crowd.group)) continue;
     for (const member of members) {
       const choice = committed.get(member);
       if (!choice) continue;
+      // Her height on screen, from her own parts (never from the sphere the
+      // code under test sizes her by): clip-space y over w, as a share of the
+      // picture. The code's sphere encloses every part, so it is never shorter.
       let top = -Infinity, bottom = Infinity;
+      for (let p = 0; p < parts.length; p += 1) {
+        const proxy = member.proxies[p];
+        if (choice[p]! < 0 || !proxy) continue;
+        worldMatrix.multiplyMatrices(crowd.group.matrixWorld, proxy.matrixWorld);
+        partSphere.copy(enclosingSphere(parts[p]!.source.geometry)).applyMatrix4(worldMatrix);
+        viewPoint.copy(partSphere.center).applyMatrix4(cam.matrixWorldInverse);
+        const w = -viewPoint.z;
+        if (w <= 1e-6) continue;
+        const y = (lens * viewPoint.y) / w;
+        const r = (lens * partSphere.radius) / w;
+        if (y + r > top) top = y + r;
+        if (y - r < bottom) bottom = y - r;
+      }
+      const bodyShare = top > bottom ? (top - bottom) / 2 : 0;
+      // At `CAMERA_ZOOM_MAX` full detail is required of every child whose body
+      // alone fills the switch's share; one far up a zoomed frame is small,
+      // and the far level is right for her.
+      const close = expect === 'full' && bodyShare >= LOD_FULL_ABOVE_SHARE;
+      let seen = false;
       for (let p = 0; p < parts.length; p += 1) {
         const chosen = choice[p]!;
         if (chosen < 0) continue;
         const part = parts[p]!;
         const levels = levelMeshes(part, chosen);
         const proxy = member.proxies[p];
-        if (levels.length === 0 || !proxy || !visibleChain(levels[0]!)) continue;
+        if (levels.length === 0 || !proxy) continue;
         // The mesh drawing her in the main pass: whichever level holds her
         // instance below its count. Before step 16 that was the only mesh.
         const drawing = levels.filter((candidate) => candidate.count > 0 && holds(candidate, proxy.matrixWorld));
@@ -428,15 +458,7 @@ function measure(label: string, kind: 'park' | 'interior', expect: 'far' | 'full
         nearSphere.radius += CROWD_BOUNDS_MARGIN + 0.02;
         if (view.intersectsSphere(nearSphere)) membersNearScreen.add(member);
         if (view.intersectsSphere(partSphere)) {
-          // Her height on screen, from her own parts: clip-space y over w.
-          viewPoint.copy(partSphere.center).applyMatrix4(cam.matrixWorldInverse);
-          const w = -viewPoint.z;
-          if (w > 1e-6) {
-            const y = (lens * viewPoint.y) / w;
-            const r = (lens * partSphere.radius) / w;
-            if (y + r > top) top = y + r;
-            if (y - r < bottom) bottom = y - r;
-          }
+          seen = true;
           if (levels.length > 1) {
             partsWithLevels += 1;
             if (drawing.length > 1) {
@@ -453,13 +475,16 @@ function measure(label: string, kind: 'park' | 'interior', expect: 'far' | 'full
                   );
                 }
               }
-            } else if (expect === 'full') {
+            } else if (close) {
               partsFullExpected += 1;
               if (drawing[0] === levels[1]) {
                 partsAtFarLevel += 1;
                 if (levelReports < 6) {
                   levelReports += 1;
-                  failures.push(`${label}: ${mesh.name} drawn at the far level at CAMERA_ZOOM_MAX, where she is close enough to want the model as authored`);
+                  failures.push(
+                    `${label}: ${mesh.name} drawn at the far level for a child ${(bodyShare * viewportCssHeight).toFixed(0)} CSS px tall ` +
+                      `on a ${viewportCssHeight} px viewport (${bodyShare.toFixed(2)} of the picture), at CAMERA_ZOOM_MAX`,
+                  );
                 }
               }
             }
@@ -514,9 +539,8 @@ function measure(label: string, kind: 'park' | 'interior', expect: 'far' | 'full
           }
         }
       }
-      if (top > bottom && expect !== 'either') {
-        // NDC spans 2 across the picture.
-        const px = ((top - bottom) / 2) * viewportCssHeight;
+      if (seen && bodyShare > 0 && (expect === 'far' || close)) {
+        const px = bodyShare * viewportCssHeight;
         const bucket = expect === 'far' ? tallCss.ordinary : tallCss.close;
         if (px < bucket.min) bucket.min = px;
         if (px > bucket.max) bucket.max = px;
@@ -795,7 +819,7 @@ process.stderr.write(
     `  ${partsWithLevels} on-screen parts with two levels checked for one level each.\n` +
     `  Ordinary camera (park poses at zoom 1, 1440×900 and 390×844 CSS px): children ${cssRange(tallCss.ordinary)} CSS px tall; ` +
     `${partsFarExpected} parts required at the far level, ${partsAtFullDetail} at full detail (must be 0).\n` +
-    `  Close (park poses at CAMERA_ZOOM_MAX): children ${cssRange(tallCss.close)} CSS px tall; ` +
+    `  Close (park poses at CAMERA_ZOOM_MAX, children whose body alone is ${LOD_FULL_ABOVE_SHARE} of the picture or more): children ${cssRange(tallCss.close)} CSS px tall; ` +
     `${partsFullExpected} parts required at full detail, ${partsAtFarLevel} at the far level (must be 0).\n` +
     `  The switch is a child's sphere ${LOD_FULL_ABOVE_SHARE} of the picture's height going up, ${LOD_LOW_BELOW_SHARE} coming down — ` +
     `${(LOD_FULL_ABOVE_SHARE * 900).toFixed(0)} / ${(LOD_LOW_BELOW_SHARE * 900).toFixed(0)} CSS px on a 900 px tall viewport, ` +
