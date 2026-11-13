@@ -26,7 +26,85 @@
  * calls, and whether the chips are written every frame.
  *
  * Run against a dev server (`pnpm run check:served-dom-churn`): it reads
- * `window.game`, which only the dev build exposes.
+ * `window.game`, which only the dev build exposes. `SWIFTSHADER=1` runs it on
+ * the software rasteriser CI's runners have.
+ *
+ * ## Its frames draw no pixels — the whole frame runs, the rasteriser does not
+ *
+ * Everything asserted here is a count made by the frame's JavaScript or the
+ * page's style engine; nothing here looks at a pixel. But a frame of the park
+ * is ~550 GL draws, its VSM shadow pass among them, and a hosted runner has no
+ * GPU, so SwiftShader rasterises them on its CPU. The 1200 frames this waits
+ * for (two samples of {@link SETTLE_FRAMES} + {@link SAMPLE_FRAMES}) took 15 s
+ * on an M4 Pro's GPU and never arrived on the runner: its first wait, for 360
+ * frames, timed out at 240 s (run 43439027681, shard 12, 13 Nov 2026) — under
+ * 1.5 fps. Measured at the spawn, seed 5, 1000×700, DPR 1, frames counted over
+ * 5 s or more:
+ *
+ * | M4 Pro, 13 Nov 2026                                              | fps     |
+ * |------------------------------------------------------------------|---------|
+ * | GPU                                                              | 120     |
+ * | SwiftShader                                                      | 3.0     |
+ * | SwiftShader, DSF 0.25 (a sixteenth of the pixels to fill)        | 3.3     |
+ * | SwiftShader, shadow map not re-rendered                          | 5.7     |
+ * | SwiftShader, sky only (`scene.visible = false`)                  | 120     |
+ * | SwiftShader, GL draw calls skipped                               | 120     |
+ * | SwiftShader on the efficiency cores (`taskpolicy -c background`) | 0.4–0.8 |
+ * | the same, GL draw calls skipped (three runs)                     | 5–11    |
+ *
+ * It is the draws — not the fill, and not the DOM. So once the park is up,
+ * `ready()` replaces the context's draw entry points with a counter. The whole
+ * frame still runs: `Game.tick`, every HUD setter, the label resolve, and all
+ * of three's own side of `renderer.render` — traversal, culling,
+ * `onBeforeRender`, programs, uniforms, and the `info.render.calls` tally the
+ * draw-call figures below are read from. Only the rasteriser is left out, on
+ * a GPU exactly as on CI, so this is one instrument everywhere, not two.
+ *
+ * **Its control, asserted on both samples**: the draws skipped equal the draws
+ * three counted, at least one a frame. Unequal means something drew around
+ * `renderer.render`, or three draws through an entry point not skipped here
+ * and CI is paying for pixels again; none means nothing was skipped at all.
+ *
+ * Not fewer frames instead: an unguarded per-frame setter is 1.00 a frame at
+ * any frame rate, but the prompts, fades, CSS transitions and wandering NPCs
+ * the ceilings must sit above run on the clock. Below 12 fps every frame
+ * carries ten times the game time a 120 fps frame does (`MAX_FRAME_DELTA` is
+ * 1/12 s) and at 1 fps 120 times the wall-clock time, so a slow frame inflates
+ * precisely the noise this has to see past — measured: the action chips'
+ * writes in the selected sample, 0.11 a frame at 120 fps, read 0.65 at 11.
+ * Fast frames keep the sample the shape it has on the family's machines.
+ *
+ * ## Proved red, 13 Nov 2026
+ *
+ * On 87d4f415 (main 23b6f0db plus this file), `pnpm run check:served-dom-churn`
+ * on an M4 Pro, seed 5's checked-in park, standing at the spawn (-1.6, 51.6),
+ * 1000×700, DPR 1, 360 frames settled then 240 sampled:
+ *
+ * - **SwiftShader, `Hud.setGamepadConnected` with its guard removed**, so it
+ *   writes the same `data-connected` every frame — the bug `ui/dataFlag.ts`
+ *   was written for:
+ *   ```
+ *   DOM mutation records: 245 in 245 frames = 1.00 a frame, ceiling 0.05 — standing
+ *   still at the spawn. Busiest: 245× attributes[data-connected] div.pill.pill--pad
+ *   ```
+ *   Style recalculations stayed at 1.00 a frame: the hidden animations already
+ *   cost one, and a second dirty element shares it. It is the mutation
+ *   ceiling, not the style one, that sees this class of bug.
+ * - **GPU, `drawElements` left out of the stub** — the control:
+ *   ```
+ *   idle: the GL draw stub skipped 39713 draws in 244 frames while three counted
+ *   132464 — a draw went around `renderer.render`, or three drew through an
+ *   entry point this does not skip
+ *   ```
+ *
+ * Green on that commit: GPU 18.7 s, SwiftShader 35.8 s, whole runs including
+ * the dev server. On SwiftShader with every process held to the efficiency
+ * cores (`taskpolicy -c background`, the nearest this Mac comes to a runner,
+ * and slower than one: boot took 17–48 s there, 9.6 s on CI), the whole of
+ * shard 12 under its watchdog passed in 4m32s of the 30m cap, at 11 fps, its
+ * slowest single wait 43.3 s of the 240 s allowed (34768dcb). Main's own
+ * version, on c1bdb168 with the browser held there the same way, timed out
+ * after 300.7 s on CI's own stack (`frames` ← `sample`).
  */
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
@@ -83,22 +161,47 @@ interface Sample {
   readonly renders: number;
   readonly targetBinds: number;
   readonly draws: number;
+  /** Draw calls three counted over the sample (`info.render.calls`, summed). */
+  readonly drawsCounted: number;
+  /** GL draw calls the stub skipped over the same frames — the control. */
+  readonly drawsSkipped: number;
   readonly styleRecalcs: number;
   readonly layouts: number;
   readonly selected: string | null;
   readonly at: readonly [number, number];
   /** Names of running animations on targets that are not painted. */
   readonly hiddenAnimations: readonly string[];
+  /** Wall-clock ms the {@link SAMPLE_FRAMES} took — printed, so every run shows its frame rate. */
+  readonly sampleMs: number;
+  /** The WebGL renderer string: which rasteriser the frames would have gone to. */
+  readonly glRenderer: string;
+}
+
+/**
+ * The longest any one wait took, against the {@link BOOT_TIMEOUT_MS} each is
+ * allowed — printed at the end of every run, so a CI log shows the margin
+ * this check has left rather than only whether it ran out.
+ */
+let slowestWait = { ms: 0, what: 'nothing' };
+async function timed<T>(what: string, wait: Promise<T>): Promise<T> {
+  const started = Date.now();
+  const result = await wait;
+  const ms = Date.now() - started;
+  if (ms > slowestWait.ms) slowestWait = { ms, what };
+  return result;
 }
 
 async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const g = (window as unknown as { game?: { player?: unknown; engine?: unknown } }).game;
-      return Boolean(g && g.player && g.engine);
-    },
-    undefined,
-    { timeout: BOOT_TIMEOUT_MS, polling: 250 },
+  await timed(
+    'the park to boot',
+    page.waitForFunction(
+      () => {
+        const g = (window as unknown as { game?: { player?: unknown; engine?: unknown } }).game;
+        return Boolean(g && g.player && g.engine);
+      },
+      undefined,
+      { timeout: BOOT_TIMEOUT_MS, polling: 250 },
+    ),
   );
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
@@ -122,19 +225,43 @@ async function ready(page: Page): Promise<void> {
         renderer: {
           render: (...a: unknown[]) => void;
           setRenderTarget: (...a: unknown[]) => void;
+          getContext: () => WebGL2RenderingContext;
           info: { render: { calls: number } };
         };
       };
     };
     const renderer = game.engine.renderer;
-    const tally = { frames: 0, renders: 0, targets: 0, draws: 0, drawsThisFrame: 0 };
+    const tally = { frames: 0, renders: 0, targets: 0, draws: 0, drawsThisFrame: 0, drawsCounted: 0, drawsSkipped: 0 };
     const render = renderer.render.bind(renderer);
     renderer.render = (...a: unknown[]) => {
       tally.renders++;
       render(...a);
       // `info.render.calls` resets at each render call, so sum them per frame.
-      tally.drawsThisFrame += renderer.info.render.calls;
+      const calls = renderer.info.render.calls;
+      tally.drawsThisFrame += calls;
+      tally.drawsCounted += calls;
     };
+    // **No pixels** (see the file comment): every draw entry point WebGL 2
+    // has, and the two `WEBGL_multi_draw` ones three r185 calls, become a
+    // counter. Own properties shadow the prototype's; three looks each one up
+    // per call (`gl.drawElements(…)`), and `getExtension` hands back the same
+    // object three holds.
+    const gl = renderer.getContext();
+    const skip = (): void => {
+      tally.drawsSkipped++;
+    };
+    const entryPoints = gl as unknown as Record<string, unknown>;
+    for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements']) {
+      entryPoints[name] = skip;
+    }
+    const multiDraw = gl.getExtension('WEBGL_multi_draw') as unknown as Record<string, unknown> | null;
+    if (multiDraw) {
+      multiDraw['multiDrawArraysWEBGL'] = skip;
+      multiDraw['multiDrawElementsWEBGL'] = skip;
+    }
+    // Which rasteriser this ran on, for the log: a CI run should say SwiftShader.
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    w['__glRenderer'] = String(debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     const setTarget = renderer.setRenderTarget.bind(renderer);
     renderer.setRenderTarget = (...a: unknown[]) => {
       if (a[0]) tally.targets++;
@@ -153,10 +280,13 @@ async function ready(page: Page): Promise<void> {
 
 async function frames(page: Page, n: number): Promise<void> {
   const from = await page.evaluate(() => (window as unknown as { __tally: { frames: number } }).__tally.frames);
-  await page.waitForFunction(
-    (until) => (window as unknown as { __tally: { frames: number } }).__tally.frames >= until,
-    from + n,
-    { timeout: BOOT_TIMEOUT_MS, polling: 100 },
+  await timed(
+    `${n} frames`,
+    page.waitForFunction(
+      (until) => (window as unknown as { __tally: { frames: number } }).__tally.frames >= until,
+      from + n,
+      { timeout: BOOT_TIMEOUT_MS, polling: 100 },
+    ),
   );
 }
 
@@ -171,13 +301,17 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
   await page.evaluate(() => {
     const w = window as unknown as {
       __domCounts: Map<string, number>;
-      __tally: { frames: number; renders: number; targets: number; draws: number };
+      __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
+      __sampleStarted: number;
     };
     w.__domCounts.clear();
     w.__tally.frames = 0;
     w.__tally.renders = 0;
     w.__tally.targets = 0;
     w.__tally.draws = 0;
+    w.__tally.drawsCounted = 0;
+    w.__tally.drawsSkipped = 0;
+    w.__sampleStarted = performance.now();
   });
   const before = await metrics();
   await frames(page, SAMPLE_FRAMES);
@@ -186,9 +320,12 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
   const got = await page.evaluate(() => {
     const w = window as unknown as {
       __domCounts: Map<string, number>;
-      __tally: { frames: number; renders: number; targets: number; draws: number };
+      __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
+      __sampleStarted: number;
+      __glRenderer: string;
       game: { selection?: { selected: { id?: string } | null }; player: { position: { x: number; z: number } } };
     };
+    const sampleMs = performance.now() - w.__sampleStarted;
     const selected = w.game.selection?.selected ?? null;
     const painted = (element: Element | null): boolean => {
       for (let e = element; e; e = e.parentElement) {
@@ -202,6 +339,8 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
       .filter((a) => a.playState === 'running' && !painted((a.effect as KeyframeEffect | null)?.target ?? null))
       .map((a) => String((a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id));
     return {
+      sampleMs,
+      glRenderer: w.__glRenderer,
       hiddenAnimations,
       tally: { ...w.__tally },
       dom: [...w.__domCounts.entries()].sort((a, b) => b[1] - a[1]),
@@ -218,11 +357,15 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     renders: got.tally.renders,
     targetBinds: got.tally.targets,
     draws: got.tally.draws,
+    drawsCounted: got.tally.drawsCounted,
+    drawsSkipped: got.tally.drawsSkipped,
     styleRecalcs: (after['RecalcStyleCount'] ?? NaN) - (before['RecalcStyleCount'] ?? NaN),
     layouts: (after['LayoutCount'] ?? NaN) - (before['LayoutCount'] ?? NaN),
     selected: got.selected,
     at: got.at,
     hiddenAnimations: got.hiddenAnimations,
+    sampleMs: got.sampleMs,
+    glRenderer: got.glRenderer,
   };
 }
 
@@ -230,13 +373,35 @@ const per = (n: number, s: Sample): string => (n / s.frames).toFixed(2);
 
 function report(label: string, s: Sample): void {
   say(
-    `${label}: at ${s.at.map((v) => v.toFixed(1)).join(', ')}, selected ${s.selected ?? 'nothing'}, ${s.frames} frames — ` +
+    `${label}: at ${s.at.map((v) => v.toFixed(1)).join(', ')}, selected ${s.selected ?? 'nothing'}, ` +
+      `${s.frames} frames in ${(s.sampleMs / 1000).toFixed(1)} s (${((s.frames * 1000) / s.sampleMs).toFixed(0)} fps) — ` +
       `DOM mutations ${s.mutations} (${per(s.mutations, s)}/frame), style recalcs ${s.styleRecalcs} (${per(s.styleRecalcs, s)}/frame), ` +
       `layouts ${s.layouts} (${per(s.layouts, s)}/frame), renderer.render ${per(s.renders, s)}/frame, ` +
       `render-target binds ${per(s.targetBinds, s)}/frame, draw calls ${s.draws} (busiest frame)`,
   );
   for (const [key, n] of s.top) say(`    ${String(n).padStart(5)}  ${(n / s.frames).toFixed(2)}/frame  ${key}`);
   say(`    running animations on unpainted elements: ${s.hiddenAnimations.length}${s.hiddenAnimations.length ? ` (${s.hiddenAnimations.join(', ')})` : ''}`);
+  say(
+    `    control: GL draws skipped ${s.drawsSkipped}, three counted ${s.drawsCounted} (${per(s.drawsSkipped, s)}/frame) — ` +
+      (controlFailure(label, s) === null ? 'every draw skipped, the rest of every frame ran' : 'CONTROL FAILED'),
+  );
+}
+
+/**
+ * The instrument's own control (file comment, "Its frames draw no pixels"):
+ * every draw three counted was skipped, and nothing was skipped that three did
+ * not count, at least one a frame. Off this, the counts above may be of a
+ * frame that is not the game's, or CI is rasterising again.
+ */
+function controlFailure(label: string, s: Sample): string | null {
+  if (s.drawsSkipped === s.drawsCounted && s.drawsSkipped >= s.frames) return null;
+  const why =
+    s.drawsSkipped === 0
+      ? 'nothing was skipped, so every frame is rasterised (and on CI times out)'
+      : s.drawsSkipped !== s.drawsCounted
+        ? 'a draw went around `renderer.render`, or three drew through an entry point this does not skip'
+        : 'under one draw a frame, so the park is not being drawn at all';
+  return `${label}: the GL draw stub skipped ${s.drawsSkipped} draws in ${s.frames} frames while three counted ${s.drawsCounted} — ${why}`;
 }
 
 try {
@@ -250,7 +415,11 @@ try {
 }
 
 const failures: string[] = [];
-const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--mute-audio'] });
+let glRenderer = '(never reached)';
+// SWIFTSHADER=1 forces the software rasteriser CI's runners have, as
+// check:render-budget and check:static-freeze do, so a local run can see CI's frame.
+const args = ['--mute-audio', ...(process.env.SWIFTSHADER === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])];
+const browser = await chromium.launch({ channel: 'chromium', headless: true, args });
 try {
   const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -267,6 +436,7 @@ try {
   await ready(page);
   const idle = await sample(context, page);
   report('idle', idle);
+  glRenderer = idle.glRenderer;
 
   if (seeds.length === 0) failures.push(`the page never reported its park seed, so the pin to ${SEED} is unproven`);
   else if (seeds.some((s) => s !== SEED)) failures.push(`asked for park seed ${SEED}, the page built ${seeds.join(', ')}`);
@@ -276,6 +446,8 @@ try {
     // has measured nothing: say that, rather than pass on 0 <= ceiling.
     if (!(idle.frames >= SAMPLE_FRAMES)) failures.push(`sampled ${idle.frames} frames, wanted ${SAMPLE_FRAMES} — nothing is measured`);
     if (!(idle.renders >= idle.frames)) failures.push(`counted ${idle.renders} render calls in ${idle.frames} frames — the renderer hook is not counting`);
+    const idleControl = controlFailure('idle', idle);
+    if (idleControl) failures.push(idleControl);
     if (!Number.isFinite(idle.styleRecalcs) || !Number.isFinite(idle.layouts)) {
       failures.push(`Chromium reported no style/layout counters (${idle.styleRecalcs}, ${idle.layouts}) — nothing is measured`);
     }
@@ -325,6 +497,8 @@ try {
     await ready(page);
     const selected = await sample(context, page);
     report(`selected (stood at ${stand.id}'s stand spot)`, selected);
+    const selectedControl = MEASURE ? null : controlFailure('selected', selected);
+    if (selectedControl) failures.push(selectedControl);
     if (selected.selected === null) {
       say('selected: NOT MEASURED — nothing was selected there, so the outline counts above are of an unselected park');
     } else if (!MEASURE && selected.renders / selected.frames > MAX_RENDER_CALLS_PER_FRAME) {
@@ -344,6 +518,10 @@ say(
     'animations ticking on hidden elements (the iris dots, the boot hint) are NOT fixed, only counted',
 );
 say(`asserted on the idle spawn only (park seed ${SEED}, ${SAMPLE_FRAMES} frames); the selected sample is asserted for render calls alone, and other spaces and mini-games are not covered`);
+say(
+  `frames drawn without pixels (GL draws skipped, see the file comment) on ${glRenderer}; slowest single wait ${(slowestWait.ms / 1000).toFixed(1)} s ` +
+    `(${slowestWait.what}) of the ${BOOT_TIMEOUT_MS / 1000} s each is allowed`,
+);
 if (MEASURE) {
   say('MEASURE=1: counts printed, nothing asserted');
 } else if (failures.length > 0) {
