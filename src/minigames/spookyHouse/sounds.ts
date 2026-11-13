@@ -1,28 +1,13 @@
+import { audioContext } from '../../core/audio';
+
 /**
  * Tiny WebAudio blips for the Spooky House — pop, squirt, candy-rattle.
  *
- * Same lazy-context, oscillator-and-envelope approach as `ui/chime.ts` (there
- * is no shared audio system yet — see that file's note about build step 9),
- * kept local to this mini-game rather than reaching into `ui/` for three
+ * Same oscillator-and-envelope approach as `ui/chime.ts`, on the park's one
+ * shared `AudioContext` (`core/audio.ts`), kept local to this mini-game rather than reaching into `ui/` for three
  * one-line helpers. Gentle throughout: this is a funfair ghost-train gag for a
  * six-year-old, not a jump scare, so nothing here is loud or sudden.
  */
-let context: AudioContext | null = null;
-
-function ensureContext(): AudioContext | null {
-  if (context) {
-    if (context.state === 'suspended') void context.resume();
-    return context;
-  }
-  const Ctor = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  try {
-    context = new Ctor();
-  } catch {
-    return null;
-  }
-  return context;
-}
 
 function tone(
   frequency: number,
@@ -32,7 +17,7 @@ function tone(
   type: OscillatorType = 'sine',
   glideTo?: number,
 ): void {
-  const ctx = ensureContext();
+  const ctx = audioContext();
   if (!ctx) return;
   const start = ctx.currentTime + at;
 
@@ -56,7 +41,7 @@ function tone(
 
 /** A short burst of filtered noise — the "shh" under the squirt and the rattle. */
 function noiseBurst(at: number, duration: number, gain: number, filterHz: number): void {
-  const ctx = ensureContext();
+  const ctx = audioContext();
   if (!ctx) return;
   const start = ctx.currentTime + at;
   const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
