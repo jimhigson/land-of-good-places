@@ -1,78 +1,54 @@
 # HANDOFF — shadow-cache-default (120 fps plan item 7, step 12)
 
 Branch `perf/shadow-cache-default` from origin/main 34f20970. Worktree
-`.claude/worktrees/shadow-cache-default`. Dev server port **6041** (one server at a
-time on it; the production preview for timings also goes on 6041).
+`.claude/worktrees/shadow-cache-default`. Dev server / preview port **6041** (one at a time).
 
-## Brief
-Prove `SunShadowCache` (src/world/sunShadowCache.ts) invisible, then turn it ON by
-default with a URL switch to turn it off. Do NOT turn on the caster budget
-(`TINY_CASTER_RADIUS` stays 0). No PR — a later stage opens it.
+## Outcome: the cache is exact, NOT invisible, NOT a clear win -> left OFF
+`SUN_SHADOW_CACHE_DEFAULT = false` with the evidence in its comment;
+`?shadowCache=1` turns it on, `?shadowCache=0` (or nothing) leaves three's own pass.
+Full numbers: `docs/perf/FRAME-DROPS-2026-11.md` item 7, "Outcome, 13 Nov 2026".
+Harness: `docs/perf/shadow-cache-2026-11-harness/` (dev server for audits; production
+build + `vite preview` for timing; `BASE=http://127.0.0.1:<port>`).
 
-## State
-- [ ] instruments: in-frame shadow-map equivalence (composite vs three's full pass), final-frame pixel diffs with a control
-- [ ] scenes: noon / low morning / sunset; movers; a static caster changing once; walking re-centre; sun step; interiors + space changes
-- [ ] timings: park standing + walking, rail race, 4x throttle — cache on vs off
-- [ ] default flipped, `?shadowCache=0` off
+## What landed on the branch
+1. `SunShadowCache.audit()` / `dayNight.auditShadowCache()`: three's own full pass from
+   the same light pose into a spare target, both blurred maps read back, compared texel by
+   texel. Control: blinded survey 59–96 k differing, movers dropped 106–113 k; clean 0.
+2. Survey hardening (993c27cf): buffers compared by identity as well as version (a swapped
+   position attribute/index went unseen: 85,885 stale texels), per-group material
+   visibility, depth-material fields (side, shadowSide, alphaTest, wireframe, alpha maps),
+   skinned/morph meshes always movers; honours three's global shadowMap switch.
+3. Single-pass redraw (399a684f): cached casters, tap copies depth, movers on top, one blur,
+   straight into the real map; the 32 MB static target is gone. The audit's control caught
+   the first version: copyTextureToTexture's depth blit leaves NO framebuffer bound, so
+   movers drawn after the tap went to the canvas (~110 k texels on every redraw). Fixed by
+   rebinding the map in the tap.
+4. `?perf=1` overlay asks for the GPU name once (39882591): it was a GPU-process round trip
+   4x/s, ~10 ms each with the cache's passes queued, inventing 1–7 % missed frames.
 
-## Findings (record as they land)
+## Audits (all 0 differing on the final code)
+park morning/noon/sunset, walking, rail race, ferris, sky cruiser, slide, cat bus /arrive,
+park train, trampoline, library and reptile-house round trips (24 consecutive frames from
+the door), 20 kinds of one-off change with the sun held, forced redraws 8/8.
+Interiors: the sun is not drawn indoors in either mode.
 
-### The instrument: `SunShadowCache.audit()` (`dayNight.auditShadowCache()`)
-After the cache draws its map, three's own pass draws the whole map again from
-the same light pose into a spare VSM target; both blurred maps are read back
-(RGBA/FLOAT) and compared texel by texel. Exact by construction: a correct cache
-differs in 0 of 4,194,304 texels.
-- Control (seed 5, `/spawn?pos=0,10`, t≈0.35, 1280x720 DPR1, headless Chromium,
-  M4 Pro Metal), harness scratchpad `sc/control.mjs`:
-  - `cache.changed = () => false` (survey blind): **59,018–89,635 differing**
-    on skipped frames, 0 on the one frame with a fresh static redraw (correct).
-  - composite drops its movers: **106,095–112,567 differing**.
-- Baseline audit, same scene, cache as merged: 12/12 audits **0 differing**
-  (10 composite frames, 2 static).
+## Visibility
+- Sun step (`steps.mjs`, noon, /spawn?pos=20,-12, 1280x720): 6 steps/s; each changes
+  ~16 k px by > 8 levels (max 74–80) and nothing between; cache off changes ~2 k px a frame
+  (max 60–98). The ring's shadow jumps ~2 px per step.
+- Re-centre (`recentre.mjs`, 2.6 m teleport, world frozen): outside her figure 4,654 px
+  > 8 levels on vs 4,608 off, max 94 both: no worse than three's own light-follow.
+- Invisible steps on tall casters (1 texel at 15 m) = redraw on 54 % of sunlit frames
+  (`dayrate.mjs`; 31 % with a 600 s day).
 
-### Audit results (all seed 5, dev server, harness `sc/scenes.mjs`, `sc/scenes2.mjs`, `sc/changes.mjs`)
-**0 differing texels in every audit** after the hardening commit 993c27cf:
-park morning/noon/sunset standing, walking (16), rail race racing (40 consecutive
-frames, cart 114,22 -> 66,-71), ferris (16), sky cruiser (16), slide (12), cat bus
-/arrive (16), park train passing (36), trampoline bounce (30), library -> park and
-reptile house -> park (24 consecutive frames from the first after the door each),
-20 kinds of one-off static change with the sun held still.
-Interiors (/hotel, /library, /reptile-house, /castle?deck=0): the sun is not drawn
-(indoors) in either mode, so there is no sun map to differ.
-Gap found and fixed (993c27cf): a swapped position attribute / index (fresh object,
-same version 0) went unseen: 85,885 stale texels. Not hit by any game path today.
+## Timing (clean pairs only; the machine hit load ~37–40 later and those runs are noise)
+Shadow-pass CPU off -> on: standing mean 0.76–1.04 -> 0.64–0.81 ms, p99 1.1–1.5 -> 1.4–1.9;
+walking 0.82–0.88 -> 0.63–0.67; rail race 0.53–0.55 -> 0.57–0.61; phone stand-in (390x844
+DPR3, 4x CPU) mean 4.3–4.8 -> 3.6–4.1, p99 6.0–6.5 -> 7.9–8.6. Shadow tris 0.46 M -> 0.13 M.
+Never time with `?perf=1` on main before 39882591 (overlay stall).
 
-### What it does standing at `/spawn?pos=0,10` (t≈0.35)
-~112 movers every frame (statue turntable 24 meshes, her 22, pet parade 21, an
-NPC 28, face-paint stall 6, crowd face patches, ferris 3, fountain water);
-~20 static redraws/s ("light moved" ~15/s, crowd face patch settle/change ~5/s).
-
-### Timing (production build on :6041, headless Chromium channel, M4 Pro Metal, seed 5)
-Harness `sc/perf2.mjs` + `sc/shadowprobe.js` (rAF intervals, CPU in rAF, GL draws and
-tris, shadow-pass draws/tris/ms timed at the OUTERMOST shadowMap.render so the cache's
-survey is included). **Do not time with `?perf=1`**: its overlay calls
-`gl.getParameter(UNMASKED_RENDERER)` 4x/s, which waits on the GPU process; with the
-cache on that wait measured ~10 ms a call (41.8 ms/s), making fake missed frames.
-First pairs (before the single-pass change), 1440x900 DPR2, 15 s:
-- standing: CPU mean 4.53/3.97 off vs 3.86 on; shadow ms mean 1.04/0.87 vs 0.65;
-  shadow p99 1.5/1.2 vs 1.6; shadow tris p50 0.46M -> 0.13M (of 1.00M -> 0.69M)
-- walking: CPU mean 3.91 vs 3.89 (no difference); shadow p99 1.2 -> 1.5
-- rail race: shadow ms mean 0.546 vs 0.568 (no saving)
-- phone stand-in 390x844 DPR3 4x CPU: shadow ms mean 4.80 -> 4.11, **p99 6.5 -> 8.6**,
-  CPU p99 23.6 -> 25.4
-CPU profile (on): survey 51 ms/s (0.43 ms/frame: visit 0.18, classify 0.12,
-changed 0.08, snapshot 0.03), composite 44 ms/s, static 18 ms/s.
-=> the survey eats most of the draw saving; redraw frames cost MORE than a cache-off
-frame (static pass + separate composite + survey) so p99 rises.
-
-### Sun steps are visible on tall casters (sc/steps.mjs: world frozen, only the sun moves)
-Noon, /spawn?pos=20,-12, 1280x720: cache on steps 6x/s; each step changes ~16k px by
->8 levels (max 74-80); between steps 0. Cache off: every frame ~2k px change by >8
-(max 60-98: the re-rasterisation crawl of a continuously moving light). Crop of the
-ring's shadow: ~2 px jump per step at 720p (out/noon-on-step-crop.png).
-Whole-day share of sunlit frames that redraw for sun steps alone: 33% at the current
-5 m/3 cm; 54% at 15 m/1 texel (what invisible-on-tall-casters needs).
-
-### Sun steps per second (computed from DayNight's formulas, 150 s day)
-06:00 every frame · 07:12 49.5/s · 08:10 (start) 20/s · 09:00 12.5/s · noon 6.5/s
-· 16:00 29/s · sunset (elev < ~8°) every frame. Each step = one full static redraw.
+## Not done / open
+- Caster budget (`TINY_CASTER_RADIUS`) untouched, per the brief.
+- No CI check for the cache: it is off by default; the audit is the instrument if it is
+  ever turned on (a served check would audit /spawn, /rail-race, /arrive with
+  ?shadowCache=1 and must be proved red with the controls in `control.mjs`).
