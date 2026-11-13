@@ -27,6 +27,14 @@ import { minTextPx } from '../../core/uiScale';
 import { SpriteLabel, type ManagedLabel } from '../../ui/LabelManager';
 
 /**
+ * The refresh rate the apples' rolling friction and the leaves' drag were tuned
+ * at, when both were per-frame multipliers. It converts those two numbers into
+ * per-second rates (perf plan step 19, docs/perf/FRAME-DROPS-2026-11.md item
+ * 18); it is not a cap and nothing runs at this rate.
+ */
+const TUNED_FRAMES_PER_SECOND = 60;
+
+/**
  * **The fake wooden tree.** The whole reason the dodgems exist.
  *
  * It stands in the middle of the rink looking like a tree that a very cheerful
@@ -454,8 +462,13 @@ export function createWobblyTree(): WobblyTree {
             apple.vz *= 0.7;
           } else {
             apple.vy = 0;
-            apple.vx *= 0.9;
-            apple.vz *= 0.9;
+            // Rolling friction, tuned as "keep 0.9 a frame" at 60 Hz. As a bare
+            // per-frame multiplier it stopped an apple twice as soon on a
+            // 120 Hz display; as a power of the frame's length it is the same
+            // roll at any refresh rate, and exactly 0.9 at 1/60 s.
+            const roll = Math.pow(0.9, dt * TUNED_FRAMES_PER_SECOND);
+            apple.vx *= roll;
+            apple.vz *= roll;
           }
         }
 
@@ -495,8 +508,11 @@ export function createWobblyTree(): WobblyTree {
         leaf.vy = damp(leaf.vy, -1.35, 0.5, dt);
         leaf.vx += Math.sin(leaf.angle) * 2.4 * dt;
         leaf.vz += Math.cos(leaf.angle * 0.7) * 1.8 * dt;
-        leaf.vx *= 0.98;
-        leaf.vz *= 0.98;
+        // Drag, tuned as "keep 0.98 a frame" at 60 Hz — see `roll` above for
+        // why it is a power of the frame's length and not a bare multiplier.
+        const drag = Math.pow(0.98, dt * TUNED_FRAMES_PER_SECOND);
+        leaf.vx *= drag;
+        leaf.vz *= drag;
         leaf.x += leaf.vx * dt;
         leaf.y += leaf.vy * dt;
         leaf.z += leaf.vz * dt;

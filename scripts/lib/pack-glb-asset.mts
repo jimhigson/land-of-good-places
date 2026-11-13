@@ -20,8 +20,9 @@ export interface PackGlbAssetConfig {
   readonly glbPath: string;
   /**
    * The bytes to pack, when they are not the whole file at {@link glbPath} — a
-   * piece of a kit cut by `splitGlb.mts` (`pack:library`'s two pieces). The
-   * path is then only named in the banner.
+   * piece of a kit cut by `splitGlb.mts` (`pack:library`'s two pieces,
+   * `pack:hotel`'s outside and inside halves). The path is then only named in
+   * the banner.
    */
   readonly bytes?: Uint8Array;
   /** Absolute path to the `.ts` module to write. */

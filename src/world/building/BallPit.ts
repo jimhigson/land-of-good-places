@@ -16,7 +16,12 @@ import { castAndReceive, softMaterial } from './parts';
 import { BALL_PIT_COUNT } from '../../core/constants';
 import { BALL_PIT_DEPTH, BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from './layout';
 import { terrainHeight } from '../terrain';
-import { BallPitSimulation, type PlayerContact, type StepStats } from './ballPhysics';
+import {
+  BALL_PHYSICS_STEP,
+  BallPitSimulation,
+  type PlayerContact,
+  type StepStats,
+} from './ballPhysics';
 import type { Player } from '../../entities/Player';
 
 /** The bowl takes light but does not cast: it sits in its own hole. */
@@ -64,15 +69,22 @@ const SPLASH_UP_STRENGTH = 6.5;
  * pit, and the player still always finds an already-settled pile.
  */
 const WARMUP_SECONDS = 6;
+/** {@link WARMUP_SECONDS} in the simulation's own sub-steps — 360. */
+const WARMUP_SUBSTEPS = Math.round(WARMUP_SECONDS / BALL_PHYSICS_STEP);
 /**
- * How much simulated time to catch up per real frame while warming up.
- * Matches the simulation's own per-`step()` cap (`MAX_SUBSTEPS` *
- * `FIXED_DT`, `ballPhysics.ts`), so each catch-up call is exactly as heavy as
- * the worst-case real frame the sim is already built to absorb — nothing new
- * to budget for. At this rate the whole 6 simulated seconds catches up over
- * about 72 real frames, roughly a second.
+ * How much of a frame the warm-up may spend, in milliseconds: a quarter of a
+ * 120 Hz frame (8.3 ms). At least one sub-step runs every frame regardless, so
+ * a slow device still settles the pile, just over more frames.
+ *
+ * It used to catch up a fixed five sub-steps (5/60 s) a frame, the most a real
+ * frame's `step()` can do. With all 900 balls awake and falling that cost
+ * **34–41 ms a frame** for the first second (docs/perf/FRAME-DROPS-2026-11.md,
+ * "ball physics start-up") — four 120 Hz frames' worth, every frame. The
+ * sub-steps, their order and their count are unchanged, so the settled pile is
+ * bit-for-bit the one the old schedule reached (`test/building/ballPacing.test.ts`);
+ * only how many land in each frame is different.
  */
-const WARMUP_BATCH_SECONDS = 5 / 60;
+const WARMUP_FRAME_BUDGET_MS = 2;
 
 const COLOURS = [
   PALETTE.ballPitA,
@@ -112,10 +124,10 @@ export class BallPit {
    *  converted to pit-local. Computed once: the anchor never moves. */
   private readonly groundWorldY: number;
   private lastAwake = -1; // -1 = "never stepped yet", forces the first step to run.
-  /** Simulated seconds still owed to the settling warm-up — see
-   *  `WARMUP_SECONDS` above. Paid off a few frames' worth at a time from
-   *  `update()` rather than all at once in the constructor. */
-  private warmupSecondsRemaining = WARMUP_SECONDS;
+  /** Sub-steps still owed to the settling warm-up — see `WARMUP_SECONDS`
+   *  above. Paid off within a per-frame budget from `update()` rather than all
+   *  at once in the constructor. */
+  private warmupSubstepsRemaining = WARMUP_SUBSTEPS;
 
   /** Timing/activity from the most recent physics step. Not read by gameplay
    *  — poke `window.game.world.building.ballPit.lastStats` from the console
@@ -182,7 +194,7 @@ export class BallPit {
       90210,
     );
     // No synchronous warm-up here any more — it's paid off gradually from
-    // `update()` instead, see `warmupSecondsRemaining`.
+    // `update()` instead, see `warmupSubstepsRemaining`.
 
     const colour = new Color();
     for (let i = 0; i < BALL_PIT_COUNT; i += 1) {
@@ -223,14 +235,15 @@ export class BallPit {
 
     // Settling the freshly-spawned pile is spread across the first real
     // frames rather than done synchronously in the constructor (see
-    // `WARMUP_SECONDS` above) — a normal frame's worth of extra physics work
-    // each time, invisible against everything else the game has to draw
-    // before anyone could possibly reach the pit.
-    if (this.warmupSecondsRemaining > 0) {
-      const batch = Math.min(this.warmupSecondsRemaining, WARMUP_BATCH_SECONDS);
-      this.sim.step(batch, null);
-      this.warmupSecondsRemaining -= batch;
-      this.writeAllMatrices();
+    // `WARMUP_SECONDS` above) — a bounded slice of each frame, invisible
+    // against everything else the game has to draw before anyone could
+    // possibly reach the pit.
+    if (this.warmupSubstepsRemaining > 0) {
+      this.warmupSubstepsRemaining -= this.sim.settle(
+        this.warmupSubstepsRemaining,
+        WARMUP_FRAME_BUDGET_MS,
+      );
+      this.writeDirtyMatrices();
       return;
     }
 
@@ -274,20 +287,25 @@ export class BallPit {
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 
-  /** Only balls the sim actually touched this frame get a matrix rewrite —
-   *  a settled pile with nobody nearby costs one boolean check per ball. */
+  /** Only balls whose *drawn* position moved this frame get a matrix rewrite
+   *  — a settled pile with nobody nearby costs one boolean check per ball.
+   *  Drawn, not simulated: at 120 Hz half the frames run no sub-step at all,
+   *  and a moving ball still has to move on those (`ballPhysics.ts`). */
   private writeDirtyMatrices(): void {
     let changed = false;
     for (let i = 0; i < this.sim.count; i += 1) {
-      if (!this.sim.dirty[i]) continue;
+      if (!this.sim.drawDirty[i]) continue;
       this.writeMatrix(i);
       changed = true;
     }
     if (changed) this.mesh.instanceMatrix.needsUpdate = true;
   }
 
+  /** Draws ball `i` where the simulation says to draw it this frame — its
+   *  interpolated position ({@link BallPitSimulation.drawX}), never the raw
+   *  physics state, which only moves on frames that ran a sub-step. */
   private writeMatrix(i: number): void {
-    this.position.set(this.sim.px[i] ?? 0, this.sim.py[i] ?? 0, this.sim.pz[i] ?? 0);
+    this.position.set(this.sim.drawX[i] ?? 0, this.sim.drawY[i] ?? 0, this.sim.drawZ[i] ?? 0);
     this.matrix.compose(this.position, this.rotation, this.scale);
     this.mesh.setMatrixAt(i, this.matrix);
   }
