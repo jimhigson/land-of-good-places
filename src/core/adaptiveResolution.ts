@@ -47,17 +47,29 @@ import { FRAME_BUDGET_MS } from './perfProbe';
  * On a 60 Hz phone every frame is 16.7 ms, and "missed 120 Hz" would be true
  * of all of them; the controller would sink to its floor on a device that is
  * keeping up perfectly. So the period is **measured**: the shortest interval
- * seen over the last few seconds ({@link PERIOD_BLOCK_FRAMES} ×
- * {@link PERIOD_BLOCKS}), never shorter than the game's own target
- * (`FRAME_BUDGET_MS`, owned by `perfProbe`: a 240 Hz screen is still held to
- * 120 fps, not 240). It is a rolling minimum, not a session one, so iOS Low
- * Power Mode capping the screen to 60 Hz mid-game is re-learnt within seconds
- * rather than read as permanent overload.
+ * the screen *keeps* producing over the last few seconds
+ * ({@link PERIOD_BLOCK_FRAMES} × {@link PERIOD_BLOCKS}), never shorter than
+ * the game's own target (`FRAME_BUDGET_MS`, owned by `perfProbe`: a 240 Hz
+ * screen is still held to 120 fps, not 240). It is a rolling figure, not a
+ * session one, so iOS Low Power Mode capping the screen to 60 Hz mid-game is
+ * re-learnt within seconds rather than read as permanent overload.
  *
- * The limit of that, said plainly: a scene that is GPU-bound at *exactly*
- * two periods from the very first frame for longer than the window looks
- * like a slower screen. Then the controller holds its DPR rather than
- * stepping down — sharpness kept, nothing lost against today.
+ * **"Keeps producing", not "ever produced".** The intervals are
+ * `performance.now()` at the start of each frame callback, not vsync
+ * timestamps, so one over-budget frame is followed by a *short* interval: the
+ * late callback, then the next one back on vsync (25 ms then 8.3 ms on a
+ * 60 Hz screen). A plain minimum would take that 8.3 ms for the refresh
+ * period and read every ordinary 16.7 ms frame for the next ten seconds as a
+ * miss — the floor DPR on a phone that is keeping up. So each block's figure
+ * is its {@link PERIOD_OUTLIERS}-th-from-shortest interval (the shortest
+ * tenth is set aside), and the block in progress sets aside the same share
+ * of what it has seen so far, and never fewer than one.
+ *
+ * The limit of that, said plainly: a scene that is GPU-bound at two periods
+ * on more than nine frames in ten, for longer than the window, looks like a
+ * slower screen. Then the controller holds its DPR (or climbs back, with the
+ * regret backoff spacing the retries) rather than stepping down — sharpness
+ * kept, nothing lost against today.
  *
  * ## Hysteresis, so it never flickers
  *
@@ -123,10 +135,15 @@ export const PAUSE_AFTER_GAP_MS = 1000;
 export const HITCH_PERIODS = 4;
 /** Adaptation stays paused this long after a CPU hitch. */
 export const PAUSE_AFTER_HITCH_MS = 500;
-/** The rolling minimum is kept in blocks of this many frames… */
+/** The period is learnt in blocks of this many frames… */
 export const PERIOD_BLOCK_FRAMES = 120;
 /** …this many blocks long (~5 s at 120 fps). */
 export const PERIOD_BLOCKS = 5;
+/**
+ * A block's shortest this-many intervals are set aside as catch-up after a
+ * late frame, not a refresh period: one in ten. The period is the next one up.
+ */
+export const PERIOD_OUTLIERS = PERIOD_BLOCK_FRAMES / 10;
 /** Intervals shorter than this are rAF bunching, not a refresh period. */
 const MIN_PLAUSIBLE_PERIOD_MS = 3;
 
@@ -207,10 +224,12 @@ export class AdaptiveResolution {
   private readonly steppedUpAt: number[];
   private changesValue = 0;
   private readonly listeners = new Set<(quality: QualityLevel) => void>();
-  // Rolling minimum of the interval, in blocks.
-  private blockMin = Infinity;
+  // The period, in blocks. `lows` is the current block's shortest
+  // PERIOD_OUTLIERS + 1 intervals, ascending — all a block's figure needs.
+  private readonly lows = new Float64Array(PERIOD_OUTLIERS + 1);
+  private lowCount = 0;
   private blockFrames = 0;
-  private readonly blockMins: number[] = [];
+  private readonly blockPeriods: number[] = [];
 
   constructor(cap: number, options: { pinned?: boolean } = {}) {
     this.pinned = options.pinned ?? false;
@@ -262,8 +281,8 @@ export class AdaptiveResolution {
 
   /** The refresh period currently believed in, never shorter than the game's target. */
   get periodMs(): number {
-    let min = this.blockMin;
-    for (const m of this.blockMins) if (m < min) min = m;
+    let min = this.blockPeriod();
+    for (const m of this.blockPeriods) if (m < min) min = m;
     return Number.isFinite(min) ? Math.max(min, FRAME_BUDGET_MS) : FRAME_BUDGET_MS;
   }
 
@@ -381,12 +400,38 @@ export class AdaptiveResolution {
   }
 
   private notePeriod(interval: number): void {
-    if (interval >= MIN_PLAUSIBLE_PERIOD_MS && interval < this.blockMin) this.blockMin = interval;
+    if (interval >= MIN_PLAUSIBLE_PERIOD_MS) this.noteLow(interval);
     if (++this.blockFrames < PERIOD_BLOCK_FRAMES) return;
-    this.blockMins.push(this.blockMin);
-    if (this.blockMins.length > PERIOD_BLOCKS) this.blockMins.shift();
-    this.blockMin = Infinity;
+    this.blockPeriods.push(this.blockPeriod());
+    if (this.blockPeriods.length > PERIOD_BLOCKS) this.blockPeriods.shift();
+    this.lowCount = 0;
     this.blockFrames = 0;
+  }
+
+  /** Keeps `lows` the block's shortest intervals, ascending. No allocation: this runs every frame. */
+  private noteLow(interval: number): void {
+    const lows = this.lows;
+    let i = this.lowCount;
+    if (i === lows.length) {
+      if (interval >= lows[i - 1]!) return;
+      i--;
+    } else {
+      this.lowCount++;
+    }
+    for (; i > 0 && lows[i - 1]! > interval; i--) lows[i] = lows[i - 1]!;
+    lows[i] = interval;
+  }
+
+  /**
+   * The block in progress's period: its shortest interval once the shortest
+   * tenth of what it has seen (never fewer than one) is set aside. `Infinity`
+   * while it has seen nothing. With one interval there is nothing to set
+   * aside, and that one is the answer.
+   */
+  private blockPeriod(): number {
+    if (this.lowCount === 0) return Infinity;
+    const setAside = Math.ceil((this.blockFrames * PERIOD_OUTLIERS) / PERIOD_BLOCK_FRAMES);
+    return this.lows[Math.min(setAside, this.lowCount - 1)]!;
   }
 }
 

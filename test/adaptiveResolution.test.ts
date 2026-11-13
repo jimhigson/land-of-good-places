@@ -119,6 +119,46 @@ describe('stepping down', () => {
     expect(trace.flips).toBe(0);
   });
 
+  // One over-budget frame on a 60 Hz screen: its callback's successor starts
+  // late (25 ms after the last) and the one after that is back on vsync, so
+  // the two intervals are 25 ms then 8.3 ms. That single short interval is
+  // not a refresh period, and must not make every 16.7 ms frame after it read
+  // as a miss against 8.3 ms.
+  const lateThenCatchUp = (trace: Trace): Trace => trace.run(1, 25, 24).run(1, 2 * HZ60 - 25, 5);
+
+  it('one catch-up interval after a late frame does not halve a 60 Hz screen\'s period', () => {
+    const trace = new Trace(2).run(1200, HZ60, 5);
+    lateThenCatchUp(trace).run(1200, HZ60, 5);
+    expect(trace.controller.state().periodMs).toBeCloseTo(HZ60, 3);
+    expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
+  });
+
+  it('…nor does one every eight seconds, for a minute', () => {
+    const trace = new Trace(2);
+    for (let i = 0; i < 8; i++) lateThenCatchUp(trace.run(480, HZ60, 5));
+    expect(trace.controller.state().periodMs).toBeCloseTo(HZ60, 3);
+    expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
+  });
+
+  it('…nor one in the very first frames, before any period has been learnt', () => {
+    const trace = new Trace(2).run(3, HZ60, 5);
+    lateThenCatchUp(trace).run(1200, HZ60, 5);
+    expect(trace.controller.state().periodMs).toBeCloseTo(HZ60, 3);
+    expect(trace.flips).toBe(0);
+  });
+
+  it('a 120 Hz screen that only sometimes makes vsync is still held to 120 Hz', () => {
+    // GPU-bound, three frames in four late: the on-time quarter is far more
+    // than a stray interval, so the period stays the screen's own and the
+    // misses are seen for what they are.
+    const trace = new Trace(2).run(240, HZ120, 3);
+    for (let i = 0; i < 2400; i++) trace.run(1, i % 4 === 0 ? HZ120 : HZ60, 3);
+    expect(trace.controller.state().periodMs).toBeCloseTo(HZ120, 3);
+    expect(trace.ratio).toBe(1.25);
+  });
+
   it('a 60 Hz phone that really misses (33 ms frames, idle CPU) steps down', () => {
     const trace = new Trace(2).run(600, HZ60, 6).run(DOWN_MISSES, HZ60 * 2, 6);
     expect(trace.ratio).toBe(1.5);
