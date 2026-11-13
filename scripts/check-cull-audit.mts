@@ -200,31 +200,32 @@ interface Scene {
  *
  * Re-derived from the first figures (`perf-step10-instanced-tiles`, one run on
  * a GPU, each frozen ~0.4 s into its scene — on SwiftShader ~2.5 s in, which
- * is the whole of CI run 43439027681's red): every ceiling fell (the old ones
- * also carried 5 draws and 25,000 triangles of slack for the moving ride
- * camera, which a fixed moment does not need) except the slide's triangles,
- * 290,910 → 355,485. That is the moment, not the game: 2 s down the chute
- * looks across more of the park than 0.4 s did — the crowd's park-wide bound,
- * the lamp posts and the flowers, all `oversized bound` offenders already
- * listed — and the old figure described no moment anyone chose. CI's own
- * reading of it, about 2.5 s in, was 316,104.
+ * is the whole of CI run 43439027681's red), and measured with the crowd's
+ * level of detail (#768) merged, which took 41 k–224 k off-screen triangles
+ * off the five scenes with children in view. **Every ceiling fell**; the old
+ * ones also carried 5 draws and 25,000 triangles of slack for the moving ride
+ * camera, which a fixed moment does not need. Old ceiling → new, triangles:
+ * park 408,232 → 282,291; castle deck 1 423,209 → 123,993; sky cruiser
+ * 256,463 → 190,943; ferris 439,472 → 333,173; slide 290,910 → 237,618. Castle
+ * decks 0 and 2, the hotel, the library, the reptile house and the rail race
+ * measure what they did before and lose only the slack.
  *
  * The reptile house's six tolerated stale bounds (snakes) are fixed, and so are
  * the four the sweep then found beside them, the hotel's motes and the ball
  * pit's balls: no scene tolerates one any more (`knownStale` was 6, now unset).
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 39, offTris: 368_916 },
+  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 36, offTris: 256_628 },
   'castle deck 0': { path: '/castle?deck=0', clock: 1, space: 'castle.', offDraws: 18, offTris: 55_366 },
-  'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 336_806 },
+  'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 112_720 },
   'castle deck 2': { path: '/castle?deck=2', clock: 1, space: 'castle.', offDraws: 17, offTris: 120_438 },
   hotel: { path: '/hotel', clock: 1, space: 'hotel.', offDraws: 17, offTris: 52_288 },
   library: { path: '/library', clock: 1, space: 'library', offDraws: 18, offTris: 211_256 },
   'reptile house': { path: '/reptile-house', clock: 1, space: 'reptileHouse', offDraws: 18, offTris: 297_312 },
   'rail race': { path: '/rail-race', clock: 2, space: '', riding: true, offDraws: 5, offTris: 40_132 },
-  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 214_416 },
-  ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 27, offTris: 379_316 },
-  slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 27, offTris: 323_168 },
+  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 173_584 },
+  ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 24, offTris: 302_884 },
+  slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 22, offTris: 216_016 },
 };
 
 const at = (scene: Scene): string =>
