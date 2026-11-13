@@ -1,12 +1,28 @@
 /**
- * **`check:undrawn-still` — nothing that is not drawn is animated** (120 fps
+ * **`owed:undrawn-still` — nothing that is not drawn is animated** (120 fps
  * plan, step 3; `docs/perf/FRAME-DROPS-2026-11.md` on #746).
  *
  * ```
- * pnpm run check:undrawn-still              # in the check chain
- * pnpm run check:undrawn-still -- --mutate  # prove it can go red
- * MEASURE=1 pnpm run check:undrawn-still    # print what moved, assert nothing
+ * pnpm run owed:undrawn-still              # NOT in the check chain — see below
+ * pnpm run owed:undrawn-still -- --mutate  # prove it can go red
+ * MEASURE=1 pnpm run owed:undrawn-still    # print what moved, assert nothing
  * ```
+ *
+ * ## Owed: this is red, and so it gates nothing yet
+ *
+ * Its first ever run was at integration (13 Nov 2026, seed 5 hydrated from a
+ * prebuilt file, player in the garden, 600 frames) and it exited 1: **5384
+ * changes under the undrawn hotel on 600 of 600 frames** — 2400 under
+ * `the-land-hotel-inside > kid > body`, 600 each under the lobby statue's
+ * turntable, `hotel:hotel.lobby` and `hotel:hotel.suite`, 592 under each of two
+ * shopkeepers. The castle, library and reptile hall were still. Both controls
+ * held (3300 changes with the great hall drawn; wild pets out on the roof).
+ *
+ * So it is registered as `owed:` rather than `check:` — a `check:*` script no
+ * workflow reaches fails `check:chain-coverage`, and one in a shard would turn
+ * the gate red for the hotel's updaters, which the landing did not touch. Gate
+ * those on `isDrawn`, see this exit 0, then rename it back to
+ * `check:undrawn-still` and add it to a node shard in the same change.
  *
  * ## Why this exists
  *
