@@ -1,4 +1,9 @@
 import type { Object3D, Scene } from 'three';
+import type { DoorwayExit } from '../entities/doorwayTap';
+import { LOBBY, hotelDoorBands } from './hotel/layout';
+import { reptileExitBand } from './reptileHouse/shell';
+import { libraryExitBand } from './library/shell';
+import { castleExitBand } from './building/Building';
 import type { Parade } from '../entities/parade/Parade';
 import { LabelManager } from '../ui/LabelManager';
 import { CollisionWorld } from './Collision';
@@ -121,6 +126,30 @@ export class World implements GameSystem {
   readonly reptileHouse: ReptileHouse;
   /** The Library (#714/#716): a pillared building whose door leads to a dim one-floor reading room. */
   readonly library: Library;
+
+  /**
+   * **Every interior's way out to the park**: its doorway frame and its
+   * trigger band, each asked of its own room — what a tap in a doorway is
+   * steered through (`entities/doorwayTap.ts`) and `check:doorframes` walks.
+   *
+   * **The Library's and the hotel's only once their rooms are furnished.**
+   * Each of those rooms — its south wall and so the frame standing in it — is
+   * a lazy chunk fetched on the way in (`world/interiors.ts`'s `LIBRARY_ROOM`
+   * and `HOTEL_INTERIOR`), and this is asked on every tap, in the park as well
+   * as indoors: until the room is there it has no way out to tap, and she
+   * cannot be standing in it. `check:doorframes` holds this list to all four
+   * on a park built with every room furnished.
+   */
+  get doorwayExits(): readonly DoorwayExit[] {
+    const lobbyExit = hotelDoorBands(LOBBY).find((band) => band.kind === 'exit');
+    if (!lobbyExit) throw new Error('World: the hotel lobby has no exit band');
+    return [
+      ...(this.hotel.furnished ? [{ placed: this.hotel.exitDoorFrame, band: lobbyExit }] : []),
+      { placed: this.reptileHouse.exitDoorFrame, band: reptileExitBand() },
+      ...(this.library.furnished ? [{ placed: this.library.exitDoorFrame, band: libraryExitBand() }] : []),
+      { placed: this.building.exitDoorFrame, band: castleExitBand() },
+    ];
+  }
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -463,6 +492,10 @@ export class World implements GameSystem {
       () => this.building.surfaces.connectors,
       this.building.shops.stands,
     );
+
+    // A hotel interior fetched later, when she first walks in, brings its
+    // guests then: they join the same crowd (`NpcSystem.addResidents`).
+    this.hotel.onLateResidents = (residents) => this.npcs.addResidents(residents);
 
     // …and now that both exist, introduce them. `Entrance` is built before
     // `NpcSystem` (the waypoint graph needs the finished collision world), so
