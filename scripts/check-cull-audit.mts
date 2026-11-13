@@ -757,7 +757,8 @@ async function runScene(
   const browser = await chromium.launch({ channel: 'chromium', headless: true, args });
   const errors: string[] = [];
   const seeds: number[] = [];
-  let loads = 0;
+  const loads: string[] = [];
+  const opened = Date.now();
   try {
     const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
     const page = await context.newPage();
@@ -768,7 +769,7 @@ async function runScene(
     });
     // A page that loads twice (a dev server's full reload, an update gate) has
     // started its clock again; whatever it measured is of a second boot.
-    page.on('load', () => (loads += 1));
+    page.on('load', () => loads.push(`${((Date.now() - opened) / 1000).toFixed(1)} s ${page.url()}`));
     await page.goto(at(scene), { waitUntil: 'domcontentloaded', timeout: 60_000 });
     const clock = await settle(page, scene);
     const result = await page.evaluate(auditInPage, OVERSIZED_RADIUS_M);
@@ -782,7 +783,7 @@ async function runScene(
     if (seeds.length === 0) return { error: `${name}: the page never reported its park seed, so the pin to ${SEED} is unproven` };
     if (wrong.length > 0) return { error: `${name}: asked for park seed ${SEED}, the page built ${wrong.join(', ')}` };
     if (errors.length > 0) return { error: `${name}: page errors: ${errors.slice(0, 3).join(' | ')}` };
-    if (loads > 1) return { error: `${name}: the page loaded ${loads} times during the audit — what it measured is of a second boot` };
+    if (loads.length > 1) return { error: `${name}: the page loaded ${loads.length} times during the audit (${loads.join('; ')}) — what it measured is of a second boot` };
     return { result, space: facts.space, gpu: facts.gpu, clock, sweep };
   } catch (error) {
     return { error: `${name} (${scene.path}): ${String((error as Error)?.message ?? error).split('\n')[0]}${errors.length ? ` — page errors: ${errors.slice(0, 3).join(' | ')}` : ''}` };
