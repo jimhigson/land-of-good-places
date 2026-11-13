@@ -10,6 +10,13 @@
  * NAV_WARM_MUTATE=short pnpm run check:nav-warm   # NOT a red proof — see below
  * ```
  *
+ * **Where CI runs it:** behind `check:nav-spaces` (`check:shard-6`), the way
+ * `check:crowd` carries the npc checks — the `check:nav-spaces` script entry
+ * ends `&& pnpm run check:nav-warm`. It is in no shard by name, so do not add
+ * it to one as well: it would then build its park and lattices twice a run.
+ * Unwired, `check:chain-coverage` goes red naming it (seen, exit 1, on
+ * e427f160).
+ *
  * **What is and is not proved red (13 Nov 2026, seed 5 restart 1, commit
  * 051415e6).** `sync` goes red: 10 failures, "1 lattice(s) built as one long
  * task" for each of the three lattices. `short` (the patch's reach scaled to 0
