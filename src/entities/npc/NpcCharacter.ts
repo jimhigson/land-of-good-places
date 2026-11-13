@@ -542,6 +542,11 @@ export class NpcCharacter {
     // down here rather than duplicated per character.
     playerStationaryFor: number = 0,
     playerWearingHat: boolean = false,
+    // Simulation LOD (`simLod.ts`): `NpcSystem` passes false on the frames a
+    // child nobody can see is steered but not posed. Everything that moves
+    // her still runs; only the walk cycle written onto her rig waits for her
+    // next posed frame, which reads the intent of that frame's own step.
+    pose: boolean = true,
   ): void {
     clearIntent(this.intent);
     this.driver.update(
@@ -590,7 +595,9 @@ export class NpcCharacter {
     const posture: RidePosture | null = this.seatedFlag ? 'listening' : this.carriedFlag ? 'seated' : null;
     // The carry is re-asserted every frame; one that is not is over.
     this.carriedFlag = false;
-    this.animate(elapsed, posture);
+    // A posture (sitting, being carried) is always written: it is somebody
+    // else placing her, and `NpcSystem` never throttles a child in one.
+    if (pose || posture !== null) this.animate(elapsed, posture);
   }
 
   /**

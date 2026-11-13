@@ -79,6 +79,7 @@ import { StoryCamera } from './world/library/storyCamera';
 import { OwlLensFade } from './world/library/owlLensFade';
 import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
 import { cullCrowdsFor } from './entities/npc/InstancedCrowd';
+import { noteNpcViewCamera } from './entities/npc/simLod';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -2239,6 +2240,10 @@ export class Game {
       // Only the children this camera can see are drawn (step 4 of
       // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
       cullCrowdsFor(this.engine.scene, camera);
+      // …and the children it cannot see are simulated in fewer, longer steps
+      // (step 11; `entities/npc/simLod.ts`, `check:npc-sim-lod`). Same camera,
+      // after the cull has brought its world matrix up to date.
+      noteNpcViewCamera(camera);
       renderer.render(this.engine.scene, camera);
       // The ferris wheel's car, drawn a second time over the finished frame.
       // The camera is bolted inside it, so nothing outside it should ever be in
