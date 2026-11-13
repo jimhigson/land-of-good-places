@@ -230,6 +230,21 @@ export class BallPit {
     this.lastAwake = this.sim.count; // wake the fast-path check below immediately
   }
 
+  /**
+   * **Pays off the whole settling warm-up now**, without the per-frame budget.
+   * For `?clock=` only (`core/checkClock.ts`): a check that audits one moment
+   * cannot have the pile half-fallen on a slow machine and settled on a fast
+   * one, and spread over frames by milliseconds it would be. The pile reached
+   * is the same either way — {@link WARMUP_FRAME_BUDGET_MS}'s note: the
+   * sub-steps, their order and their count do not depend on how many land in
+   * each frame. A no-op once the warm-up is paid.
+   */
+  settleNow(): void {
+    if (this.warmupSubstepsRemaining <= 0) return;
+    this.warmupSubstepsRemaining -= this.sim.settle(this.warmupSubstepsRemaining, Number.POSITIVE_INFINITY);
+    this.writeDirtyMatrices();
+  }
+
   update(dt: number, elapsed: number): void {
     void elapsed; // kept in the signature: Building.ts calls update(dt, elapsed)
 

@@ -57,6 +57,8 @@ import { makeSessionUnsavable, type SavedPlace } from './state/save';
 import { libraryDenContains } from './world/library/layout';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from './world/spaces';
 import { PerfProbe, perfRequested } from './core/perfProbe';
+import { CheckClock, checkClockRequested } from './core/checkClock';
+import { lazyPartsFetching } from './world/LazyPart';
 import { freezeParkStatics } from './world/parkStatics';
 import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
@@ -1168,23 +1170,52 @@ export class Game {
     // `?perf=1` — the frame counted and shown (120 fps plan, step 0; see
     // `core/perfProbe.ts`). Without the flag the loop calls `tick` directly,
     // exactly as it always has: nothing is constructed, nothing is wrapped.
+    //
+    // `?clock=<seconds>` — the world at one moment, the same on every machine
+    // (`core/checkClock.ts`, `check:cull-audit`). Without the flag the frame is
+    // `tick` exactly as it always was.
+    const clockStopAt = checkClockRequested();
+    this.checkClock = clockStopAt === null ? null : new CheckClock(clockStopAt);
+    const frame = this.checkClock ? (tick: LoopTick) => this.checkClockFrame(tick) : (tick: LoopTick) => this.tick(tick);
     if (perfRequested()) {
       const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
       this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
         this.beginEngineFrame();
         probe.begin();
-        this.tick(tick);
+        frame(tick);
         probe.end();
         this.engine.endFrame();
       });
     } else {
       this.loop = new Loop((tick) => {
         this.beginEngineFrame();
-        this.tick(tick);
+        frame(tick);
         this.engine.endFrame();
       });
     }
+  }
+
+  /** `?clock=` — the world's time, held and stepped (`core/checkClock.ts`); `null` without the flag. */
+  private readonly checkClock: CheckClock | null;
+
+  /**
+   * One display frame under `?clock=`: the world stepped as far as it may go,
+   * then drawn held. The clock does not step while anything the world waits
+   * on runs on the wall clock — an iris (its midpoint is a `setTimeout`) or a
+   * lazy part on its way — and a warm-up spread over frames by a millisecond
+   * budget is finished outright, which reaches the same pile.
+   */
+  private checkClockFrame(tick: LoopTick): void {
+    this.checkClock?.frame(
+      () => {
+        this.world.building.ballPit.settleNow();
+        if (this.transitions.wiping) return 'iris';
+        if (lazyPartsFetching() > 0) return 'lazy part';
+        return null;
+      },
+      (dt, draw) => this.tick({ ...tick, dt }, draw),
+    );
   }
 
   /** The `?perf=1` overlay, when the URL asked for it. */
@@ -1210,6 +1241,7 @@ export class Game {
     return {
       space: spaceAt(this.player.position.x, this.player.position.z),
       riding: this.player.riding,
+      clock: this.checkClock?.state() ?? null,
       gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
@@ -1849,7 +1881,11 @@ export class Game {
     return sampler ? this.navGrid.warm(sampler, NAV_WARM_BUDGET_MS) : false;
   }
 
-  private tick(tick: LoopTick): void {
+  /**
+   * One frame of the game. `draw` is false only for a `?clock=` step
+   * (`core/checkClock.ts`), which runs everything but the draw itself.
+   */
+  private tick(tick: LoopTick, draw = true): void {
     this.input.update();
     this.warmNavigation();
 
@@ -2225,9 +2261,31 @@ export class Game {
     (this.cameraOverride ?? this.camera.camera).getWorldPosition(this.drawnEye);
     const owl = this.world.library.owlIfFurnished;
     if (owl && !this.owlFade) this.owlFade = new OwlLensFade(owl);
+    if (!draw) {
+      // A `?clock=` step draws nothing, but the simulation still hears what
+      // the draw would have told it about the camera.
+      if (!this.miniGames.hidesPark) this.noteView();
+      return;
+    }
     this.owlFade?.apply(this.drawnEye);
     this.render();
     this.owlFade?.restore();
+  }
+
+  /**
+   * What drawing the park tells the simulation about the camera, before the
+   * draw: only the children this camera can see are drawn (step 4 of
+   * docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`), and the children it
+   * cannot see are simulated in fewer, longer steps (step 11;
+   * `entities/npc/simLod.ts`, `check:npc-sim-lod`) — same camera, after the
+   * cull has brought its world matrix up to date. Its own method so a
+   * `?clock=` step, which draws nothing, tells it too.
+   */
+  private noteView(): PerspectiveCamera {
+    const camera = this.cameraOverride ?? this.camera.camera;
+    cullCrowdsFor(this.engine.scene, camera);
+    noteNpcViewCamera(camera);
+    return camera;
   }
 
   private updateHud(tick: LoopTick): void {
@@ -2285,14 +2343,7 @@ export class Game {
     if (!this.miniGames.hidesPark) {
       this.sky.render(renderer);
       renderer.clearDepth();
-      const camera = this.cameraOverride ?? this.camera.camera;
-      // Only the children this camera can see are drawn (step 4 of
-      // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
-      cullCrowdsFor(this.engine.scene, camera);
-      // …and the children it cannot see are simulated in fewer, longer steps
-      // (step 11; `entities/npc/simLod.ts`, `check:npc-sim-lod`). Same camera,
-      // after the cull has brought its world matrix up to date.
-      noteNpcViewCamera(camera);
+      const camera = this.noteView();
       renderer.render(this.engine.scene, camera);
       // The ferris wheel's car, drawn a second time over the finished frame.
       // The camera is bolted inside it, so nothing outside it should ever be in

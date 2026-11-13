@@ -72,7 +72,8 @@ const BASE = (process.env.CHECK_CULL_AUDIT_URL ?? 'http://127.0.0.1:5173').repla
 const SEED = Number(process.env.CHECK_CULL_AUDIT_SEED ?? CANONICAL_PARK_SEED);
 const MEASURE = process.env.MEASURE === '1';
 const OUT = process.env.OUT;
-const SETTLE_FRAMES = 20;
+/** Frames drawn with the world held at its moment before the audit — the frame audited is one three has drawn. */
+const HELD_FRAMES = 3;
 const BOOT_TIMEOUT_MS = 240_000;
 /**
  * A bound this wide is one sphere over a large part of the park: it can only
@@ -82,26 +83,27 @@ const BOOT_TIMEOUT_MS = 240_000;
 const OVERSIZED_RADIUS_M = 40;
 /**
  * Measured + 10 %, plus a small absolute floor so a space measured at zero can
- * still move by a stray instance (the clock is frozen, but where she and the
- * NPCs stood when it froze differs a little between a GPU and SwiftShader —
- * the same reason `check:render-budget` carries headroom).
+ * still take a stray instance. **A ratchet margin, not a variance allowance**:
+ * every scene is audited at a fixed moment of the world's own clock, and the
+ * same commit measures the same numbers on a GPU and on SwiftShader (see
+ * "Which frame" above). The margin is room for a change that adds a little,
+ * so not every new prop has to touch this file; a change that adds a lot
+ * says so here.
  */
 const HEADROOM = 1.1;
 const FLOOR_TRIS = 2_000;
 const FLOOR_DRAWS = 2;
-/**
- * Added on top of {@link HEADROOM}, because a ride is frozen on whichever
- * frame the freeze lands on and its camera is moving: measured over three runs
- * of the same code, the sky cruiser's off-screen draws read 17, 19 and 22, and
- * one fine tile of bushes crossing the screen edge is up to 22 k triangles
- * (69 instances × 320). A percentage of a small number cannot absorb that.
- */
-const SLACK_DRAWS = 5;
-const SLACK_TRIS = 25_000;
 
 interface Scene {
   readonly path: string;
-  /** What the probe must report before sampling: a space id, or its prefix. */
+  /**
+   * **The moment audited**: seconds of the world's own clock (`?clock=`,
+   * `core/checkClock.ts`) after she got there — the clock is held while the
+   * iris, a lazy room or a ride's sky show is on its way, so for a ride this
+   * is seconds after boarding.
+   */
+  readonly clock: number;
+  /** What the probe must report at that moment: a space id, or its prefix. */
   readonly space: string;
   readonly riding?: boolean;
   /** Measured off-screen draws and triangles on the commit that set them, before {@link HEADROOM}. */
@@ -128,20 +130,21 @@ interface Scene {
  * bound three cached for them.
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', space: 'garden', offDraws: 37, offTris: 348_392 },
-  'castle deck 0': { path: '/castle?deck=0', space: 'castle.', offDraws: 18, offTris: 55_390 },
-  'castle deck 1': { path: '/castle?deck=1', space: 'castle.', offDraws: 18, offTris: 362_008 },
-  'castle deck 2': { path: '/castle?deck=2', space: 'castle.', offDraws: 17, offTris: 119_900 },
-  hotel: { path: '/hotel', space: 'hotel.', offDraws: 17, offTris: 52_288 },
-  library: { path: '/library', space: 'library', offDraws: 19, offTris: 224_304 },
-  'reptile house': { path: '/reptile-house', space: 'reptileHouse', offDraws: 18, offTris: 297_312, knownStale: 6 },
-  'rail race': { path: '/rail-race', space: '', riding: true, offDraws: 5, offTris: 40_132 },
-  'sky cruiser': { path: '/sky-cruiser', space: '', riding: true, offDraws: 12, offTris: 210_420 },
-  ferris: { path: '/ferris', space: '', riding: true, offDraws: 27, offTris: 376_792 },
-  slide: { path: '/slide', space: '', riding: true, offDraws: 27, offTris: 241_736 },
+  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 37, offTris: 348_392 },
+  'castle deck 0': { path: '/castle?deck=0', clock: 1, space: 'castle.', offDraws: 18, offTris: 55_390 },
+  'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 362_008 },
+  'castle deck 2': { path: '/castle?deck=2', clock: 1, space: 'castle.', offDraws: 17, offTris: 119_900 },
+  hotel: { path: '/hotel', clock: 1, space: 'hotel.', offDraws: 17, offTris: 52_288 },
+  library: { path: '/library', clock: 1, space: 'library', offDraws: 19, offTris: 224_304 },
+  'reptile house': { path: '/reptile-house', clock: 1, space: 'reptileHouse', offDraws: 18, offTris: 297_312, knownStale: 6 },
+  'rail race': { path: '/rail-race', clock: 2, space: '', riding: true, offDraws: 5, offTris: 40_132 },
+  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 210_420 },
+  ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 27, offTris: 376_792 },
+  slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 27, offTris: 241_736 },
 };
 
-const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}&perf=1`;
+const at = (scene: Scene): string =>
+  `${BASE}${scene.path}${scene.path.includes('?') ? '&' : '?'}seed=${SEED}&perf=1&clock=${scene.clock}`;
 
 /** One mesh three will draw this frame that is, wholly or in part, off the screen. */
 interface Offender {
@@ -170,12 +173,105 @@ interface Audit {
     readonly walkInvented: readonly string[];
   };
   readonly offenders: readonly Offender[];
-  /** Instanced meshes whose cached bound no longer contains their live instances. */
-  readonly stale: readonly string[];
+  /** Instanced meshes whose cached bound no longer contains their live instances, at the audited moment. */
+  readonly stale: readonly { readonly name: string; readonly out: number; readonly of: number }[];
   /** Drawn meshes with `frustumCulled = false`, by name, whether or not they are off-screen. */
   readonly unculled: readonly string[];
   /** Drawn meshes whose bound is wider than {@link OVERSIZED_RADIUS_M}. */
   readonly oversized: readonly string[];
+}
+
+/**
+ * The world's seconds the stale-bound sweep runs on for after the audited
+ * moment, and how often (in `?clock=` steps) it looks. Ten seconds is most of
+ * a mote's fall (7–15 s) and several of a snake's waves; every sixth step is
+ * ten looks a world second, far finer than anything here moves past a bound.
+ */
+const SWEEP_SECONDS = 10;
+const SWEEP_EVERY = 6;
+
+/** An instanced mesh whose live instances left the bound three culls it by, during the sweep. */
+interface StaleFinding {
+  readonly name: string;
+  /** World seconds (`?clock=`) at which it was first seen out. */
+  readonly firstAt: number;
+  /** The most instances out at one look, and of how many. */
+  readonly worst: number;
+  readonly of: number;
+  /** The furthest an instance's sphere reached past the bound, metres in the mesh's own space. */
+  readonly overshoot: number;
+}
+
+/**
+ * Runs **in the page**: looks at every instanced mesh's bound against its live
+ * instances on every `every`th step of the world's clock from now, until the
+ * clock stops again. Self-contained for the same reason {@link auditInPage}
+ * is; its containment test is that function's, so the two cannot disagree
+ * about what "outside the bound" means.
+ */
+function installStaleSweep(every: number): void {
+  type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const w = window as unknown as { game: Any; __checkClock: Any; __staleSweep?: Any };
+  const game = w.game;
+  const clock = w.__checkClock;
+  const scene = game.miniGames.hidesPark && game.miniGames.game ? game.miniGames.game.scene : game.engine.scene;
+  const meshes: Any[] = [];
+  scene.traverse((o: Any) => {
+    if (o.isInstancedMesh) meshes.push(o);
+  });
+  const nameOf = (o: Any): string => {
+    const parts: string[] = [];
+    for (let n = o; n && n !== scene; n = n.parent) parts.push((n.name || n.type) + (n.userData?.tile ? `@${n.userData.tile}` : ''));
+    return parts.reverse().join('/');
+  };
+  const drawable = (o: Any): boolean => {
+    for (let n = o; n; n = n.parent) {
+      if (!n.visible) return false;
+      if (n === scene) return true;
+    }
+    return false;
+  };
+  const findings = new Map<Any, { name: string; firstAt: number; worst: number; of: number; overshoot: number }>();
+  let steps = 0;
+  let instanceMatrix: Any = null;
+  let local: Any = null;
+  clock.afterStep = () => {
+    steps += 1;
+    if (steps % every !== 0) return;
+    const seconds = clock.state().seconds;
+    for (const mesh of meshes) {
+      // Only a bound three would cull by: a culled mesh, drawn, whose bound exists.
+      if (!mesh.frustumCulled || !mesh.boundingSphere || !drawable(mesh)) continue;
+      const geometry = mesh.geometry;
+      if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+      if (!instanceMatrix) {
+        instanceMatrix = mesh.matrixWorld.clone();
+        local = geometry.boundingSphere.clone();
+      }
+      const cached = mesh.boundingSphere;
+      let out = 0;
+      let overshoot = 0;
+      for (let i = 0; i < mesh.count; i += 1) {
+        mesh.getMatrixAt(i, instanceMatrix);
+        const e = instanceMatrix.elements;
+        if (e[0] === 0 && e[1] === 0 && e[2] === 0 && e[4] === 0 && e[5] === 0 && e[6] === 0 && e[8] === 0 && e[9] === 0 && e[10] === 0) continue;
+        local.copy(geometry.boundingSphere).applyMatrix4(instanceMatrix);
+        const d = local.center.distanceTo(cached.center) + local.radius;
+        if (d > cached.radius * (1 + 1e-4) + 1e-4) {
+          out += 1;
+          overshoot = Math.max(overshoot, d - cached.radius);
+        }
+      }
+      if (out === 0) continue;
+      const seen = findings.get(mesh);
+      if (!seen) findings.set(mesh, { name: nameOf(mesh), firstAt: seconds, worst: out, of: mesh.count, overshoot });
+      else {
+        seen.worst = Math.max(seen.worst, out);
+        seen.overshoot = Math.max(seen.overshoot, overshoot);
+      }
+    }
+  };
+  w.__staleSweep = { findings: () => [...findings.values()], looks: () => Math.floor(steps / every) };
 }
 
 /**
@@ -348,7 +444,7 @@ function auditInPage(oversizedRadius: number): Audit[] {
 
     // ------------------------------------------------ what is really on screen
     const offenders: Offender[] = [];
-    const stale: string[] = [];
+    const stale: { name: string; out: number; of: number }[] = [];
     const unculled: string[] = [];
     const oversized: string[] = [];
     let offDraws = 0;
@@ -387,7 +483,7 @@ function auditInPage(oversizedRadius: number): Audit[] {
           if (sphereIn(s.center.x, s.center.y, s.center.z, s.radius)) flags[i] = 1;
           else off += 1;
         }
-        if (escaped > 0) stale.push(`${name}: ${escaped} of ${n} instances outside the cached bound`);
+        if (escaped > 0) stale.push({ name, out: escaped, of: n });
         onScreen.set(object, flags);
         if (off > 0) {
           const perInstance = n > 0 ? items.tris / n : 0;
@@ -570,46 +666,98 @@ function auditInPage(oversizedRadius: number): Audit[] {
   return results;
 }
 
-async function settle(page: Page, scene: Scene): Promise<void> {
-  const settledFrom = await page.waitForFunction(
-    ({ space, riding }) => {
-      const perf = (window as unknown as { __perf?: { frameCount: number; context(): Record<string, unknown> } }).__perf;
-      if (!perf) return false;
-      const context = perf.context();
-      if (!String(context['space']).startsWith(space)) return false;
-      if (riding && context['riding'] !== true) return false;
-      return perf.frameCount;
-    },
-    { space: scene.space, riding: scene.riding === true },
-    { timeout: BOOT_TIMEOUT_MS, polling: 200 },
-  );
-  const from = Number(await settledFrom.jsonValue());
-  await page.waitForFunction(
-    (until) => (window as unknown as { __perf: { frameCount: number } }).__perf.frameCount >= until,
-    from + SETTLE_FRAMES,
-    { timeout: BOOT_TIMEOUT_MS, polling: 200 },
-  );
-  // Freeze the world (see check-render-budget.mts for why), then let two frames draw it still.
-  const frozen = await page.evaluate(() => {
-    const g = (window as unknown as { game?: { timeScale: number } }).game;
-    if (!g) return false;
-    g.timeScale = 0;
-    return true;
-  });
-  if (!frozen) throw new Error('no window.game to freeze — run against the dev server (`check:served-cull-audit`)');
-  const now = await page.evaluate(() => (window as unknown as { __perf: { frameCount: number } }).__perf.frameCount);
-  await page.waitForFunction(
-    (until) => (window as unknown as { __perf: { frameCount: number } }).__perf.frameCount >= until,
-    now + 3,
-    { timeout: BOOT_TIMEOUT_MS, polling: 100 },
-  );
+/** `window.__perf.context().clock` — `CheckClockState` in `core/checkClock.ts`. */
+interface ClockState {
+  readonly seconds: number;
+  readonly stopAt: number;
+  readonly stopped: boolean;
+  readonly heldFrames: number;
+  readonly heldBy: Readonly<Record<string, number>>;
 }
 
-async function runScene(name: string, scene: Scene): Promise<{ result?: Audit[]; space?: string; error?: string }> {
+/**
+ * Waits for the world's clock to stop at the scene's moment, then for
+ * {@link HELD_FRAMES} more frames drawn with it held, and checks she is where
+ * the scene says she is at that moment. Nothing here is timed: the moment is
+ * the page's own (`?clock=`), so how fast this machine draws changes how long
+ * the wait is and nothing else.
+ */
+async function settle(page: Page, scene: Scene): Promise<ClockState> {
+  type Perf = { frameCount: number; context(): Record<string, unknown> };
+  const stoppedAt = await page.waitForFunction(
+    () => {
+      const perf = (window as unknown as { __perf?: Perf }).__perf;
+      if (!perf) return false;
+      const clock = perf.context()['clock'] as ClockState | null | undefined;
+      // A game without `?clock=` would never stop; say so rather than time out.
+      if (clock === undefined || clock === null) return { missing: true, frame: 0 };
+      return clock.stopped ? { missing: false, frame: perf.frameCount } : false;
+    },
+    undefined,
+    { timeout: BOOT_TIMEOUT_MS, polling: 200 },
+  );
+  const { missing, frame } = (await stoppedAt.jsonValue()) as { missing: boolean; frame: number };
+  if (missing) {
+    throw new Error('the page reports no `clock` — this game has no `?clock=` (core/checkClock.ts), so no moment can be pinned');
+  }
+  await page.waitForFunction(
+    (until) => ((window as unknown as { __perf?: Perf }).__perf?.frameCount ?? 0) >= until,
+    frame + HELD_FRAMES,
+    { timeout: BOOT_TIMEOUT_MS, polling: 100 },
+  );
+  const context = await page.evaluate(() => (window as unknown as { __perf: Perf }).__perf.context());
+  const clock = context['clock'] as ClockState;
+  const where = String(context['space']);
+  if (!where.startsWith(scene.space)) {
+    throw new Error(`at ${clock.seconds.toFixed(3)} s on the world's clock she is in '${where}', not '${scene.space}…' — the moment audited is not in this space`);
+  }
+  if (scene.riding && context['riding'] !== true) {
+    throw new Error(`at ${clock.seconds.toFixed(3)} s on the world's clock she is not riding — the moment audited is not on the ride`);
+  }
+  return clock;
+}
+
+/**
+ * **Stale bounds over time, not at one instant.** A cached bound goes stale as
+ * the instances move, so one frame can miss it: on CI the hotel's motes were
+ * outside theirs about two seconds in, and inside it at one. After the audit
+ * the world runs on for {@link SWEEP_SECONDS} of its own seconds and is looked
+ * at every {@link SWEEP_EVERY} steps ({@link installStaleSweep}).
+ */
+async function sweepStale(page: Page): Promise<{ findings: StaleFinding[]; looks: number; from: number; to: number }> {
+  type Clock = { state(): ClockState; extend(seconds: number): void };
+  await page.evaluate(installStaleSweep, SWEEP_EVERY);
+  const from = await page.evaluate((seconds) => {
+    const clock = (window as unknown as { __checkClock: Clock }).__checkClock;
+    clock.extend(seconds);
+    return clock.state().seconds;
+  }, SWEEP_SECONDS);
+  await page.waitForFunction(() => (window as unknown as { __checkClock: Clock }).__checkClock.state().stopped, undefined, {
+    timeout: BOOT_TIMEOUT_MS,
+    polling: 200,
+  });
+  return page.evaluate(() => {
+    const w = window as unknown as { __checkClock: Clock; __staleSweep: { findings(): StaleFinding[]; looks(): number } };
+    return { findings: w.__staleSweep.findings(), looks: w.__staleSweep.looks(), from: 0, to: w.__checkClock.state().seconds };
+  }).then((r) => ({ ...r, from }));
+}
+
+async function runScene(
+  name: string,
+  scene: Scene,
+): Promise<{
+  result?: Audit[];
+  space?: string;
+  clock?: ClockState;
+  gpu?: string;
+  sweep?: { findings: StaleFinding[]; looks: number; from: number; to: number };
+  error?: string;
+}> {
   const args = ['--mute-audio', ...(process.env.SWIFTSHADER === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])];
   const browser = await chromium.launch({ channel: 'chromium', headless: true, args });
   const errors: string[] = [];
   const seeds: number[] = [];
+  let loads = 0;
   try {
     const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
     const page = await context.newPage();
@@ -618,17 +766,24 @@ async function runScene(name: string, scene: Scene): Promise<{ result?: Audit[];
       const said = /park seed (\d+)/.exec(message.text());
       if (said) seeds.push(Number(said[1]));
     });
-    await page.goto(at(scene.path), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await settle(page, scene);
+    // A page that loads twice (a dev server's full reload, an update gate) has
+    // started its clock again; whatever it measured is of a second boot.
+    page.on('load', () => (loads += 1));
+    await page.goto(at(scene), { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    const clock = await settle(page, scene);
     const result = await page.evaluate(auditInPage, OVERSIZED_RADIUS_M);
-    const space = await page.evaluate(() =>
-      String((window as unknown as { __perf: { context(): Record<string, unknown> } }).__perf.context()['space']),
-    );
+    const facts = await page.evaluate(() => {
+      const context = (window as unknown as { __perf: { context(): Record<string, unknown> } }).__perf.context();
+      return { space: String(context['space']), gpu: String(context['gpu']) };
+    });
+    // After the audit, which it must not disturb: it runs the world on.
+    const sweep = await sweepStale(page);
     const wrong = seeds.filter((s) => s !== SEED);
     if (seeds.length === 0) return { error: `${name}: the page never reported its park seed, so the pin to ${SEED} is unproven` };
     if (wrong.length > 0) return { error: `${name}: asked for park seed ${SEED}, the page built ${wrong.join(', ')}` };
     if (errors.length > 0) return { error: `${name}: page errors: ${errors.slice(0, 3).join(' | ')}` };
-    return { result, space };
+    if (loads > 1) return { error: `${name}: the page loaded ${loads} times during the audit — what it measured is of a second boot` };
+    return { result, space: facts.space, gpu: facts.gpu, clock, sweep };
   } catch (error) {
     return { error: `${name} (${scene.path}): ${String((error as Error)?.message ?? error).split('\n')[0]}${errors.length ? ` — page errors: ${errors.slice(0, 3).join(' | ')}` : ''}` };
   } finally {
@@ -657,9 +812,9 @@ let measured = 0;
 for (const [name, scene] of Object.entries(BUDGETS)) {
   if (only && !only.has(name)) continue;
   const started = Date.now();
-  const { result, space, error } = await runScene(name, scene);
+  const { result, space, clock, gpu, sweep, error } = await runScene(name, scene);
   const secs = ((Date.now() - started) / 1000).toFixed(0);
-  if (error || !result) {
+  if (error || !result || !clock || !sweep) {
     failures.push(error ?? `${name}: no result`);
     say(`${name}: FAILED to measure (${secs} s) — ${error}`);
     continue;
@@ -669,7 +824,9 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
     continue;
   }
   measured += 1;
-  dump[name] = { space, passes: result };
+  dump[name] = { space, clock, gpu, passes: result, sweep };
+  const held = Object.entries(clock.heldBy).map(([on, frames]) => `${on} for ${frames} frames`).join(', ') || 'nothing';
+  say(`${name.padEnd(14)} the moment: ${clock.seconds.toFixed(3)} s on the world's clock (asked ${scene.clock} s; it waited on ${held}) — ${gpu}`);
   let offDraws = 0;
   let offTris = 0;
   for (const audit of result) {
@@ -699,17 +856,32 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
     }
     if (c.offPixels !== 0) failures.push(`${name}: CONTROL — what the audit called off-screen lit ${c.offPixels} pixels; its "off-screen" is wrong`);
     if (!(c.onPixels > 0)) failures.push(`${name}: CONTROL — what the audit called on-screen lit ${c.onPixels} pixels; the pixel read cannot see anything`);
-    const knownStale = scene.knownStale ?? 0;
-    if (audit.stale.length > knownStale) {
-      for (const s of audit.stale) failures.push(`${name}: stale bound — ${s} (three may cull something on screen); ${audit.stale.length} found, ${knownStale} tolerated`);
-    } else if (audit.stale.length > 0) {
-      say(`  NOT COVERED: ${audit.stale.length} stale bound(s) tolerated here (ceiling ${knownStale}) — three may cull these while on screen; fix them and lower the ceiling:`);
-      for (const s of audit.stale) say(`    ${s}`);
+  }
+  // **Stale bounds**: at the audited moment, and over the sweep after it. One
+  // line per mesh, however often it was seen out.
+  const stale = new Map<string, string>();
+  for (const audit of result) {
+    for (const s of audit.stale) stale.set(s.name, `${s.out} of ${s.of} instances outside the bound three culls by, at ${clock.seconds.toFixed(3)} s`);
+  }
+  for (const f of sweep.findings) {
+    if (!stale.has(f.name)) {
+      stale.set(f.name, `up to ${f.worst} of ${f.of} instances outside the bound three culls by, first at ${f.firstAt.toFixed(3)} s, by up to ${f.overshoot.toFixed(3)} m`);
     }
   }
+  say(
+    `  stale bounds: swept ${sweep.from.toFixed(3)}–${sweep.to.toFixed(3)} s of the world's clock, ${sweep.looks} looks — ` +
+      (stale.size === 0 ? 'none' : `${stale.size} mesh(es)`),
+  );
+  const knownStale = scene.knownStale ?? 0;
+  if (stale.size > knownStale) {
+    for (const [mesh, how] of stale) failures.push(`${name}: stale bound — ${mesh}: ${how} (three may cull it while on screen); ${stale.size} found, ${knownStale} tolerated`);
+  } else if (stale.size > 0) {
+    say(`  NOT COVERED: ${stale.size} stale bound(s) tolerated here (ceiling ${knownStale}) — three may cull these while on screen; fix them and lower the ceiling:`);
+    for (const [mesh, how] of stale) say(`    ${mesh}: ${how}`);
+  }
   if (MEASURE) continue;
-  const drawCeiling = Math.max(FLOOR_DRAWS, Math.ceil(scene.offDraws * HEADROOM) + SLACK_DRAWS);
-  const triCeiling = Math.max(FLOOR_TRIS, Math.ceil(scene.offTris * HEADROOM) + SLACK_TRIS);
+  const drawCeiling = Math.max(FLOOR_DRAWS, Math.ceil(scene.offDraws * HEADROOM));
+  const triCeiling = Math.max(FLOOR_TRIS, Math.ceil(scene.offTris * HEADROOM));
   say(`  budget: off-screen draws ${offDraws} / ceiling ${drawCeiling}, off-screen tris ${offTris} / ceiling ${triCeiling}`);
   if (offDraws > drawCeiling) failures.push(`${name}: ${offDraws} draws a frame for meshes wholly off the screen, ceiling ${drawCeiling} (measured ${scene.offDraws})`);
   if (offTris > triCeiling) failures.push(`${name}: ${offTris} triangles a frame off the screen, ceiling ${triCeiling} (measured ${scene.offTris})`);
