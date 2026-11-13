@@ -40,7 +40,7 @@ did the reptile hall; exterior (tower, its collider, outer doors) stays boot.
 - [x] Playwright desktop+phone 9/9 (`scripts/qa-lazy-hotel.mjs 5791 <out> desktop|phone`,
       dev server `vite --port 5791 --strictPort`, QA_SEED=5, park cached in .parks/dev)
 - [x] draft PR #762 (rebased on 34f9d8df)
-- [ ] full `check` (running), `test:procgen` (first local run: 7 seed files hit the
-      3600 s beforeAll timeout under load ~120 — re-run when quiet / rely on CI)
-- [ ] `scripts/qa-lazy-hotel-restore.mjs` (/hotel + save restore) not yet run
-- [ ] preview URL /hotel check, remove draft
+- [x] full `check` exit 0 locally after rebase; CI procgen invariants green
+- [x] restore QA 6/6 (/hotel + save in lobby); live-vs-preview tower view 0.31/255
+- [x] PR #762 ready. Final: boot 4128 KB / 41 chunks; interior-*.js 633 KB lazy
+- [ ] CI shard 9 check:book-reader flake = #761's fix; merge main after #761 lands and re-run
