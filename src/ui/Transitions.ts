@@ -4,6 +4,9 @@ import {
   STAIR_RIDE_FADE_SECONDS,
 } from '../core/constants';
 
+/** How many times {@link Transitions.whenShut} looks before going on anyway: half a second. */
+const SHUT_CHECKS = 30;
+
 /**
  * The cute wipes: an iris for changing space, and a whoosh for fast-forward.
  *
@@ -19,6 +22,8 @@ import {
  */
 export class Transitions {
   private readonly iris: HTMLElement;
+  /** The iris's hole — its width is how much of the game still shows. */
+  private readonly eye: HTMLElement;
   private readonly whoosh: HTMLElement;
   private readonly flashPane: HTMLElement;
 
@@ -46,6 +51,7 @@ export class Transitions {
     this.iris.style.setProperty('--iris-close', `${IRIS_CLOSE_SECONDS}s`);
     this.iris.style.setProperty('--iris-open', `${IRIS_OPEN_SECONDS}s`);
     const eye = document.createElement('div');
+    this.eye = eye;
     eye.className = 'iris-eye';
     this.iris.append(eye);
     // The "still on its way" dots, shown only while a held wipe waits on a
@@ -143,19 +149,46 @@ export class Transitions {
       if (held) held.then(reveal, reveal);
       else reveal();
     };
-    this.closeTimer = window.setTimeout(() => {
-      const waitFor = typeof ready === 'function' ? ready() : ready;
-      if (settled || !waitFor) {
-        open();
-        return;
-      }
-      this.iris.dataset.waiting = 'true';
-      const done = (): void => {
-        delete this.iris.dataset.waiting;
-        open();
-      };
-      waitFor.then(done, done);
-    }, IRIS_CLOSE_SECONDS * 1000);
+    this.closeTimer = window.setTimeout(
+      () =>
+        this.whenShut(() => {
+          const waitFor = typeof ready === 'function' ? ready() : ready;
+          if (settled || !waitFor) {
+            open();
+            return;
+          }
+          this.iris.dataset.waiting = 'true';
+          const done = (): void => {
+            delete this.iris.dataset.waiting;
+            open();
+          };
+          waitFor.then(done, done);
+        }),
+      IRIS_CLOSE_SECONDS * 1000,
+    );
+  }
+
+  /**
+   * Runs `then` once the iris has **really** closed — its eye drawn at no
+   * width — rather than when the close timer says it should have.
+   *
+   * The timer runs from the moment the wipe was asked for; the transition runs
+   * from the next style pass, and a long frame in between (a ride's press that
+   * builds its car, a door's first frame) starts it late. Measured on the
+   * Rail Race's first boarding while its press still cost a 165 ms frame:
+   * the timer fired with the iris still 94 % open, and the midpoint's work
+   * froze a picture she could see. On the library's door the timer fired
+   * with a 340 px hole still showing, and the room's 130 ms build froze it. Checked every 16 ms
+   * and given up on after {@link SHUT_CHECKS} — a background tab does not run
+   * transitions, and the iris must still open on her when she comes back.
+   */
+  private whenShut(then: () => void, checks = 0): void {
+    const width = parseFloat(getComputedStyle(this.eye).width);
+    if (!(width > 1) || checks >= SHUT_CHECKS) {
+      then();
+      return;
+    }
+    this.closeTimer = window.setTimeout(() => this.whenShut(then, checks + 1), 16);
   }
 
   /**
