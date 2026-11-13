@@ -336,6 +336,16 @@ const HOP_STEP_ABOVE = 0.02;
 const CHANGE_LOG = 256;
 
 /**
+ * How many revisions one {@link CollisionWorld}'s `blockBounds` entry spans.
+ * Small, because the block a cache was built in also holds the changes just
+ * before it: at 256 that block took in the end of the park's own construction,
+ * spanned the park, and sent the lattice to a whole rebuild after all — found
+ * by `check:nav-spaces` going red on the first version of this. At 16 the
+ * stray changes are at most fifteen, and patch in a few cells.
+ */
+const CHANGE_BLOCK = 16;
+
+/**
  * **Where a body of `radius` walking from `(fromX, fromZ)` towards `(toX, toZ)`
  * first touches a footprint** (`depthAt`: positive inside it) — and the way
  * into it there, a body's radius and a little, for a question about the top
@@ -1812,14 +1822,14 @@ export class CollisionWorld {
   /** The latest revision whose change had no footprint to give: everywhere. */
   private everywhereAt = 0;
   /**
-   * **Older changes, coarsely** — the plan bounds of every {@link CHANGE_LOG}
+   * **Older changes, coarsely** — the plan bounds of every {@link CHANGE_BLOCK}
    * revisions in a row, four numbers per block, so block `b` holds the union of
-   * revisions `b·CHANGE_LOG + 1 … (b + 1)·CHANGE_LOG`. A cache that fell further
+   * revisions `b·CHANGE_BLOCK + 1 … (b + 1)·CHANGE_BLOCK`. A cache that fell further
    * behind than the ring can still learn *where* the world changed: a lazy room
    * registers hundreds of colliders in one burst 279 m from the park (QA on
    * #759: a 459–517 ms park rebuild 3.4 s after she first walked into the
    * castle), and its block lies wholly off the park's lattice. Bounds only grow,
-   * so the answer is conservative, never wrong. Four numbers per 256 changes.
+   * so the answer is conservative, never wrong. Four numbers per sixteen changes.
    */
   private readonly blockBounds: number[] = [];
   private blockMinX = Infinity;
@@ -1851,9 +1861,9 @@ export class CollisionWorld {
     this.closeBlock();
   }
 
-  /** Files the running block's bounds once it spans {@link CHANGE_LOG} revisions. */
+  /** Files the running block's bounds once it spans {@link CHANGE_BLOCK} revisions. */
   private closeBlock(): void {
-    if (this.revisionCounter % CHANGE_LOG !== 0) return;
+    if (this.revisionCounter % CHANGE_BLOCK !== 0) return;
     this.blockBounds.push(this.blockMinX, this.blockMinZ, this.blockMaxX, this.blockMaxZ);
     this.blockMinX = Infinity;
     this.blockMinZ = Infinity;
@@ -1896,8 +1906,8 @@ export class CollisionWorld {
     // in (every such block is complete — see {@link blockBounds}).
     const ringFrom = Math.max(revision, this.revisionCounter - CHANGE_LOG);
     if (ringFrom > revision) {
-      const firstBlock = Math.floor(revision / CHANGE_LOG);
-      const lastBlock = Math.floor((ringFrom - 1) / CHANGE_LOG);
+      const firstBlock = Math.floor(revision / CHANGE_BLOCK);
+      const lastBlock = Math.floor((ringFrom - 1) / CHANGE_BLOCK);
       for (let b = firstBlock; b <= lastBlock; b += 1) {
         const at = b * 4;
         if (at + 3 >= this.blockBounds.length) return false;
