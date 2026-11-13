@@ -43,16 +43,20 @@ const { world } = quietly(() => buildHeadlessPark());
 const collision = world.collision;
 const sample = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
 
-// The room: every solid the reptile house registered, as its footprint.
+// The room: every solid the reptile house's hall registered, as its footprint.
 const room: { x: number; z: number; r: number }[] = [];
+// Only the hall's: the same owner tag also covers the house's outside, which
+// stands in the park and is rightly seen by the park's lattice.
 collision.forEachSolid((solid) => {
-  if (solid.owner === 'reptile house' && !solid.moving) room.push({ x: solid.centreX, z: solid.centreZ, r: Math.max(0.05, solid.reach) });
+  if (solid.owner !== 'reptile house' || solid.moving) return;
+  if (GARDEN_PLAY_BOUNDARY.distanceToEdge(solid.centreX, solid.centreZ) > -50) return;
+  room.push({ x: solid.centreX, z: solid.centreZ, r: Math.max(0.05, solid.reach) });
 });
 const roomX = room.reduce((s, c) => s + c.x, 0) / Math.max(1, room.length);
 const roomZ = room.reduce((s, c) => s + c.z, 0) / Math.max(1, room.length);
 const edge = GARDEN_PLAY_BOUNDARY.distanceToEdge(roomX, roomZ);
 console.log(
-  `check:nav-spaces: the room is the reptile house's ${room.length} solids, centred (${roomX.toFixed(0)}, ${roomZ.toFixed(0)}), ` +
+  `check:nav-spaces: the room is the reptile hall's ${room.length} solids, centred (${roomX.toFixed(0)}, ${roomZ.toFixed(0)}), ` +
     `${(-edge).toFixed(0)} m outside the park's edge`,
 );
 say(room.length > 0, `the room has solids to register (${room.length}) — otherwise this check asserts nothing`);
