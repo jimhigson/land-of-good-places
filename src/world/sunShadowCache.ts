@@ -40,19 +40,24 @@ import {
  *
  * So the map is split in two, and only the cheap half is redrawn per frame:
  *
- * - **The static cache** — every caster that has not changed for
- *   {@link SETTLE_MS}, drawn into a depth texture of its own. Redrawn only
- *   when the light moves (`DayNight` moves it in steps: when the sun has
- *   swung far enough to move a shadow by a texel or so, or when she has
- *   walked {@link DayNight}'s re-centre distance) or when a caster in it
- *   changes — moves, appears, disappears, swaps its geometry.
- * - **The composite** — the real map three.js samples. The static depth is
- *   copied in by one full-screen triangle (the {@link sentinel}, which writes
- *   `gl_FragDepth` from the cache), then only the casters that are moving
- *   right now are drawn on top: her, her pets, the NPCs walking near her, a
- *   ride turning. Depth testing makes the result exactly the nearer of the
- *   two, which is what one full pass would have drawn. Then three's own VSM
- *   blur runs as before.
+ * - **The static cache** — the depth of every caster that has not changed for
+ *   {@link SETTLE_MS}. Redrawn only when the light moves (`DayNight` moves it
+ *   in steps: when the sun has swung far enough to move a shadow by a texel
+ *   or so, or when she has walked {@link DayNight}'s re-centre distance) or
+ *   when a caster in it changes — moves, appears, disappears, swaps its
+ *   geometry. A redraw is **one** pass of three's, straight into the real
+ *   map: the cached casters, then the {@link tap} copying their depth out to
+ *   {@link keepTarget}, then this frame's movers on top, then the blur.
+ * - **The composite** — every other frame. The kept depth is copied in by one
+ *   full-screen triangle (the {@link sentinel}, which writes `gl_FragDepth`
+ *   from it), then only the casters that are moving right now are drawn on
+ *   top: her, her pets, the NPCs walking near her, a ride turning. Depth
+ *   testing makes the result exactly the nearer of the two, which is what one
+ *   full pass would have drawn. Then three's own VSM blur runs as before.
+ *
+ * "Exactly" is checked, not assumed: {@link SunShadowCache.audit} draws three's
+ * own full pass from the same light pose and compares the two maps texel by
+ * texel, and a correct cache differs in none.
  *
  * Nothing has to be tagged "static" or "dynamic" for this to be right: every
  * frame each shadow-relevant mesh's world matrix, geometry, instance matrices
@@ -242,23 +247,27 @@ export class SunShadowCache {
   active = true;
 
   private readonly entries = new Map<Object3D, Entry>();
-  private readonly seenList: Entry[] = [];
-  private readonly seenObjects: Object3D[] = [];
   /** Movers this frame, top-most only (a mover's children are drawn by three's own recursion). */
   private readonly movers: Object3D[] = [];
   private stamp = 0;
   private staticCount = 0;
   private staticSeen = 0;
-  private staticTarget: WebGLRenderTarget | null = null;
   /**
-   * Where the static pass's depth is **kept**. Three's VSM blur ends by
-   * clearing the map it has just blurred — depth included — so the depth the
-   * static pass drew is gone by the time `render` returns. {@link tap} copies
-   * it here first, and this is what the {@link sentinel} restores from.
+   * Where the cache's depth is **kept**. Three's VSM blur ends by clearing the
+   * map it has just blurred — depth included — so the depth the static pass
+   * drew is gone by the time `render` returns. {@link tap} copies it here
+   * first, and this is what the {@link sentinel} restores from.
    */
   private keepTarget: WebGLRenderTarget | null = null;
-  /** Drawn last in the static pass (it draws nothing); its `onAfterShadow` copies the finished depth out. */
+  /**
+   * Drawn after every cached caster in the static pass (it draws nothing). Its
+   * `onAfterShadow` copies their depth out to {@link keepTarget} and puts back
+   * the flags the pass took off the movers, which are drawn next.
+   */
   private readonly tap: Mesh;
+  /** Meshes the static pass hides (movers, and anything out of the sun's sight), with their flags. */
+  private readonly hiddenEntries: Entry[] = [];
+  private readonly hiddenObjects: Object3D[] = [];
   private renderer: WebGLRenderer | null = null;
   /** Light pose the cache was drawn from. */
   private readonly cachedLight = new Matrix4();
@@ -340,10 +349,20 @@ export class SunShadowCache {
         }
       `,
     });
-    this.tap.onAfterShadow = () => {
-      const from = this.staticTarget?.depthTexture;
+    this.tap.onAfterShadow = (renderer) => {
+      const map = this.light.shadow.map;
+      const from = map?.depthTexture;
       const to = this.keepTarget?.depthTexture;
-      if (this.renderer && from && to) this.renderer.copyTextureToTexture(from, to);
+      if (map && from && to) {
+        renderer.copyTextureToTexture(from, to);
+        // The copy is a framebuffer blit that ends with *no* framebuffer
+        // bound, and the movers queued after the tap draw next: put the map
+        // back, or they draw into the canvas (the audit's control found it —
+        // ~110,000 texels of missing mover shadow on every redraw frame).
+        renderer.setRenderTarget(map as WebGLRenderTarget);
+      }
+      // The cache's depth is kept: the movers queued after the tap may draw now.
+      this.unhide();
     };
     this.sentinel = new Mesh(triangle, new MeshBasicMaterial());
     this.sentinel.name = 'sunShadowCache.sentinel';
@@ -426,23 +445,23 @@ export class SunShadowCache {
     }
     this.survey(camera, now);
 
-    let drew = false;
+    let frame: SunShadowAudit['frame'];
     if (!this.cacheValid) {
+      // One pass: the cache's casters, the tap keeping their depth, then this
+      // frame's movers on top — the whole map, as three would have drawn it.
       this.renderStatic(original, camera, now);
-      drew = true;
-    }
-    if (drew || this.movers.length > 0) {
+      frame = 'static';
+    } else if (this.movers.length > 0) {
       this.renderComposite(original, camera);
       this.statsValue.compositePasses++;
-      this.statsValue.lastMovers = this.movers.length;
+      frame = 'composite';
     } else {
       this.statsValue.skipped++;
-      this.statsValue.lastMovers = 0;
+      frame = 'skipped';
     }
+    this.statsValue.lastMovers = this.movers.length;
     this.statsValue.lastDraws = info.calls - callsBefore;
-    if (this.auditsPending.length > 0) {
-      this.runAudit(renderer, original, camera, drew ? 'static' : this.movers.length > 0 ? 'composite' : 'skipped');
-    }
+    if (this.auditsPending.length > 0) this.runAudit(renderer, original, camera, frame);
   }
 
   /**
@@ -557,8 +576,6 @@ export class SunShadowCache {
    */
   private survey(camera: Camera, now: number): void {
     this.stamp++;
-    this.seenList.length = 0;
-    this.seenObjects.length = 0;
     this.movers.length = 0;
     this.staticSeen = 0;
     this.visit(this.scene, camera.layers.mask, now, false);
@@ -571,8 +588,15 @@ export class SunShadowCache {
   private visit(object: Object3D, layerMask: number, now: number, underMover: boolean): void {
     if (object.visible === false) return;
     let mover = false;
-    const drawable = (object as Mesh).isMesh === true || (object as unknown as { isLine?: boolean }).isLine === true || (object as unknown as { isPoints?: boolean }).isPoints === true;
-    if (drawable && (object.castShadow || object.receiveShadow) && (object.layers.mask & layerMask) !== 0) {
+    // The two flags first: they are own fields on every node, and most nodes
+    // (groups, pivots) have neither, so the kind checks below are rarely paid.
+    if (
+      (object.castShadow || object.receiveShadow) &&
+      ((object as Mesh).isMesh === true ||
+        (object as unknown as { isLine?: boolean }).isLine === true ||
+        (object as unknown as { isPoints?: boolean }).isPoints === true) &&
+      (object.layers.mask & layerMask) !== 0
+    ) {
       mover = this.classify(object, now);
       if (mover && !underMover) this.movers.push(object);
     }
@@ -630,8 +654,6 @@ export class SunShadowCache {
       }
     }
     entry.seen = this.stamp;
-    this.seenList.push(entry);
-    this.seenObjects.push(object);
     if (entry.inStatic) this.staticSeen++;
     if (entry.tiny) return false;
 
@@ -729,15 +751,11 @@ export class SunShadowCache {
     entry.map = single !== null && single.alphaTest > 0 ? textureOf(single, 'map') : null;
   }
 
-  private ensureStaticTarget(): WebGLRenderTarget {
+  private ensureKeepTarget(): void {
     const map = this.light.shadow.map!;
     const width = map.width;
     const height = map.height;
-    if (this.staticTarget && this.staticTarget.width === width && this.staticTarget.height === height) return this.staticTarget;
-    this.staticTarget?.depthTexture?.dispose();
-    this.staticTarget?.dispose();
-    const target = this.vsmTarget(width, height, 'sunShadowCache.static');
-    this.staticTarget = target;
+    if (this.keepTarget && this.keepTarget.width === width && this.keepTarget.height === height) return;
     // The kept copy: only its depth matters; the colour is the smallest three allows.
     this.keepTarget?.depthTexture?.dispose();
     this.keepTarget?.dispose();
@@ -753,7 +771,6 @@ export class SunShadowCache {
     this.renderer?.initRenderTarget(keep);
     this.keepTarget = keep;
     this.sentinelDepth.uniforms['staticDepth']!.value = keepDepth;
-    return target;
   }
 
   /**
@@ -780,17 +797,32 @@ export class SunShadowCache {
     return target;
   }
 
-  /** Draws every settled caster, and nothing that is moving or tiny, into the cache. */
+  /**
+   * **Redraws the cache, and draws this frame's map, in one pass** — straight
+   * into the real map:
+   *
+   * 1. every settled caster in the sun's sight (everything else has its two
+   *    flags taken off for the walk, so three skips it);
+   * 2. the {@link tap}, last child of the root: it copies the depth so far —
+   *    the cache — to {@link keepTarget}, and puts the flags back;
+   * 3. this frame's movers, queued after the tap, drawn over the cache;
+   * 4. three's own blur, once.
+   *
+   * Which is three's full pass, ordered so the cache can be copied out of the
+   * middle of it. Later frames restore the copy with the {@link sentinel}.
+   */
   private renderStatic(original: ShadowRender, camera: Camera, now: number): void {
     const shadow = this.light.shadow;
-    const target = this.ensureStaticTarget();
+    this.ensureKeepTarget();
     // Decide the cache's membership now, and hide everything outside it.
-    const hidden: Entry[] = [];
-    const hiddenObjects: Object3D[] = [];
     this.staticCount = 0;
-    for (let i = 0; i < this.seenList.length; i++) {
-      const entry = this.seenList[i]!;
-      const object = this.seenObjects[i]!;
+    for (const [object, entry] of this.entries) {
+      // Not seen this frame: removed, hidden, or moved off the camera's
+      // layers. Forget it; if it comes back it is new.
+      if (entry.seen !== this.stamp) {
+        this.entries.delete(object);
+        continue;
+      }
       const moving = now - entry.changedAt < SETTLE_MS;
       if (!moving && !entry.tiny && entry.frustumStamp !== this.frustumStamp) {
         entry.outside = !this.inFrustum(object);
@@ -806,29 +838,24 @@ export class SunShadowCache {
         entry.savedReceive = object.receiveShadow;
         object.castShadow = false;
         object.receiveShadow = false;
-        hidden.push(entry);
-        hiddenObjects.push(object);
+        this.hiddenEntries.push(entry);
+        this.hiddenObjects.push(object);
       }
     }
-    // Entries not seen this frame are gone (removed or hidden): forget them.
-    if (this.entries.size !== this.seenList.length) {
-      for (const [object, entry] of this.entries) if (entry.seen !== this.stamp) this.entries.delete(object);
-    }
-    const real = shadow.map;
-    shadow.map = target;
+    // Movers are exactly the seen, non-tiny, non-cached entries in sight:
+    // `survey` already collected them. They go after the tap.
+    const children = this.scene.children;
+    const length = children.length;
+    children.push(this.tap);
+    for (let i = 0; i < this.movers.length; i++) children.push(this.movers[i]!);
     shadow.needsUpdate = true;
-    // Last child of the root, so three's walk draws it after every caster.
-    this.scene.children.push(this.tap);
     try {
       original([this.light], this.scene, camera);
     } finally {
-      this.scene.children.pop();
-      shadow.map = real;
+      children.length = length;
       shadow.needsUpdate = false;
-      for (let i = 0; i < hidden.length; i++) {
-        hiddenObjects[i]!.castShadow = hidden[i]!.savedCast;
-        hiddenObjects[i]!.receiveShadow = hidden[i]!.savedReceive;
-      }
+      // The tap puts the flags back; this is for a pass that never reached it.
+      this.unhide();
     }
     this.cachedLight.copy(this.light.matrixWorld);
     this.cachedTarget.copy(this.light.target.matrixWorld);
@@ -836,8 +863,18 @@ export class SunShadowCache {
     this.statsValue.staticPasses++;
     this.statsValue.staticMeshes = this.staticCount;
     this.statsValue.lastReason = this.dirtyReason;
-    // Movers are exactly the seen, non-tiny, non-cached entries in sight;
-    // `survey` already collected them, and they stay as they are.
+  }
+
+  /** Gives back the flags {@link renderStatic} took off. Safe to call twice. */
+  private unhide(): void {
+    const entries = this.hiddenEntries;
+    const objects = this.hiddenObjects;
+    for (let i = 0; i < entries.length; i++) {
+      objects[i]!.castShadow = entries[i]!.savedCast;
+      objects[i]!.receiveShadow = entries[i]!.savedReceive;
+    }
+    entries.length = 0;
+    objects.length = 0;
   }
 
   /** The real map: the cache's depth, then this frame's movers on top, then three's blur. */
