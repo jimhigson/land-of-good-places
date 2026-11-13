@@ -1,4 +1,4 @@
-import type { Group } from 'three';
+import type { Group, Object3D } from 'three';
 import { Rng } from '../../core/mathUtils';
 import { applyRidePose } from '../../entities/ridePose';
 import { KidCrowd, type KidAvatar, type KidColours } from '../../entities/npc/kidCrowd';
@@ -56,7 +56,11 @@ import type { PetTablePlace } from '../../entities/parade/ParadeMember';
  *
  * They draw only inside the castle — `Building` hides `interiorRoot` while the
  * player is outdoors, and per-space visibility since #377 means only the storey
- * she is on is drawn at all.
+ * she is on is drawn at all. **And they are only posed while drawn** (120 fps
+ * plan, step 3): posing and committing them everywhere else was 0.96 ms of
+ * every frame in the park, for a room 600 m away. The pose is a pure function
+ * of the clock, so a feast posed only while she can see it is the same feast
+ * — the first frame she walks in poses it at the current time, mid-meal.
  *
  * ## Every diner is the same height, and that is a ruling rather than laziness
  *
@@ -221,6 +225,19 @@ export class GreatHallBanquet {
   /** Every child at the table, for anything that wants to measure one. */
   get seated(): readonly Diner[] {
     return this.diners;
+  }
+
+  /**
+   * The diners' group on the storey, or `null` where there is no feast — what
+   * `Building` asks `isDrawn` of before calling {@link update}.
+   *
+   * The gate is the owner's, not this class's, on purpose: {@link dress} poses
+   * the table once at construction, while the storey is still hidden, so that
+   * a scene a check builds — which never calls `update` — measures children
+   * sitting down. A gate in here would skip exactly that pose.
+   */
+  get root(): Object3D | null {
+    return this.crowd?.crowd.group ?? null;
   }
 
   dispose(): void {
