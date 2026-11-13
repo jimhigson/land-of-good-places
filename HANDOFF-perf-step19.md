@@ -43,6 +43,11 @@ Plan: `docs/perf/FRAME-DROPS-2026-11.md` on `origin/perf/frame-drops-2026-11`
     (drawn held still 36226 of 72452 ball-frames) and "expected 0 to be greater than 0"
   - `this.px[i] = x` inside `interpolate()` → `4 failed | 2 passed`, fingerprints
     `ae4978a3`/`b396c390` against the pinned `1f38a64b`/`06cf593d`
+- [x] redraw dead band `BALL_REDRAW_DEADBAND` (0.1 mm): idle settled pile, 10 s, nobody near —
+  instance-buffer uploads 600 before (60 and 120 Hz), 1200 with bare interpolation at 120 Hz,
+  **0** now. Guard 'redraws nothing while the settled pile only shuffles on the spot', proved red
+  with a zero dead band in `step()`: `1 failed | 6 passed`, "expected 714 to be +0".
+  The pacing test's "moving" floor is now 4 x the dead band (129 balls qualify, was 614 at 10 um).
 - [x] audit of the rest of `src/` — see below
 - [ ] browser measurement: NOT done. A dev park for this source hash is a fresh
   ~30 minute solve of seed 5 on the loaded Mac; headless Chromium is 60 Hz anyway.
