@@ -5,7 +5,6 @@ import {
   DepthTexture,
   FloatType,
   Frustum,
-  GLSL3,
   HalfFloatType,
   LinearFilter,
   Matrix4,
@@ -194,7 +193,12 @@ export class SunShadowCache {
     triangle.setAttribute('position', new BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3));
     this.sentinelDepth = new ShaderMaterial({
       name: 'sunShadowCache.restore',
-      glslVersion: GLSL3,
+      // Not `glslVersion: GLSL3`: with it three declares no colour output for
+      // a ShaderMaterial, and WebGL 2 then *drops the draw* ("active draw
+      // buffers with missing fragment shader outputs") — the map's colour
+      // attachment is live during the depth pass. Three compiles every
+      // ShaderMaterial as `#version 300 es` regardless, so `texelFetch` and
+      // `gl_FragDepth` are there, and `gl_FragColor` is its declared output.
       uniforms: { staticDepth: { value: null } },
       vertexShader: /* glsl */ `
         void main() {
@@ -205,6 +209,8 @@ export class SunShadowCache {
         uniform highp sampler2D staticDepth;
         void main() {
           gl_FragDepth = texelFetch(staticDepth, ivec2(gl_FragCoord.xy), 0).r;
+          // Overwritten by three's VSM blur, which reads only the depth.
+          gl_FragColor = vec4(1.0);
         }
       `,
     });
