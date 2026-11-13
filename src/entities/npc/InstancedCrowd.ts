@@ -1,11 +1,14 @@
 import {
   Color,
+  Frustum,
+  type Camera,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
   Object3D,
+  Sphere,
   type Material,
 } from 'three';
 
@@ -39,11 +42,30 @@ import {
  *   one shared material, tinted per instance via `instanceColor`. That is what
  *   makes the whole crowd share materials; it also means a member's colours are
  *   set once at spawn, not swapped per frame.
- * - **Instanced meshes are not frustum-culled here.** An `InstancedMesh`'s
- *   bounding sphere is computed from where its instances *were*, and these ones
- *   walk about; culling against a stale sphere makes children blink out of
- *   existence at the screen edge. At one draw call per part it is not a trade
- *   worth making.
+ * - **A part's instances are packed, and its bounds are live.** `commit` only
+ *   records what a member shows; `flush` then writes, for every part variant,
+ *   just the members actually wearing it into slots `0..count-1`, and sets that
+ *   mesh's bounding sphere to the union of exactly those instances. So a mesh
+ *   draws no zero-scaled stand-ins for children wearing a different face or
+ *   hair, and three.js's ordinary frustum culling — main pass and shadow pass
+ *   alike — skips a part whose children are all off screen, or a whole crowd
+ *   in a space she is not in (step 4 of docs/perf/FRAME-DROPS-2026-11.md).
+ *
+ *   Culling used to be off here, and rightly: three.js computes an
+ *   `InstancedMesh`'s sphere once, from where its instances *were*, and these
+ *   walk about — a stale sphere makes children blink out at the screen edge.
+ *   The sphere is now rebuilt in the same `flush` that uploads the matrices it
+ *   bounds, so it can never be a frame behind them. `check:crowd-cull` holds
+ *   both halves of that: nobody on screen culled, nobody off screen drawn.
+ *
+ *   Then, immediately before a draw, `cullCrowdsFor` trims every part that
+ *   casts no shadow to the children whose own sphere touches that camera's
+ *   frustum — per child, so a child half over the edge is drawn whole. The
+ *   shadow-casting parts keep everybody (see {@link InstancedCrowd.cullTo}).
+ *
+ *   The cost of packing is that **slot ≠ member**: an instance id from a
+ *   raycast or `getMatrixAt` does not name a child. Nothing asks today; ask the
+ *   crowd, not the buffer, if something ever needs to.
  */
 
 /** One part of the prototype, and the instanced mesh (or meshes) that draw it. */
@@ -93,6 +115,21 @@ export interface CrowdOptions {
 
 const ZERO_MATRIX = new Matrix4().makeScale(0, 0, 0);
 const scratchColour = new Color();
+const scratchMatrix = new Matrix4();
+const cullSphere = new Sphere();
+const cullFrustum = new Frustum();
+const cullMatrix = new Matrix4();
+/** Every crowd not yet disposed — what {@link cullCrowdsFor} walks. */
+const LIVE_CROWDS = new Set<InstancedCrowd>();
+/**
+ * Metres added to every sphere the crowd is culled by (a part's packed bounds,
+ * a child's own sphere, a part tested on its own). The spheres are exact for
+ * the geometry as committed; this is slack against float32 rounding in the
+ * instance buffer and nothing else — no crowd material displaces vertices — so
+ * it is a hand's breadth, where it cannot make culling meaningless.
+ * `check:crowd-cull` reads it rather than keeping a number of its own.
+ */
+export const CROWD_BOUNDS_MARGIN = 0.1;
 
 export class InstancedCrowd {
   readonly group = new Group();
@@ -105,6 +142,36 @@ export class InstancedCrowd {
   private readonly capacity: number;
   private readonly members: CrowdMember[] = [];
   private dirty = true;
+  /**
+   * What each member showed at its last `commit`, per part: the variant drawn,
+   * or -1 for none. Indexed `member * parts + part`. Kept apart from
+   * {@link CrowdMember.variant}/`shown`, which callers may change between
+   * commits; the buffer only ever reflects what was committed.
+   */
+  private readonly committedChoice: Int16Array;
+  /** Each member's committed part matrices, 16 floats per `member * parts + part`. */
+  private readonly committedMatrix: Float32Array;
+  /** Each member's colour per part, 3 floats per `member * parts + part`. */
+  private readonly colour: Float32Array;
+  /** Which member each packed slot held at the last flush, per variant mesh. */
+  private readonly slotMember = new Map<InstancedMesh, Int32Array>();
+  /** A colour changed since the last flush, so every packed colour is rewritten. */
+  private coloursDirty = true;
+  /**
+   * Each member's committed box in the crowd's frame — min x, y, z, max x, y,
+   * z — enclosing every part she shows (min x is `Infinity` if she shows
+   * nothing). Built in `commit` from each part's {@link partReach}.
+   */
+  private readonly memberBox: Float32Array;
+  /**
+   * How far each part's geometry reaches from its own origin: its bounding
+   * sphere's centre distance plus radius, in the part's frame.
+   */
+  private readonly partReach: Float32Array;
+  /** Scratch box for {@link pack}. */
+  private readonly packBox = new Float32Array(6);
+  /** Scratch for {@link cullTo}: whether each member is kept for this draw. */
+  private readonly keep: Uint8Array;
 
   constructor(prototype: Object3D, capacity: number, options: CrowdOptions) {
     this.capacity = capacity;
@@ -122,15 +189,19 @@ export class InstancedCrowd {
         mesh.name = `crowd:${source.name || source.geometry.type}`;
         mesh.castShadow = options.castShadowFor?.(source) ?? false;
         mesh.receiveShadow = options.receiveShadow ?? false;
-        // See the note in the class doc: these walk, so a cached bounding
-        // sphere would cull them at the wrong moment.
-        mesh.frustumCulled = false;
+        // Culled, against a sphere `flush` rebuilds from the live instances —
+        // see the class doc.
+        mesh.frustumCulled = true;
+        mesh.boundingSphere = new Sphere();
         mesh.renderOrder = source.renderOrder;
-        // Everything starts hidden; `commit` reveals a member's parts.
+        // Nobody is drawn until a member is committed into it.
         for (let i = 0; i < capacity; i += 1) {
           mesh.setMatrixAt(i, ZERO_MATRIX);
           mesh.setColorAt(i, scratchColour.setHex(0xffffff));
         }
+        mesh.count = 0;
+        mesh.visible = false;
+        this.slotMember.set(mesh, new Int32Array(capacity).fill(-1));
         this.group.add(mesh);
         return mesh;
       });
@@ -138,6 +209,16 @@ export class InstancedCrowd {
     }
 
     this.parts = parts;
+    this.committedChoice = new Int16Array(capacity * parts.length).fill(-1);
+    this.committedMatrix = new Float32Array(capacity * parts.length * 16);
+    this.colour = new Float32Array(capacity * parts.length * 3).fill(1);
+    this.memberBox = new Float32Array(capacity * 6).fill(Infinity);
+    this.partReach = new Float32Array(parts.map((part) => {
+      const sphere = geometrySphereOf(part.source);
+      return sphere.center.length() + sphere.radius;
+    }));
+    this.keep = new Uint8Array(capacity);
+    LIVE_CROWDS.add(this);
     this.partCount = parts.reduce((total, part) => total + part.variants.length, 0);
   }
 
@@ -174,46 +255,216 @@ export class InstancedCrowd {
 
   /** Tints one part of one member. Colours are multiplied into the material. */
   setPartColour(member: CrowdMember, partIndex: number, colour: number): void {
-    const part = this.parts[partIndex];
-    if (!part) return;
+    if (!this.parts[partIndex]) return;
     scratchColour.setHex(colour);
-    for (const variant of part.variants) {
-      variant.setColorAt(member.index, scratchColour);
-      if (variant.instanceColor) variant.instanceColor.needsUpdate = true;
-    }
+    const at = (member.index * this.parts.length + partIndex) * 3;
+    this.colour[at] = scratchColour.r;
+    this.colour[at + 1] = scratchColour.g;
+    this.colour[at + 2] = scratchColour.b;
+    this.coloursDirty = true;
+    this.dirty = true;
   }
 
   /**
-   * Recomputes the member's world transforms and writes them into the instance
-   * buffers. Call once per frame per member, after posing the skeleton.
+   * Recomputes the member's world transforms and records what it shows. Call
+   * once per frame per member, after posing the skeleton; `flush` then writes
+   * the buffers.
    */
   commit(member: CrowdMember): void {
     member.root.updateMatrixWorld(true);
 
-    for (let p = 0; p < this.parts.length; p += 1) {
+    const partTotal = this.parts.length;
+    const base = member.index * partTotal;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let p = 0; p < partTotal; p += 1) {
       const part = this.parts[p];
       const proxy = member.proxies[p];
       if (!part || !proxy) continue;
-      const chosen = member.shown[p] ? member.variant[p] : -1;
-      for (let v = 0; v < part.variants.length; v += 1) {
-        const variant = part.variants[v];
-        if (!variant) continue;
-        variant.setMatrixAt(member.index, v === chosen ? proxy.matrixWorld : ZERO_MATRIX);
-      }
+      const variant = member.variant[p] ?? 0;
+      const chosen = member.shown[p] && variant < part.variants.length ? variant : -1;
+      this.committedChoice[base + p] = chosen;
+      if (chosen < 0) continue;
+      const e = proxy.matrixWorld.elements;
+      this.committedMatrix.set(e, (base + p) * 16);
+      // The part lies within `reach` of its own origin in its own frame, so
+      // within reach × its largest scale of that origin here — a cube that
+      // costs one square root, where transforming its sphere costs three.
+      const scaleSq = Math.max(
+        e[0]! * e[0]! + e[1]! * e[1]! + e[2]! * e[2]!,
+        e[4]! * e[4]! + e[5]! * e[5]! + e[6]! * e[6]!,
+        e[8]! * e[8]! + e[9]! * e[9]! + e[10]! * e[10]!,
+      );
+      const reach = this.partReach[p]! * Math.sqrt(scaleSq);
+      const x = e[12]!, y = e[13]!, z = e[14]!;
+      if (x - reach < minX) minX = x - reach;
+      if (y - reach < minY) minY = y - reach;
+      if (z - reach < minZ) minZ = z - reach;
+      if (x + reach > maxX) maxX = x + reach;
+      if (y + reach > maxY) maxY = y + reach;
+      if (z + reach > maxZ) maxZ = z + reach;
+    }
+    const b = member.index * 6;
+    if (minX === Infinity) {
+      this.memberBox[b] = Infinity;
+    } else {
+      this.memberBox[b] = minX;
+      this.memberBox[b + 1] = minY;
+      this.memberBox[b + 2] = minZ;
+      this.memberBox[b + 3] = maxX;
+      this.memberBox[b + 4] = maxY;
+      this.memberBox[b + 5] = maxZ;
     }
     this.dirty = true;
   }
 
-  /** Flushes the instance buffers to the GPU. Call once, after every `commit`. */
+  /**
+   * Packs every part variant's buffer with the members wearing it, rebuilds its
+   * bounding sphere round exactly those children, and flags the upload. Call
+   * once, after every `commit`.
+   *
+   * This alone is always correct to draw: every committed member is in. A
+   * renderer that then calls {@link cullTo} with the camera it is about to draw
+   * through gets the non-shadow parts trimmed to the children on screen.
+   */
   flush(): void {
     if (!this.dirty) return;
-    for (const part of this.parts) {
-      for (const variant of part.variants) variant.instanceMatrix.needsUpdate = true;
+    const partTotal = this.parts.length;
+    for (let p = 0; p < partTotal; p += 1) {
+      const part = this.parts[p];
+      if (!part) continue;
+      for (let v = 0; v < part.variants.length; v += 1) this.pack(p, v, null);
     }
+    this.coloursDirty = false;
     this.dirty = false;
   }
 
+  /**
+   * **Trims the crowd to the children `camera` can see**, for the draw about
+   * to happen through it. Call after `flush`, immediately before
+   * `renderer.render` — `cullCrowdsFor` is how `Game` does it.
+   *
+   * A child is kept whole if anything of her touches the frustum, so a child
+   * half over the screen edge is drawn complete — culling is per child, never
+   * per part. Her committed box decides the clear cases; one whose box straddles
+   * the frustum is decided part by part, against each part's exact sphere.
+   *
+   * **Shadow-casting parts are left alone.** The same buffer feeds the shadow
+   * pass, and a child just off the screen still throws her shadow onto it; the
+   * shadow camera is not the view camera and there is more than one shadow
+   * light (the sun, the castle's key). Those parts keep every member and their
+   * union sphere, which three.js culls per pass on its own.
+   */
+  cullTo(frustum: Frustum): void {
+    const memberTotal = this.members.length;
+    const toWorld = this.group.matrixWorld;
+    const scale = toWorld.getMaxScaleOnAxis();
+    for (let m = 0; m < memberTotal; m += 1) {
+      if (!this.memberShows(m)) {
+        this.keep[m] = 0;
+        continue;
+      }
+      this.sphereOfBox(m * 6, this.memberBox, cullSphere);
+      cullSphere.center.applyMatrix4(toWorld);
+      cullSphere.radius *= scale;
+      const inside = sphereSide(frustum, cullSphere);
+      // Wholly in or wholly out is decided by the child's own sphere; one
+      // straddling the frustum asks her parts, so a child whose union sphere
+      // pokes into the frame with nothing of her in it is not drawn.
+      this.keep[m] = inside === 1 ? 1 : inside === -1 ? 0 : this.anyPartMeets(frustum, m, toWorld, scale) ? 1 : 0;
+    }
+    for (let p = 0; p < this.parts.length; p += 1) {
+      const part = this.parts[p];
+      if (!part) continue;
+      for (let v = 0; v < part.variants.length; v += 1) {
+        if (part.variants[v]?.castShadow) continue;
+        this.pack(p, v, this.keep);
+      }
+    }
+  }
+
+  /** Whether member `m` showed anything at her last commit. */
+  private memberShows(m: number): boolean {
+    return m < this.members.length && this.memberBox[m * 6] !== Infinity;
+  }
+
+  /** The sphere round the box at `box[o..o+5]`, plus {@link CROWD_BOUNDS_MARGIN}. */
+  private sphereOfBox(o: number, box: Float32Array, out: Sphere): void {
+    const hx = (box[o + 3]! - box[o]!) / 2;
+    const hy = (box[o + 4]! - box[o + 1]!) / 2;
+    const hz = (box[o + 5]! - box[o + 2]!) / 2;
+    out.center.set(box[o]! + hx, box[o + 1]! + hy, box[o + 2]! + hz);
+    out.radius = Math.sqrt(hx * hx + hy * hy + hz * hz) + CROWD_BOUNDS_MARGIN;
+  }
+
+  /** Whether any part member `m` shows meets `frustum`, each part padded by {@link CROWD_BOUNDS_MARGIN}. */
+  private anyPartMeets(frustum: Frustum, m: number, toWorld: Matrix4, scale: number): boolean {
+    const partTotal = this.parts.length;
+    for (let p = 0; p < partTotal; p += 1) {
+      const at = m * partTotal + p;
+      const part = this.parts[p];
+      if (!part || this.committedChoice[at]! < 0) continue;
+      scratchMatrix.fromArray(this.committedMatrix, at * 16);
+      cullSphere.copy(geometrySphereOf(part.source)).applyMatrix4(scratchMatrix).applyMatrix4(toWorld);
+      cullSphere.radius += CROWD_BOUNDS_MARGIN * scale;
+      if (frustum.intersectsSphere(cullSphere)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Writes one part variant's buffer: the members wearing it (and, given
+   * `keep`, only those kept) into slots `0..count-1`, its bounding sphere the
+   * sphere round those children's boxes.
+   */
+  private pack(p: number, v: number, keep: Uint8Array | null): void {
+    const part = this.parts[p];
+    const mesh = part?.variants[v];
+    const slots = mesh ? this.slotMember.get(mesh) : undefined;
+    if (!part || !mesh || !slots) return;
+    const partTotal = this.parts.length;
+    const memberTotal = this.members.length;
+    const coloursDirty = this.coloursDirty;
+    const matrices = mesh.instanceMatrix.array as Float32Array;
+    const colours = mesh.instanceColor?.array as Float32Array | undefined;
+    const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
+    let count = 0;
+    let recoloured = false;
+    const box = this.packBox;
+    box[0] = box[1] = box[2] = Infinity;
+    box[3] = box[4] = box[5] = -Infinity;
+    for (let m = 0; m < memberTotal; m += 1) {
+      const at = m * partTotal + p;
+      if (this.committedChoice[at] !== v) continue;
+      if (keep && !keep[m]) continue;
+      // Element by element: a `subarray` view here would allocate per instance per frame.
+      for (let e = 0; e < 16; e += 1) matrices[count * 16 + e] = this.committedMatrix[at * 16 + e]!;
+      if (colours && (coloursDirty || slots[count] !== m)) {
+        colours[count * 3] = this.colour[at * 3]!;
+        colours[count * 3 + 1] = this.colour[at * 3 + 1]!;
+        colours[count * 3 + 2] = this.colour[at * 3 + 2]!;
+        recoloured = true;
+      }
+      slots[count] = m;
+      // The mesh's bounds are the box round its children's own boxes: no
+      // transform per instance, and never smaller than any part it draws.
+      const b = m * 6;
+      for (let k = 0; k < 3; k += 1) {
+        if (this.memberBox[b + k]! < box[k]!) box[k] = this.memberBox[b + k]!;
+        if (this.memberBox[b + 3 + k]! > box[3 + k]!) box[3 + k] = this.memberBox[b + 3 + k]!;
+      }
+      count += 1;
+    }
+    if (count > 0) this.sphereOfBox(0, box, sphere);
+    else sphere.makeEmpty();
+    mesh.count = count;
+    mesh.visible = count > 0;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
   dispose(): void {
+    LIVE_CROWDS.delete(this);
     for (const part of this.parts) {
       for (const variant of part.variants) variant.dispose();
     }
@@ -221,6 +472,59 @@ export class InstancedCrowd {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/** A prototype mesh's geometry sphere, computed once and cached on the geometry. */
+function geometrySphereOf(source: Mesh): Sphere {
+  if (!source.geometry.boundingSphere) source.geometry.computeBoundingSphere();
+  return source.geometry.boundingSphere ?? EMPTY_SPHERE;
+}
+const EMPTY_SPHERE = new Sphere();
+
+/**
+ * **Trim every crowd drawn in `scene` to what `camera` sees** — call it
+ * immediately before `renderer.render(scene, camera)`, as `Game.render` does.
+ *
+ * Crowds in another scene (a preview, a mini-game) are left exactly as their
+ * own `flush` packed them, which is always correct to draw. A crowd whose
+ * `flush` has not run since its last `commit` is trimmed against its last
+ * flush, which is the buffer the renderer would upload anyway.
+ */
+export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
+  // Parents too: a ride's camera rides on something. Both of these repeat work
+  // `render` is about to do anyway, so they cannot disagree with it.
+  camera.updateWorldMatrix(true, false);
+  cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  cullFrustum.setFromProjectionMatrix(cullMatrix, camera.coordinateSystem, camera.reversedDepth);
+  for (const crowd of LIVE_CROWDS) {
+    // Not in this scene, or switched off (an interior she is not in): not drawn
+    // by this render at all, so there is nothing to trim.
+    if (!drawnIn(crowd.group, scene)) continue;
+    crowd.group.updateWorldMatrix(true, false);
+    crowd.cullTo(cullFrustum);
+  }
+}
+
+/** 1 if `sphere` is wholly inside `frustum`, -1 if wholly outside, 0 if it straddles a plane. */
+function sphereSide(frustum: Frustum, sphere: Sphere): number {
+  let side = 1;
+  for (const plane of frustum.planes) {
+    const distance = plane.distanceToPoint(sphere.center);
+    if (distance < -sphere.radius) return -1;
+    if (distance < sphere.radius) side = 0;
+  }
+  return side;
+}
+
+/** Whether `object` and all its ancestors are visible and it hangs from `scene`. */
+function drawnIn(object: Object3D, scene: Object3D): boolean {
+  let at: Object3D | null = object;
+  while (at) {
+    if (!at.visible) return false;
+    if (at === scene) return true;
+    at = at.parent;
+  }
+  return false;
+}
 
 /**
  * Every mesh in the prototype that the crowd should draw, in traversal order.

@@ -3,6 +3,7 @@ import { HOTEL_GLB_BASE64 } from '../assets/hotelGlb';
 import { PALETTE } from '../style/bridge';
 import { ART } from '../style/artPalette';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
+import { isHotelBootPart } from './hotelKitSplit';
 import {
   addOutline,
   decal,
@@ -65,9 +66,30 @@ import { RIDER_HEADROOM } from '../../world/train/clearance';
  * of lit rooms.
  */
 
-const parts: Map<string, GlbPart> = readGlbParts(base64ToArrayBuffer(HOTEL_GLB_BASE64));
+/**
+ * Every authored part loaded so far, by node name.
+ *
+ * **Two kits, one table.** `pack:hotel` cuts `hotel.glb` in two
+ * (`hotelKitSplit.ts` owns the cut): the boot kit, read here, is the tower in
+ * the park and the parts other places borrow; the inside kit arrives with the
+ * hotel's interior when she walks in (`world/hotel/interior.ts`), and
+ * `hotelInsideKit.ts` adds its parts with {@link registerHotelParts}. Every
+ * factory below asks this one table, so none of them knows which kit its parts
+ * came in — and asking for an inside part before the interior has loaded
+ * throws, naming the kit, rather than building half a piece of furniture.
+ */
+const parts: Map<string, GlbPart> = new Map();
 
-for (const part of parts.values()) markShared(part.geometry);
+/** Adds a kit's parts to the table. Called once per kit. */
+export function registerHotelParts(kit: ReadonlyMap<string, GlbPart>): void {
+  for (const [name, part] of kit) {
+    if (parts.has(name)) throw new Error(`hotelAssets: part '${name}' is in two kits — see hotelKitSplit.ts`);
+    markShared(part.geometry);
+    parts.set(name, part);
+  }
+}
+
+registerHotelParts(readGlbParts(base64ToArrayBuffer(HOTEL_GLB_BASE64)));
 
 /** How a part is dressed. Colour and shading only — never shape. */
 interface PartStyle {
@@ -309,6 +331,13 @@ const STYLES: Record<string, PartStyle> = {
 /** One authored part, by name. Throws rather than returning a hole. */
 function hotelPart(name: string): GlbPart {
   const part = parts.get(name);
+  if (!part && !isHotelBootPart(name)) {
+    throw new Error(
+      `hotelAssets: '${name}' is in the hotel's inside kit, which has not been loaded — it ` +
+        `arrives with the interior (world/hotel/interior.ts, hotelInsideKit.ts). Nothing at boot ` +
+        `may build hotel furniture.`,
+    );
+  }
   if (!part) {
     throw new Error(
       `hotelAssets: the asset has no part named '${name}'. Either a factory here has grown ` +
@@ -319,7 +348,7 @@ function hotelPart(name: string): GlbPart {
   return part;
 }
 
-/** Every part name the asset actually contains — for checks, not for the game. */
+/** Every part name loaded so far (both kits, once the inside one is in) — for checks, not for the game. */
 export function hotelAssetPartNames(): readonly string[] {
   return [...parts.keys()];
 }

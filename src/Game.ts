@@ -1,4 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
+import { doorwayTapTarget } from './entities/doorwayTap';
 import { FrameStrides } from './entities/frameStrides';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
@@ -78,6 +79,7 @@ import { BookGlance } from './world/library/bookGlance';
 import { StoryCamera } from './world/library/storyCamera';
 import { OwlLensFade } from './world/library/owlLensFade';
 import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
+import { cullCrowdsFor } from './entities/npc/InstancedCrowd';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -243,9 +245,10 @@ export class Game {
    * The owl fades as she passes the lens (`world/library/owlLensFade.ts`):
    * story time's held shot is in her flight path from cushion 3. Applied just
    * before the frame is drawn, from the eye that draws it, and undone straight
-   * after — nothing else ever sees her faded.
+   * after — nothing else ever sees her faded. Made the first frame the owl
+   * exists: she is in the reading room's lazy chunk (`world/interiors.ts`).
    */
-  private readonly owlFade: OwlLensFade;
+  private owlFade: OwlLensFade | null = null;
   private readonly drawnEye = new Vector3();
 
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
@@ -316,7 +319,6 @@ export class Game {
     this.world.library.adoptRestoredPlayer();
     this.bookGlance = new BookGlance(this.world.library);
     this.storyCamera = new StoryCamera(this.world.library, this.world.collision, this.camera, this.player);
-    this.owlFade = new OwlLensFade(this.world.library.owl);
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -469,6 +471,8 @@ export class Game {
       () => this.world.building.visibleSurfaceCeiling,
     );
     this.engine.scene.add(this.tapNavigator.group);
+    // A tap in an interior's way out walks her on through it (QA on #743).
+    this.tapNavigator.throughDoorway = (x, y, z) => doorwayTapTarget(this.world.doorwayExits, x, y, z);
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
@@ -2174,9 +2178,11 @@ export class Game {
     // The owl fades while she is close to the lens that draws this frame, and
     // only for the drawing (`world/library/owlLensFade.ts`).
     (this.cameraOverride ?? this.camera.camera).getWorldPosition(this.drawnEye);
-    this.owlFade.apply(this.drawnEye);
+    const owl = this.world.library.owlIfFurnished;
+    if (owl && !this.owlFade) this.owlFade = new OwlLensFade(owl);
+    this.owlFade?.apply(this.drawnEye);
     this.render();
-    this.owlFade.restore();
+    this.owlFade?.restore();
   }
 
   private updateHud(tick: LoopTick): void {
@@ -2235,6 +2241,9 @@ export class Game {
       this.sky.render(renderer);
       renderer.clearDepth();
       const camera = this.cameraOverride ?? this.camera.camera;
+      // Only the children this camera can see are drawn (step 4 of
+      // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
+      cullCrowdsFor(this.engine.scene, camera);
       renderer.render(this.engine.scene, camera);
       // The ferris wheel's car, drawn a second time over the finished frame.
       // The camera is bolted inside it, so nothing outside it should ever be in
