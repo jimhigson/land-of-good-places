@@ -75,9 +75,41 @@
  * onto a solid, must see a frame over {@link FRAME_LIMIT_MS}. Otherwise the
  * instrument could not see what this check exists to catch.
  *
- * ## Proved red
+ * ## Proved red — seed 5, restart 1, on commit 6e3f1fba (13 Nov 2026, this Mac)
  *
- * (To be pasted: both mutations, with the geometry — seed, restart, commit.)
+ * The session above, unchanged; geometry is the checked-in park's
+ * (`parks/5.json`). Green on the same commit: worst frame 3.13 ms CPU, p99
+ * 2.23 ms, 84 answers compared, 0 lattices built in one task.
+ *
+ * `NAV_FRAME_MUTATE=sync` — her navigator, her parade and the crowd built
+ * with no scheduler, i.e. today's code (exit 1, 3 failures):
+ *
+ * ```
+ * ✗ no frame spent more than 6 ms of CPU finding its way: worst 491.66 ms (cold), p99 1.06 ms, 29 over the limit, 46 over the 2 ms budget, of 5586 frames
+ *   a worst frame: 491.66 ms CPU (cold): warm@379² 2.49, findRoute@379² 455.33, findRoute@379² 33.84
+ *   a worst frame: 117.54 ms CPU (castle): findRoute@192² 117.53
+ *   a worst frame: 69.81 ms CPU (crowd): findRoute@379² 35.67, findRoute@379² 34.13
+ * ✗ every answer is the whole search's route, float for float (0 compared, ...)
+ * ✗ after her first lattice: 0 lattice(s) laid in slices, 1 laid whole in one task (0² in castle), 1 half-laid one finished in one go — must be 0 and 0, with at least 1 sliced
+ * ```
+ *
+ * (The 455 ms is a companion's first plan finishing her half-laid park
+ * lattice in one go; 117 ms the mall's lattice laid whole inside a child's
+ * plan — the 55 ms Chrome measured, in Node; "0²" was the label read before
+ * the build sized it, since fixed to read after.)
+ *
+ * `NAV_FRAME_MUTATE=deadline` — the scheduler's deadline ignored, so each
+ * request it touches is answered whole (exit 1, 1 failure):
+ *
+ * ```
+ * ✗ no frame spent more than 6 ms of CPU finding its way: worst 112.89 ms (castle), p99 2.37 ms, 29 over the limit, 309 over the 2 ms budget, of 5999 frames
+ *   a worst frame: 112.89 ms CPU (castle): warm@192² 1.71, advanceRequest@192² 111.18
+ *   a worst frame: 36.33 ms CPU (park taps): advanceRequest@379² 36.32
+ * ```
+ *
+ * Its answers stayed equal to the whole search's (81 compared): the mutation
+ * breaks the slicing, not the search, and the equality clause rightly passes.
+ * The control line passed in both runs (34.0/33.8 and 35.1/34.7 ms).
  */
 import './headless-canvas.mjs';
 import { Vector3 } from 'three';
@@ -187,11 +219,12 @@ let oneTaskBuilds = 0;
 const oneTaskWhat: string[] = [];
 const wholeRebuild = navProto['rebuild'] as (...args: unknown[]) => unknown;
 navProto['rebuild'] = function (this: unknown, ...args: unknown[]): unknown {
+  const result = wholeRebuild.apply(this, args);
   if (!isWindow(this) && paused === 0) {
     oneTaskBuilds += 1;
     if (oneTaskWhat.length < 5) oneTaskWhat.push(`${(this as { cells?: number }).cells ?? '?'}² in ${phase}`);
   }
-  return wholeRebuild.apply(this, args);
+  return result;
 };
 
 // Every answer, checked against a whole search of the same question on the
