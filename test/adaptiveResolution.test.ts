@@ -99,17 +99,24 @@ describe('stepping down', () => {
   it('needs persistent evidence: a GPU miss one frame in ten never steps down', () => {
     const trace = new Trace(2).run(240, HZ120, 3).mixed(30, HZ120, 10);
     expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
   });
 
   it('ignores CPU-bound misses — fewer pixels would not have saved them', () => {
     const trace = new Trace(2).run(240, HZ120, 3).run(1200, HZ60, 14);
     expect(trace.ratio).toBe(2);
+    // The final ratio alone cannot fail here: a controller that wrongly
+    // stepped down would relearn the period as 16.7 ms and climb back before
+    // the trace ends. Proved by removing the CPU test and watching only this
+    // line go red.
+    expect(trace.flips).toBe(0);
   });
 
   it('a 60 Hz phone keeping up is not "missing 120 Hz"', () => {
     const trace = new Trace(2).run(3000, HZ60, 6);
     expect(trace.controller.state().periodMs).toBeCloseTo(HZ60, 3);
     expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
   });
 
   it('a 60 Hz phone that really misses (33 ms frames, idle CPU) steps down', () => {
@@ -121,6 +128,7 @@ describe('stepping down', () => {
     const trace = new Trace(2).run(240, HZ120, 3);
     for (let i = 0; i < 100; i++) trace.run(1, 5000, 1);
     expect(trace.ratio).toBe(2);
+    expect(trace.flips).toBe(0);
   });
 });
 
