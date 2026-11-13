@@ -1,0 +1,23 @@
+# HANDOFF — perf-step1b-nav (120 fps plan steps 1b + 7; one of 12 packages, no PR of its own)
+
+Start ref: origin/perf/navgrid-other-space (#751 + the other-space follow-up). Integrator merges this branch.
+
+## Done
+- `NavGrid.warm(sample, budgetMs)`: a whole lattice laid in resumable passes (boundary rows, solid rows,
+  bridge rows, paving, level cells), stamped with the revision it BEGAN at so mid-build collider changes
+  are a patch's. `ensureLattice` finishes a pending build's remainder for a question that cannot wait.
+- `Game.warmNavigation()` each tick, and each cat-bus ride frame from `main.ts` (one hunk).
+- `check:nav-warm` (script entry only — NOT in a shard; `check:chain-coverage` will want it wired).
+  Mutations: `NAV_WARM_MUTATE=sync`, `NAV_WARM_MUTATE=short`.
+- Node checks here were run with `LGP_PARK_RESTART=1` (seed 5's accepted restart at four sibling source
+  hashes): the acceptance loop at this hash costs ~7 min per restart on the shared Mac.
+
+## Not done (see the workflow result for detail)
+- Resumable A* (`findRoute` still one task per tap / NPC plan). Design: begin/advance/finish on NavGrid with
+  `findRoute` = all three; `TapNavigator.planRoute` leaves the route empty while pending (it already steers
+  straight at the target with no route); the parade shares her grid, so a pending search must not share
+  the scratch buffers with a synchronous `findRoute`.
+- The park children's grid (`JourneyPlanner`) is not warmed: first plan still builds it in one task.
+- Step 7 (`Hotel.covers` squared-radius reject) waits on origin/perf/120fps-base; `surfaces.ts` has no
+  `Math.hypot`/`sqrt` at this ref.
+- Inherited: `check:nav-spaces` sits in `check:shard-6` from the predecessor's commit 40bdf7d0.
