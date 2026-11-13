@@ -75,6 +75,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/input/wheel-zoom.test.ts',
     'test/adaptiveResolution.test.ts',
     'test/lazy/lazyRooms.test.ts',
+    'test/lazy/hotelKitSplit.test.ts',
     'test/parkChangingSwitches.test.ts',
     'test/parkSolveBounded.test.ts',
   ],

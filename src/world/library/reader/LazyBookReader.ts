@@ -3,6 +3,7 @@ import { bookById, type LibraryBook } from '../books';
 import type { BookReader, BookReaderOptions, ReaderFraming } from './BookReader';
 import type * as BookReaderModule from './BookReader';
 import { chunkPart } from '../../lazyChunks';
+import { LIBRARY_ROOM } from '../../interiors';
 
 /** The reader's chunk — a `LazyPart` for its timeout, so a hung fetch lets the held park go. */
 const READER = chunkPart<typeof BookReaderModule>('the book reader', 'src/world/library/reader/BookReader.ts', () => import('./BookReader'));
@@ -50,7 +51,10 @@ export class LazyBookReader {
   /** Fetches and builds the reader if nobody has yet. Safe to call repeatedly. */
   load(): Promise<BookReader> {
     if (this.loading) return this.loading;
-    this.loading = READER.load().then(({ BookReader }) => {
+    // The reading room first: a page that pictures the library draws the
+    // room's own owl, desk and shelves, which are its chunk's, not the
+    // reader's (`pagePictures.ts`'s `libraryArt`).
+    this.loading = Promise.all([READER.load(), LIBRARY_ROOM.load()]).then(([{ BookReader }]) => {
       const reader = new BookReader(this.options);
       if (this.disposed) {
         reader.dispose();

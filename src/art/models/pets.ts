@@ -11,7 +11,7 @@ import {
 import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
 import { visibleBounds, visibleTop } from '../style/measure';
-import { addOutline, decal, disposeTree, markShared, solid, toonMaterial } from '../style/materials';
+import { addOutline, decal, disposeTree, markShared, showMap, solid, toonMaterial } from '../style/materials';
 import { sharedFacePatch } from '../style/sharedFace';
 import { paintFace, type Expression, type FacePaintOptions } from '../style/faces';
 import { applyWalk, blob, type CreatureHandle } from '../style/asset';
@@ -521,8 +521,7 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
     setExpression(name: Expression) {
       currentExpr = name;
       if (!singing) {
-        faceMaterial.map = face.expressions[name];
-        faceMaterial.needsUpdate = true;
+        showMap(faceMaterial, face.expressions[name]);
       }
     },
 
@@ -536,8 +535,7 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
         const song = playPuffMelody(rng, melodyVolume);
         singing = true;
         singRemaining = song.duration;
-        faceMaterial.map = puffSingingFace();
-        faceMaterial.needsUpdate = true;
+        showMap(faceMaterial, puffSingingFace());
         notes.burst(0, mouthLocalY, mouthLocalZ, song.noteCount);
       }
 
@@ -545,8 +543,7 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
         singRemaining -= dt;
         if (singRemaining <= 0) {
           singing = false;
-          faceMaterial.map = face.expressions[currentExpr];
-          faceMaterial.needsUpdate = true;
+          showMap(faceMaterial, face.expressions[currentExpr]);
         }
       }
       notes.update(dt);

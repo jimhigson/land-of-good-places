@@ -2,7 +2,7 @@ import { Group, Mesh, Sprite, SpriteMaterial, Vector3, type Material, type MeshT
 import { damp } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import { glowTexture } from '../../core/textures';
-import { createLibrarySecretLeaf, libraryBookMaterial, libraryBookShapes } from '../../art/models/libraryAssets';
+import { createLibrarySecretLeaf, libraryBookMaterial, libraryBookShapes } from '../../art/models/libraryRoomAssets';
 import { createLibrarySecretBook, librarySecretBookSize } from '../../art/models/libraryDenAssets';
 import { denKitBounds } from '../../art/models/libraryDenKit';
 import { isShared } from '../../art/style/materials';
