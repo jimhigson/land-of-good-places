@@ -71,14 +71,14 @@ NAV_GRID_BUILDS.verify = true;
 // ── The room, furnished in its own space. ──
 const park = parkGrid();
 ask(park);
-const before = { full: NAV_GRID_BUILDS.full, patched: NAV_GRID_BUILDS.patched, fullMs: NAV_GRID_BUILDS.fullMs };
+const before = { full: NAV_GRID_BUILDS.full, patched: NAV_GRID_BUILDS.patched, fullMs: NAV_GRID_BUILDS.fullMs, patchMs: NAV_GRID_BUILDS.patchMs };
 NAV_GRID_BUILDS.mismatches.length = 0;
 const revisionBefore = collision.revision;
 const added = room.map((c) => collision.addCircle(c.x, c.z, c.r));
 const moved = collision.revision - revisionBefore;
-const asked = performance.now();
 ask(park);
-const tookMs = performance.now() - asked;
+// The lattice's own time, whole build or patch — never the verifier's whole rebuild beside it.
+const tookMs = NAV_GRID_BUILDS.fullMs - before.fullMs + (NAV_GRID_BUILDS.patchMs - before.patchMs);
 const whole = NAV_GRID_BUILDS.full - before.full;
 say(
   whole === 0,
@@ -90,7 +90,7 @@ say(
 );
 process.stderr.write(
   `check:nav-spaces timing (this machine, Node, not asserted): the park's next plan after the room took ${tookMs.toFixed(1)} ms to bring its lattice up to date ` +
-    `(${whole > 0 ? 'a whole rebuild' : 'no rebuild'}), against an 8.3 ms frame\n`,
+    `(${whole > 0 ? 'a whole rebuild' : 'no whole rebuild'}; the verifier's own rebuild excluded), against an 8.3 ms frame\n`,
 );
 for (const id of added) collision.removeCircle(id);
 
