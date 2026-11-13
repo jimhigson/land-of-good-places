@@ -28,8 +28,10 @@ build + `vite preview` for timing; `BASE=http://127.0.0.1:<port>`).
 
 ## Audits (all 0 differing on the final code)
 park morning/noon/sunset, walking, rail race, ferris, sky cruiser, slide, cat bus /arrive,
-park train, trampoline, library and reptile-house round trips (24 consecutive frames from
-the door), 20 kinds of one-off change with the sun held, forced redraws 8/8.
+park train, library and reptile-house round trips (24 consecutive frames from the door),
+20 kinds of one-off change with the sun held, forced redraws 8/8.
+NOT audited: the roof-garden trampoline (x≈1205, its own space; the harness's teleport
+did not take, so those 30 audits were of the park). No swings exist in the park.
 Interiors: the sun is not drawn indoors in either mode.
 
 ## Visibility

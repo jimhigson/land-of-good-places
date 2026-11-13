@@ -344,8 +344,9 @@ with **~70 k triangles** (crowd 1.67 M tris / 24 kids, the face patches alone
     from the same light pose and compares the two maps texel by texel: 0
     differing in every audit — park at morning, noon and sunset, walking, the
     Rail Race at speed, ferris, Sky Cruiser, slide, cat bus, park train,
-    trampoline, library and reptile house round trips (24 consecutive frames
-    from the door), 20 kinds of one-off static change. Controls: a blinded
+    library and reptile house round trips (24 consecutive frames from the
+    door), 20 kinds of one-off static change. Not audited: the roof-garden
+    trampoline (its space did not take the harness's teleport). Controls: a blinded
     survey gives 59–96 k differing texels, movers dropped 106–113 k. The audit
     found one real hole (a swapped position attribute or index went unseen:
     85,885 stale texels), now closed.
