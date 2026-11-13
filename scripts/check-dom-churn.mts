@@ -33,12 +33,13 @@
  *
  * Everything asserted here is a count made by the frame's JavaScript or the
  * page's style engine; nothing here looks at a pixel. But a frame of the park
- * is ~600 GL draws plus a VSM shadow pass, and a hosted runner has no GPU, so
- * SwiftShader rasterises them on its CPU. The 1200 frames this waits for (two
- * samples of {@link SETTLE_FRAMES} + {@link SAMPLE_FRAMES}) took 18 s on an M4
- * Pro's GPU and never arrived on the runner: its first wait, for 360 frames,
- * timed out at 240 s (run 43439027681, shard 12, 13 Nov 2026) — under 1.5 fps.
- * Measured at the spawn, seed 5, 1000×700, DPR 1, frames counted over 5 s:
+ * is ~550 GL draws, its VSM shadow pass among them, and a hosted runner has no
+ * GPU, so SwiftShader rasterises them on its CPU. The 1200 frames this waits
+ * for (two samples of {@link SETTLE_FRAMES} + {@link SAMPLE_FRAMES}) took 15 s
+ * on an M4 Pro's GPU and never arrived on the runner: its first wait, for 360
+ * frames, timed out at 240 s (run 43439027681, shard 12, 13 Nov 2026) — under
+ * 1.5 fps. Measured at the spawn, seed 5, 1000×700, DPR 1, frames counted over
+ * 5 s or more:
  *
  * | M4 Pro, 13 Nov 2026                                              | fps     |
  * |------------------------------------------------------------------|---------|
@@ -49,7 +50,7 @@
  * | SwiftShader, sky only (`scene.visible = false`)                  | 120     |
  * | SwiftShader, GL draw calls skipped                               | 120     |
  * | SwiftShader on the efficiency cores (`taskpolicy -c background`) | 0.4–0.8 |
- * | the same, GL draw calls skipped                                  | ~10     |
+ * | the same, GL draw calls skipped (three runs)                     | 5–11    |
  *
  * It is the draws — not the fill, and not the DOM. So once the park is up,
  * `ready()` replaces the context's draw entry points with a counter. The whole
@@ -69,8 +70,9 @@
  * the ceilings must sit above run on the clock. Below 12 fps every frame
  * carries ten times the game time a 120 fps frame does (`MAX_FRAME_DELTA` is
  * 1/12 s) and at 1 fps 120 times the wall-clock time, so a slow frame inflates
- * precisely the noise this has to see past. Fast frames keep the sample the
- * shape it has on the family's machines.
+ * precisely the noise this has to see past — measured: the action chips'
+ * writes in the selected sample, 0.11 a frame at 120 fps, read 0.65 at 11.
+ * Fast frames keep the sample the shape it has on the family's machines.
  *
  * ## Proved red, 13 Nov 2026
  *
@@ -96,12 +98,13 @@
  *   ```
  *
  * Green on that commit: GPU 18.7 s, SwiftShader 35.8 s, whole runs including
- * the dev server. Against main c1bdb168, on SwiftShader with the browser held
- * to the efficiency cores (`taskpolicy -c background`, the nearest this Mac
- * comes to a runner): 213 s, where main's own version timed out after 300.7 s
- * on CI's own stack (`frames` ← `sample`); and the whole of shard 12 under its
- * watchdog, every process held there, in 6m11s of the 30m cap — slowest single
- * wait 71.4 s of the 240 s allowed.
+ * the dev server. On SwiftShader with every process held to the efficiency
+ * cores (`taskpolicy -c background`, the nearest this Mac comes to a runner,
+ * and slower than one: boot took 17–48 s there, 9.6 s on CI), the whole of
+ * shard 12 under its watchdog passed in 4m32s of the 30m cap, at 11 fps, its
+ * slowest single wait 43.3 s of the 240 s allowed (34768dcb). Main's own
+ * version, on c1bdb168 with the browser held there the same way, timed out
+ * after 300.7 s on CI's own stack (`frames` ← `sample`).
  */
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
