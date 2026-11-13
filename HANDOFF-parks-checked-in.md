@@ -87,3 +87,11 @@ put at the default spawn after slightly more deploys than before (small, player-
   `.claude/worktrees/interior-doorways`.
 - This worktree is `.claude/worktrees/parks-checked-in`. No process of this work is still
   running.
+
+## Progress, 13 Nov afternoon (finishing engineer)
+
+- origin/main merged (da316dba), clean; scripts parsed: only `check:all` differs (adds `validate:parks`); `check:chain-coverage` exit 0.
+- Validation #1 of all sixteen against the merged code (3 lanes, `--fresh`): seeds 0-8 accepted (133 measures, 206-312 s each under load 40+); the rest running. Log: scratchpad `validate-all-1.log`. Every seed reads "PLACEMENT MOVED" only because the manifest's `layout` was never stamped.
+- Next: `LGP_LANES=3 pnpm run build:parks` (cache hit at this source hash -> re-stamp, no solve), commit `parks/manifest.json`.
+- Step 2 DONE on branch `tooling/parks-stall-hydrated` (a42288e4, 27b0a3c6, docs too): `resumedStallBuilder` makes check:stall-accommodate run on a hydrated park; control (ledger reversed) red. Merge it in after the re-stamp.
+- Layout digest: seed 9 hydrated 305c7b0157f1043e; one tree moved 1 m -> b8b32695cd123268 (moves).
