@@ -59,7 +59,7 @@ import { GRAVITY, JUMP_SPEED, MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_MAX_S
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { INTERIOR_DOOR_MAX_X, INTERIOR_DOOR_MIN_X } from '../src/world/building/layout.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
-import { buildDoorFrame, registerDoorFrameSolids, type PlacedDoorFrame } from '../src/art/models/doorFrames.ts';
+import { buildDoorFrame, registerDoorFrameSolids, type DoorFramePartRange, type PlacedDoorFrame } from '../src/art/models/doorFrames.ts';
 import { castleExitBand } from '../src/world/building/Building.ts';
 import { DOOR_HALF, LOBBY, hotelDoorBands } from '../src/world/hotel/layout.ts';
 import { reptileDoorGap, reptileExitBand } from '../src/world/reptileHouse/shell.ts';
@@ -114,11 +114,31 @@ function drawnBounds(mesh: Mesh): Box3 {
   return box.clone().applyMatrix4(mesh.matrixWorld);
 }
 
-function frameMeshes(placed: PlacedDoorFrame, role: string): Mesh[] {
-  const out: Mesh[] = [];
+/**
+ * **The drawn bounds of a frame's parts**, read off the baked body mesh in the
+ * scene: the vertex range each part occupies (`userData.doorFrameParts`), put
+ * through the mesh's own world matrix. A frame is two meshes now (body and
+ * outline), so a part is a range of one geometry rather than a mesh of its own.
+ */
+function partBoxes(placed: PlacedDoorFrame, role: string, side?: number): Box3[] {
+  let body: Mesh | null = null;
   placed.frame.group.traverse((node) => {
-    if (node instanceof Mesh && node.name.startsWith(`doorframe-${placed.frame.style}-${role}`)) out.push(node);
+    if (node instanceof Mesh && node.name === `doorframe-${placed.frame.style}`) body = node;
   });
+  if (!body) throw new Error(`${placed.frame.style}: no baked body mesh in the frame's group`);
+  const mesh: Mesh = body;
+  const ranges = mesh.userData['doorFrameParts'] as DoorFramePartRange[] | undefined;
+  if (!ranges || ranges.length === 0) throw new Error(`${placed.frame.style}: the body mesh carries no part ranges`);
+  const position = mesh.geometry.getAttribute('position');
+  const v = new Vector3();
+  const out: Box3[] = [];
+  for (const range of ranges) {
+    if (!range.name.startsWith(`doorframe-${placed.frame.style}-${role}`)) continue;
+    if (side !== undefined && range.side !== side) continue;
+    const box = new Box3();
+    for (let i = range.start; i < range.start + range.count; i += 1) box.expandByPoint(v.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
+    out.push(box);
+  }
   return out;
 }
 
@@ -187,8 +207,7 @@ for (const room of rooms) {
   if (Math.abs(frame.opening.minX - room.gap[0]) > 1e-9 || Math.abs(frame.opening.maxX - room.gap[1]) > 1e-9) {
     fail(`${room.name}: the frame's opening ${frame.opening.minX.toFixed(3)}..${frame.opening.maxX.toFixed(3)} is not the room's gap ${room.gap[0].toFixed(3)}..${room.gap[1].toFixed(3)}`);
   }
-  const posts = frameMeshes(placed, 'post');
-  const sides = [-1, 1].map((sign) => union(posts.filter((m) => sign * (drawnBounds(m).getCenter(new Vector3()).x - (ox + (room.gap[0] + room.gap[1]) / 2)) > 0).map(drawnBounds)));
+  const sides = [0, 1].map((side) => union(partBoxes(placed, 'post', side)));
   const [left, right] = sides as [Box3, Box3];
   const innerLeft = left.max.x;
   const innerRight = right.min.x;
@@ -221,7 +240,7 @@ for (const room of rooms) {
     // flat-ok: the interiors are flat plates at their own far origins, off the planet; a frame's drawn box is upright there
     if (Math.abs(drawn.min.y - floorY) > TOL) fail(`${room.name}: post ${index} stands at ${drawn.min.y.toFixed(3)}, the floor at ${floorY.toFixed(3)}`);
   }
-  const lintel = union(frameMeshes(placed, 'lintel').map(drawnBounds));
+  const lintel = union(partBoxes(placed, 'lintel'));
   const lintelSolid = placed.solids.lintel;
   // flat-ok: the interiors are flat plates at their own far origins, off the planet; the lintel's drawn box is upright there
   const [lintelBottom, lintelTopDrawn] = [lintel.min.y, lintel.max.y];
@@ -233,12 +252,12 @@ for (const room of rooms) {
   }
   const clear = lintelBottom - floorY;
   if (clear < TALLEST_CHILD_HEIGHT) fail(`${room.name}: the lintel is ${clear.toFixed(3)} m over the floor, under the tallest child (${TALLEST_CHILD_HEIGHT})`);
-  const everything = union(frameMeshes(placed, '').map(drawnBounds));
+  const everything = union(partBoxes(placed, ''));
   const frameTall = everything.max.y - floorY; // flat-ok: the interiors are flat plates at their own far origins, off the planet
   if (clear < HEAD_AT_APEX) fail(`${room.name}: the lintel's underside is ${clear.toFixed(3)} m over the floor, under her head at the top of a jump (${HEAD_AT_APEX.toFixed(3)} m)`);
   // The crest's collider is its drawn box.
   {
-    const drawn = union(frameMeshes(placed, 'crest').map(drawnBounds));
+    const drawn = union(partBoxes(placed, 'crest'));
     const box = placed.solids.crest;
     // flat-ok: the interiors are flat plates at their own far origins, off the planet
     const [drawnBottom, drawnTop] = [drawn.min.y, drawn.max.y];
@@ -261,7 +280,7 @@ for (const room of rooms) {
     scene.traverse((node) => {
       if (node instanceof Mesh && node.name === 'interior-porch-roof') roofTop = drawnBounds(node).max.y; // flat-ok: the interior's flat far-off plate
     });
-    const parapet = union(frameMeshes(placed, 'crest-parapet').map(drawnBounds));
+    const parapet = union(partBoxes(placed, 'crest-parapet'));
     const parapetBottom = parapet.min.y; // flat-ok: the interior's flat far-off plate
     if (!Number.isFinite(roofTop)) fail('castle: no interior-porch-roof mesh in the scene to measure the gatehouse top against');
     else if (parapetBottom <= roofTop) fail(`castle: the gatehouse top starts at ${parapetBottom.toFixed(3)}, under the porch roof's top ${roofTop.toFixed(3)} — the camera cannot see it`);

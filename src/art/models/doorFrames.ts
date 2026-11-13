@@ -46,12 +46,13 @@
  * face back to back (opposite normals never fight). The wall's **collider** is
  * untouched.
  */
-import { BufferGeometry, Group, Mesh, type Material } from 'three';
+import { BackSide, BufferAttribute, Color, Group, Matrix4, Mesh, MeshBasicMaterial, type BufferGeometry, type Material } from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
 import { DOORFRAMES_GLB_BASE64 } from '../assets/doorframesGlb';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
-import { addOutline, markShared, solid, toonMaterial } from '../style/materials';
+import { inkTint, markShared, outlineGeometry, solid, toonMaterial } from '../style/materials';
 import type { BoxCollider, CollisionWorld } from '../../world/Collision';
 
 /** The four interiors with a way out to the park, one style each. */
@@ -118,7 +119,6 @@ interface KitStyle {
 }
 
 let decoded: Map<string, KitStyle> | null = null;
-const materials = new Map<string, Material>();
 
 function boundsOf(parts: readonly GlbPart[]): { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number } {
   const out = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
@@ -217,18 +217,104 @@ export interface DoorFrame {
   readonly top: number;
 }
 
-function partMesh(part: GlbPart): Mesh {
-  const style = DOORFRAME_NODE_STYLES[part.name];
-  if (!style) throw new Error(`doorFrames: ${part.name} has no colour`);
-  let material = materials.get(part.name);
-  if (!material) {
-    material = markShared(toonMaterial(style.colour));
-    materials.set(part.name, material);
+/**
+ * One drawn part of a frame, placed: which node, and where (in the frame's own
+ * metres). {@link buildDoorFrame} collects these and bakes them into two
+ * meshes, so a frame costs **two draw calls** however many parts it has.
+ */
+interface PlacedPart {
+  readonly part: GlbPart;
+  readonly matrix: Matrix4;
+  /** Which post (0 left, 1 right), for a post's parts. */
+  readonly side?: number;
+}
+
+/**
+ * Where each part's vertices sit in the baked body mesh — so `check:doorframes`
+ * can measure each part's drawn bounds off the mesh in the scene.
+ */
+export interface DoorFramePartRange {
+  readonly name: string;
+  readonly side?: number;
+  readonly start: number;
+  readonly count: number;
+}
+
+let bodyMaterial: Material | null = null;
+let outlineMaterial: Material | null = null;
+
+/** A copy of `geometry` with every vertex coloured `hex` (in the working colour space). */
+function coloured(geometry: BufferGeometry, hex: number): BufferGeometry {
+  const colour = new Color(hex);
+  const count = geometry.getAttribute('position').count;
+  const values = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    values[i * 3] = colour.r;
+    values[i * 3 + 1] = colour.g;
+    values[i * 3 + 2] = colour.b;
   }
-  const mesh = solid(new Mesh(part.geometry as BufferGeometry, material));
-  mesh.name = part.name;
-  if (style.outline !== undefined) addOutline(mesh, style.outline);
-  return mesh;
+  geometry.setAttribute('color', new BufferAttribute(values, 3));
+  return geometry;
+}
+
+/** Only the attributes every part shares, so the merge never refuses a part. */
+function trimmed(geometry: BufferGeometry): BufferGeometry {
+  for (const name of Object.keys(geometry.attributes)) {
+    if (name !== 'position' && name !== 'normal') geometry.deleteAttribute(name);
+  }
+  return geometry.index ? geometry.toNonIndexed() : geometry;
+}
+
+/**
+ * **Bakes a frame's parts into two meshes**: the body, every part's own colour
+ * carried per vertex under one toon material, and the ink outline, every
+ * outlined part's hull in its own ink tint under one back-faced basic
+ * material — the very hull `addOutline` makes, part by part, only merged.
+ * PR #743's first cut drew each part as its own mesh with its own outline,
+ * which cost the library ~40 draw calls for one doorway (`check:render-budget`).
+ */
+function bakeFrame(parts: readonly PlacedPart[], name: string): { body: Mesh; outline: Mesh | null; ranges: DoorFramePartRange[] } {
+  const bodies: BufferGeometry[] = [];
+  const hulls: BufferGeometry[] = [];
+  const ranges: DoorFramePartRange[] = [];
+  let start = 0;
+  for (const { part, matrix, side } of parts) {
+    const style = DOORFRAME_NODE_STYLES[part.name];
+    if (!style) throw new Error(`doorFrames: ${part.name} has no colour`);
+    const body = coloured(trimmed(part.geometry.clone()).applyMatrix4(matrix), style.colour);
+    const count = body.getAttribute('position').count;
+    ranges.push(side === undefined ? { name: part.name, start, count } : { name: part.name, side, start, count });
+    start += count;
+    bodies.push(body);
+    if (style.outline !== undefined) {
+      hulls.push(coloured(trimmed(outlineGeometry(part.geometry, style.outline)).applyMatrix4(matrix), inkTint(style.colour)));
+    }
+  }
+  const merged = mergeGeometries(bodies, false);
+  if (!merged) throw new Error(`doorFrames: the ${name} frame's parts would not merge`);
+  for (const g of bodies) g.dispose();
+  if (!bodyMaterial) {
+    const material = toonMaterial(0xffffff);
+    material.vertexColors = true;
+    bodyMaterial = markShared(material);
+  }
+  const body = solid(new Mesh(merged, bodyMaterial));
+  body.name = `doorframe-${name}`;
+  body.userData['doorFrameParts'] = ranges;
+  let outline: Mesh | null = null;
+  if (hulls.length > 0) {
+    const hull = mergeGeometries(hulls, false);
+    for (const g of hulls) g.dispose();
+    if (hull) {
+      if (!outlineMaterial) outlineMaterial = markShared(new MeshBasicMaterial({ vertexColors: true, side: BackSide }));
+      outline = new Mesh(hull, outlineMaterial);
+      outline.name = `doorframe-${name}-outline`;
+      outline.castShadow = false;
+      outline.receiveShadow = false;
+      outline.renderOrder = -1;
+    }
+  }
+  return { body, outline, ranges };
 }
 
 /**
@@ -242,12 +328,10 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
   group.name = `doorframe.${style}`;
   // Each post's inner face on its gap edge: the left post's +X face, the
   // right post's −X face.
-  const posts = [opening.minX - k.post.maxX, opening.maxX - k.post.minX].map((centre) => {
-    for (const part of k.posts) {
-      const mesh = partMesh(part);
-      mesh.position.set(centre, opening.floorY, opening.z);
-      group.add(mesh);
-    }
+  const placed: PlacedPart[] = [];
+  const at = (x: number, y: number, z: number, sx = 1): Matrix4 => new Matrix4().makeScale(sx, 1, 1).setPosition(x, y, z);
+  const posts = [opening.minX - k.post.maxX, opening.maxX - k.post.minX].map((centre, side) => {
+    for (const part of k.posts) placed.push({ part, matrix: at(centre, opening.floorY, opening.z), side });
     return { minX: centre + k.post.minX, maxX: centre + k.post.maxX, minZ: opening.z + k.post.minZ, maxZ: opening.z + k.post.maxZ };
   });
 
@@ -260,21 +344,15 @@ export function buildDoorFrame(style: DoorFrameStyle, opening: DoorOpening): Doo
   const stretch = span / (count * k.tileWidth);
   for (let i = 0; i < count; i += 1) {
     const x = from + (span * (i + 0.5)) / count;
-    for (const part of k.lintels) {
-      const mesh = partMesh(part);
-      mesh.position.set(x, opening.floorY + k.seat, opening.z);
-      mesh.scale.x = stretch;
-      group.add(mesh);
-    }
+    for (const part of k.lintels) placed.push({ part, matrix: at(x, opening.floorY + k.seat, opening.z, stretch) });
   }
 
   const middle = (opening.minX + opening.maxX) / 2;
   const seat = k.seat + k.lintelHeight;
-  for (const part of k.crests) {
-    const mesh = partMesh(part);
-    mesh.position.set(middle, opening.floorY + seat, opening.z);
-    group.add(mesh);
-  }
+  for (const part of k.crests) placed.push({ part, matrix: at(middle, opening.floorY + seat, opening.z) });
+  const baked = bakeFrame(placed, style);
+  group.add(baked.body);
+  if (baked.outline) group.add(baked.outline);
   const c = boundsOf(k.crests);
   const crest = {
     minX: middle + c.minX,
