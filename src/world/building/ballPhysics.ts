@@ -32,9 +32,20 @@
  *   accumulator, so behaviour doesn't change with frame rate. Real `dt` is
  *   already clamped upstream (`MAX_FRAME_DELTA` in `core/constants.ts`), so a
  *   handful of sub-steps is always enough to catch up after a hitch.
+ * - **Drawn by interpolation, not at the last sub-step**: on a 120 Hz display a
+ *   1/60 sub-step lands on every other frame, so drawing the physics state as
+ *   it stands moved each ball on alternate frames and held it on the rest — a
+ *   judder you can see. What is drawn ({@link BallPitSimulation.drawX}) is
+ *   instead the state one sub-step ago moved `accumulator / FIXED_DT` of the
+ *   way towards the current one, which changes on every frame at any refresh
+ *   rate. It is read-only to the physics: nothing in a sub-step ever reads it,
+ *   so the simulation is bit-for-bit what it was, at every frame rate.
  */
 
-const FIXED_DT = 1 / 60;
+/** The physics sub-step, in seconds. Exported for `BallPit`'s warm-up, which
+ *  is counted in sub-steps — see {@link BallPitSimulation.settle}. */
+export const BALL_PHYSICS_STEP = 1 / 60;
+const FIXED_DT = BALL_PHYSICS_STEP;
 /** Matches MAX_FRAME_DELTA (core/constants.ts) / FIXED_DT, so one bad frame can
  *  always fully catch up. Duplicated as a plain cap rather than importing the
  *  constant — this file has no dependency on core/. */
@@ -223,9 +234,33 @@ export class BallPitSimulation {
   private readonly asleep: Uint8Array;
   private readonly sleepTimer: Float32Array;
   /** Set for any ball touched (moved, woken, or put to sleep) during the most
-   *  recent `step()` — the caller uses this to skip matrix rewrites for
-   *  balls that are frozen in a resting pile. */
-  readonly dirty: Uint8Array;
+   *  recent `step()`. The sub-step's sleep bookkeeping reads it; a renderer
+   *  wants {@link drawDirty} instead, which also covers a ball whose drawn
+   *  position moves on a frame with no sub-step in it. */
+  private readonly dirty: Uint8Array;
+
+  /** Each ball's position at the start of the most recent sub-step — the
+   *  state {@link drawX} interpolates *from*. */
+  private readonly prevX: Float32Array;
+  private readonly prevY: Float32Array;
+  private readonly prevZ: Float32Array;
+
+  /**
+   * Where each ball is **drawn**: its position one sub-step ago, moved
+   * `accumulator / FIXED_DT` of the way to its current one, rewritten by every
+   * {@link step}. It therefore runs one fixed sub-step (1/60 s) behind the
+   * physics, and changes on every frame a ball is moving, however many
+   * sub-steps that frame did — none, at 120 Hz, on alternate frames.
+   *
+   * Output only: nothing in the simulation reads it back.
+   */
+  readonly drawX: Float32Array;
+  readonly drawY: Float32Array;
+  readonly drawZ: Float32Array;
+  /** Set for every ball whose drawn position changed in the most recent
+   *  {@link step} or {@link settle} — the balls whose matrix wants rewriting.
+   *  A resting pile has none. */
+  readonly drawDirty: Uint8Array;
 
   private readonly grid: SpatialHash;
   private readonly ballRadius: number;
@@ -246,9 +281,25 @@ export class BallPitSimulation {
     this.sleepTimer = new Float32Array(count);
     this.dirty = new Uint8Array(count);
     this.dirty.fill(1);
+    this.prevX = new Float32Array(count);
+    this.prevY = new Float32Array(count);
+    this.prevZ = new Float32Array(count);
+    this.drawX = new Float32Array(count);
+    this.drawY = new Float32Array(count);
+    this.drawZ = new Float32Array(count);
+    this.drawDirty = new Uint8Array(count);
     this.grid = new SpatialHash(count, ballRadius * 2.05);
 
     this.spawn(seed);
+    // Nothing has moved yet: the previous state and the drawn one are both
+    // the spawn layout.
+    this.prevX.set(this.px);
+    this.prevY.set(this.py);
+    this.prevZ.set(this.pz);
+    this.drawX.set(this.px);
+    this.drawY.set(this.py);
+    this.drawZ.set(this.pz);
+    this.drawDirty.fill(1);
   }
 
   /**
@@ -315,13 +366,17 @@ export class BallPitSimulation {
     }
   }
 
-  /** Advance real time `dt` seconds via fixed sub-steps. */
+  /**
+   * Advance real time `dt` seconds via fixed sub-steps, then work out where
+   * every ball is drawn this frame ({@link drawX}).
+   */
   step(dt: number, player: PlayerContact | null): StepStats {
     const t0 = performance.now();
     this.dirty.fill(0);
     this.accumulator = Math.min(this.accumulator + dt, FIXED_DT * MAX_SUBSTEPS);
     let substeps = 0;
     while (this.accumulator >= FIXED_DT) {
+      this.recordPrevious();
       this.substep(FIXED_DT, player);
       this.accumulator -= FIXED_DT;
       substeps += 1;
@@ -330,7 +385,83 @@ export class BallPitSimulation {
     let awake = 0;
     for (let i = 0; i < this.count; i += 1) if (!this.asleep[i]) awake += 1;
 
+    if (awake === 0) {
+      // Nothing will move again until something wakes it, and the caller
+      // stops stepping a pile in this state (`BallPit.update`) — so draw it
+      // where it is, not parked a fraction of a sub-step short of there.
+      this.holdAtCurrent();
+    } else {
+      this.interpolate(this.accumulator / FIXED_DT);
+    }
+
     return { substeps, awake, ms: performance.now() - t0 };
+  }
+
+  /**
+   * Settle a freshly spawned pile: up to `substeps` sub-steps with nobody in
+   * the pit, stopping early once `budgetMs` of wall time has gone — but always
+   * running at least one while any are owed, so a slow device still gets
+   * there. Returns how many ran.
+   *
+   * These are exactly the sub-steps {@link step} would have run, in the same
+   * order, with the same absent player, so the pile they reach depends only on
+   * how many have run in total, never on how they were shared out between
+   * frames. The accumulator is left alone. The pile is drawn as it stands.
+   */
+  settle(substeps: number, budgetMs: number): number {
+    const t0 = performance.now();
+    this.dirty.fill(0);
+    let ran = 0;
+    while (ran < substeps) {
+      this.substep(FIXED_DT, null);
+      ran += 1;
+      if (performance.now() - t0 >= budgetMs) break;
+    }
+    this.holdAtCurrent();
+    return ran;
+  }
+
+  /** Remember where every ball is, before a sub-step moves it. */
+  private recordPrevious(): void {
+    this.prevX.set(this.px);
+    this.prevY.set(this.py);
+    this.prevZ.set(this.pz);
+  }
+
+  /**
+   * Draw every ball exactly where the physics has it, and make that the state
+   * the next interpolation starts from — so the first frame after this never
+   * slides a ball back towards an older position.
+   */
+  private holdAtCurrent(): void {
+    this.recordPrevious();
+    this.interpolate(1);
+  }
+
+  /**
+   * Draw each ball `alpha` of the way from where it was before the latest
+   * sub-step to where it is now, and flag the ones whose drawn position moved.
+   */
+  private interpolate(alpha: number): void {
+    const t = Math.min(1, Math.max(0, alpha));
+    for (let i = 0; i < this.count; i += 1) {
+      const x0 = at(this.prevX, i);
+      const y0 = at(this.prevY, i);
+      const z0 = at(this.prevZ, i);
+      // Rounded to what a Float32Array will hold, so "unchanged" compares like
+      // with like and a resting ball is not rewritten every frame.
+      const x = Math.fround(x0 + (at(this.px, i) - x0) * t);
+      const y = Math.fround(y0 + (at(this.py, i) - y0) * t);
+      const z = Math.fround(z0 + (at(this.pz, i) - z0) * t);
+      if (x === at(this.drawX, i) && y === at(this.drawY, i) && z === at(this.drawZ, i)) {
+        this.drawDirty[i] = 0;
+        continue;
+      }
+      this.drawX[i] = x;
+      this.drawY[i] = y;
+      this.drawZ[i] = z;
+      this.drawDirty[i] = 1;
+    }
   }
 
   private substep(dt: number, player: PlayerContact | null): void {

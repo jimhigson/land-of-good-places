@@ -17,6 +17,13 @@ Plan: `docs/perf/FRAME-DROPS-2026-11.md` on `origin/perf/frame-drops-2026-11`
   accumulator 4.3e-15. Costs up to ~35-40 ms/frame in browser (plan) —
   Node timings on this machine are noisy (other agents), median ~1.4 ms/substep.
 
+- GOLDEN (unmodified code, origin/main 46ef5a64, under vitest's deterministic
+  Math): sim(900, 0.28, {radius 5.22, restY -0.22}, 90210); old warm-up
+  (step(min(rem,5/60)) to 6 s) → warm=360 substeps, positions fnv1a
+  `1f38a64b`; then impulse(0.8,-0.4,6.6,14.4,10.4) and 600 frames of
+  mulberry32(7) dt in [1/144,1/45], player line x=-5+10t z=1.5 sin 6t
+  (null every 3rd frame) → 537 substeps, final fnv `06cf593d`.
+
 ## Plan
 
 1. Sim keeps previous positions; `step()` writes interpolated draw positions
