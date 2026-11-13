@@ -1,15 +1,21 @@
 name: Deploy
 
 # Builds the game and publishes dist/ to Cloudflare Workers (static assets)
-# on every push to main. Can also be run by hand from the Actions tab.
+# on every push to main.
 on:
-  # Called from ci.yml. The parks it builds from are the checked-in ones
-  # (`parks/`), read straight from this checkout: nothing is solved or restored.
+  # Called from ci.yml, and **only** from there. The parks it builds from are
+  # the checked-in ones (`parks/`), read straight from this checkout: nothing
+  # is solved or restored, so nothing in this job asks whether this commit's
+  # source still accepts them. ci.yml's `deploy` job is what does: it needs
+  # the Parks validation of this exact commit to succeed, and main.
+  #
+  # **No `workflow_dispatch` here, deliberately.** Run by hand from the Actions
+  # tab, this workflow would publish any branch's checked-in parks — or a main
+  # whose Parks validation is red — with nothing validating them. To deploy by
+  # hand, run CI on main instead, which puts the validation in front:
+  #
+  #     gh workflow run ci.yml --ref main
   workflow_call:
-  # By hand, from the Actions tab. (It ships that branch's checked-in parks
-  # without asking whether its source still accepts them — `ci.yml` is what
-  # puts the Parks validation in front of a deploy.)
-  workflow_dispatch:
 
 # The deploy queue is on the job below, not here: a called workflow's
 # `github.workflow` is the caller's, so a workflow-level group would collide.
