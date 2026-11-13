@@ -15,20 +15,38 @@ Branch `perf-step11-npc-sim-lod`, worktree `.claude/worktrees/perf-step11`.
 - `Game.render`: one line, `noteNpcViewCamera(camera)`, after `cullCrowdsFor`.
 - `scripts/check-npc-sim-lod.mts` + its `check:npc-sim-lod` script entry (not in any shard).
 
-## NOT DONE — read this first
+## Measured, 13 Nov (review fix) — seed 5, player at the spawn (-1.6, 51.6)
 
-**`check:npc-sim-lod` has never completed a run, so nothing here is measured and the check is
-not proved red.** Editing `NpcSystem.ts` changes the park source hash, the headless harness then
-re-solves seed 5, and on 13 Nov with the Mac at load 35 that solve had not finished after 13
-minutes. `tsc --noEmit` and `typecheck:test` pass; the new code has not executed once.
+The acceptance solve at this source hash never finished, so every run below hydrates the seed-5
+park file two sibling worktrees solved independently (restart 1, digest `be65f30f3323a8a4`):
+`LGP_PARK_FILE=<that 5.json> node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/<check>.mts`.
+**The acceptance loop has still not run at this source hash; CI does that.**
 
-To finish: `pnpm run check:npc-sim-lod` (green), then `--mutate=no-throttle`, `--mutate=blind`,
-`--mutate=drop-banked` (each must exit 1 with numbers). Paste the counts it prints to stderr.
-Things most likely to need a touch when it first runs: the walker circuit in part 4 is a 6 m
-square round the player's spawn and may be blocked by the bus stop (the check says so if it is);
-`DRIFT_ALLOWED` is 10 cm on reasoning (about 4 cm lost per corner), not on a measurement.
+`check:npc-sim-lod`, exit 0, per frame over 600 frames each way, 34 characters:
+- throttle off: 24.00 updates, 24.00 poses, 23.00 kid commits
+- throttle on: 17.92 updates, 15.02 poses, 14.29 kid commits (12.11 every-frame, 11.61 throttled, peak 5)
+- 8279 on-screen child-frames checked, 0 not stepped
+- walker: 50.1 m, 8 corners in 20 s; 27.8 cm off at the end, 28.0 cm worst, 38.3 cm allowed
 
-Then run the checks that step the crowd headless, because with no camera noted everybody now
-runs at full rate where far children used to run at half: `check:npc-jitter`,
-`check:npc-separation`, `check:npc-dispersal`, `check:npc-presence`, `check:crowd-cull`,
-`check:speech-bubbles`, `check:cat-bus`, `check:hotel`.
+Its first run FAILED on the unmeasured `DRIFT_ALLOWED = 10 cm`. Traced: drift is constant on
+every straight (banked time is exact) and grows one stride (about 4.2 cm) at each corner turned a
+frame late. The bound is now that arithmetic, per compared frame (`driftAllowedAfter`).
+
+Proved red against that same park, each exit 1 on its own clause:
+- `--mutate=no-throttle`: 0.00 throttled; 23.00 kid commits no fewer than 23.00
+- `--mutate=blind`: 165 of 8567 on-screen child-frames not stepped
+- `--mutate=drop-banked`: 7.5 cm at 0.08 s against 4.3 allowed; 255.0 cm at the end, 792.3 worst
+
+Crowd-stepping checks on the same park: `check:jitter` (npc-jitter), `check:npc-separation`,
+`check:npc-dispersal`, `check:npc-presence`, `check:crowd-cull`, `check:speech-bubbles`,
+`check:cat-bus`, `check:npc-perch`, `trace-npc-driver` all exit 0.
+
+**`check:hotel` exits 1 — and exits 1 identically on the unmodified base (8cae5514), same park:**
+`hotel.lobby's perimeter has 32 unwalled sample(s) outside its doorways (south at -1.70 …)`.
+Not this package (a wall probe; nothing here touches the hotel). The base is red on it.
+
+## Still not done
+
+- No browser run: ride, story and `/view` cameras and interiors are unseen.
+- `check:npc-sim-lod` is in no shard yet (integrator).
+- The wander driver's own dice are not covered (two runs diverge by design).
