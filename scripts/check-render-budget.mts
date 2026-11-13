@@ -108,7 +108,24 @@ interface Measured {
   readonly drawsMin: number;
   readonly trisMin: number;
   readonly gpu: string;
+  /** Objects reachable from the scene — what `updateMatrixWorld` and the render walk. */
+  readonly sceneObjects: number;
+  /** Objects under registered space roots that are out of the graph. */
+  readonly keptOut: number;
+  /** Whether the live game is taking undrawn spaces out of the graph at all. */
+  readonly detaching: boolean;
+  /** Roots of a space she is not in that are in the graph anyway. Must be empty. */
+  readonly strays: readonly { readonly space: string; readonly name: string; readonly objects: number }[];
+  /** The registered roots, as counted: `space/name objects in|out`. */
+  readonly census: readonly string[];
 }
+
+/**
+ * **`MUTATE=reattach`** — proves the stray count can go red. In the page,
+ * before the census, one detached space root is put back in the scene the way
+ * a careless `scene.add` would: straight past `DrawnSpaces`.
+ */
+const MUTATE_REATTACH = process.env.MUTATE === 'reattach';
 
 async function measure(page: Page, scene: Scene): Promise<Measured> {
   // Settled = the probe exists, she is where the link says, and SETTLE_FRAMES
@@ -152,22 +169,55 @@ async function measure(page: Page, scene: Scene): Promise<Measured> {
     sampleFrom + SAMPLE_FRAMES,
     { timeout: BOOT_TIMEOUT_MS, polling: 200 },
   );
-  return page.evaluate((n) => {
+  return page.evaluate(({ n, reattach }) => {
     const perf = (window as unknown as {
       __perf: { frames(): { draws: number; tris: number }[]; context(): Record<string, unknown> };
     }).__perf;
     const frames = perf.frames().slice(-n);
     const context = perf.context();
+    const space = String(context['space']);
+    // **The graph census** (120 fps plan, step 2). `DrawnSpaces` says which
+    // roots it owns and what space each belongs to; whether one is *in the
+    // graph* is not taken from it — the scene is walked here, the way the
+    // renderer walks it, and a root is "in" if that walk reaches it.
+    interface Node { uuid: string; name: string; parent: Node | null; traverse(visit: (o: Node) => void): void; add(o: Node): void }
+    const game = (window as unknown as {
+      game: {
+        engine: { scene: Node };
+        world: {
+          drawnSpaces: {
+            isDetaching: boolean;
+            detachedRoots(): Node[];
+            census(): { space: string; name: string; uuid: string; objects: number }[];
+          };
+        };
+      };
+    }).game;
+    const spaces = game.world.drawnSpaces;
+    if (reattach) {
+      const victim = spaces.detachedRoots()[0];
+      if (victim) game.engine.scene.add(victim);
+    }
+    const reachable = new Set<string>();
+    game.engine.scene.traverse((o) => reachable.add(o.uuid));
+    const rows = spaces.census();
     return {
-      space: String(context['space']),
+      space,
       riding: context['riding'] === true,
       gpu: String(context['gpu']),
       draws: Math.max(...frames.map((f) => f.draws)),
       tris: Math.max(...frames.map((f) => f.tris)),
       drawsMin: Math.min(...frames.map((f) => f.draws)),
       trisMin: Math.min(...frames.map((f) => f.tris)),
+      sceneObjects: reachable.size,
+      keptOut: rows.filter((r) => !reachable.has(r.uuid)).reduce((sum, r) => sum + r.objects, 0),
+      detaching: spaces.isDetaching === true,
+      // A root may be in the graph only in its own space: the row's label is
+      // the stem of that space's id (`castle` for `castle.great-hall`).
+      strays: rows.filter((r) => reachable.has(r.uuid) && !space.startsWith(r.space)).map((r) => ({ space: r.space, name: r.name, objects: r.objects })),
+      census: rows.map((r) => `${r.space}/${r.name} ${r.objects} ${reachable.has(r.uuid) ? 'in' : 'out'}`),
     };
-  }, SAMPLE_FRAMES);
+  }, { n: SAMPLE_FRAMES, reattach: MUTATE_REATTACH });
 }
 
 async function runScene(name: string, scene: Scene): Promise<{ result?: Measured; error?: string }> {
@@ -240,7 +290,20 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
   rows.push(row);
   say(row);
   if (rows.length === 1) say(`renderer: ${result.gpu}`);
+  say(`${name}: scene graph ${result.sceneObjects} objects, ${result.keptOut} kept out of it — ${result.census.join('; ')}`);
   if (MEASURE) continue;
+  // **Nothing from a space she is not in is in the graph the renderer walks**
+  // (step 2). Asserted in every space this check visits, so the list of spaces
+  // has one owner: BUDGETS above.
+  if (!result.detaching) {
+    failures.push(`${name}: the game is not detaching undrawn spaces at all (DrawnSpaces.isDetaching is false) — every interior is in the graph`);
+  }
+  for (const stray of result.strays) {
+    failures.push(`${name}: she is in "${result.space}", yet "${stray.name}" (${stray.space}, ${stray.objects} objects) is in the scene graph — a space that is not drawn must be detached, not hidden`);
+  }
+  if (result.keptOut === 0) {
+    failures.push(`${name}: 0 objects are kept out of the scene graph — nothing is registered or nothing is detached, so "no strays" says nothing here`);
+  }
   if (!(result.draws > 0 && result.tris > 0)) {
     failures.push(`${name}: counted ${result.draws} draws and ${result.tris} triangles — the probe is not counting, so nothing here is measured`);
     continue;

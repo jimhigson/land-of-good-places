@@ -3,6 +3,7 @@ import { registerDoorFrameSolids, type PlacedDoorFrame } from '../../art/models/
 import { castleFloorBounds } from './floorBounds';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
+import { isDrawn } from '../../core/drawn';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_SLAB, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
@@ -1397,16 +1398,22 @@ export class Building implements GameSystem {
     // Deliberately above the `!player` return: the fire burns whether or not
     // anybody is standing in the room, which is also what makes it screenshot.
     this.castleFire.update(elapsed);
-    // Above the `!player` return with the fire, and for the identical reason:
-    // the feast is in progress whether or not she has walked in yet, which is
-    // the whole of #413's brief ("a feast in progress, not a set waiting for
-    // one") and is also what makes it screenshot.
-    this.banquet.update(elapsed);
-    // Above the `!player` return for the same reason the fire is: the roof
-    // garden's animals live their lives whether or not she is up there, so she
-    // arrives to a park that was already going rather than one that starts
-    // when she looks at it.
-    this.wildPets.update(context);
+    // Above the `!player` return with the fire: the feast is in progress
+    // whether or not she has walked in yet — the whole of #413's brief ("a
+    // feast in progress, not a set waiting for one"). **Posed only while the
+    // great hall is drawn** (120 fps plan, step 3): the pose is a pure function
+    // of `elapsed`, so the first frame she can see it is already mid-meal, and
+    // posing it from the park was most of a millisecond a frame for nobody.
+    const diners = this.banquet.root;
+    if (diners && isDrawn(diners)) this.banquet.update(elapsed);
+    // The roof garden's animals live their lives whether or not she is up
+    // there, so she arrives to a roof that was already going rather than one
+    // that starts when she looks at it. **Lived in arrears** while the roof is
+    // not drawn (step 3): nobody is animated, the time is banked, and the
+    // first frame it is drawn — behind the lift's iris — lives it in coarse
+    // steps. See `WildPets.passUnseen`.
+    if (isDrawn(this.wildPets.root)) this.wildPets.update(context);
+    else this.wildPets.passUnseen(dt);
     // Only while the roof garden is the space being drawn. Unlike the animals
     // above, nothing about the clouds is a simulation anybody can arrive in the
     // middle of — they are a hundred and thirty instance matrices whose only

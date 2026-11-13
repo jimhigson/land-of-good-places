@@ -204,6 +204,7 @@
     "check:served-render-budget": "pnpm run with-dev-server pnpm run check:render-budget",
     "check:static-freeze": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-static-freeze.mts",
     "check:served-static-freeze": "pnpm run with-dev-server pnpm run check:static-freeze",
+    "check:undrawn-still": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-undrawn-still.mts",
     "check:render-budget": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-render-budget.mts",
     "check:served-cull-audit": "pnpm run with-dev-server pnpm run check:cull-audit",
     "check:cull-audit": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cull-audit.mts",
