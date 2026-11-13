@@ -87,9 +87,30 @@ import {
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_SPRINT_MULTIPLIER } from '../src/core/constants.ts';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../src/entities/TapNavigator.ts';
 import { bandWalkedThrough, type PortalBand } from '../src/world/tapSpacing.ts';
+import { offeredParkFile } from '../src/world/prebuilt/parkFileStore.ts';
 
 /** The seeds walked: the canonical park and three more from the pool. */
 const SEEDS = [5, 0, 9, 13];
+
+/**
+ * **The parks this run walks** — {@link SEEDS}, unless the `--import` hook
+ * has bound the process to one park file (`LGP_PARK_FILE`,
+ * `ts-extension-resolver-register.mjs`). Every child inherits that binding and
+ * refuses any other seed before measuring anything, so the run walks the
+ * file's park alone and says on stderr which seeds it did not. The hook
+ * ignores the file under a park-changing switch, and then offers nothing here
+ * (`builtParkFileOf` declines while `LGP_PARK_FILE` is set) — so all four are
+ * walked, exactly as the children will build them.
+ */
+function seedsToWalk(): readonly number[] {
+  const supplied = process.env['LGP_PARK_FILE'] ? offeredParkFile() : null;
+  if (supplied === null) return SEEDS;
+  const unwalked = SEEDS.filter((seed) => seed !== supplied.seed);
+  process.stderr.write(
+    `check:tap-dash: LGP_PARK_FILE is seed ${supplied.seed}'s park — walking that park only; seeds ${unwalked.join(', ')} are NOT walked this run\n`,
+  );
+  return [supplied.seed];
+}
 /** Frame steps each journey is run at. The clamp is where a dash's frame is longest. */
 const FRAME_STEPS = [1 / 60, 1 / 30, MAX_FRAME_DELTA];
 /** Every dash must have arrived by this, in seconds. "About 4 s". */
@@ -442,7 +463,14 @@ async function child(seed: number): Promise<void> {
         const qz = route[i * 2 + 1] ?? pz;
         const leg = Math.hypot(qx - px, qz - pz);
         if (walked + leg >= metres / 2 && leg > 2) {
-          const t = (metres / 2 - walked) / leg;
+          // On this leg, or — when the middle fell on legs too short to stand a
+          // door across (`leg > 2`) — at this leg's start, which is where those
+          // short legs end. Never before it: unclamped, `t` went negative and
+          // stood the band off the route altogether, 2.7 m beside a dash that
+          // went exactly where it was planned (seed 13, once #760 shifted the
+          // seeded stream these routes are drawn from: band at (54.15, -2.69),
+          // the route through (54.08, 0.14)).
+          const t = Math.max(0, (metres / 2 - walked) / leg);
           band = {
             what: 'a door-sized band across the route',
             centreX: px + (qx - px) * t,
@@ -751,9 +779,10 @@ function curve(): void {
 
 async function parent(): Promise<void> {
   curve();
-  const lanes = Math.max(1, Math.min(Number(process.env['LGP_LANES'] ?? 2), cpus().length, SEEDS.length));
-  process.stderr.write(`check:tap-dash: ${SEEDS.length} parks, ${lanes} at a time\n`);
-  const queue = [...SEEDS];
+  const seeds = seedsToWalk();
+  const lanes = Math.max(1, Math.min(Number(process.env['LGP_LANES'] ?? 2), cpus().length, seeds.length));
+  process.stderr.write(`check:tap-dash: ${seeds.length} parks, ${lanes} at a time\n`);
+  const queue = [...seeds];
   const reports = new Map<number, SeedReport>();
   await Promise.all(
     Array.from({ length: lanes }, async () => {
@@ -772,7 +801,7 @@ async function parent(): Promise<void> {
   );
 
   let cameraCovered = 0;
-  for (const seed of SEEDS) {
+  for (const seed of seeds) {
     const report = reports.get(seed);
     if (!report) {
       check(false, `seed ${seed}: the park never reported back`);
@@ -911,7 +940,16 @@ async function parent(): Promise<void> {
     process.stderr.write(`check:tap-dash: seed ${seed}: ${skipped} of ${report.journeys.length} runs the walk itself could not finish — their arrival clauses assert nothing\n`);
   }
 
-  check(cameraCovered > 0, `the on-screen camera clause covered ${cameraCovered} dash(es) of ${CAMERA_ROUTE_METRES} m+ across the seeds`);
+  // Asserted whenever the run walked every seed in SEEDS. A run bound to one
+  // park file may hold no route that long (seed 5's longest is 243 m), so it
+  // says the clause went unproven rather than claim cover it does not have.
+  if (cameraCovered > 0 || seeds === SEEDS) {
+    check(cameraCovered > 0, `the on-screen camera clause covered ${cameraCovered} dash(es) of ${CAMERA_ROUTE_METRES} m+ across the seeds`);
+  } else {
+    process.stderr.write(
+      `check:tap-dash: NOT PROVEN — the on-screen camera clause covered no dash of ${CAMERA_ROUTE_METRES} m+: this run walked seed ${seeds.join(', ')} only (LGP_PARK_FILE); the full run asserts it\n`,
+    );
+  }
 
   if (failures.length > 0) {
     console.log(`\ncheck:tap-dash: ${failures.length} failure(s)`);

@@ -33,13 +33,13 @@ import { duckBarAssetGeometry } from '../../../art/models/duckBarAsset';
 import { createMini, type MiniHandle } from '../../../art/models/mini';
 import { createLollipopTree, createPinkWall, type TreeVariant } from '../../../art/models/props';
 import { createTortoise } from '../../../art/models/reptiles';
-import { createLibraryOwl } from '../../../art/models/libraryCreatures';
-import { createLibraryBookcase, createLibraryDesk, createLibraryReadingLamp, libraryBookMaterial, libraryBookShapes } from '../../../art/models/libraryAssets';
+import { createLibraryBookcase } from '../../../art/models/libraryAssets';
 import { createJetpack } from '../../../art/models/jetpack';
 import { createDiscoBall } from '../../../art/models/hotelAssets';
 import { createAlienSaucer } from '../../../minigames/ferrisWheel/friends';
 import { Rng } from '../../../core/mathUtils';
-import { bookInstances, shelveFace } from '../furnish';
+import { LIBRARY_ROOM } from '../../interiors';
+import type { LibraryPictureArt } from '../room';
 import { createStoryBook, createStoryDragon } from './readerAssets';
 import {
   createBattlement,
@@ -429,7 +429,7 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
       return tortoise;
     }
     case 'owl':
-      return createLibraryOwl();
+      return libraryArt().createLibraryOwl();
     case 'candyFloss':
       return createCandyFloss((actor.variant as FlossFlavour | undefined) ?? 'pink');
     case 'jetpack': {
@@ -465,9 +465,9 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
       return { root, height: top - bottom, dispose: () => friend.dispose() };
     }
     case 'libraryDesk':
-      return createLibraryDesk();
+      return libraryArt().createLibraryDesk();
     case 'readingLamp':
-      return createLibraryReadingLamp();
+      return libraryArt().createLibraryReadingLamp();
     case 'bookcase':
       return buildPictureBookcase();
     case 'flossStick': {
@@ -549,10 +549,11 @@ const PICTURE_SHELF_SEED = 0x5e1f;
  */
 function buildPictureBookcase(): AssetHandle {
   const kind = 'wall';
+  const art = libraryArt();
   const bookcase = createLibraryBookcase(kind);
-  const shapes = libraryBookShapes();
-  const books = shelveFace({ id: 'picture', kind, at: { x: 0, z: 0 }, facing: 0 }, false, new Rng(PICTURE_SHELF_SEED), shapes);
-  bookcase.root.add(bookInstances(books, shapes, libraryBookMaterial()));
+  const shapes = art.libraryBookShapes();
+  const books = art.shelveFace({ id: 'picture', kind, at: { x: 0, z: 0 }, facing: 0 }, false, new Rng(PICTURE_SHELF_SEED), shapes);
+  bookcase.root.add(art.bookInstances(books, shapes, art.libraryBookMaterial()));
   return { root: bookcase.root, height: bookcase.height };
 }
 
@@ -935,4 +936,20 @@ export function renderPicture(renderer: WebGLRenderer, picture: PagePicture, loo
   }
   ctx.putImageData(image, 0, 0);
   return { canvas, coverage: covered / (PICTURE_WIDTH * PICTURE_HEIGHT) };
+}
+
+/**
+ * **The reading room's own models, for a page that pictures the library** —
+ * the owl, the desk, the lamp, a stocked shelf — from the reading room's lazy
+ * chunk (`world/interiors.ts`'s `LIBRARY_ROOM`, `room.ts`'s
+ * `LIBRARY_PICTURE_ART`), never imported here. The reader is a lazy chunk of
+ * its own; a module both chunks imported would be split into a third, shared
+ * one, and a chunk whose own import failed once can never be fetched again
+ * (`world/lazyChunks.ts`). So `LazyBookReader` loads the room before it builds
+ * the reader, and the pictures ask for its art here.
+ */
+function libraryArt(): LibraryPictureArt {
+  const room = LIBRARY_ROOM.loaded;
+  if (!room) throw new Error('pagePictures: the reading room is not loaded — LazyBookReader loads LIBRARY_ROOM before the reader');
+  return room.LIBRARY_PICTURE_ART;
 }

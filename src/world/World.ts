@@ -1,4 +1,9 @@
 import type { Object3D, Scene } from 'three';
+import type { DoorwayExit } from '../entities/doorwayTap';
+import { LOBBY, hotelDoorBands } from './hotel/layout';
+import { reptileExitBand } from './reptileHouse/shell';
+import { libraryExitBand } from './library/shell';
+import { castleExitBand } from './building/Building';
 import type { Parade } from '../entities/parade/Parade';
 import { LabelManager } from '../ui/LabelManager';
 import { CollisionWorld } from './Collision';
@@ -13,6 +18,7 @@ import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
 import { PARK_LAYOUT, placedEntry } from './parkLayout';
 import { DayNight } from './DayNight';
+import { DrawnSpaces } from './DrawnSpaces';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
 import { Coaster } from './coaster/Coaster';
@@ -121,6 +127,30 @@ export class World implements GameSystem {
   readonly reptileHouse: ReptileHouse;
   /** The Library (#714/#716): a pillared building whose door leads to a dim one-floor reading room. */
   readonly library: Library;
+
+  /**
+   * **Every interior's way out to the park**: its doorway frame and its
+   * trigger band, each asked of its own room — what a tap in a doorway is
+   * steered through (`entities/doorwayTap.ts`) and `check:doorframes` walks.
+   *
+   * **The Library's and the hotel's only once their rooms are furnished.**
+   * Each of those rooms — its south wall and so the frame standing in it — is
+   * a lazy chunk fetched on the way in (`world/interiors.ts`'s `LIBRARY_ROOM`
+   * and `HOTEL_INTERIOR`), and this is asked on every tap, in the park as well
+   * as indoors: until the room is there it has no way out to tap, and she
+   * cannot be standing in it. `check:doorframes` holds this list to all four
+   * on a park built with every room furnished.
+   */
+  get doorwayExits(): readonly DoorwayExit[] {
+    const lobbyExit = hotelDoorBands(LOBBY).find((band) => band.kind === 'exit');
+    if (!lobbyExit) throw new Error('World: the hotel lobby has no exit band');
+    return [
+      ...(this.hotel.furnished ? [{ placed: this.hotel.exitDoorFrame, band: lobbyExit }] : []),
+      { placed: this.reptileHouse.exitDoorFrame, band: reptileExitBand() },
+      ...(this.library.furnished ? [{ placed: this.library.exitDoorFrame, band: libraryExitBand() }] : []),
+      { placed: this.building.exitDoorFrame, band: castleExitBand() },
+    ];
+  }
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -145,6 +175,14 @@ export class World implements GameSystem {
   readonly entrance: Entrance;
   /** Every group that makes up the park itself. See {@link setParkVisible}. */
   private readonly parkGroups: readonly Object3D[];
+  /**
+   * Which spaces are in the graph the renderer walks — the one owner
+   * (`DrawnSpaces.ts`, 120 fps plan steps 2 and 3). Every root that is not the
+   * park is registered with it in the constructor.
+   */
+  readonly drawnSpaces: DrawnSpaces;
+  /** What {@link setElsewhereVisible} hid, to put back exactly that. */
+  private elsewhereWas: boolean | null = null;
 
   constructor(
     scene: Scene,
@@ -464,6 +502,10 @@ export class World implements GameSystem {
       this.building.shops.stands,
     );
 
+    // A hotel interior fetched later, when she first walks in, brings its
+    // guests then: they join the same crowd (`NpcSystem.addResidents`).
+    this.hotel.onLateResidents = (residents) => this.npcs.addResidents(residents);
+
     // …and now that both exist, introduce them. `Entrance` is built before
     // `NpcSystem` (the waypoint graph needs the finished collision world), so
     // this cannot be a constructor argument in either direction — it is the
@@ -525,19 +567,28 @@ export class World implements GameSystem {
     // hundred metres from the park rather than inside the plot the facade
     // stands on. Deliberately **not** one of the park groups above — it is not
     // the park, and {@link setElsewhereVisible} is what hides it.
-    scene.add(
-      ...this.parkGroups,
-      this.building.interiorRoot,
-      this.hotel.hotelRoot,
-      this.reptileHouse.hallRoot,
-      this.reptileHouse.forecourtRoot,
-      this.library.roomRoot,
-      // The library's children's models, at an identity transform beside the
-      // room (an `NpcCharacter` writes world positions onto its model's root);
-      // the Library shows and hides them with the room.
-      this.library.kidsRoot,
-      this.ferrisWheel.group,
-    );
+    scene.add(...this.parkGroups, this.ferrisWheel.group);
+    // **Each of these is a space of its own, and is in the graph only while it
+    // is drawn** (120 fps plan, step 2). Registered rather than `scene.add`ed:
+    // from here on the `visible` its owner already writes on the way in and
+    // out *is* its membership of the scene — see `DrawnSpaces.ts`. Nothing is
+    // taken out of the graph until `Game` calls `drawnSpaces.detachUndrawn()`,
+    // so a headless `World` (every Node check) is one graph, as it always was.
+    //
+    // The labels are the stems `spaces.ts` gives each place's space id
+    // (`castle.`, `hotel.`, `reptileHouse…`, `library`), which is what lets
+    // `check:render-budget` ask, in every space, that nothing registered under
+    // another stem is in the graph. A space added later registers its root on
+    // this list and is covered by that check without anything else being told.
+    this.drawnSpaces = new DrawnSpaces(scene);
+    this.drawnSpaces.register('castle', this.building.interiorRoot);
+    this.drawnSpaces.register('hotel', this.hotel.hotelRoot);
+    this.drawnSpaces.register('reptileHouse', this.reptileHouse.hallRoot, this.reptileHouse.forecourtRoot);
+    // The library's children's models hang under a root of their own, at an
+    // identity transform beside the room (an `NpcCharacter` writes world
+    // positions onto its model's root); the Library shows and hides them with
+    // the room, so they come and go with it here too.
+    this.drawnSpaces.register('library', this.library.roomRoot, this.library.kidsRoot);
   }
 
   /**
@@ -555,7 +606,21 @@ export class World implements GameSystem {
    * you cannot board a ferris wheel from indoors.
    */
   setElsewhereVisible(visible: boolean): void {
-    this.building.interiorRoot.visible = visible;
+    // **Hide, then put back what was there — never simply "show".** This used
+    // to write `visible` straight through, so stepping off the wheel turned
+    // the castle's insides *on* in the park, where they had been off since
+    // boot: fog hid them, so nobody saw, but they were drawn-and-traversed for
+    // the rest of the session and the banquet was posed for nobody again. With
+    // `visible` now meaning "in the graph" (`DrawnSpaces`) that leak would be
+    // 1,837 objects re-attached by every ride.
+    const root = this.building.interiorRoot;
+    if (!visible) {
+      if (this.elsewhereWas === null) this.elsewhereWas = root.visible;
+      root.visible = false;
+    } else if (this.elsewhereWas !== null) {
+      root.visible = this.elsewhereWas;
+      this.elsewhereWas = null;
+    }
   }
 
   /**

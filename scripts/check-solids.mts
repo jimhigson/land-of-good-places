@@ -84,12 +84,13 @@ import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { CLEAR_TOLERANCE } from '../src/world/dismount.ts';
 import { CARRIAGE_BODY_HALF_WIDTH, CAR_FLOOR_Y } from '../src/world/train/trainDimensions.ts';
 import { CAR_GAP, CARRIAGE_LENGTH, LOCO_LENGTH } from '../src/world/train/trainModel.ts';
-import { TRAIN_STOPS_SHORT } from '../src/world/train/ParkTrain.ts';
+import { DWELL_SECONDS, TRAIN_STOPS_SHORT } from '../src/world/train/ParkTrain.ts';
 import { AUTO_HOP_LOOKAHEAD, GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer, playerHopProbe, type HopProbe } from './playerSim.mts';
 import { CollisionWorld, FOOT_HALF_WIDTH, JUMP_CLEARANCE_GRACE, MAX_AUTO_HOP_HEIGHT, type BoxCollider, type SolidView } from '../src/world/Collision.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
 import { BUILDING_STEP_UP, HOTEL_PLAY_RADIUS, NPC_RADIUS, PARADE_MEMBER_RADIUS, PLAYER_LONGEST_STEP, PLAYER_MAX_SPEED, PLAYER_RADIUS, MAX_FRAME_DELTA } from '../src/core/constants.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
+import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_BOUNDARY, circleBoundary, type ParkBoundary } from '../src/world/boundary.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
@@ -181,6 +182,26 @@ import { STEP_MARGIN, STEP_SAMPLES, WEDGE_DEPTH, solidStepCeiling, standingHeigh
  *   carriage she is standing on, as before (`ParkTrain.upOn` always no) —
  *   clause 13's standing on it must find her shouldered off it. Seed 5 boards
  *   no child there while she stands: run it on seed 2 (`LGP_SEED=2`).
+ * - `train-blind-mid-jump` (park): only the lookout's half of the fix
+ *   reverted — her height where she is drawn, not where she stands; the new
+ *   band kept — clause 13's jumping on it, her line in her backpack, must
+ *   find it pulling away under her.
+ * - `train-band-two-metres` (park): only the old 2 m band, her standing
+ *   height kept — clause 13's jumping on it must find it leaving with her on
+ *   its funnel's rim (2.26–2.38 m over the rails on seed 5: out of the old
+ *   reach while she stands there, never mind jumps).
+ * - `train-ignores-her-line` (park, from clause 13): her and her line out of
+ *   the train's lookout — clause 13's drops beside it, after its dwell, her
+ *   line in her backpack, must find it moving while she is beside it.
+ * - `low-vault` (park): a solid ceiling under each tunnel's arch, 0.35 m under
+ *   the drawn soffit as the vault's foot once stood, low enough to reach —
+ *   clause 12's standing jumps must find a ceiling under the drawn soffit.
+ * - `child-left-on-line` (park): the crowd never takes a child off the line
+ *   (`NpcSystem.offTheLine` does nothing) — clause 8's child, let go, must
+ *   find the train standing for them for good.
+ * - `hover-any-air` (park): the hover rescue as it was — any second in the
+ *   air within its span, nothing pushing her — clause 13's hopping under a
+ *   canopy must find a rescue.
  * - `put-down-ignores-train` (park): the put-down rule asked of the world
  *   without the train in it — clause 13 must find a put-down, or a rescue,
  *   leaving her inside it or wedged against it.
@@ -195,6 +216,7 @@ const PROOFS = [
   'reptile-roof', 'every-roof', 'new-roof', 'blind-hop', 'spawn-highest', 'single-step', 'drawn-feet',
   'sealed-line', 'train-ignores-her', 'train-ignores-pets', 'train-ignores-npcs', 'platform-holds-train', 'parapets-to-ground', 'drawn-step', 'no-crack-rules', 'narrow-wedges', 'feet-judged',
   'pets-count-aboard', 'pets-stay-out', 'ghost-train', 'frozen-train', 'train-ignores-on-top', 'put-down-ignores-train', 'riders-sit-on-her',
+  'train-blind-mid-jump', 'train-band-two-metres', 'hover-any-air', 'child-left-on-line', 'low-vault', 'train-ignores-her-line',
 ];
 if (PROVE && !PROOFS.includes(PROVE)) throw new Error(`SOLIDS_PROVE=${PROVE} is no proof this check knows (${PROOFS.join(', ')})`);
 /** The frame rate the census simulates her at: 60 unless `SOLIDS_FPS` asks for another (never in the chain). */
@@ -405,6 +427,21 @@ const CANOPY_KINDS: Readonly<Record<string, string>> = {
       collision.kinded('bridge parapet', () =>
         collision.addWall(seg.ax, seg.az, seg.bx, seg.bz, wall.halfWidth, wall.topAt(seg.ax, seg.az), false, true, -Infinity, false, Number.NaN, wall.topAt(seg.bx, seg.bz)),
       );
+    }
+  }
+  if (PROVE === 'low-vault') {
+    // Under every bridge, over the line, a solid ceiling 0.35 m under where
+    // her head reaches at the top of a jump — the same 0.35 m the vault's foot
+    // once stood under the arch, brought down into her reach.
+    const route = world.train.route;
+    const p = new Vector3();
+    for (let d = 0; d < route.length; d += 0.5) {
+      route.pointAt(d, p);
+      for (const bridge of world.train.bridges) {
+        if (bridge.soffitYAt(p.x, p.z) === null) continue;
+        const base = sample(p.x, p.z, p.y + 0.5) + KID_HEIGHT + JUMP_APEX_HEIGHT - 0.35;
+        collision.kinded('proof: a low vault', () => collision.addBox(p.x, p.z, 1.6, 0.3, 0, 0, base + 0.5, false, true, base));
+      }
     }
   }
   if (PROVE === 'low-roof') stepNearGate('castle roof deck');
@@ -1801,6 +1838,69 @@ if (inPart('park')) {
     tunnels.length > 0 && failed.length === 0,
     `${tunnels.length} tunnel(s) under ${bridges.length} bridge(s), walked both ways along the line's middle: ${failed.length} stopped, wedged or through the soffit${failed.length ? ` — ${failed.slice(0, 6).join('; ')}` : ''}`,
   );
+  // **And a jump under the arch meets the arch** — standing jumps every half
+  // metre along each tunnel, at the line's middle and a metre either side:
+  // her head never rises through the drawn soffit, and where something caps
+  // her jump it is the drawn soffit, not a solid ceiling under it (walking
+  // never lifts her head to it, so an invisible ceiling went unseen: the
+  // vault's foot was the lowest soffit over the bridge's whole width, 0.35 m
+  // under the drawn arch over the line's middle — PR #722's review).
+  {
+    const apex = sampledApex(60);
+    const bad: string[] = [];
+    let jumps = 0;
+    let capped = 0;
+    let nearest = Infinity;
+    const side = new Vector3();
+    for (const tunnel of tunnels) {
+      for (let d = tunnel.from; d <= tunnel.to + 1e-9; d += 0.5) {
+        route.pointAt(route.wrap(d), at);
+        route.tangentAt(route.wrap(d), along);
+        side.set(along.z, 0, -along.x).normalize();
+        for (const offset of [-1, 0, 1]) {
+          const x = at.x + side.x * offset;
+          const z = at.z + side.z * offset;
+          const soffitHere = bridges.map((bridge) => bridge.soffitYAt(x, z)).find((y) => y !== null) ?? null;
+          if (soffitHere === null) continue;
+          // On the track bed under the arch — not the bridge's deck over it, the highest ground there.
+          const sim = new SimPlayer(collision, { ground: sample, hopProbe: playerHopProbe(collision) });
+          sim.placeOnGround(x, z);
+          const ground = sample(x, z, at.y + 0.5);
+          sim.position.y = ground;
+          sim.previousPosition.copy(sim.position);
+          (sim as unknown as { groundHeight: number; groundY: number }).groundHeight = ground;
+          (sim as unknown as { groundY: number }).groundY = ground;
+          if (wedgeDepth(collision, sim.position, ground) > WEDGE_DEPTH) continue;
+          jumps += 1;
+          sim.verticalVelocity = JUMP_SPEED;
+          sim.airborne = true;
+          let top = ground;
+          let headOver = -Infinity;
+          for (let f = 0; f < 120 && (f === 0 || sim.airborne); f += 1) {
+            sim.step(1 / 60, 0, 0, false);
+            top = Math.max(top, sim.position.y);
+            const soffit = bridges.map((bridge) => bridge.soffitYAt(sim.position.x, sim.position.z)).find((y) => y !== null) ?? null;
+            if (soffit !== null) headOver = Math.max(headOver, sim.position.y + KID_HEIGHT - soffit); // flat-ok: her head and the drawn soffit in one column, in the same frame
+          }
+          const rose = top - ground; // flat-ok: her head and the drawn soffit in one column, in the same frame
+          const link = `/spawn?pos=${x.toFixed(1)},${z.toFixed(1)}&seed=${PARK_SEED_ASKED}`;
+          nearest = Math.min(nearest, soffitHere - (ground + apex + KID_HEIGHT)); // flat-ok: her head and the drawn soffit in one column, in the same frame
+          if (headOver > 0.02) bad.push(`at ${link}: her head ${headOver.toFixed(2)} m through the soffit`);
+          else if (rose < apex - 0.02) {
+            capped += 1;
+            // Capped: by the drawn arch, her head at it.
+            const under = soffitHere - (top + KID_HEIGHT); // flat-ok: her head and the drawn soffit in one column, in the same frame
+            if (under > 0.05) bad.push(`at ${link}: a ceiling ${under.toFixed(2)} m under the drawn soffit capped her jump at ${rose.toFixed(2)} m`);
+          }
+        }
+      }
+    }
+    say(
+      tunnels.length > 0 && jumps > 0 && bad.length === 0,
+      `standing jumps under every bridge (${jumps}, every 0.5 m along each tunnel, on the line's middle and a metre either side): her head never through the drawn soffit, and ${capped} capped — each by the drawn arch, never a solid under it${bad.length ? ` — ${bad.slice(0, 6).join('; ')}` : ''}`,
+    );
+    if (capped === 0 && jumps > 0) note(`clause 12: no standing jump under a bridge reached the drawn soffit here (her head at the top of a jump came no nearer than ${nearest.toFixed(2)} m under it), so the jumps assert only that nothing solid caps her under it`);
+  }
   if (tunnels.length === 0) note('clause 12: this park\'s line runs under no bridge, so the clause asserts nothing here');
 }
 
@@ -1902,6 +2002,7 @@ if (inPart('park')) {
     };
   }
   if (PROVE === 'train-ignores-npcs') world.npcs.onTheLine = function* () {};
+  if (PROVE === 'child-left-on-line') (world.npcs as unknown as { offTheLine: () => void }).offTheLine = () => {};
   if (PROVE === 'pets-count-aboard') {
     // Her companion counted as standing while it rides beside her.
     (Parade.prototype as unknown as { standing: () => Iterable<Readonly<Vector3>> }).standing = function* (this: { members: { root: { visible: boolean; position: Vector3 } }[] }) {
@@ -2188,6 +2289,23 @@ if (inPart('park')) {
       },
     );
     say(nearest >= MARGIN && stood > 3, `a child of the crowd: 20 m ahead of it, through World's own wiring, the train stops ${nearest.toFixed(2)} m short of them (${MARGIN.toFixed(2)} asked), standing ${stood.toFixed(1)} s`);
+    // **Then let go of them**: nobody puts a child back on the line, and the
+    // crowd must get them off it (`NpcSystem.offTheLine`, the only thing that
+    // does) — or the train stands there for ever, and with her aboard on the
+    // loop there is no "Get off" until it comes to a station (PR #722's
+    // review: this case once held the child there every frame and never asked
+    // whether the train went on).
+    const spot = route.distanceNear(at.x, at.z);
+    let passedIn = -1;
+    let t = 0;
+    play(30, STILL_INPUT, 1 / 30, () => {
+      t += 1 / 30;
+      const ahead = route.forwardGap(spot, train.noseDistance());
+      if (ahead > 2 && ahead < route.length / 2) passedIn = t;
+      return passedIn >= 0;
+    });
+    const kidLine = train.downOnTheLine(kid.position.x, kid.position.y, kid.position.z, NPC_RADIUS);
+    say(passedIn >= 0 && passedIn < 20, `a child of the crowd, let go: the crowd gets them off the line and the train goes on past where they stood — ${passedIn >= 0 ? `in ${passedIn.toFixed(1)} s` : `it never did in 30 s (the child at (${kid.position.x.toFixed(2)}, ${kid.position.y.toFixed(2)}, ${kid.position.z.toFixed(2)}), ${kidLine ? 'still down on the line' : 'off the line'}; the train moving ${train.runningSpeed.toFixed(2)}; on the line: ${onTheLineNow()})`}`);
     kid.position.set(ENTRANCE_PLAYER_X + 3, terrainHeight(ENTRANCE_PLAYER_X + 3, ENTRANCE_PLAYER_Z), ENTRANCE_PLAYER_Z);
   }
 
@@ -2254,8 +2372,12 @@ if (inPart('park')) {
  *   radius, never past its nose or tail.
  * - **Walking into it moving**: from the platform as it pulls in, never inside
  *   any piece of it.
- * - **Standing on it**: on a carriage at a platform, it waits — through its
- *   dwell and twenty seconds more — and goes once she has stepped off.
+ * - **Standing on it**: at every place on it beside a platform she fits, it
+ *   waits twenty seconds with nobody else holding it, she steps off onto the
+ *   platform, and it goes once she has gone.
+ * - **Jumping on it**: out on the loop, on every top of it she fits on — the
+ *   engine's boiler, smokebox, cab roof and funnel rim, and the carriages — a
+ *   jump each time she lands, and it never moves.
  * - **Put down beside it**: every exit asked inside it, in the slot between it
  *   and its far fence, and between two of its cars, puts her where no piece of
  *   it holds her and she is not wedged.
@@ -2287,6 +2409,35 @@ if (inPart('park')) {
       };
     }
     if (PROVE === 'riders-sit-on-her') (train as unknown as { upOn(car: number): boolean }).upOn = () => false;
+    if (PROVE === 'train-ignores-her-line') {
+      // Her and her line out of its lookout (the crowd still counted): the
+      // drops beside it must find it pulling away from her.
+      const looking = train as unknown as { lookout(): Iterable<{ radius: number }> };
+      const looked = looking.lookout.bind(train);
+      looking.lookout = function* () {
+        for (const body of looked()) if (body.radius !== PLAYER_RADIUS && body.radius !== PARADE_MEMBER_RADIUS) yield body;
+      } as never;
+    }
+    if (PROVE === 'hover-any-air') (Player.prototype as unknown as { isHover: () => boolean }).isHover = () => true;
+    if (PROVE === 'train-blind-mid-jump' || PROVE === 'train-band-two-metres') {
+      const looking = train as unknown as { nearLine(x: number, y: number, z: number): { at: number } | null; lookout(): Iterable<{ x: number; y: number; z: number; radius: number }> };
+      const nearLine = looking.nearLine.bind(train);
+      const rails = new Vector3();
+      // The 2 m band alone, for its own proof — never with the mid-jump one,
+      // or a red there could come from the band (PR #742's review).
+      if (PROVE === 'train-band-two-metres') looking.nearLine = (x, y, z) => {
+        const near = nearLine(x, y, z);
+        if (!near) return near;
+        route.pointAt(near.at, rails);
+        return y > rails.y + 2 ? null : near;
+      };
+      if (PROVE === 'train-blind-mid-jump') {
+        const looked = looking.lookout.bind(train);
+        looking.lookout = function* () {
+          for (const body of looked()) yield body.radius === PLAYER_RADIUS && body.x === player.position.x && body.z === player.position.z ? { ...body, y: player.position.y } : body;
+        } as never;
+      }
+    }
     if (PROVE === 'put-down-ignores-train') {
       const near = CollisionWorld.prototype.near;
       CollisionWorld.prototype.near = function (this: CollisionWorld, x: number, z: number, reach: number) {
@@ -2393,6 +2544,22 @@ if (inPart('park')) {
       player.teleportTo(ENTRANCE_PLAYER_X, terrainHeight(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z), ENTRANCE_PLAYER_Z);
       play(0.5);
     };
+    /**
+     * **Her line into her backpack, or back out** — so that in the cases that
+     * ask what *she* holds, she is alone with the train. Her pets stand beside
+     * it, and it stands for anyone beside it, so with them out these cases were
+     * held by her pets (PR #742's review: with her own fix reverted, "jumping
+     * on it" stayed green). A teleport to the gate is no help: they come too.
+     */
+    const herLineOut = (out: boolean): void => {
+      for (const item of gameStore.get().inventory) if (item.paradeable) gameStore.setStowed(item.uid, !out);
+      // The store tells its subscribers in a microtask, and this loop never
+      // yields to one: the parade is told now, as Game's frame would have.
+      (parade as unknown as { sync(state: unknown): void }).sync(gameStore.get());
+      play(1, STILL_INPUT, 1 / 30);
+      const line = parade.lineNow().out;
+      if (out ? line === 0 : line !== 0) say(false, `her line ${out ? 'back out of' : 'into'} her backpack: ${line} of it out — the cases below would not be asked as they say`);
+    };
     /** Where the train is, how fast, and everybody it looks out for near its line, for a failure message. */
     const whereItIs = (): string => {
       const looking = train as unknown as { lookout(): Iterable<{ x: number; y: number; z: number; radius: number }>; nearLine(x: number, y: number, z: number): { at: number; lateral: number; onPlatform: boolean } | null };
@@ -2484,54 +2651,107 @@ if (inPart('park')) {
         if (deepest > 0.03) ends.push(`${label}: ${deepest.toFixed(2)} m inside it, at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})`);
       }
       say(ends.length === 0, `walking into it along the line: at its nose and its tail she is never inside it${ends.length ? ` — ${ends.join('; ')}` : ''}`);
-      // --- standing on it: put up on it while it is held, then nobody but her holding it ---
-      // Somewhere on it beside the platform with room for her over it — under
-      // a platform's canopy a carriage's top has none, and she cannot get
-      // onto it there at all (stepping up, her head meets the canopy;
-      // jumping, it caps her) — on a carriage no child of the crowd is
-      // riding in: one sat in it is furniture to her
-      // (`NpcSystem.separateFromPlayer`), and shoulders her straight off its
-      // top. On a carriage that is its middle, between its two backrests —
-      // the one place on one she fits, all of her: they stand 0.70 m either
-      // side of it, and she is 0.62 m round. Or the engine's cab roof. With
-      // nowhere like that at this stop, it goes on to its next, and she
-      // looks there.
+      // --- standing on it, and jumping on it: every top on it she fits on ---
+      // Up on it by a hand, as a jump from its platform puts her (the put-down
+      // rule never stands her on a train: the router knows nothing that
+      // moves), at every place on it beside the platform she fits standing —
+      // a carriage's middle, between its backrests; the engine's cab roof, off
+      // its bobble; its funnel's rim — with room over her all the way off it
+      // to the platform (under a canopy a carriage's top has none) and no
+      // child of the crowd riding in that car (one sat in it is furniture to
+      // her, `NpcSystem.separateFromPlayer`, and shoulders her off). Then
+      // nobody but her holding it: standing, it waits; **jumping on it — a
+      // jump each time she lands — it waits** (PR #722's review: its lookout
+      // asked where she was drawn, a jump took her feet out of its reach,
+      // and it pulled away under her). Where nothing fits at this stop it goes
+      // on to its next, and she looks there too.
       type Stop = NonNullable<typeof station>;
-      const spotAt = (stop: Stop): { what: string; d: number; top: number } | null => {
-        route.pointAt(stop.distance, at);
-        const acrossX = stop.standX - at.x;
-        const acrossZ = stop.standZ - at.z;
-        const across = Math.hypot(acrossX, acrossZ) || 1;
+      interface Spot { readonly what: string; readonly x: number; readonly z: number; readonly top: number }
+      const carNames = ['the engine', 'carriage 1', 'carriage 2', 'carriage 3'];
+      /** Places on the train she fits standing — beside `stop`'s platform, or anywhere when it is `null` — with `room` over her. */
+      const spotsAt = (stop: Stop | null, room: number): Spot[] => {
+        route.pointAt(stop?.distance ?? 0, at);
+        const acrossX0 = (stop?.standX ?? at.x) - at.x;
+        const acrossZ0 = (stop?.standZ ?? at.z) - at.z;
+        const across = Math.hypot(acrossX0, acrossZ0) || 1;
+        const acrossX = acrossX0 / across;
+        const acrossZ = acrossZ0 / across;
         const riders = new Set(world.npcs.all.map((character) => (character.driver as { trainSeat?: number | null }).trainSeat).filter((seat): seat is number => seat !== null && seat !== undefined));
         const cars = carsNow();
-        const candidates = [
-          ...[0, 1, 2].filter((carriage) => !riders.has(carriage * 2) && !riders.has(carriage * 2 + 1)).map((carriage) => ({ what: `carriage ${carriage + 1}`, d: cars[carriage + 1]! })),
-          { what: "the engine's cab roof", d: cars[0]! - 1.05 },
-        ];
-        for (const candidate of candidates) {
-          route.pointAt(route.wrap(candidate.d), at);
-          const x = at.x;
-          const z = at.z;
-          // Beside the platform: straight off it there, she is on it.
-          if (!stop.covers(x + (acrossX / across) * 2.2, z + (acrossZ / across) * 2.2)) continue;
-          const top = pieces.filter((piece) => piece.depthAt(x, z) >= 0 && piece.standsAt(x, z)).reduce((t, piece) => Math.max(t, piece.topAt(x, z)), -Infinity);
-          if (!Number.isFinite(top)) continue;
-          if (collision.deepestSolidOverlap(new Vector3(x, top, z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT, top) > 0.01) continue;
-          // And room over her, all the way off it to the platform.
-          let headroom = true;
-          for (let k = 0; headroom && k <= 11; k += 1) {
-            if (collision.ceilingAt(x + (acrossX / across) * k * 0.2, z + (acrossZ / across) * k * 0.2, top + 0.05) - top < KID_HEIGHT + 0.1) headroom = false;
+        const spots: Spot[] = [];
+        const tangent = new Vector3();
+        const rails = new Vector3();
+        for (let car = 0; car < cars.length; car += 1) {
+          if (car > 0 && (riders.has((car - 1) * 2) || riders.has((car - 1) * 2 + 1))) continue;
+          const half = (car === 0 ? LOCO_LENGTH : CARRIAGE_LENGTH) / 2;
+          const centre = route.wrap(cars[car]!);
+          route.pointAt(centre, at);
+          route.tangentAt(centre, tangent);
+          const cx = at.x;
+          const cz = at.z;
+          // Every place over the car, nearest its middle first.
+          const samples: { along: number; side: number }[] = [];
+          for (let along = -half; along <= half + 1e-9; along += 0.1) for (let side = -0.9; side <= 0.9 + 1e-9; side += 0.1) samples.push({ along, side });
+          samples.sort((a, b) => Math.hypot(a.along, a.side) - Math.hypot(b.along, b.side));
+          // One place on each top she can stand on, nearest the car's middle.
+          const asked = new Set<SolidView>();
+          for (const { along, side } of samples) {
+            const x = cx + tangent.x * along + tangent.z * side;
+            const z = cz + tangent.z * along - tangent.x * side;
+            let top = -Infinity;
+            let under: SolidView | null = null;
+            for (const piece of pieces) {
+              if (!piece.standsAt(x, z) || piece.topAt(x, z) <= top) continue;
+              top = piece.topAt(x, z);
+              under = piece;
+            }
+            if (!under || asked.has(under)) continue;
+            // Beside the platform: straight off it there, she is on it.
+            if (stop && !stop.covers(x + acrossX * 2.2, z + acrossZ * 2.2)) continue;
+            if (collision.deepestSolidOverlap(new Vector3(x, top, z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT, top) > 0.01) continue;
+            // And room over her all the way off it to the platform (under a
+            // canopy, a jump is capped: it asks less, and says so below).
+            let headroom = true;
+            for (let k = 0; headroom && k <= (stop ? 11 : 0); k += 1) {
+              if (collision.ceilingAt(x + acrossX * k * 0.2, z + acrossZ * k * 0.2, top + 0.05) - top < room) headroom = false;
+            }
+            if (!headroom) continue;
+            asked.add(under);
+            route.pointAt(route.distanceNear(x, z), rails);
+            spots.push({ what: `${carNames[car]} (its top ${(altitudeAt(x, top, z) - altitudeAt(rails.x, rails.y, rails.z)).toFixed(2)} m over the rails)`, x, z, top });
           }
-          if (headroom) return { what: candidate.what, d: candidate.d, top };
         }
-        return null;
+        return spots;
       };
+      const standings: string[] = [];
+      const askedOn: string[] = [];
       let stop: Stop = station;
-      let spot = spotAt(stop);
       const passedBy: string[] = [];
-      for (let stops = 0; !spot && stops < 6; stops += 1) {
+      for (let stops = 0; stops < 2; stops += 1) {
+        for (const spot of spotsAt(stop, KID_HEIGHT + 0.1)) {
+          hold(true);
+          play(1, STILL_INPUT, 1 / 30);
+          player.position.set(spot.x, spot.top + 0.05, spot.z);
+          player.launch(0);
+          play(0.5);
+          hold(false);
+          const onIt = !player.isAirborne && Math.abs(player.feetSurface - spot.top) < 0.05;
+          const standFrom = train.noseDistance();
+          play(20, STILL_INPUT, 1 / 30);
+          const stood = route.forwardGap(standFrom, train.noseDistance());
+          askedOn.push(`${spot.what} at ${stop.name}`);
+          if (!onIt || stood > 0.01) standings.push(`${spot.what} at ${stop.name}: ${onIt ? '' : `she was NOT on it (her feet on ${player.feetSurface.toFixed(2)} against its top ${spot.top.toFixed(2)}), `}it moved ${stood.toFixed(2)} m in 20 s`);
+          // Held again while she steps off, so it waits for the next place.
+          hold(true);
+          route.pointAt(stop.distance, at);
+          play(1.2, walkAlong(camera, stop.standX - at.x, stop.standZ - at.z));
+          play(0.5);
+          const offIt = !pieces.some((piece) => piece.standsAt(player.position.x, player.position.z) && player.position.y >= piece.topAt(player.position.x, player.position.z) - 0.1) && sideOf(player.position, stop) > CARRIAGE_BODY_HALF_WIDTH + PLAYER_RADIUS - 0.05;
+          if (!offIt) standings.push(`${spot.what} at ${stop.name}: she could NOT step off onto the platform (at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), ${sideOf(player.position, stop).toFixed(2)} on the platform's side of the line)`);
+        }
+        if (askedOn.some((s) => s.includes(stop.name))) break;
         passedBy.push(stop.name);
-        // Back on the platform while it goes on to its next stop.
+        // Nowhere at this stop: on to the next, and look there.
         player.teleportTo(stop.standX, sample(stop.standX, stop.standZ, 50), stop.standZ);
         hold(false);
         play(60, STILL_INPUT, 1 / 30, () => train.stoppedAt() === null);
@@ -2541,44 +2761,94 @@ if (inPart('park')) {
         stop = next;
         hold(true);
         play(4, STILL_INPUT, 1 / 30);
-        spot = spotAt(stop);
       }
-      const passed = passedBy.length ? ` (at ${passedBy.join(', then ')}, nowhere beside the platform with room for her and no child of the crowd in it)` : '';
-      if (!spot) {
-        // Nobody left holding it: the cases below need it running.
-        hold(false);
-        say(false, `standing on it: in ${passedBy.length} stops, nowhere on it beside a platform with room for her and no child of the crowd in it — NOTHING ASKED`);
-      } else {
-        route.pointAt(route.wrap(spot.d), at);
-        // Up on it by a hand, as a jump from its platform puts her (the
-        // put-down rule never stands her on a train: the router knows
-        // nothing that moves).
-        player.position.set(at.x, spot.top + 0.05, at.z);
-        player.launch(0);
-        play(0.5);
-        hold(false);
-        const onAt = player.position.clone();
-        const onGap = lineGap(player.position);
-        const topHere = pieces.filter((piece) => piece.standsAt(onAt.x, onAt.z)).reduce((t, piece) => Math.max(t, piece.topAt(onAt.x, onAt.z)), -Infinity);
-        const onIt = Math.abs(onAt.y - topHere) < 0.05 && onGap < CARRIAGE_BODY_HALF_WIDTH + 0.15;
-        const heldFrom = train.noseDistance();
-        play(30, STILL_INPUT, 1 / 30);
-        const heldFor = route.forwardGap(heldFrom, train.noseDistance());
-        // She steps off straight onto the platform — square off its side —
-        // and walks a little way onto it.
-        route.pointAt(stop.distance, at);
-        play(1.2, walkAlong(camera, stop.standX - at.x, stop.standZ - at.z));
-        play(0.5);
-        const offIt = !pieces.some((piece) => piece.standsAt(player.position.x, player.position.z) && player.position.y >= piece.topAt(player.position.x, player.position.z) - 0.1) && sideOf(player.position, stop) > CARRIAGE_BODY_HALF_WIDTH + PLAYER_RADIUS - 0.05;
-        const offAt = `(${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), ${sideOf(player.position, stop).toFixed(2)} on the platform's side of the line, ${player.isAirborne ? 'in the air' : 'on her feet'}`;
-        // Her line walked her trail over the carriage after her: one at a trail
-        // point by it stands beside it, and it waits for that one as for anybody
-        // (seed 7). Asked here is whether anything but her and hers holds it.
-        awayWithHerLine();
-        const leftFrom = train.noseDistance();
-        play(20, STILL_INPUT, 1 / 30);
-        const leftBy = route.forwardGap(leftFrom, train.noseDistance());
-        say(onIt && heldFor < 0.01 && offIt && leftBy > 2, `standing on it: put on ${spot.what} at ${stop.name}${passed} ${onIt ? `(on its top, ${spot.top.toFixed(2)})` : `— she was NOT on it (her feet ${onAt.y.toFixed(2)} against its top ${spot.top.toFixed(2)}, ${onGap.toFixed(2)} m off the line's middle)`}, it moved ${heldFor.toFixed(2)} m in 30 s; ${offIt ? 'she stepped off onto the platform' : `she could NOT step off (at ${offAt})`}, and it went on ${leftBy.toFixed(1)} m in 20 s`);
+      // Nobody left holding it, her line with her at the gate: it goes on.
+      hold(false);
+      awayWithHerLine();
+      const leftFrom = train.noseDistance();
+      play(20, STILL_INPUT, 1 / 30);
+      const leftBy = route.forwardGap(leftFrom, train.noseDistance());
+      const onCarriage = askedOn.some((s) => s.startsWith('carriage'));
+      const onEngine = askedOn.some((s) => s.startsWith('the engine'));
+      const passed = passedBy.length ? ` (nowhere at ${passedBy.join(', ')})` : '';
+      if (!onEngine) note('clause 13: nowhere on the engine had room for her beside a platform at either stop asked, so standing on it at a platform was asked of the carriages only (jumping on it, below, asks the engine out on the loop)');
+      say(onCarriage && standings.length === 0 && leftBy > 2, `standing on it: ${askedOn.length} places on it she fits — ${askedOn.join('; ') || 'NONE'}${passed} — it waits 20 s at every one and she steps off onto the platform${onCarriage ? '' : ' (NO CARRIAGE ASKED)'}, and with her gone it went on ${leftBy.toFixed(1)} m in 20 s${standings.length ? ` — ${standings.join('; ')}` : ''}`);
+      // --- jumping on it, out on the loop: room over every top for a whole jump ---
+      // Out of every station and from under every bridge, held by a child of
+      // the crowd ahead of it while she is put up on it, then held by nobody
+      // but her: a jump each time she lands, for twelve seconds, on every top
+      // she can stand on — and it never moves.
+      {
+        const span = LOCO_LENGTH + 3 * CARRIAGE_LENGTH + 3 * CAR_GAP;
+        // Clear of a station is clear of its platform *beside* the line (the
+        // 2.2 m across that `spotsAt` asks), not just of the line's middle,
+        // which a platform never covers. Asked there alone, on seed 5 a
+        // carriage stood beside the platform under the station canopy at
+        // (-81.2, 21.6): its overhang met her head at the top of each jump and
+        // shoved her ~0.5 m, until four jumps put her off the carriage's side
+        // onto the track bed — and once she was 1.95 m off the line the train
+        // rightly went on, which this clause then read as moving under her.
+        const lineDir = new Vector3();
+        const openLine = (): boolean => {
+          for (let k = -2; k <= span + 4; k += 1) {
+            const along = route.wrap(train.noseDistance() - k);
+            route.pointAt(along, at);
+            route.tangentAt(along, lineDir);
+            for (const side of [-2.2, 0, 2.2]) {
+              const x = at.x + lineDir.z * side;
+              const z = at.z - lineDir.x * side;
+              if (train.stations.some((s) => s.covers(x, z)) || train.bridges.some((b) => b.covers(x, z))) return false;
+            }
+          }
+          return train.runningSpeed > 0.5;
+        };
+        herLineOut(false);
+        play(240, STILL_INPUT, 1 / 30, openLine);
+        const jumpings: string[] = [];
+        const askedJumps: string[] = [];
+        let highestFeet = 0;
+        if (!openLine()) herLineOut(true);
+        if (!openLine()) say(false, `jumping on it: it never ran clear of every station and bridge in 240 s — ${whereItIs()}`);
+        else {
+          hold(true);
+          play(4, STILL_INPUT, 1 / 30);
+          for (const spot of spotsAt(null, KID_HEIGHT + JUMP_APEX_HEIGHT + 0.1)) {
+            hold(true);
+            play(0.5, STILL_INPUT, 1 / 30);
+            player.position.set(spot.x, spot.top + 0.05, spot.z);
+            player.launch(0);
+            play(0.5);
+            hold(false);
+            const onIt = !player.isAirborne && Math.abs(player.feetSurface - spot.top) < 0.05;
+            // A jump each time she lands, for twelve seconds.
+            const jumping = { ...STILL_INPUT, justPressed: (key: string) => key === 'jump' && !player.isAirborne };
+            const jumpFrom = train.noseDistance();
+            let jumps = 0;
+            let wasUp = false;
+            let feet = 0;
+            const rails = new Vector3();
+            play(12, jumping, 1 / 60, () => {
+              if (player.isAirborne && !wasUp) jumps += 1;
+              wasUp = player.isAirborne;
+              route.pointAt(route.distanceNear(player.position.x, player.position.z), rails);
+              feet = Math.max(feet, altitudeAt(player.position.x, player.position.y, player.position.z) - altitudeAt(rails.x, rails.y, rails.z));
+            });
+            play(1);
+            const jumped = route.forwardGap(jumpFrom, train.noseDistance());
+            highestFeet = Math.max(highestFeet, feet);
+            askedJumps.push(spot.what);
+            if (!onIt || jumps < 5 || jumped > 0.01) jumpings.push(`${spot.what}: ${onIt ? '' : 'she was NOT on it; '}${jumps} jumps, her feet up to ${feet.toFixed(2)} m over the rails, it moved ${jumped.toFixed(2)} m in 12 s`);
+          }
+          hold(false);
+          awayWithHerLine();
+          herLineOut(true);
+          const onEngineTop = askedJumps.some((what) => what.startsWith('the engine'));
+          const onCarriageTop = askedJumps.some((what) => what.startsWith('carriage'));
+          say(
+            onEngineTop && jumpings.length === 0 && highestFeet > 2.1,
+            `jumping on it: out on the loop, her line in her backpack so nothing but her holds it, at ${askedJumps.length} tops she fits on — ${askedJumps.join('; ') || 'NONE'} — a jump each time she lands for 12 s, her feet up to ${highestFeet.toFixed(2)} m over the rails: it never moves${onEngineTop ? '' : ' (NOTHING ON THE ENGINE ASKED)'}${onCarriageTop ? '' : ' (no carriage free of riders this time: the engine only)'}${jumpings.length ? ` — ${jumpings.join('; ')}` : ''}`,
+          );
+        }
       }
     }
     // --- walking into it moving: from a platform as it pulls in ---
@@ -2597,12 +2867,19 @@ if (inPart('park')) {
         let slidPast = 0;
         let wedged = 0;
         let lastNose = train.noseDistance();
+        let throughAt = '';
+        let wentOver = false;
         play(6, walkAlong(camera, at.x - coming.standX, at.z - coming.standZ), 1 / 60, () => {
           deepest = Math.max(deepest, insideTrain(player.position));
           const her = route.distanceNear(player.position.x, player.position.z);
           const span = LOCO_LENGTH + 3 * CARRIAGE_LENGTH + 3 * CAR_GAP;
           const alongside = route.forwardGap(route.wrap(train.noseDistance() - span), her) <= span;
-          if (alongside && downOnTrack(player.position) && sideOf(player.position, coming) < 0) through = true;
+          // Up on it on the way (a step from this platform) is over it, not through it.
+          if (pieces.some((piece) => piece.standsAt(player.position.x, player.position.z) && player.position.y >= piece.topAt(player.position.x, player.position.z) - 0.1)) wentOver = true;
+          if (!wentOver && alongside && downOnTrack(player.position) && sideOf(player.position, coming) < 0 && !through) {
+            through = true;
+            throughAt = `at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), ${lineGap(player.position).toFixed(2)} m off its middle, ${route.forwardGap(her, train.noseDistance()).toFixed(2)} m behind its nose, its speed ${train.runningSpeed.toFixed(2)}`;
+          }
           wedged = Math.max(wedged, wedgedNow());
           const moved = route.forwardGap(lastNose, train.noseDistance());
           lastNose = train.noseDistance();
@@ -2613,7 +2890,7 @@ if (inPart('park')) {
         // into anything (never wedged): a train pulling in slides past a child
         // at its side, it does not carry her.
         const CONTACT = (PLAYER_MAX_SPEED + 4) / 60;
-        say(movingBy && deepest <= CONTACT && !through, `walking into it moving: from ${coming.name} as its carriages come by her${movingBy ? '' : ' (it never came by moving — NOTHING ASKED)'}, she is never inside it beyond contact (${deepest.toFixed(2)} m at the deepest, ${CONTACT.toFixed(2)} allowed) and never through it (pressed to it ${wedged.toFixed(2)} m at the most); it slid ${slidPast.toFixed(2)} m past her side`);
+        say(movingBy && deepest <= CONTACT && !through, `walking into it moving: from ${coming.name} as its carriages come by her${movingBy ? '' : ' (it never came by moving — NOTHING ASKED)'}, she is never inside it beyond contact (${deepest.toFixed(2)} m at the deepest, ${CONTACT.toFixed(2)} allowed) and never through it (pressed to it ${wedged.toFixed(2)} m at the most); it slid ${slidPast.toFixed(2)} m past her side${wentOver ? ', and she stepped up onto it' : ''}${through ? ` — THROUGH it ${throughAt}` : ''}`);
         // Back on the platform where its chip stands her, and she waits there
         // for it to come round: standing still, the crowd walking up to its
         // waiting spots goes round her (`NpcSystem.separateFromPlayer`) — it
@@ -2674,6 +2951,7 @@ if (inPart('park')) {
       hold(false);
       awayWithHerLine();
       const badDrops: string[] = [];
+      herLineOut(false);
       // Each asked of the train standing where it stands now: a fresh stop
       // before each drop, nothing holding it but her.
       const span = LOCO_LENGTH + 3 * CARRIAGE_LENGTH + 3 * CAR_GAP;
@@ -2685,6 +2963,14 @@ if (inPart('park')) {
       let dropsAsked = 0;
       for (const drop of fromNose) {
         play(240, STILL_INPUT, 1 / 30, () => train.stoppedAt() !== null && train.runningSpeed === 0);
+        // Through its dwell held by a child ahead of it, so that once she is
+        // dropped nothing but her holds it: it would leave this instant, and
+        // must not while she is beside it (PR #722's review: the drops ended
+        // two seconds into the dwell, so "the train standing meanwhile" could
+        // not fail).
+        hold(true);
+        play(DWELL_SECONDS + 1, STILL_INPUT, 1 / 30);
+        hold(false);
         const here = train.stoppedAt() === null ? null : train.stations[train.stoppedAt()!] ?? null;
         if (!here) {
           badDrops.push(`${drop.what}: the train never stood at a station to drop her beside — ${whereItIs()}`);
@@ -2705,7 +2991,12 @@ if (inPart('park')) {
         const rescuesBefore = player.wedgeRescues;
         let lastNose = train.noseDistance();
         let movedBeside = 0;
+        let movedFirst = '';
+        let freedIn = -1;
+        let t = 0;
+        // The whole ten seconds, freed or not: the train is asked all the while.
         play(10, STILL_INPUT, 1 / 60, () => {
+          t += 1 / 60;
           const wedged = wedgedNow();
           worst = Math.max(worst, wedged);
           freeFor = !player.isAirborne && wedged <= WEDGE_DEPTH ? freeFor + 1 / 60 : 0;
@@ -2714,10 +3005,18 @@ if (inPart('park')) {
           lastNose = train.noseDistance();
           const her = route.distanceNear(player.position.x, player.position.z);
           const beside = route.forwardGap(route.wrap(train.noseDistance() - span), her) <= span + PLAYER_RADIUS;
-          if (moved > 1e-4 && beside && train.onTheLine(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS)) movedBeside += moved;
-          return freeFor > 1;
+          // Beside it as the train itself counts her (#722's platform rule):
+          // down on the track by it, or up on it — not on a platform touching
+          // its side, which a train pulling away slides past. Asked at the
+          // ground she stands on (`feetSurface`), as the train asks it.
+          const upOnIt = pieces.some((piece) => piece.standsAt(player.position.x, player.position.z) && player.feetSurface >= piece.topAt(player.position.x, player.position.z) - 0.1);
+          if (moved > 1e-4 && beside && (upOnIt || train.downOnTheLine(player.position.x, player.feetSurface, player.position.z, PLAYER_RADIUS))) {
+            if (!movedFirst) movedFirst = `${t.toFixed(2)} s: she at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), feet on ${player.feetSurface.toFixed(2)}, ${player.isAirborne ? 'in the air' : 'on her feet'}; ${whereItIs()}`;
+            movedBeside += moved;
+          }
+          if (freedIn < 0 && freeFor > 1) freedIn = t;
         });
-        if (freeFor <= 1) {
+        if (freedIn < 0) {
           const put = player.lastPutDown;
           const p = player.position;
           badDrops.push(
@@ -2725,11 +3024,182 @@ if (inPart('park')) {
               `${player.isAirborne ? 'in the air' : 'on her feet'}, ${player.wedgeRescues - rescuesBefore} rescue(s), the last put-down ${put ? (put.found ? `to (${put.x.toFixed(2)}, ${put.y.toFixed(2)}, ${put.z.toFixed(2)}), ${put.moved.toFixed(2)} m` : 'found nowhere') : 'none'}`,
           );
         }
-        else if (movedBeside > 0.01) badDrops.push(`${drop.what} at ${here.name}: the train moved ${movedBeside.toFixed(2)} m while she was beside it`);
+        else if (movedBeside > 0.01) badDrops.push(`${drop.what} at ${here.name}: the train moved ${movedBeside.toFixed(2)} m while she was beside it (first at ${movedFirst})`);
         awayWithHerLine();
       }
       const drops = fromNose;
-      say(dropsAsked === drops.length && badDrops.length === 0, `dropped into a slot beside it: ${dropsAsked} of ${drops.length} drops — the far side of every carriage and the gaps between its cars — each freed by the wedge rescue within 10 s, the train standing meanwhile${badDrops.length ? ` — ${badDrops.join('; ')}` : ''}`);
+      herLineOut(true);
+      say(dropsAsked === drops.length && badDrops.length === 0, `dropped into a slot beside it, her line in her backpack: ${dropsAsked} of ${drops.length} drops — the far side of every carriage and the gaps between its cars — each dropped once its dwell is over, with nothing but her to hold it, and each freed by the wedge rescue within 10 s — the train standing all the while she is beside it${badDrops.length ? ` — ${badDrops.join('; ')}` : ''}`);
+    }
+    // --- hopping under a station's canopy: no rescue ---
+    // Under a canopy a jump is capped at a few centimetres: hopping on the
+    // spot, a jump each time she lands, she is in the air most of every second
+    // and never leaves the hover's span — and the hover rescue, which asked
+    // nothing else, zeroed her jump and set her down every second (PR #722's
+    // review). A hover is one the resolver pushes her about in; this is not.
+    {
+      const hops: string[] = [];
+      const hatsThrough: string[] = [];
+      const hatSamples = { platform: 0, top: 0, tightest: Infinity, tightestOnTop: Infinity, onTrain: 0 };
+      let askedHere = 0;
+      // Under every station canopy —
+      // (whose canopies are now tall enough for every hat — see below);
+      const canopies: { name: string; standX: number; standZ: number }[] = [];
+      collision.forEachSolid((solid) => {
+        if (solid.kind === 'station canopy') canopies.push({ name: `the ${solid.kind} at (${solid.centreX.toFixed(1)}, ${solid.centreZ.toFixed(1)})`, standX: solid.centreX, standZ: solid.centreZ });
+      });
+      // And one as low as Sunny Side's once was over its bench — 0.07 m over
+      // her head, where the review found the rescue firing — on open ground by
+      // the gate, for this case alone: the stations' canopies are tall enough
+      // now for every hat (above), so nothing in the park caps a jump that hard
+      // any more, and the rule must still hold where something does.
+      const lowX = ENTRANCE_PLAYER_X;
+      const lowZ = ENTRANCE_PLAYER_Z - 4;
+      const lowGround = terrainHeight(lowX, lowZ);
+      const lowCanopy = collision.kinded('proof: a canopy 0.07 m over her head', () =>
+        collision.addBox(lowX, lowZ, 1.5, 1.5, 0, 0, lowGround + KID_HEIGHT + 0.27, false, true, lowGround + KID_HEIGHT + 0.07),
+      );
+      canopies.push({ name: 'a canopy 0.07 m over her head by the gate (this check\'s own)', standX: lowX, standZ: lowZ });
+      for (const stop of canopies) {
+        // The lowest room over her anywhere under it she can stand — on the
+        // ground, a platform or a bench — that she fits standing in: where a
+        // jump is capped hardest.
+        let found: { x: number; z: number; feet: number; room: number } | null = null;
+        for (let dx = -3; dx <= 3; dx += 0.2) {
+          for (let dz = -3; dz <= 3; dz += 0.2) {
+            const x = stop.standX + dx;
+            const z = stop.standZ + dz;
+            const floor = sample(x, z, 50);
+            const feet = standingHeight(floor, collision, x, z, floor + BUILDING_STEP_UP);
+            // **Everything she wears fits under a station's canopy, wherever her
+            // feet can be under it** — the platform, and the top of anything on
+            // it she stands on (its bench): asked before any test of whether her
+            // body is clear there, since standing on the bench is standing in a
+            // solid's footprint. (Asked after it, the bench was never measured —
+            // PR #742's second review lowered the canopy by the bench's height
+            // and this stayed green.)
+            // Not up on the train standing under it: that moves on (noted below).
+            const onTrain = pieces.some((piece) => piece.standsAt(x, z) && Math.abs(piece.topAt(x, z) - feet) < 0.02);
+            if (onTrain) hatSamples.onTrain += 1;
+            if (stop.name.includes('station canopy') && !onTrain) {
+              const headroom = collision.ceilingAt(x, z, feet + 0.05) - feet;
+              if (Number.isFinite(headroom) && headroom > 0) {
+                const onTop = feet > floor + 0.05;
+                hatSamples.platform += onTop ? 0 : 1;
+                hatSamples.top += onTop ? 1 : 0;
+                if (onTop) hatSamples.tightestOnTop = Math.min(hatSamples.tightestOnTop, headroom);
+                hatSamples.tightest = Math.min(hatSamples.tightest, headroom);
+                if (headroom < TALLEST_CHILD_HEIGHT && hatsThrough.length < 4) hatsThrough.push(`under ${stop.name} at (${x.toFixed(2)}, ${z.toFixed(2)}), feet on ${onTop ? 'a top' : 'the platform'} at ${feet.toFixed(2)}: ${headroom.toFixed(2)} m of room against the tallest child's ${TALLEST_CHILD_HEIGHT.toFixed(2)}`);
+              }
+            }
+            if (!collision.isClearCircle(x, z, PLAYER_RADIUS) && feet <= floor + 0.05) continue;
+            if (train.onTheLine(x, feet, z, PLAYER_RADIUS)) continue;
+            if (collision.deepestSolidOverlap(new Vector3(x, feet, z), PLAYER_RADIUS, 0, undefined, KID_HEIGHT, feet) > 0.01) continue;
+            const room = collision.ceilingAt(x, z, feet + 0.05) - feet;
+            if (room > KID_HEIGHT + 0.02 && room < KID_HEIGHT + JUMP_APEX_HEIGHT - 0.3 && (!found || room < found.room)) found = { x, z, feet, room };
+          }
+        }
+        if (!found) {
+          note(`clause 13: ${stop.name} has nowhere under it where it caps her jump`);
+          continue;
+        }
+        askedHere += 1;
+        player.position.set(found.x, found.feet + 0.02, found.z);
+        player.launch(0);
+        play(1);
+        const from = player.position.clone();
+        const rescuesBefore = player.wedgeRescues;
+        const hopping = { ...STILL_INPUT, justPressed: (key: string) => key === 'jump' && !player.isAirborne };
+        let jumps = 0;
+        let wasUp = false;
+        let rose = 0;
+        play(8, hopping, 1 / 60, () => {
+          if (player.isAirborne && !wasUp) jumps += 1;
+          wasUp = player.isAirborne;
+          rose = Math.max(rose, player.position.y - found.feet);
+        });
+        const rescues = player.wedgeRescues - rescuesBefore;
+        const moved = Math.hypot(player.position.x - from.x, player.position.z - from.z);
+        const line = `${stop.name} at (${found.x.toFixed(2)}, ${found.z.toFixed(2)}), ${(found.room - KID_HEIGHT).toFixed(2)} m over her head: ${jumps} hops, rising ${rose.toFixed(2)} m, ${rescues} rescue(s), moved ${moved.toFixed(2)} m`;
+        // How far she moved is reported, not asked: a child of the crowd may nudge her as she hops.
+        if (rescues > 0 || jumps < 10) hops.push(line);
+        else hops.push(`ok: ${line}`);
+      }
+      const bad = hops.filter((line) => !line.startsWith('ok: '));
+      collision.removeBox(lowCanopy);
+      if (hatSamples.onTrain > 0) note(`clause 13: ${hatSamples.onTrain} places under a station canopy were up on the train standing there, and are not in "nothing she wears goes through a canopy": on a carriage's rim the tallest hat comes within a few centimetres of the canopy, and on the engine's cab roof through it — her body fits, her hat is taller than her body (PR #742 lists it as a gap)`);
+      say(
+        hatSamples.platform > 0 && hatSamples.top > 0 && hatsThrough.length === 0,
+        `nothing she wears goes through a station's canopy: under every one, ${hatSamples.platform} places on the platform and ${hatSamples.top} on its bench, the tallest child the park builds (${TALLEST_CHILD_HEIGHT.toFixed(2)} m, hat and hair) fits under its underside — the least room ${hatSamples.tightest.toFixed(2)} m, on the bench ${hatSamples.tightestOnTop.toFixed(2)} m${hatSamples.top ? '' : ' (NO BENCH SAMPLED)'}${hatsThrough.length ? ` — ${hatsThrough.join('; ')}` : ''}`,
+      );
+      say(askedHere > 0 && bad.length === 0, `hopping under a canopy: under ${askedHere} canopies, a jump each time she lands for 8 s, capped by the canopy — no hover rescue — ${hops.map((line) => line.replace(/^ok: /, '')).join('; ') || 'NOWHERE ASKED'}`);
+      awayWithHerLine();
+    }
+    // --- up onto a station's bench ---
+    // Walking at its seat from the platform, she steps up onto it and stands
+    // there (QA on PR #722: the back, solid to its own top, met her step-up
+    // first and stopped her — her body is wider than the seat).
+    {
+      const benches: SolidView[] = [];
+      collision.forEachSolid((solid) => {
+        if (solid.kind === 'station bench') benches.push(solid);
+      });
+      const onBench: string[] = [];
+      let benchFails = 0;
+      for (const bench of benches) {
+        const station = train.stations.reduce((best, stop) => (Math.hypot(stop.standX - bench.centreX, stop.standZ - bench.centreZ) < Math.hypot(best.standX - bench.centreX, best.standZ - bench.centreZ) ? stop : best));
+        const platform = sample(station.standX, station.standZ, 50);
+        const upOn = (): boolean => !player.isAirborne && bench.depthAt(player.position.x, player.position.z) >= 0 && Math.abs(player.feetSurface - bench.topAt(player.position.x, player.position.z)) < 0.05;
+        // From the platform round it, every way she can walk at it from: a
+        // stride clear of it, on the platform's own level.
+        let tried = 0;
+        let stood = 0;
+        let last = '';
+        // Square at its front (towards the line), and a little either side of square.
+        route.tangentAt(station.distance, at);
+        const tx = at.x;
+        const tz = at.z;
+        route.pointAt(route.distanceNear(bench.centreX, bench.centreZ), at);
+        const front = Math.sign((at.x - bench.centreX) * tz - (at.z - bench.centreZ) * tx) || 1;
+        const nx = tz * front;
+        const nz = -tx * front;
+        for (let k = 0; k < 5; k += 1) {
+          const turn = ((k - 2) * Math.PI) / 12;
+          const ux = nx * Math.cos(turn) - nz * Math.sin(turn);
+          const uz = nx * Math.sin(turn) + nz * Math.cos(turn);
+          let out = 0;
+          for (let r = 0.3; r <= 2; r += 0.05) {
+            if (bench.depthAt(bench.centreX + ux * r, bench.centreZ + uz * r) < -(PLAYER_RADIUS + 0.3)) {
+              out = r;
+              break;
+            }
+          }
+          const fromX = bench.centreX + ux * out;
+          const fromZ = bench.centreZ + uz * out;
+          if (!out || !station.covers(fromX, fromZ) || Math.abs(sample(fromX, fromZ, 50) - platform) > 0.05 || !collision.isClearCircle(fromX, fromZ, PLAYER_RADIUS)) continue;
+          tried += 1;
+          player.teleportTo(fromX, sample(fromX, fromZ, 50), fromZ);
+          play(0.5);
+          // Until she is up on it (she would walk on across it and off its back).
+          let wasUp = false;
+          let rise = -Infinity;
+          play(2.5, walkAlong(camera, -ux, -uz), 1 / 60, () => {
+            rise = Math.max(rise, player.feetSurface - platform);
+            return (wasUp = upOn());
+          });
+          // And let go there, she stays on it: no bounce back off, no carry on over its back.
+          if (wasUp) {
+            play(1.5);
+            wasUp = upOn();
+          }
+          if (wasUp) stood += 1;
+          else last = `from (${fromX.toFixed(2)}, ${fromZ.toFixed(2)}) her feet rose ${rise.toFixed(2)} m over the platform, its seat ${(bench.topAt(bench.centreX, bench.centreZ) - platform).toFixed(2)}; she ended at (${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)})`;
+        }
+        if (tried === 0 || stood < tried) benchFails += 1;
+        onBench.push(`the bench at (${bench.centreX.toFixed(1)}, ${bench.centreZ.toFixed(1)}): ${stood} of ${tried} walks at its front from the platform stepped her up onto its seat and left her standing there, let go${stood < tried && last ? ` — e.g. ${last}` : ''}`);
+      }
+      say(benches.length > 0 && benchFails === 0, `up onto a station's bench: walking at it from the platform, she steps up onto its seat and stands there — ${onBench.join('; ') || 'NO BENCH FOUND'}`);
+      awayWithHerLine();
     }
     note(`clause 13 walked her at the park's own train through Game's own wiring: ${pieces.length} moving bodies, every one of them the train's own`);
   }

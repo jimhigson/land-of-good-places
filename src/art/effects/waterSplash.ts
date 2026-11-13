@@ -1,3 +1,4 @@
+import { audioContext } from '../../core/audio';
 import {
   BufferAttribute,
   Color,
@@ -65,6 +66,13 @@ function createDropletField(): {
     transparent: true,
     depthWrite: false,
     side: DoubleSide,
+    // One pass, not three.js's default two for a transparent double-sided
+    // material — which draws the back faces, then the front, and sets
+    // `needsUpdate` on the material for each, every frame (two program
+    // re-validations a frame for every splash in the park, measured). A flat
+    // fleck cannot overlap itself, so the back-then-front order bought
+    // nothing to see.
+    forceSinglePass: true,
     toneMapped: false,
   });
   const mesh = decal(new InstancedMesh(geometry, material, DROPLET_CAPACITY));
@@ -80,6 +88,11 @@ function createDropletField(): {
   const scale = new Vector3();
   const axis = new Vector3(0.2, 0.6, 0.4).normalize();
   const colour = new Color();
+  // Uploads are per frame only while there is something to upload: an idle
+  // splash (every fountain and pond in the park, nearly all the time) used to
+  // re-send its whole instance buffer, every frame, for no droplets at all.
+  let drawn = 0;
+  let coloursDirty = false;
 
   return {
     root,
@@ -119,6 +132,7 @@ function createDropletField(): {
             droplets[i] = last;
             mesh.getColorAt(droplets.length - 1, colour);
             mesh.setColorAt(i, colour);
+            coloursDirty = true;
           }
           droplets.pop();
           continue;
@@ -130,6 +144,8 @@ function createDropletField(): {
         drop.angle += drop.spin * dt;
       }
 
+      if (droplets.length === 0 && drawn === 0) return;
+      drawn = droplets.length;
       mesh.count = droplets.length;
       for (let i = 0; i < droplets.length; i += 1) {
         const drop = droplets[i];
@@ -142,7 +158,8 @@ function createDropletField(): {
         mesh.setMatrixAt(i, matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      if (coloursDirty && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      coloursDirty = false;
     },
 
     dispose() {
@@ -335,26 +352,9 @@ export function createWaterSplashEffects(): WaterSplashEffects {
  * Deliberately not reusing `ui/chime.ts`: that file synthesises tuned notes
  * for the shops, this wants filtered noise instead, and the fountain's own
  * effects file is the right home for the sound that goes with them. Same
- * lazy-`AudioContext` technique — browsers only allow audio to start from a
- * response to user input, which every trigger here always is.
+ * shared `AudioContext` (`core/audio.ts`), built at boot and unlocked on the
+ * first gesture.
  */
-let audioContext: AudioContext | null = null;
-
-function ensureAudioContext(): AudioContext | null {
-  if (audioContext) {
-    if (audioContext.state === 'suspended') void audioContext.resume();
-    return audioContext;
-  }
-  const Ctor =
-    window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  try {
-    audioContext = new Ctor();
-  } catch {
-    return null;
-  }
-  return audioContext;
-}
 
 /** One second of white noise, generated once and reused for every burst. */
 let noiseBuffer: AudioBuffer | null = null;
@@ -370,7 +370,7 @@ function noise(ctx: AudioContext): AudioBuffer {
 }
 
 function playWaterBurst(duration: number, peakGain: number, frequencyFrom: number, frequencyTo: number): void {
-  const ctx = ensureAudioContext();
+  const ctx = audioContext();
   if (!ctx) return;
   const start = ctx.currentTime;
 

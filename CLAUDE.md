@@ -284,11 +284,13 @@ timeout as `cancelled`, so the site sat stale for hours with nothing red.
 
 **Where they run:**
 
-Every workflow that builds a park is **called from `ci.yml`**, behind a
-`needs:` edge on the Parks build (`parks.yml`) in the same run, and the two
+Every workflow that builds a park is **called from `ci.yml`**, and the two
 required aggregators, `Checks` and `Procgen invariants`, are jobs in `ci.yml`
-itself. Never wait for parks by polling the API from another workflow: eight
-pollers exhausted the installation's rate limit on 2 Oct 2026 (#705).
+itself. They read the checked-in parks and start at once; the aggregators also
+`need` the Parks validation (`parks.yml`), and the preview and deploy will not
+run unless it succeeded. Never wait for anything by polling the API from
+another workflow: eight pollers exhausted the installation's rate limit on 2
+Oct 2026 (#705).
 
 | script | workflow | required to merge? |
 |---|---|---|
@@ -312,6 +314,23 @@ gh api repos/jimhigson/land-of-good-places/branches/main/protection
 push.** `build` exiting 0
 now tells you almost nothing — it means the bundle was produced, not that
 anything is correct.
+
+### Parks are checked in; you never solve one to run anything
+
+Jim, 13 November 2026: *"how about if we checked in the result of the solve so
+we don't have to do it every time?"* The sixteen solved parks live in `parks/`
+and the game, the dev server, `build`, every check and `test:procgen` read them.
+**You never need to solve a park to run the game or a check.** What keeps them
+honest is `pnpm run validate:parks` (CI: "Park N still accepted", one seed a
+runner): the current code hydrates each file and asks it every acceptance
+measure, solving nothing.
+
+**If `validate:parks` rejects a seed, run `pnpm run build:parks` and commit
+what it changes in `parks/` with your change.** It re-solves only the seeds this
+source rejects (minutes each) and keeps the rest untouched. Never hand-edit a
+park file or its manifest line, and if `parks/` conflicts in a merge, take
+main's (`git checkout origin/main -- parks/`) and run `build:parks`. Details:
+`docs/design/PREBUILT-PARKS.md`, "Checked in".
 
 ## A check that never runs is worse than a check that fails
 
@@ -513,20 +532,20 @@ an error."* Design and measurements: `docs/design/PREBUILT-PARKS.md`.
   in `src/`, and both sides import that.
 - **The game reads each park's decisions from `/parks/<seed>.json`** (layout,
   routes, path graph, world-phase placements, bridge footprints — never
-  meshes), written by `pnpm run build:parks`, shipped by `vite build`,
+  meshes), checked in under `parks/`, shipped by `vite build`,
   precached by the service worker, and hydrated by `src/world/parkPlan.ts`,
   `src/world/worldPhase.ts` and `src/world/prebuilt/`. A seed with no usable
   file is `ParkUnavailable` and an on-screen error — **never** a solve.
-- **Node tooling still solves**: every check and test builds a fresh park
-  through the solver that `scripts/ts-extension-resolver-register.mjs`
-  installs lazily into `src/world/prebuilt/solverPort.ts` (vitest: through
-  `test/procgen/parkFacts.ts`). `check:prebuilt-park` proves a park hydrated
-  from its file is byte-identical, by whole-park digest, to a fresh solve.
-- **The dev server serves park files too** (`scripts/lib/dev-parks.mjs`):
-  solved on first request per source change (seconds to minutes per seed) and
-  cached, or taken straight from `build:parks` output solved from the same
-  source. **Run `pnpm run build:parks` before a browser session over many
-  seeds.** `vite preview` serves only what `build:parks` wrote.
+- **Node tooling hydrates the checked-in parks too**; only scripts whose
+  subject is the search itself (`builtParks.mts`' `SEARCH_SCRIPTS`) and
+  `build:parks` solve, through the solver that
+  `scripts/ts-extension-resolver-register.mjs` installs lazily into
+  `src/world/prebuilt/solverPort.ts`. `check:prebuilt-park` proves a park
+  hydrated from its file is byte-identical, by whole-park digest, to a fresh
+  solve of the canonical seed.
+- **The dev server serves the checked-in park files** (`scripts/lib/dev-parks.mjs`),
+  stamped like `vite build`'s, at once. It never solves; a missing file is a
+  500 naming the fix.
 - **A `?seed=` outside 0..15 is an error screen**, by design. There is no
   URL that makes the game solve.
 

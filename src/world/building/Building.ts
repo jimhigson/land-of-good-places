@@ -1,7 +1,9 @@
 import { GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { registerDoorFrameSolids, type PlacedDoorFrame } from '../../art/models/doorFrames';
 import { castleFloorBounds } from './floorBounds';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
+import { isDrawn } from '../../core/drawn';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_SLAB, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
@@ -33,7 +35,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type CompanionRide, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint, type RideHolder } from '../../entities/Player';
 import type { OpenAreaPoint } from '../dismount';
 
 import { BallPit } from './BallPit';
@@ -109,6 +111,8 @@ import {
   ENTRANCE_MIN_X,
   GROWN_UP_X,
   GROWN_UP_Z,
+  CASTLE_DOOR_ARRIVAL_IN,
+  CASTLE_DOOR_ARRIVAL_X,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
@@ -680,6 +684,8 @@ export class Building implements GameSystem {
   readonly interiorRoot = new Group();
 
   private readonly shell = new BuildingShell('interior');
+  /** The doorway frame round the ground floor's way out (`doorFrames.ts`). */
+  readonly exitDoorFrame: PlacedDoorFrame;
   private readonly facade = new BuildingShell('facade');
   /** The facade, the ginormous slide, and the grown-up while they ride it. */
   /**
@@ -915,6 +921,16 @@ export class Building implements GameSystem {
     // paying for itself — a wall on the mall can no longer be a wall in the
     // great hall.
     for (const floor of CASTLE_FLOORS) registerInteriorCollision(collision, floor);
+    // The ground floor's doorway frame (`doorFrames.ts`), solid beside the walls.
+    const exitFrame = this.shell.exitFrame;
+    if (!exitFrame) throw new Error('Building: the interior shell built no doorway frame');
+    this.exitDoorFrame = {
+      frame: exitFrame,
+      solids: registerDoorFrameSolids(collision, exitFrame, floorX(CASTLE_MALL, 0), floorZ(CASTLE_MALL, 0), BUILDING_BASE_Y),
+      originX: floorX(CASTLE_MALL, 0),
+      originZ: floorZ(CASTLE_MALL, 0),
+      originY: BUILDING_BASE_Y,
+    };
 
     // The banquet's runs (#453) and everything the dressing stands on the
     // floor (17 Oct 2026) are solid too — registered by `castleInterior.ts` in
@@ -1374,16 +1390,25 @@ export class Building implements GameSystem {
     // Deliberately above the `!player` return: the fire burns whether or not
     // anybody is standing in the room, which is also what makes it screenshot.
     this.castle?.fire.update(elapsed);
-    // Above the `!player` return with the fire, and for the identical reason:
-    // the feast is in progress whether or not she has walked in yet, which is
-    // the whole of #413's brief ("a feast in progress, not a set waiting for
-    // one") and is also what makes it screenshot.
-    this.castle?.banquet.update(elapsed);
-    // Above the `!player` return for the same reason the fire is: the roof
-    // garden's animals live their lives whether or not she is up there, so she
-    // arrives to a park that was already going rather than one that starts
-    // when she looks at it.
-    this.wildPets.update(context);
+    // Above the `!player` return with the fire: the feast is in progress
+    // whether or not she has walked in yet — the whole of #413's brief ("a
+    // feast in progress, not a set waiting for one"). **Posed only while the
+    // great hall is drawn** (120 fps plan, step 3): the pose is a pure function
+    // of `elapsed`, so the first frame she can see it is already mid-meal, and
+    // posing it from the park was most of a millisecond a frame for nobody.
+    // Until she has first walked in there is no banquet to pose at all
+    // (`castleInterior.ts`, loaded on entry).
+    const banquet = this.castle?.banquet;
+    const diners = banquet?.root;
+    if (banquet && diners && isDrawn(diners)) banquet.update(elapsed);
+    // The roof garden's animals live their lives whether or not she is up
+    // there, so she arrives to a roof that was already going rather than one
+    // that starts when she looks at it. **Lived in arrears** while the roof is
+    // not drawn (step 3): nobody is animated, the time is banked, and the
+    // first frame it is drawn — behind the lift's iris — lives it in coarse
+    // steps. See `WildPets.passUnseen`.
+    if (isDrawn(this.wildPets.root)) this.wildPets.update(context);
+    else this.wildPets.passUnseen(dt);
     // Only while the roof garden is the space being drawn. Unlike the animals
     // above, nothing about the clouds is a simulation anybody can arrive in the
     // middle of — they are a hundred and thirty instance matrices whose only
@@ -1490,7 +1515,7 @@ export class Building implements GameSystem {
    * there and her first sight of the market is the back of a wall.
    */
   private enterInterior(): void {
-    this.stepThroughDoor(CASTLE_MALL, 0, CASTLE_MALL.halfZ - 6.5, Math.PI);
+    this.stepThroughDoor(CASTLE_MALL, CASTLE_DOOR_ARRIVAL_X, CASTLE_MALL.halfZ - CASTLE_DOOR_ARRIVAL_IN, Math.PI);
   }
 
   /**
@@ -1666,8 +1691,8 @@ export class Building implements GameSystem {
       // screenshot rather than by trusting the link.
       this.stepThroughDoor(
         floor,
-        at ? at.x : 0,
-        at ? at.z : floor.halfZ - 6.5,
+        at ? at.x : CASTLE_DOOR_ARRIVAL_X,
+        at ? at.z : floor.halfZ - CASTLE_DOOR_ARRIVAL_IN,
         Math.PI,
       );
     });
@@ -1939,7 +1964,6 @@ export class Building implements GameSystem {
    * splash, its companions and its camera, just sooner.
    */
   private readonly slideHolder: RideHolder = (() => {
-    const building = this;
     return {
       holding: 'a slide',
       letGo: () => {
@@ -1947,13 +1971,11 @@ export class Building implements GameSystem {
         const player = this.player;
         if (ride && player) this.finishRide(ride, player);
       },
-      // Down the ginormous slide her companion rides the chute behind her,
-      // carried by the ride itself (`ridePetsDownSlide`, #468); a little
-      // slide has room for nobody but her, and it rides in her backpack.
-      // Asked as she boards, once `startRide` has said which slide it is.
-      get companion(): CompanionRide {
-        return building.ride?.giant === true ? 'carried by the ride' : 'in her backpack';
-      },
+      // Down any slide her companion rides the chute behind her, carried by
+      // the ride itself (`ridePetsDownSlide`, #468) — the ginormous one and
+      // the little ones alike (Jim, 19 Oct 2026: *"one rides on the seat
+      // alongside the player"*: on a slide, the chute behind her is the seat).
+      companion: 'carried by the ride',
     };
   })();
 
@@ -2152,7 +2174,9 @@ export class Building implements GameSystem {
     // arrive somewhere the ride is not. The seats come from
     // `slide/petRiders.ts`; the parade owns the animals, and this file never
     // touches one.
-    if (ride.giant) this.chaseCompanions = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
+    // Down a little slide too: her companion comes down behind her on every chute.
+    const riders = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
+    if (ride.giant) this.chaseCompanions = riders;
 
     if (ride.giant && this.grownUpComing) {
       // In front, and lying down. Clamped to the end of the chute so the

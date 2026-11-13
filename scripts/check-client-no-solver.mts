@@ -82,7 +82,7 @@ try {
   execFileSync(process.execPath, [join(root, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--outDir', outDir, '--emptyOutDir', '--logLevel', 'error'], {
     cwd: root,
     stdio: ['ignore', 'ignore', 'inherit'],
-    env: { ...process.env, LGP_REQUIRE_PARKS: '' },
+    env: process.env,
   });
   const chunks = filesUnder(outDir, /\.js$/);
   const bundle = chunks.map((file) => ({ file: relative(outDir, file), text: readFileSync(file, 'utf8') }));

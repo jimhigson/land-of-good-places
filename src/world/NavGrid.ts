@@ -221,6 +221,75 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * (`measure-walk-reach.mts`).
  */
 export const NAV_CELL = 0.5;
+/**
+ * **How every lattice in the process has been built** — for the checks, which
+ * count rather than time (`check:library`'s NAV REBUILDS). `full` is a whole
+ * lattice laid down from nothing; `patched` is one brought up to date by
+ * redoing only the cells a collider change touched ({@link NavGrid}'s
+ * `patch`), and `patchedCells` how many cells those patches redid.
+ *
+ * `patching` and `verify` are the checks' two levers: `patching = false` puts
+ * back the old behaviour (every change rebuilds whole), which is what a check
+ * flips to prove itself red; `verify = true` makes every patch build a fresh
+ * whole lattice beside it and compare them cell for cell and level for level,
+ * recording any difference in `mismatches`. Neither is touched by the game.
+ */
+export const NAV_GRID_BUILDS = {
+  full: 0,
+  patched: 0,
+  patchedCells: 0,
+  /** Wall-clock milliseconds spent in whole builds and in patches, and the longest of each — reported, never asserted. */
+  fullMs: 0,
+  patchMs: 0,
+  worstFullMs: 0,
+  worstPatchMs: 0,
+  /**
+   * Whole lattices laid a slice a frame by {@link NavGrid.warm} rather than in
+   * one task — a subset of `full` — with how many slices they took and the
+   * longest single one. `forced` counts sliced builds a synchronous question
+   * (a tap, a plan) had to finish in one go because it could not wait, and
+   * `worstForcedMs` the longest such finish. So "whole lattices built as one
+   * long task" is `full - sliced + forced`.
+   */
+  sliced: 0,
+  slices: 0,
+  worstSliceMs: 0,
+  forced: 0,
+  worstForcedMs: 0,
+  patching: true,
+  verify: false,
+  /** How far past a change's footprint a patch reaches, as a share of the real margin. 1 in the game; a check sets 0 to prove the verifier sees a short patch. */
+  reachScale: 1,
+  verified: 0,
+  mismatches: [] as string[],
+};
+
+/**
+ * A patch bigger than this share of the lattice's cells is done as a whole
+ * rebuild instead — past it, copying the untouched cells' levels saves little.
+ */
+const PATCH_MAX_SHARE = 0.25;
+
+/**
+ * How a sliced build ({@link NavGrid.warm}) cuts each pass, between looks at
+ * the clock: rows of the boundary's `contains` sweep, rows of solids (every
+ * collider is offered to each band, so wider is cheaper overall), rows of the
+ * bridge exemption, and cells of levels. Small enough that one piece is a
+ * fraction of a millisecond to a few on the whole park; the budget, not these,
+ * decides how many pieces a frame runs.
+ */
+const BUILD_BOUNDARY_ROWS = 8;
+const BUILD_SOLID_ROWS = 48;
+const BUILD_BRIDGE_ROWS = 16;
+const BUILD_LEVEL_CELLS = 128;
+
+/**
+ * Milliseconds of lattice building a frame may spend in {@link NavGrid.warm} —
+ * the one owner, for `Game` (her own lattice, every frame and every frame of
+ * the cat-bus ride). About a quarter of the 8.3 ms frame the game is held to.
+ */
+export const NAV_WARM_BUDGET_MS = 2;
+
 /** Nodes popped per piece of a sliced flood ({@link NavGrid.floodFromSearch}). */
 const FLOOD_PIECE = 4096;
 const CELL = NAV_CELL;
@@ -893,20 +962,62 @@ export class NavGrid {
     // is what the player's own grid wants and what this has always done.
     const boundary = this.pinnedBoundary ?? this.collision.playBounds;
 
-    if (
-      this.built &&
-      this.builtRevision === this.collision.revision &&
-      this.builtBoundary === boundary
-    ) {
-      return true;
+    // A build {@link warm} left part-laid: this asker cannot wait a frame, so
+    // the rest of it is laid now — the remainder only, never a fresh start.
+    const pending = this.pendingBuild;
+    if (pending) {
+      if (pending.boundary === boundary) {
+        const began = performance.now();
+        this.advanceBuild(pending, sample, Infinity);
+        const took = performance.now() - began;
+        NAV_GRID_BUILDS.fullMs += took;
+        NAV_GRID_BUILDS.forced += 1;
+        NAV_GRID_BUILDS.worstForcedMs = Math.max(NAV_GRID_BUILDS.worstForcedMs, took);
+      } else {
+        this.pendingBuild = null;
+      }
     }
 
+    if (this.built && this.builtBoundary === boundary) {
+      if (this.builtRevision === this.collision.revision) return true;
+      // A collider came or went since this lattice was laid: redo the cells it
+      // touched, never the whole space (docs/perf/FRAME-DROPS-2026-11.md — a
+      // whole rebuild was 0.5 s on an M4 Pro, twice per story time).
+      if (NAV_GRID_BUILDS.patching) {
+        const began = performance.now();
+        if (this.patch(boundary, sample)) {
+          const took = performance.now() - began;
+          NAV_GRID_BUILDS.patchMs += took;
+          NAV_GRID_BUILDS.worstPatchMs = Math.max(NAV_GRID_BUILDS.worstPatchMs, took);
+          if (NAV_GRID_BUILDS.verify) this.verifyAgainstWhole(boundary, sample);
+          return true;
+        }
+      }
+    }
+
+    const began = performance.now();
     this.rebuild(boundary, sample);
+    const took = performance.now() - began;
+    NAV_GRID_BUILDS.fullMs += took;
+    NAV_GRID_BUILDS.worstFullMs = Math.max(NAV_GRID_BUILDS.worstFullMs, took);
     return this.built;
   }
 
   private rebuild(boundary: ParkBoundary, sample: GroundSampler): void {
+    this.pendingBuild = null;
     const levels = this.levelsOf(sample);
+    if (!this.frameLattice(boundary)) return;
+    const side = this.cells;
+    const total = side * side;
+    this.rebuildFramed(boundary, sample, levels, side, total);
+  }
+
+  /**
+   * Sizes and places the lattice over `boundary` and clears its cell arrays —
+   * the head of every whole build, one-shot or sliced. False (and `built`
+   * false) when the boundary has no extent to lay a lattice over.
+   */
+  private frameLattice(boundary: ParkBoundary): boolean {
     // Sized and centred on the boundary's own extent rather than on a radius
     // about a centre: the park's edge is neither circular nor, for the castle
     // interior, centred on the origin.
@@ -917,7 +1028,7 @@ export class NavGrid {
     let side = Math.ceil(((reach + MARGIN) * 2) / CELL);
     if (side <= 0) {
       this.built = false;
-      return;
+      return false;
     }
 
     // Cell (0, 0)'s centre, half a cell in from the corner of the square.
@@ -945,7 +1056,10 @@ export class NavGrid {
       this.hopBand.fill(0);
       this.paved.fill(0);
     }
+    return true;
+  }
 
+  private rebuildFramed(boundary: ParkBoundary, sample: GroundSampler, levels: GroundSampler, side: number, total: number): void {
     // The soft boundary first: everything the resolver would push her back
     // inside of is simply not part of the map.
     // Asked of the boundary itself, so the lattice and `CollisionWorld`'s
@@ -970,20 +1084,7 @@ export class NavGrid {
     // colliders-free lattice against the per-cell rule on every run (exact on
     // the spline, within that chord error on a circle) and fails naming the
     // cell. That clause is the guard; this comment is not.
-    for (let cz = 0; cz < side; cz += 1) {
-      const z = this.originZ + cz * CELL;
-      const row = cz * side;
-      for (let cx = 0; cx < side; cx += 1) {
-        const x = this.originX + cx * CELL;
-        if (!boundary.contains(x, z)) this.blocked[row + cx] = 1;
-      }
-    }
-    const edge = boundary.outline();
-    for (let i = 0; i < edge.length; i += 1) {
-      const a = edge[i] as readonly [number, number];
-      const b = edge[(i + 1) % edge.length] as readonly [number, number];
-      this.stampSegment(a[0], a[1], b[0], b[1], this.walkerRadius, this.blocked);
-    }
+    this.stampBoundary(boundary, 0, side - 1, 0, side - 1, this.blocked);
 
     // Then everything solid, fattened by the walker's own width — the walls
     // she hops without being asked going into `hopBand` rather than into
@@ -999,11 +1100,254 @@ export class NavGrid {
     // nothing in it, so it is never asked about — which matters for a window
     // (`NavGrid.around`), where `walksOnto` would otherwise ask the walk sampler
     // under every solid in the space for the sake of a few hundred cells.
+    this.stampSolids(sample, 0, side - 1, 0, side - 1, this.blocked, this.hopBand);
+
+    // Bridges (Decision 8): a cell a deck or ramp covers is exempt from
+    // everything just stamped, however it got blocked — the rail fence
+    // that would otherwise wall off the deck's own cells included. Safe
+    // because what a bridge stands over is the fenced rail corridor, which
+    // was never walkable ground to begin with; nothing is lost by letting
+    // the surface a level up win. See `bridges.ts`'s header for the
+    // physical half of this (the fence's own `topIsAbsolute` seam) — this
+    // is only the lattice's own bookkeeping.
+    this.exemptBridges(0, side - 1, 0, side - 1, this.blocked, this.hopBand);
+
+    // The paving (issue #416), stamped from the drawn network's own record of
+    // where it put the ribbons. Not fattened by the walker's radius, unlike a
+    // collider: a collider is fattened because her *body* must clear it, while
+    // paving is about where her *feet* are, and shrinking every path by 1.24 m
+    // would leave a 2 m garden spur with no cheap band down the middle at all.
+    // Blocked cells are stamped too and simply never read — cheaper than a
+    // branch, and it keeps this pass independent of the one above it.
+    forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
+    this.flatCost = this.paved.includes(1) ? 1 : OFF_PATH_COST_MULTIPLIER;
+
+    // Levels, for the free cells only — a blocked cell is never stepped on, so
+    // its heights are never asked for, and this is much the most expensive
+    // part. Top-down: the topmost surface first, then whatever the sampler
+    // offers from just over a step beneath it, until it repeats itself (the
+    // unconditional ground). Surfaces within a step of one another are one
+    // walking level, and the higher one speaks for it — exactly as the old
+    // single-height lattice behaved around the ball pit's lip.
+    this.growNodes(total + 64);
+    let nodes = 0;
+    for (let index = 0; index < total; index += 1) {
+      this.levelStart[index] = nodes;
+      if (this.blocked[index] === 1) continue;
+      if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) this.growNodes(this.nodeHeight.length * 2);
+      nodes = this.levelCell(index, levels, this.nodeHeight, this.nodeCell, nodes);
+    }
+    this.levelStart[total] = nodes;
+    this.nodeCount = nodes;
+    this.finishBuild(boundary);
+    NAV_GRID_BUILDS.full += 1;
+  }
+
+  // ------------------------------------------------------- the sliced build
+
+  /** A whole build in flight: which boundary, the revision it began at, and how far each pass has got. */
+  private pendingBuild: { boundary: ParkBoundary; revision: number; phase: number; row: number; index: number; nodes: number } | null = null;
+
+  /**
+   * **Brings this lattice up to date a slice at a time**, spending about
+   * `budgetMs` and returning true once it describes the space as it stands —
+   * step 1b of the 120 fps plan (`docs/perf/FRAME-DROPS-2026-11.md`). Called
+   * every frame by whoever owns the grid, so the lattice is laid behind the
+   * cat bus and the first frames of a room rather than inside the first tap
+   * (measured: one 526 ms task on an M4 Pro).
+   *
+   * A lattice already laid over this boundary is patched as ever (a patch is
+   * small by construction); one that is not, or that cannot be patched, is
+   * built whole **in slices**: the very passes `rebuild` runs — boundary,
+   * solids, bridge exemption, paving, levels — over bands of rows and runs of
+   * cells, in the same order. Every stamp only ever writes a 1 and every band
+   * offers each collider whole, so the bands' union is `rebuild`'s one pass;
+   * `NAV_GRID_BUILDS.verify` proves it cell for cell.
+   *
+   * The build is stamped with the revision it **began** at, so a collider that
+   * came or went while it was being laid is a patch's to redo, by the patch's
+   * own rule: nothing outside a change's footprint depends on it.
+   *
+   * A question that cannot wait (`findRoute`, `canStandAt`) finishes whatever
+   * is left in one go — see `ensureLattice` — so nothing is ever answered from
+   * a half-laid lattice.
+   */
+  warm(sample: GroundSampler, budgetMs: number): boolean {
+    const boundary = this.pinnedBoundary ?? this.collision.playBounds;
+    if (this.built && this.builtBoundary === boundary) {
+      if (this.builtRevision === this.collision.revision) return true;
+      if (NAV_GRID_BUILDS.patching) {
+        const began = performance.now();
+        if (this.patch(boundary, sample)) {
+          const took = performance.now() - began;
+          NAV_GRID_BUILDS.patchMs += took;
+          NAV_GRID_BUILDS.worstPatchMs = Math.max(NAV_GRID_BUILDS.worstPatchMs, took);
+          if (NAV_GRID_BUILDS.verify) this.verifyAgainstWhole(boundary, sample);
+          return true;
+        }
+      }
+    }
+
+    const began = performance.now();
+    let pending = this.pendingBuild;
+    if (!pending || pending.boundary !== boundary) {
+      this.pendingBuild = null;
+      this.built = false;
+      // Whoever holds a flood of the old lattice must hear that it is gone.
+      this.builtBoundary = null;
+      this.builtRevision = -1;
+      if (!this.frameLattice(boundary)) return false;
+      pending = { boundary, revision: this.collision.revision, phase: 0, row: 0, index: 0, nodes: 0 };
+      this.pendingBuild = pending;
+    }
+    const done = this.advanceBuild(pending, sample, began + budgetMs);
+    const took = performance.now() - began;
+    NAV_GRID_BUILDS.fullMs += took;
+    NAV_GRID_BUILDS.slices += 1;
+    NAV_GRID_BUILDS.worstSliceMs = Math.max(NAV_GRID_BUILDS.worstSliceMs, took);
+    if (done) {
+      NAV_GRID_BUILDS.sliced += 1;
+      if (NAV_GRID_BUILDS.verify && this.builtRevision === this.collision.revision) this.verifyAgainstWhole(boundary, sample);
+    }
+    return done && this.builtRevision === this.collision.revision;
+  }
+
+  /**
+   * Runs a pending build's passes until `deadline` (a `performance.now()`
+   * time; `Infinity` to finish). True once the lattice is built.
+   */
+  private advanceBuild(
+    pending: { boundary: ParkBoundary; revision: number; phase: number; row: number; index: number; nodes: number },
+    sample: GroundSampler,
+    deadline: number,
+  ): boolean {
+    const side = this.cells;
+    const last = side - 1;
+    const total = side * side;
+    const boundary = pending.boundary;
+    for (;;) {
+      if (pending.phase === 0) {
+        const to = Math.min(last, pending.row + BUILD_BOUNDARY_ROWS - 1);
+        this.stampBoundary(boundary, 0, last, pending.row, to, this.blocked);
+        pending.row = to + 1;
+        if (pending.row > last) {
+          pending.phase = 1;
+          pending.row = 0;
+        }
+      } else if (pending.phase === 1) {
+        const to = Math.min(last, pending.row + BUILD_SOLID_ROWS - 1);
+        this.stampSolids(sample, 0, last, pending.row, to, this.blocked, this.hopBand);
+        pending.row = to + 1;
+        if (pending.row > last) {
+          pending.phase = 2;
+          pending.row = 0;
+        }
+      } else if (pending.phase === 2) {
+        const to = Math.min(last, pending.row + BUILD_BRIDGE_ROWS - 1);
+        this.exemptBridges(0, last, pending.row, to, this.blocked, this.hopBand);
+        pending.row = to + 1;
+        if (pending.row > last) pending.phase = 3;
+      } else if (pending.phase === 3) {
+        forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
+        this.flatCost = this.paved.includes(1) ? 1 : OFF_PATH_COST_MULTIPLIER;
+        this.growNodes(total + 64);
+        pending.index = 0;
+        pending.nodes = 0;
+        pending.phase = 4;
+      } else if (pending.phase === 4) {
+        const levels = this.levelsOf(sample);
+        const stop = Math.min(total, pending.index + BUILD_LEVEL_CELLS);
+        let nodes = pending.nodes;
+        for (let index = pending.index; index < stop; index += 1) {
+          this.levelStart[index] = nodes;
+          if (this.blocked[index] === 1) continue;
+          if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) this.growNodes(this.nodeHeight.length * 2);
+          nodes = this.levelCell(index, levels, this.nodeHeight, this.nodeCell, nodes);
+        }
+        pending.index = stop;
+        pending.nodes = nodes;
+        if (stop >= total) {
+          this.levelStart[total] = nodes;
+          this.nodeCount = nodes;
+          pending.phase = 5;
+        }
+      } else {
+        this.finishBuild(boundary);
+        // Stamped with the revision the build began at: see {@link warm}.
+        this.builtRevision = pending.revision;
+        this.pendingBuild = null;
+        NAV_GRID_BUILDS.full += 1;
+        return true;
+      }
+      if (performance.now() >= deadline) return false;
+    }
+  }
+
+  /** The tail every build shares: search buffers sized, connectors tied to nodes, the build stamped. */
+  private finishBuild(boundary: ParkBoundary): void {
+    const nodes = this.nodeCount;
+    if (this.gScore.length < nodes) {
+      this.gScore = new Float32Array(this.nodeHeight.length);
+      this.fScore = new Float32Array(this.nodeHeight.length);
+      this.cameFrom = new Int32Array(this.nodeHeight.length);
+      this.cameVia = new Int32Array(this.nodeHeight.length);
+      this.state = new Uint8Array(this.nodeHeight.length);
+      this.heap = new Int32Array(this.nodeHeight.length);
+      this.path = new Int32Array(this.nodeHeight.length);
+      this.pathVia = new Int32Array(this.nodeHeight.length);
+    }
+    this.resolveConnectors();
+    this.sizePointBuffers();
+
+    this.built = true;
+    this.builtBoundary = boundary;
+    this.builtRevision = this.collision.revision;
+  }
+
+  /**
+   * The soft boundary, over cells `fromX..toX` × `fromZ..toZ` of `blocked`:
+   * every cell the boundary does not contain, then every outline segment
+   * fattened by the walker — the band `rebuild`'s comment explains. A segment
+   * whose fattened footprint misses the range can stamp nothing in it and is
+   * skipped, which makes a patch's boundary pass cost its own size.
+   */
+  private stampBoundary(boundary: ParkBoundary, fromX: number, toX: number, fromZ: number, toZ: number, blocked: Uint8Array): void {
+    const side = this.cells;
+    for (let cz = fromZ; cz <= toZ; cz += 1) {
+      const z = this.originZ + cz * CELL;
+      const row = cz * side;
+      for (let cx = fromX; cx <= toX; cx += 1) {
+        const x = this.originX + cx * CELL;
+        if (!boundary.contains(x, z)) blocked[row + cx] = 1;
+      }
+    }
+    const reach = this.walkerRadius + CELL;
+    const lowX = this.originX + fromX * CELL - reach;
+    const lowZ = this.originZ + fromZ * CELL - reach;
+    const highX = this.originX + toX * CELL + reach;
+    const highZ = this.originZ + toZ * CELL + reach;
+    const edge = boundary.outline();
+    for (let i = 0; i < edge.length; i += 1) {
+      const a = edge[i] as readonly [number, number];
+      const b = edge[(i + 1) % edge.length] as readonly [number, number];
+      if (Math.max(a[0], b[0]) < lowX || Math.min(a[0], b[0]) > highX || Math.max(a[1], b[1]) < lowZ || Math.min(a[1], b[1]) > highZ) continue;
+      this.stampSegment(a[0], a[1], b[0], b[1], this.walkerRadius, blocked);
+    }
+  }
+
+  /**
+   * Everything solid whose fattened footprint can reach cells `fromX..toX` ×
+   * `fromZ..toZ`, stamped into `blocked` (or `hopBand`, for a wall she hops) —
+   * the whole lattice for `rebuild`, one patch for `patch`. A stamp may spill
+   * past the range; a patch reads back only its own cells, so the spill is
+   * never seen.
+   */
+  private stampSolids(sample: GroundSampler, fromX: number, toX: number, fromZ: number, toZ: number, blocked: Uint8Array, hopBand: Uint8Array): void {
     const stampReach = this.walkerRadius + CELL;
-    const lowX = this.originX - stampReach;
-    const lowZ = this.originZ - stampReach;
-    const highX = this.originX + (side - 1) * CELL + stampReach;
-    const highZ = this.originZ + (side - 1) * CELL + stampReach;
+    const lowX = this.originX + fromX * CELL - stampReach;
+    const lowZ = this.originZ + fromZ * CELL - stampReach;
+    const highX = this.originX + toX * CELL + stampReach;
+    const highZ = this.originZ + toZ * CELL + stampReach;
     const misses = (minX: number, minZ: number, maxX: number, maxZ: number): boolean =>
       maxX < lowX || minX > highX || maxZ < lowZ || minZ > highZ;
     this.collision.forEachCircle(
@@ -1016,7 +1360,7 @@ export class NavGrid {
           x,
           z,
           colliderRadius + this.walkerRadius,
-          hoppable ? this.hopBand : this.blocked,
+          hoppable ? hopBand : blocked,
         );
       },
     );
@@ -1050,7 +1394,7 @@ export class NavGrid {
           x2,
           z2,
           halfThickness + this.walkerRadius,
-          hoppable ? this.hopBand : this.blocked,
+          hoppable ? hopBand : blocked,
         );
       },
     );
@@ -1074,7 +1418,7 @@ export class NavGrid {
       }
       if (misses(minX - rounding, minZ - rounding, maxX + rounding, maxZ + rounding)) return;
       if (this.walksOnto(topHeight, topIsAbsolute, centre[0], centre[1], sample, standable)) return;
-      const into = hoppable ? this.hopBand : this.blocked;
+      const into = hoppable ? hopBand : blocked;
       for (let i = 0; i < 4; i += 1) {
         const a = corners[i] as readonly [number, number];
         const b = corners[(i + 1) % 4] as readonly [number, number];
@@ -1082,105 +1426,281 @@ export class NavGrid {
       }
       this.stampRegion(minX, minZ, maxX, maxZ, inCore, into);
     });
+  }
 
-    // Bridges (Decision 8): a cell a deck or ramp covers is exempt from
-    // everything just stamped, however it got blocked — the rail fence
-    // that would otherwise wall off the deck's own cells included. Safe
-    // because what a bridge stands over is the fenced rail corridor, which
-    // was never walkable ground to begin with; nothing is lost by letting
-    // the surface a level up win. See `bridges.ts`'s header for the
-    // physical half of this (the fence's own `topIsAbsolute` seam) — this
-    // is only the lattice's own bookkeeping.
-    for (let cz = 0; cz < side; cz += 1) {
+  /** Decision 8's bridge exemption, over cells `fromX..toX` × `fromZ..toZ` — see `rebuild`. */
+  private exemptBridges(fromX: number, toX: number, fromZ: number, toZ: number, blocked: Uint8Array, hopBand: Uint8Array): void {
+    const side = this.cells;
+    for (let cz = fromZ; cz <= toZ; cz += 1) {
       const z = this.originZ + cz * CELL;
       const row = cz * side;
-      for (let cx = 0; cx < side; cx += 1) {
+      for (let cx = fromX; cx <= toX; cx += 1) {
         const x = this.originX + cx * CELL;
         if (!this.bridgeCovers(x, z)) continue;
-        this.blocked[row + cx] = 0;
-        this.hopBand[row + cx] = 0;
+        blocked[row + cx] = 0;
+        hopBand[row + cx] = 0;
       }
     }
+  }
 
-    // The paving (issue #416), stamped from the drawn network's own record of
-    // where it put the ribbons. Not fattened by the walker's radius, unlike a
-    // collider: a collider is fattened because her *body* must clear it, while
-    // paving is about where her *feet* are, and shrinking every path by 1.24 m
-    // would leave a 2 m garden spur with no cheap band down the middle at all.
-    // Blocked cells are stamped too and simply never read — cheaper than a
-    // branch, and it keeps this pass independent of the one above it.
-    forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
-    this.flatCost = this.paved.includes(1) ? 1 : OFF_PATH_COST_MULTIPLIER;
-
-    // Levels, for the free cells only — a blocked cell is never stepped on, so
-    // its heights are never asked for, and this is much the most expensive
-    // part. Top-down: the topmost surface first, then whatever the sampler
-    // offers from just over a step beneath it, until it repeats itself (the
-    // unconditional ground). Surfaces within a step of one another are one
-    // walking level, and the higher one speaks for it — exactly as the old
-    // single-height lattice behaved around the ball pit's lip.
-    this.growNodes(total + 64);
-    let nodes = 0;
-    for (let cz = 0; cz < side; cz += 1) {
-      const z = this.originZ + cz * CELL;
-      const row = cz * side;
-      for (let cx = 0; cx < side; cx += 1) {
-        const index = row + cx;
-        this.levelStart[index] = nodes;
-        if (this.blocked[index] === 1) continue;
-        const x = this.originX + cx * CELL;
-
-        let cursor = levels(x, z, TOP_REFERENCE);
-        if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) {
-          this.growNodes(this.nodeHeight.length * 2);
-        }
-        this.nodeHeight[nodes] = cursor;
-        this.nodeCell[nodes] = index;
-        let kept = cursor;
+  /**
+   * One free cell's levels, top-down, written from node `nodes` into `heights`
+   * and `cellOf`; returns the next free node. The caller has made room for
+   * {@link MAX_LEVELS_PER_CELL} more. This is the expensive part of a build —
+   * every level is a question to the ground sampler — and the only part a
+   * patch must redo for the cells it touched.
+   */
+  private levelCell(index: number, levels: GroundSampler, heights: Float32Array, cellOf: Int32Array, nodes: number): number {
+    const side = this.cells;
+    const x = this.originX + (index % side) * CELL;
+    const z = this.originZ + Math.floor(index / side) * CELL;
+    let cursor = levels(x, z, TOP_REFERENCE);
+    heights[nodes] = cursor;
+    cellOf[nodes] = index;
+    let kept = cursor;
+    nodes += 1;
+    // A bridge cell stops here, at its one level — the deck (or ramp
+    // tread) itself. `sample` always has *something* to say further
+    // down (the raw, unconditional ground, `WalkSurfaces`'s own
+    // comment for it), and under a bridge that ground is the fenced
+    // rail corridor: a level the physical fence refuses ever getting a
+    // route from the resolver it cannot deliver. See the exemption
+    // pass in `rebuild`.
+    const onBridge = this.bridgeCovers(x, z);
+    for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
+      // The reference whose reach stops just under `cursor` — asked of the
+      // reach's owner, because that is no longer `cursor - MAX_STEP` once
+      // the step is measured along the local up (#643).
+      const next = levels(x, z, stepReferenceFor(x, z, cursor - LEVEL_EPSILON));
+      if (next >= cursor - LEVEL_EPSILON) break;
+      cursor = next;
+      if (!withinStep(x, kept, z, x, next, z, MAX_STEP)) {
+        heights[nodes] = next;
+        cellOf[nodes] = index;
+        kept = next;
         nodes += 1;
-        // A bridge cell stops here, at its one level — the deck (or ramp
-        // tread) itself. `sample` always has *something* to say further
-        // down (the raw, unconditional ground, `WalkSurfaces`'s own
-        // comment for it), and under a bridge that ground is the fenced
-        // rail corridor: a level the physical fence refuses ever getting a
-        // route from the resolver it cannot deliver. See the exemption
-        // pass above.
-        const onBridge = this.bridgeCovers(x, z);
-        for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
-          // The reference whose reach stops just under `cursor` — asked of the
-          // reach's owner, because that is no longer `cursor - MAX_STEP` once
-          // the step is measured along the local up (#643).
-          const next = levels(x, z, stepReferenceFor(x, z, cursor - LEVEL_EPSILON));
-          if (next >= cursor - LEVEL_EPSILON) break;
-          cursor = next;
-          if (!withinStep(x, kept, z, x, next, z, MAX_STEP)) {
-            this.nodeHeight[nodes] = next;
-            this.nodeCell[nodes] = index;
-            kept = next;
-            nodes += 1;
-          }
+      }
+    }
+    return nodes;
+  }
+
+  // ------------------------------------------------------------ the patch
+
+  /** The cell rectangles a patch redoes, four numbers each (fromX, toX, fromZ, toZ). Reused. */
+  private patchRects: number[] = [];
+  /** Scratch classification for a patch, and the cells it marks dirty. Allocated once per lattice size. */
+  private patchBlocked = new Uint8Array(0);
+  private patchHop = new Uint8Array(0);
+  private patchDirty = new Uint8Array(0);
+  /** The node arrays a patch writes into, then swaps with the live ones. */
+  private spareLevelStart = new Int32Array(0);
+  private spareHeight = new Float32Array(0);
+  private spareCell = new Int32Array(0);
+
+  /** {@link CollisionWorld.forEachChangeSince}'s visitor: a change's footprint, as the cells it can touch. */
+  private readonly collectChange = (minX: number, minZ: number, maxX: number, maxZ: number): void => {
+    // Everything a collider can alter is within its footprint fattened by the
+    // walker, plus a cell for the stamps' centre-sampling — and the levels a
+    // walker who stands on solids reads lie inside the footprint itself.
+    const reach = (this.walkerRadius + 2 * CELL) * NAV_GRID_BUILDS.reachScale;
+    const last = this.cells - 1;
+    const fromX = Math.max(0, this.columnOf(minX - reach));
+    const toX = Math.min(last, this.columnOf(maxX + reach));
+    const fromZ = Math.max(0, this.rowOf(minZ - reach));
+    const toZ = Math.min(last, this.rowOf(maxZ + reach));
+    if (toX < fromX || toZ < fromZ) return;
+    this.patchRects.push(fromX, toX, fromZ, toZ);
+  };
+
+  /**
+   * Merges every pair of {@link patchRects} that overlap or touch into the box
+   * round both, until none do. Each rectangle's pass walks every collider in the
+   * world, so a burst of changes in one place — a room's worth of furniture, a
+   * building's outside — is one pass over one rectangle, not one per collider
+   * (measured: 162 rectangles, 45 ms; merged, a few). Never grows the area a
+   * patch redoes beyond the boxes round touching changes.
+   */
+  private coalesceRects(): void {
+    const rects = this.patchRects;
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let i = 0; i < rects.length && !merged; i += 4) {
+        for (let j = i + 4; j < rects.length; j += 4) {
+          const ax0 = rects[i] ?? 0;
+          const ax1 = rects[i + 1] ?? 0;
+          const az0 = rects[i + 2] ?? 0;
+          const az1 = rects[i + 3] ?? 0;
+          const bx0 = rects[j] ?? 0;
+          const bx1 = rects[j + 1] ?? 0;
+          const bz0 = rects[j + 2] ?? 0;
+          const bz1 = rects[j + 3] ?? 0;
+          if (bx0 > ax1 + 1 || ax0 > bx1 + 1 || bz0 > az1 + 1 || az0 > bz1 + 1) continue;
+          rects[i] = Math.min(ax0, bx0);
+          rects[i + 1] = Math.max(ax1, bx1);
+          rects[i + 2] = Math.min(az0, bz0);
+          rects[i + 3] = Math.max(az1, bz1);
+          rects.splice(j, 4);
+          merged = true;
+          break;
         }
       }
     }
-    this.levelStart[total] = nodes;
-    this.nodeCount = nodes;
+  }
 
-    if (this.gScore.length < nodes) {
-      this.gScore = new Float32Array(this.nodeHeight.length);
-      this.fScore = new Float32Array(this.nodeHeight.length);
-      this.cameFrom = new Int32Array(this.nodeHeight.length);
-      this.cameVia = new Int32Array(this.nodeHeight.length);
-      this.state = new Uint8Array(this.nodeHeight.length);
-      this.heap = new Int32Array(this.nodeHeight.length);
-      this.path = new Int32Array(this.nodeHeight.length);
-      this.pathVia = new Int32Array(this.nodeHeight.length);
+  /**
+   * **Brings the lattice up to the collision world's revision by redoing only
+   * the cells the changes since it was built can have touched**, or returns
+   * false for the caller to rebuild whole: when the world cannot say where it
+   * changed, or the changes cover more than {@link PATCH_MAX_SHARE} of it.
+   *
+   * The cells in each change's rectangle are classified afresh by exactly the
+   * passes `rebuild` runs — boundary, solids, bridge exemption — into scratch
+   * arrays, and copied back; their levels are asked of the sampler again; every
+   * other cell's levels are copied across unchanged. So a patched lattice is
+   * the lattice a whole rebuild would have laid, which `NAV_GRID_BUILDS.verify`
+   * proves cell for cell (`check:library`'s NAV REBUILDS turns it on).
+   */
+  private patch(boundary: ParkBoundary, sample: GroundSampler): boolean {
+    const rects = this.patchRects;
+    rects.length = 0;
+    if (!this.collision.forEachChangeSince(this.builtRevision, this.collectChange)) return false;
+    this.coalesceRects();
+    const side = this.cells;
+    const total = side * side;
+    let area = 0;
+    for (let r = 0; r < rects.length; r += 4) area += ((rects[r + 1] ?? 0) - (rects[r] ?? 0) + 1) * ((rects[r + 3] ?? 0) - (rects[r + 2] ?? 0) + 1);
+    if (area > total * PATCH_MAX_SHARE) return false;
+    if (rects.length === 0) {
+      // Every change was off this lattice altogether: another space's.
+      this.builtRevision = this.collision.revision;
+      NAV_GRID_BUILDS.patched += 1;
+      return true;
     }
-    this.resolveConnectors();
-    this.sizePointBuffers();
 
-    this.built = true;
-    this.builtBoundary = boundary;
-    this.builtRevision = this.collision.revision;
+    if (this.patchBlocked.length !== total) {
+      this.patchBlocked = new Uint8Array(total);
+      this.patchHop = new Uint8Array(total);
+      this.patchDirty = new Uint8Array(total);
+    }
+    const scratchBlocked = this.patchBlocked;
+    const scratchHop = this.patchHop;
+    const dirty = this.patchDirty;
+    let cellsRedone = 0;
+    for (let r = 0; r < rects.length; r += 4) {
+      const fromX = rects[r] ?? 0;
+      const toX = rects[r + 1] ?? 0;
+      const fromZ = rects[r + 2] ?? 0;
+      const toZ = rects[r + 3] ?? 0;
+      for (let cz = fromZ; cz <= toZ; cz += 1) {
+        const row = cz * side;
+        scratchBlocked.fill(0, row + fromX, row + toX + 1);
+        scratchHop.fill(0, row + fromX, row + toX + 1);
+      }
+      this.stampBoundary(boundary, fromX, toX, fromZ, toZ, scratchBlocked);
+      this.stampSolids(sample, fromX, toX, fromZ, toZ, scratchBlocked, scratchHop);
+      this.exemptBridges(fromX, toX, fromZ, toZ, scratchBlocked, scratchHop);
+      for (let cz = fromZ; cz <= toZ; cz += 1) {
+        const row = cz * side;
+        for (let cx = fromX; cx <= toX; cx += 1) {
+          const index = row + cx;
+          this.blocked[index] = scratchBlocked[index] ?? 0;
+          this.hopBand[index] = scratchHop[index] ?? 0;
+          if (dirty[index] === 0) cellsRedone += 1;
+          dirty[index] = 1;
+        }
+      }
+    }
+
+    // Levels: asked afresh in the dirty cells, copied everywhere else.
+    const levels = this.levelsOf(sample);
+    const oldStart = this.levelStart;
+    const oldHeight = this.nodeHeight;
+    const oldCell = this.nodeCell;
+    if (this.spareLevelStart.length !== total + 1) this.spareLevelStart = new Int32Array(total + 1);
+    if (this.spareHeight.length < oldHeight.length) {
+      this.spareHeight = new Float32Array(oldHeight.length);
+      this.spareCell = new Int32Array(oldHeight.length);
+    }
+    let start = this.spareLevelStart;
+    let heights = this.spareHeight;
+    let cellOf = this.spareCell;
+    let nodes = 0;
+    for (let index = 0; index < total; index += 1) {
+      start[index] = nodes;
+      if (this.blocked[index] === 1) continue;
+      if (nodes + MAX_LEVELS_PER_CELL > heights.length) {
+        const grownHeights = new Float32Array(heights.length * 2);
+        grownHeights.set(heights);
+        heights = grownHeights;
+        const grownCells = new Int32Array(cellOf.length * 2);
+        grownCells.set(cellOf);
+        cellOf = grownCells;
+      }
+      if (dirty[index] === 1) {
+        nodes = this.levelCell(index, levels, heights, cellOf, nodes);
+        continue;
+      }
+      const from = oldStart[index] ?? 0;
+      const to = oldStart[index + 1] ?? 0;
+      for (let node = from; node < to; node += 1) {
+        heights[nodes] = oldHeight[node] ?? 0;
+        cellOf[nodes] = index;
+        nodes += 1;
+      }
+    }
+    start[total] = nodes;
+    for (let r = 0; r < rects.length; r += 4) {
+      const fromX = rects[r] ?? 0;
+      const toX = rects[r + 1] ?? 0;
+      for (let cz = rects[r + 2] ?? 0; cz <= (rects[r + 3] ?? 0); cz += 1) dirty.fill(0, cz * side + fromX, cz * side + toX + 1);
+    }
+
+    this.spareLevelStart = oldStart;
+    this.spareHeight = oldHeight;
+    this.spareCell = oldCell;
+    this.levelStart = start;
+    this.nodeHeight = heights;
+    this.nodeCell = cellOf;
+    this.nodeCount = nodes;
+    this.finishBuild(boundary);
+    NAV_GRID_BUILDS.patched += 1;
+    NAV_GRID_BUILDS.patchedCells += cellsRedone;
+    return true;
+  }
+
+  /**
+   * **The patch's proof**: lays a whole lattice of this same space beside this
+   * one and records any cell or level on which they differ. Only ever run by a
+   * check (`NAV_GRID_BUILDS.verify`); it costs a whole rebuild.
+   */
+  private verifyAgainstWhole(boundary: ParkBoundary, sample: GroundSampler): void {
+    const whole = new NavGrid(this.collision, this.walkerRadius, this.hopApex, this.connectors, this.bridgeCovers, this.pinnedBoundary, this.standsOnSolids);
+    whole.windowAround = this.windowAround;
+    const counted = NAV_GRID_BUILDS.full;
+    whole.rebuild(boundary, sample);
+    NAV_GRID_BUILDS.full = counted;
+    NAV_GRID_BUILDS.verified += 1;
+    const say = (what: string): void => {
+      if (NAV_GRID_BUILDS.mismatches.length < 20) NAV_GRID_BUILDS.mismatches.push(what);
+    };
+    if (whole.cells !== this.cells || whole.originX !== this.originX || whole.originZ !== this.originZ) return say(`lattice frame differs: ${whole.cells} vs ${this.cells} cells`);
+    if (whole.nodeCount !== this.nodeCount) say(`node count: whole ${whole.nodeCount}, patched ${this.nodeCount}`);
+    const total = this.cells * this.cells;
+    for (let index = 0; index < total; index += 1) {
+      if (whole.blocked[index] !== this.blocked[index] || whole.hopBand[index] !== this.hopBand[index]) {
+        return say(`cell ${index % this.cells},${Math.floor(index / this.cells)}: blocked ${whole.blocked[index]}/${this.blocked[index]}, hop ${whole.hopBand[index]}/${this.hopBand[index]} (whole/patched)`);
+      }
+      const wFrom = whole.levelStart[index] ?? 0;
+      const wTo = whole.levelStart[index + 1] ?? 0;
+      const pFrom = this.levelStart[index] ?? 0;
+      const pTo = this.levelStart[index + 1] ?? 0;
+      if (wTo - wFrom !== pTo - pFrom) return say(`cell ${index % this.cells},${Math.floor(index / this.cells)}: ${wTo - wFrom} levels whole, ${pTo - pFrom} patched`);
+      for (let k = 0; k < wTo - wFrom; k += 1) {
+        if (whole.nodeHeight[wFrom + k] !== this.nodeHeight[pFrom + k]) return say(`cell ${index % this.cells},${Math.floor(index / this.cells)} level ${k}: ${whole.nodeHeight[wFrom + k]} whole, ${this.nodeHeight[pFrom + k]} patched`);
+      }
+    }
+    if (whole.connectorEdges.size !== this.connectorEdges.size) say(`connector edges: whole ${whole.connectorEdges.size}, patched ${this.connectorEdges.size}`);
   }
 
   private growNodes(capacity: number): void {

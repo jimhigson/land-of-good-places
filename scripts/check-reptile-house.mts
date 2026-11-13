@@ -32,7 +32,8 @@
  *  7. The doors work both ways at a sprint stride, through the real
  *     `ReptileHouse` on the real harness.
  *  8. Every drawn solid taller than 0.6 m under the hall root has a collider
- *     at its middle, bar a named walk-through list.
+ *     at its middle, bar a named walk-through list. The baked doorway frame is
+ *     measured part by part (`doorFramePartBoxes`), with a control every run.
  *  9. Every animal is inside its own enclosure.
  * 10. The Tortoise Ride, on a real `Player`: boards by the link, and mid-lap
  *     a jump, the stick or a tap each put her off the shell on clear floor
@@ -57,6 +58,32 @@
  * lagoon stadium (13, −3)→(17, −3) half 3 at origin (600, −600), walls at
  * `REPTILE_ENCLOSURE_WALL_HEIGHT` 1.45. (Clause 9 stays green under that
  * mutation: animals are measured by position, not by collider.)
+ *
+ * **Clause 8 and the doorway frame, 13 November 2026.** Measured whole, the
+ * baked frame read `doorframe-reptile (4.21 m tall) has no collider at (6.00,
+ * 18.20)`: its box spans post to post, and (6.00, 18.20) is the open doorway,
+ * nothing drawn there under the lintel's 3.50 m. Not a hole — marched in the
+ * built park (seed 5 restart 1), 404 lane-walks 5 cm apart across the frame and
+ * 128 marches at that point, at 5 cm and `PLAYER_LONGEST_STEP`, put her body
+ * into drawn stone 0 times; with the posts' boxes removed, 234 and 55. Part by
+ * part, proved red against that geometry — reptile posts at hall-local x
+ * 4.10..4.70 and 7.30..7.90, z 17.59..18.41, moss to z 18.46, 0..3.50 m, the
+ * gap 4.70..7.30, the south wall's collider (half 0.3) running under both
+ * posts to the gap's edges — with no collider under the frame at all (its
+ * solids registered elsewhere, the south wall's not registered):
+ *
+ * ```
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post#0] (3.50 m tall) has no collider at (4.40, 18.00)
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post-moss#0] (2.50 m tall) has no collider at (4.42, 18.07)
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post#1] (3.50 m tall) has no collider at (7.60, 18.00)
+ *   ✗ doorframe.reptile/doorframe-reptile/doorframe-reptile[doorframe-reptile-post-moss#1] (2.50 m tall) has no collider at (7.62, 18.07)
+ *   ✗ 72 tall drawn solids checked (495 plant instances among them), 4 with no collider
+ * ```
+ *
+ * With only the frame's own boxes out it stays green, honestly: the wall's
+ * collider is still at every part's middle. The 0.11–0.16 m of post and moss
+ * standing proud of the wall is `check:doorframes` §3's to see (58 problems
+ * under that mutation).
  *
  * Clause 10 proved red the same day with the one line in
  * `TortoiseRide.update` that reads the input commented out (the mouth-door
@@ -117,6 +144,9 @@ import {
   type ExhibitShape,
   type LocalPoint,
 } from '../src/world/reptileHouse/layout.ts';
+import { REPTILE_LIGHT_POOL_COUNT, REPTILE_POINT_LIGHT_BUDGET } from '../src/world/reptileHouse/lighting.ts';
+import { buildDoorFrame, registerDoorFrameSolids, type DoorFramePartRange } from '../src/art/models/doorFrames.ts';
+import { LIGHT_POOLS_MESH_NAME } from '../src/world/reptileHouse/lightPools.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
 const OX = REPTILE_HOUSE_ORIGIN_X;
@@ -225,6 +255,30 @@ function insideShape(shape: ExhibitShape, p: LocalPoint, slack = 0.01): boolean 
 
 function shapeCentre(shape: ExhibitShape): LocalPoint {
   return shape.kind === 'disc' ? shape.centre : { x: (shape.a.x + shape.b.x) / 2, z: (shape.a.z + shape.b.z) / 2 };
+}
+
+/**
+ * **A baked doorway frame's parts, each as the mesh it was before the bake** —
+ * `null` for any other mesh. `doorFrames.ts`'s `bakeFrame` merges every post,
+ * moss, lintel tile and crest of a frame into one body mesh and lists where
+ * each part's vertices sit in `userData.doorFrameParts`. That mesh's own box
+ * spans post to post, so the middle of it is the open doorway under the lintel
+ * — the one place in the frame nothing may stand. Each part's box is read off
+ * its own vertices through the mesh's world matrix, as `check:hotel`'s
+ * `wallBoxesOf` does.
+ */
+function doorFramePartBoxes(mesh: Mesh): { name: string; box: Box3 }[] | null {
+  const ranges = mesh.userData['doorFrameParts'] as readonly DoorFramePartRange[] | undefined;
+  if (!ranges) return null;
+  const position = mesh.geometry.getAttribute('position');
+  const vertex = new Vector3();
+  return ranges.map((range) => {
+    const box = new Box3();
+    for (let i = range.start; i < range.start + range.count; i += 1) {
+      box.expandByPoint(vertex.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
+    }
+    return { name: range.side === undefined ? range.name : `${range.name}#${range.side}`, box };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -721,6 +775,8 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
   let checked = 0;
   let naked = 0;
   let instances = 0;
+  let framePartsSeen = 0;
+  let framePartsInReach = 0;
   const box = new Box3();
   const instance = new Matrix4();
   const world = new Matrix4();
@@ -734,19 +790,55 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
     }
     return name;
   };
+  /** Whether a drawn box is a tall solid a child on the hall floor can meet: not a sliver, not overhead. */
+  const counts = (drawn: Box3): boolean => {
+    const height = drawn.max.y - drawn.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
+    if (height < 0.6 || !Number.isFinite(height)) return false;
+    return drawn.min.y <= TALLEST_CHILD_HEIGHT; // flat-ok: the same prop box in the flat reptile hall (floor y 0, off the sphere); TALLEST_CHILD_HEIGHT over that floor
+  };
+  /** No collider at the drawn box's middle in plan. */
+  const bareIn = (world: CollisionWorld, drawn: Box3): boolean =>
+    world.isClearCircle((drawn.min.x + drawn.max.x) / 2, (drawn.min.z + drawn.max.z) / 2, 0.1);
   const probeBox = (name: string): void => {
-    const height = box.max.y - box.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
-    if (height < 0.6 || !Number.isFinite(height)) return;
-    if (box.min.y > TALLEST_CHILD_HEIGHT) return; // flat-ok: the same prop box in the flat reptile hall (floor y 0, off the sphere); TALLEST_CHILD_HEIGHT over that floor
+    if (!counts(box)) return;
     if (walkThrough.some(([prefix]) => name.includes(prefix))) return;
     checked += 1;
-    const cx = (box.min.x + box.max.x) / 2;
-    const cz = (box.min.z + box.max.z) / 2;
-    if (collision.isClearCircle(cx, cz, 0.1)) {
+    if (bareIn(collision, box)) {
       naked += 1;
+      const height = box.max.y - box.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
+      const cx = (box.min.x + box.max.x) / 2;
+      const cz = (box.min.z + box.max.z) / 2;
       if (naked <= 8) say(false, `${name} (${height.toFixed(2)} m tall) has no collider at (${(cx - OX).toFixed(2)}, ${(cz - OZ).toFixed(2)})`);
     }
   };
+
+  // CONTROL — the doorway frame measured part by part can say no. The hall's
+  // own frame built again round the same opening, in a world with nothing
+  // registered, must have bare parts; with its own solids registered, none.
+  // In the hall the south wall's collider also runs under both posts, so
+  // taking only the frame's boxes out there leaves every part's middle solid
+  // (check:doorframes §3 marches at the posts and sees that sliver); this is
+  // the frame with no collider of any kind under it.
+  {
+    const exit = house.exitDoorFrame;
+    const alone = buildDoorFrame(exit.frame.style, exit.frame.opening);
+    alone.group.position.set(exit.originX, exit.originY, exit.originZ);
+    alone.group.updateWorldMatrix(true, true);
+    const parts: { name: string; box: Box3 }[] = [];
+    alone.group.traverse((object) => {
+      if (object instanceof Mesh) parts.push(...(doorFramePartBoxes(object) ?? []));
+    });
+    const measured = parts.filter((part) => counts(part.box));
+    const empty = new CollisionWorld();
+    const bareAlone = measured.filter((part) => bareIn(empty, part.box)).length;
+    registerDoorFrameSolids(empty, alone, exit.originX, exit.originZ, exit.originY);
+    const bareWithSolids = measured.filter((part) => bareIn(empty, part.box)).length;
+    say(
+      measured.length > 0 && bareAlone === measured.length && bareWithSolids === 0,
+      `CONTROL: a ${exit.frame.style} doorway frame, part by part — ${measured.length} parts in reach, ${bareAlone} bare with no collider, ${bareWithSolids} with its own solids`,
+    );
+  }
+
   house.hallRoot.updateWorldMatrix(true, true);
   house.hallRoot.traverse((object) => {
     if (!(object instanceof Mesh) || !object.visible) return;
@@ -767,9 +859,28 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
       return;
     }
     if (!object.castShadow) return;
+    // A doorway frame is one baked mesh whose box spans post to post: its
+    // middle is the open way out, under the lintel. Measured whole it read
+    // "doorframe-reptile (4.21 m tall) has no collider at (6.00, 18.20)" —
+    // the doorway itself. Each part is measured as the mesh it was.
+    const frameParts = doorFramePartBoxes(object);
+    if (frameParts) {
+      for (const part of frameParts) {
+        box.copy(part.box);
+        framePartsSeen += 1;
+        if (counts(box)) framePartsInReach += 1;
+        probeBox(`${pathOf(object)}[${part.name}]`);
+      }
+      return;
+    }
     box.setFromObject(object);
     probeBox(pathOf(object));
   });
+  note(
+    framePartsSeen > 0
+      ? `doorway frame measured part by part: ${framePartsSeen} parts, ${framePartsInReach} tall and in a child's reach, the rest overhead or slivers`
+      : 'no baked doorway frame met under the hall root — nothing was measured part by part',
+  );
   say(naked === 0, `${checked} tall drawn solids checked (${instances} plant instances among them), ${naked} with no collider`);
   note(`walk-through list: ${walkThrough.map(([prefix, why]) => `${prefix} (${why})`).join('; ')}; soft species: ${softSpecies.join(', ')}`);
 }
@@ -903,11 +1014,36 @@ console.log('\nANIMALS — every one inside its own enclosure:');
 
 console.log('\nHOUSEKEEPING:');
 {
+  // The light budget (perf step 15). Every point light is evaluated on every
+  // lit pixel in the hall, so the rig is a key, a sky and a few point lights —
+  // and the six warm pools that used to be lights are painted on the floor.
+  // This used to be a floor of eight lights; it is a ceiling on point lights
+  // now, with a floor of "lit at all" so an empty rig cannot pass it.
   let lights = 0;
+  let pointLights = 0;
   house.hallRoot.traverse((object) => {
     if ((object as { isLight?: boolean }).isLight) lights += 1;
+    if ((object as { isPointLight?: boolean }).isPointLight) pointLights += 1;
   });
-  say(lights >= 8, `${lights} lights under the hall root`);
+  say(
+    lights > pointLights && pointLights >= 1 && pointLights <= REPTILE_POINT_LIGHT_BUDGET,
+    `${lights} lights under the hall root, ${pointLights} of them point lights (budget ${REPTILE_POINT_LIGHT_BUDGET}, and at least one that is not a point light)`,
+  );
+  {
+    // Counted off the built mesh, not off the list that built it: a disc's
+    // middle is the one vertex at the pool's full colour, so the vertices at
+    // the mesh's brightest are its discs.
+    const pools = house.hallRoot.getObjectByName(LIGHT_POOLS_MESH_NAME) as Mesh | undefined;
+    const colour = pools?.geometry.getAttribute('color') as BufferAttribute | undefined;
+    let peak = 0;
+    for (let i = 0; colour && i < colour.count; i += 1) peak = Math.max(peak, colour.getX(i));
+    let discs = 0;
+    for (let i = 0; colour && i < colour.count; i += 1) if (peak > 0 && colour.getX(i) >= peak * 0.999) discs += 1;
+    say(
+      Boolean(pools) && pools?.visible === true && discs === REPTILE_LIGHT_POOL_COUNT,
+      `${discs} painted light pools on the hall floor (${pools ? `mesh '${pools.name}'` : 'NO POOLS MESH'}), ${REPTILE_LIGHT_POOL_COUNT} wanted — one for each light that used to hang there`,
+    );
+  }
   say(spaceAt(OX, OZ) === SPACE_REPTILE_HOUSE, `spaceAt the hall origin is '${spaceAt(OX, OZ)}'`);
   say(scene.children.includes(house.hallRoot), 'the hall root is in the scene');
   {

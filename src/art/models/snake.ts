@@ -19,7 +19,7 @@ import type { AssetHandle, CreatureHandle } from '../style/asset';
 import type { Expression } from '../style/faces';
 import { createFaceLife, type FaceLife } from '../style/faceLife';
 import { visibleBounds } from '../style/measure';
-import { inkTint, markShared, outlineGeometry, toonMaterial } from '../style/materials';
+import { inkTint, markShared, outlineGeometry, showMap, toonMaterial } from '../style/materials';
 import { reptileCreatureMesh } from './reptileCreaturesAssets';
 import { PET_RENDER_HEIGHT } from './pets';
 import { snakeFaceTextures, type SnakeExpression } from './snakeFace';
@@ -152,6 +152,36 @@ const SCRATCH_SCALE = new Vector3();
 const SCRATCH_MATRIX = new Matrix4();
 const SCRATCH_TO_POOL = new Matrix4();
 const SCRATCH_LOOK = new Vector3();
+const SCRATCH_BEHIND = new Vector3();
+const SCRATCH_AHEAD = new Vector3();
+
+/**
+ * The step three.js's own `Curve.getTangent` takes either side of `t`. Not a
+ * tuning number of ours: it is here only so {@link sampleSpine} lands on the
+ * same two points `getTangentAt` would, and `check:hot-path-churn` compares the
+ * two bit for bit — a three.js upgrade that changes it turns that check red.
+ */
+const TANGENT_STEP = 0.0001;
+
+/**
+ * **Where the spine is at `u`, and which way it runs — without allocating.**
+ *
+ * `path.getPointAt(u, p)` + `path.getTangentAt(u, t)` give the same answer,
+ * but `getTangent` asks for its two neighbouring points with no target, so
+ * every segment of every snake cost two fresh `Vector3`s a frame, and the
+ * arc-length lookup ran twice. In the Reptile House that was the single
+ * largest source of garbage (120 fps plan, item 16: `Curve.getPoint`
+ * 18.6 MB/s). Same arithmetic in the same order, into scratch vectors.
+ */
+export function sampleSpine(path: CatmullRomCurve3, u: number, position: Vector3, tangent: Vector3): void {
+  // Called with `u` alone, exactly as `getPointAt` calls it — the typings
+  // insist on a `distance` three.js itself never passes here.
+  const t = (path.getUtoTmapping as (u: number) => number).call(path, u);
+  path.getPoint(t, position);
+  path.getPoint(Math.max(0, t - TANGENT_STEP), SCRATCH_BEHIND);
+  path.getPoint(Math.min(1, t + TANGENT_STEP), SCRATCH_AHEAD);
+  tangent.copy(SCRATCH_AHEAD).sub(SCRATCH_BEHIND).normalize();
+}
 const FORWARD = new Vector3(0, 0, 1);
 
 export interface SnakeOptions {
@@ -225,8 +255,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   headMesh.scale.setScalar(headScale);
   const faces = snakeFaceTextures();
   const headMaterial = headMesh.material as MeshToonMaterial;
-  headMaterial.map = faces.neutral;
-  headMaterial.needsUpdate = true;
+  showMap(headMaterial, faces.neutral);
   const tongue = reptileCreatureMesh('rr-snake-tongue');
   // Hidden by visibility for the flick, not by a 0.001 scale along its
   // length — that leaves the tongue's flat silhouette on the snout.
@@ -260,12 +289,31 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   const showFace = (expression: Expression): void => {
     const snake: SnakeExpression =
       expression === 'blink' ? 'blink' : expression === 'happy' ? 'happy' : expression === 'surprised' ? 'surprised' : 'neutral';
-    headMaterial.map = faces[snake];
-    headMaterial.needsUpdate = true;
+    showMap(headMaterial, faces[snake]);
   };
 
   const wavelength = 0.8;
   const k = (Math.PI * 2) / wavelength;
+
+  /**
+   * A snake that does not crawl lies on the same stretch of its path for
+   * ever: `headAt` never moves, so each segment's point and tangent are the
+   * same numbers every frame, and only the wave laid over them changes. They
+   * are sampled once, here, into doubles (so the pose is bit-identical to
+   * sampling the curve every frame) — which takes a resting snake from three
+   * spline evaluations a segment a frame to none. `null` for a crawler, whose
+   * segments genuinely move along the path.
+   */
+  let rest: Float64Array | null = null;
+  if (crawl <= 0) {
+    rest = new Float64Array(count * 6);
+    for (let i = 0; i < count; i += 1) {
+      const s = wrap(headAt - i * spacing, pathLength, false);
+      sampleSpine(path, Math.max(0, Math.min(1, s / pathLength)), SCRATCH_POSITION, SCRATCH_TANGENT);
+      SCRATCH_POSITION.toArray(rest, i * 6);
+      SCRATCH_TANGENT.toArray(rest, i * 6 + 3);
+    }
+  }
 
   const update = (dt: number, elapsed: number): void => {
     if (crawl > 0) headAt = (headAt + crawl * dt) % pathLength;
@@ -298,9 +346,12 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
 
     for (let i = 0; i < count; i += 1) {
       const s = wrap(headAt - i * spacing, pathLength, crawl > 0);
-      const u = Math.max(0, Math.min(1, s / pathLength));
-      path.getPointAt(u, SCRATCH_POSITION);
-      path.getTangentAt(u, SCRATCH_TANGENT);
+      if (rest) {
+        SCRATCH_POSITION.fromArray(rest, i * 6);
+        SCRATCH_TANGENT.fromArray(rest, i * 6 + 3);
+      } else {
+        sampleSpine(path, Math.max(0, Math.min(1, s / pathLength)), SCRATCH_POSITION, SCRATCH_TANGENT);
+      }
       SCRATCH_NORMAL.set(-SCRATCH_TANGENT.z, 0, SCRATCH_TANGENT.x);
       if (SCRATCH_NORMAL.lengthSq() < 1e-6) SCRATCH_NORMAL.set(1, 0, 0);
       SCRATCH_NORMAL.normalize();

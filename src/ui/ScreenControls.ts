@@ -1,5 +1,6 @@
 import { isTouchDevice } from '../core/device';
 import type { InputSystem } from '../core/input';
+import { setDataFlag } from './dataFlag';
 
 /**
  * The on-screen **hop** button in the bottom-right corner — and, once there is
@@ -75,7 +76,8 @@ export class ScreenControls {
 
   /** Fades the whole cluster in or out — used to hide it while a ride is on. */
   setVisible(visible: boolean): void {
-    this.root.dataset.hidden = visible ? 'false' : 'true';
+    // Called every frame (`Game.updateHud`): written only when it changes.
+    setDataFlag(this.root, 'hidden', visible ? 'false' : 'true');
     // A cluster that fades out under a finger never delivers the `pointerup`.
     if (!visible) this.input.clearVirtualHolds();
   }

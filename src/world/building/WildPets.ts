@@ -128,6 +128,9 @@ const TIME_ABOVE_GROUND = [35, 60] as const;
 /** Seconds between one leaving (or being caught) and the next surfacing. */
 const RESPAWN_DELAY = [3, 6] as const;
 
+/** Seconds before the first one surfaces on a roof nobody has lived yet. */
+const FIRST_EMERGENCE = 1.5;
+
 /** Seconds to climb out of / drop into a burrow. */
 const EMERGE_SECONDS = 0.55;
 const DIVE_SECONDS = 0.45;
@@ -137,6 +140,24 @@ const ANNOUNCE_SECONDS = 4;
 
 /** How far it may be from its destination and count as arrived. */
 const ARRIVE_RADIUS = 0.8;
+
+/**
+ * The most unseen time the roof lives on her arrival: enough for an empty roof
+ * to fill — the first emergence, then every place surfacing at the slowest
+ * respawn. Anything older than this changes nothing she could tell apart: a
+ * roof that has been full for a minute and one that has been full for an hour
+ * look the same.
+ */
+const CATCH_UP_SECONDS = FIRST_EMERGENCE + POPULATION * (RESPAWN_DELAY[1] + EMERGE_SECONDS);
+
+/**
+ * The step that unseen time is lived in. Coarse — the whole point is to be
+ * cheap — but finer than anything it steps through: the shortest phase is a
+ * {@link DIVE_SECONDS} dive, four or five steps, and a stride is already
+ * clamped to the distance left (`step`), so no creature passes its
+ * destination however long the step.
+ */
+const CATCH_UP_STEP = 0.1;
 
 /**
  * The kinds that roam, and which catalogue entry catching one grants.
@@ -201,7 +222,9 @@ export class WildPets {
   private readonly bubble = new SpeechBubble({ id: 'wild-pet-announce', item: '', kind: 'speech' }, PALETTE.markerLemon);
 
   /** Seconds until the next one surfaces. */
-  private nextEmergence = 1.5;
+  private nextEmergence = FIRST_EMERGENCE;
+  /** Seconds of the roof's life banked while it was not drawn — see {@link passUnseen}. */
+  private unseen = 0;
   /** Which creature the announcement is currently over, and for how long. */
   private announcing: WildOne | null = null;
   private announceLeft = 0;
@@ -269,20 +292,67 @@ export class WildPets {
     return this.burrows.length > 0 && this.cells.length > 0;
   }
 
+  /**
+   * One frame of the roof **as she can see it** — `Building` calls this only
+   * while the roof is drawn, and {@link passUnseen} otherwise.
+   *
+   * Any time banked while the roof was not drawn is lived first, so the
+   * animals are wherever that time would have taken them before this frame's
+   * step. See {@link catchUp}.
+   */
   update(context: FrameContext): void {
     if (!this.inhabited) return;
-    const { dt } = context;
     // World in, floor-local from here down. See `playerXZ`.
     this.playerXZ.set(
       context.playerPosition.x - this.originX,
       0,
       context.playerPosition.z - this.originZ,
     );
+    if (this.unseen > 0) this.catchUp(context.elapsed);
+    this.liveFor(context.dt, context.elapsed);
+    this.sizeAnnouncement();
+  }
 
+  /**
+   * **A frame in which the roof is not drawn** (120 fps plan, step 3): nothing
+   * is moved, posed, built or announced — the time is only banked, and the
+   * next frame that *is* drawn lives it ({@link catchUp}).
+   *
+   * Before this the roof ran in full wherever she was, which also meant
+   * building and disposing a pet model in an undrawn space every minute or so
+   * for the whole session.
+   */
+  passUnseen(dt: number): void {
+    if (this.inhabited) this.unseen += dt;
+  }
+
+  /**
+   * **The roof's life while nobody watched, lived on her arrival** — what keeps
+   * the promise in `Building.update` that she arrives to a roof that was
+   * already going, now that nothing runs while it is not drawn.
+   *
+   * At most {@link CATCH_UP_SECONDS} — long enough for an empty roof to fill
+   * to {@link POPULATION} — in steps of {@link CATCH_UP_STEP}, which no
+   * creature can overshoot a destination in (`BURST_SPEED × CATCH_UP_STEP` is
+   * under `ARRIVE_RADIUS`). It runs on the first frame the roof is drawn,
+   * which is behind the lift's iris, with her already standing at the lift:
+   * so the animals have been fleeing *her*, and none is diving beside her.
+   */
+  private catchUp(elapsed: number): void {
+    const owed = Math.min(this.unseen, CATCH_UP_SECONDS);
+    this.unseen = 0;
+    const steps = Math.ceil(owed / CATCH_UP_STEP);
+    if (steps === 0) return;
+    const dt = owed / steps;
+    for (let i = 1; i <= steps; i += 1) this.liveFor(dt, elapsed - owed + i * dt);
+  }
+
+  /** One step of the roof's life: every creature, the burrows, the announcement's clock. */
+  private liveFor(dt: number, elapsed: number): void {
     for (let i = this.live.length - 1; i >= 0; i -= 1) {
       const one = this.live[i];
       if (!one) continue;
-      this.advance(one, dt, context.elapsed);
+      this.advance(one, dt, elapsed);
       if (one.phase === 'diving' && one.phaseAge >= DIVE_SECONDS) {
         this.remove(i);
       }
@@ -294,7 +364,6 @@ export class WildPets {
     }
 
     this.updateAnnouncement(dt);
-    this.sizeAnnouncement();
   }
 
   /**

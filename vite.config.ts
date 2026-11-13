@@ -1,19 +1,13 @@
 import { execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { VERSION_FILE_NAME } from './src/version-file';
 import { PRECACHE_FILE_LIMIT_BYTES } from './src/boot/precacheLimit';
 import { lazyChunkMapFile } from './src/world/lazyChunks';
-import {
-  PARK_FILE_FORMAT,
-  PREBUILT_PARKS_MANIFEST,
-  PREBUILT_PARKS_OUT,
-  SUPPORTED_PARK_SEEDS,
-  parkFileName,
-  type PrebuiltParksManifest,
-} from './src/world/prebuilt/parkFileName';
+import { SUPPORTED_PARK_SEEDS, parkFileName } from './src/world/prebuilt/parkFileName';
 import { parkSourceHash } from './scripts/lib/park-source-hash.mjs';
+import { servedParkText } from './scripts/lib/checked-in-parks.mjs';
 import { devParksMiddleware } from './scripts/lib/dev-parks.mjs';
 
 // No `@types/node` in this project (a browser game has no business seeing
@@ -95,60 +89,50 @@ function lazyChunksPlugin(version: string): Plugin {
 }
 
 /**
- * **Ships the parks `pnpm run build:parks` solved** — `.parks/<seed>.json`
- * into `dist/parks/`, each stamped with this bundle's version
- * (`docs/design/PREBUILT-PARKS.md`, `src/boot/prebuiltPark.ts`).
+ * **Ships the checked-in parks** — `parks/<seed>.json` into `dist/parks/`,
+ * each stamped with this bundle's version and its park stamp
+ * (`docs/design/PREBUILT-PARKS.md`, "Checked in"; `src/boot/prebuiltPark.ts`;
+ * `scripts/lib/checked-in-parks.mjs`, the one owner of what a served park is).
  *
  * Emitted from `generateBundle`, so they are part of the bundle by the time
  * the PWA plugin globs `dist/` for its precache: the parks and the code that
  * reads them are one precache, swapped together by `UpdateGate`, and a stale
  * park against a new bundle cannot be served.
  *
- * **Parks solved from any other source are never shipped.** The manifest
- * records `scripts/lib/park-source-hash.mjs` of the tree `build:parks` ran on;
- * this recomputes it and ships nothing on a mismatch. A bundle with no parks
- * cannot open any park — the game has no solver, and shows `ParkUnavailable`
- * — so outside the deploy workflows it is a loud warning, and
- * `LGP_REQUIRE_PARKS=1` (set by them) makes it, and a missing manifest, fail
- * the build instead.
+ * **A build with a park missing fails.** The game has no solver, so a bundle
+ * without all sixteen cannot open a park; and since the parks are tracked,
+ * there is no honest way for one to be absent — a missing manifest, a missing
+ * seed, a wrong format or a file that is not the one its manifest line records
+ * is a broken tree, and the error says how to restore it. Nothing is solved
+ * here, ever, and nothing asks whether the source changed since the parks were
+ * solved: whether this source still *accepts* them is `validate:parks`'
+ * question, which CI answers before anything is deployed.
  */
 function prebuiltParksPlugin(version: string): Plugin {
   return {
     name: 'land-of-good-places-prebuilt-parks',
     apply: 'build',
     generateBundle() {
-      const required = process.env.LGP_REQUIRE_PARKS === '1';
-      const none = (why: string): void => {
-        const message = `prebuilt parks: shipping none — ${why}. Every park will be solved on the player's device.`;
-        if (required) this.error(`${message} LGP_REQUIRE_PARKS=1 forbids that.`);
-        this.warn(message);
-      };
-      const manifestPath = `${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST}`;
-      if (!existsSync(manifestPath)) return none(`no ${manifestPath}; run \`pnpm run build:parks\` first`);
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PrebuiltParksManifest;
-      if (manifest.format !== PARK_FILE_FORMAT) {
-        return none(`${manifestPath} is format ${manifest.format}, this build reads ${PARK_FILE_FORMAT}`);
-      }
-      const source = parkSourceHash(process.cwd());
-      if (manifest.sourceHash !== source) {
-        return none(
-          `they were solved from source ${manifest.sourceHash.slice(0, 12)} and this is ${source.slice(0, 12)}; ` +
-            'run `pnpm run build:parks` again',
-        );
-      }
-      for (const seed of manifest.seeds) {
-        const file = JSON.parse(readFileSync(`${PREBUILT_PARKS_OUT}/${seed}.json`, 'utf8')) as Record<string, unknown>;
-        this.emitFile({ type: 'asset', fileName: parkFileName(seed), source: JSON.stringify({ ...file, build: version }) });
+      const root = process.cwd();
+      const source = parkSourceHash(root);
+      for (const seed of SUPPORTED_PARK_SEEDS) {
+        let text: string;
+        try {
+          text = servedParkText(root, seed, version, source);
+        } catch (error) {
+          return this.error(`prebuilt parks: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        this.emitFile({ type: 'asset', fileName: parkFileName(seed), source: text });
       }
     },
   };
 }
 
 /**
- * **Park files on the dev server** — solved on first request by the build-time
- * solver in a child process and cached, so the dev client fetches and hydrates
- * exactly as the shipped game does and never solves (`scripts/lib/dev-parks.mjs`).
- * The seeds are the game's parks, `SUPPORTED_PARK_SEEDS`.
+ * **Park files on the dev server** — the checked-in parks, served stamped
+ * exactly as a build ships them, so the dev client fetches and hydrates as the
+ * shipped game does (`scripts/lib/dev-parks.mjs`). Nothing is solved: a fresh
+ * worktree opens the game straight after `pnpm install`.
  */
 function devParksPlugin(version: string): Plugin {
   return {

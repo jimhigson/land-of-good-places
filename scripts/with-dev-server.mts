@@ -134,35 +134,31 @@ if (!server || server.exitCode !== null) {
 say(`serving ${BASE}`);
 
 /**
- * **The canonical park, built before any check asks for it.** On a source the
- * dev server has no park for yet, the first request for one runs the accept
- * loop (`scripts/lib/dev-parks.mjs`) — minutes — and a check that times its
- * pages from their first load spends its waits on that build instead: on
- * 26 Oct 2026, run locally after a source change, `check:deep-links`'s first
- * five links timed out at 120 s each while seeds 5 and 12 were built (611 s
- * and 675 s), and every link after them passed. In CI `.parks/` is restored
- * first and this is instant; on a cold tree it is the one wait, said out loud.
- * Asked again on a headers timeout (Node's fetch gives up on headers after
- * five minutes): the dev server builds a seed once, however often it is asked.
+ * **The canonical park, asked for before any check asks for it.** The dev
+ * server answers from the checked-in `parks/` (`scripts/lib/dev-parks.mjs`),
+ * so this is instant; it stays as the one place a broken tree — a missing
+ * park, a file out of step with its manifest line — fails by name, with the
+ * server's own instruction, rather than as a timeout in whichever check loaded
+ * a page first. (It used to wait up to 40 minutes here, for the dev server to
+ * *solve* the seed after any source change: 611 s and 675 s for seeds 5 and 12
+ * on 26 Oct 2026. Nothing solves on request any more.)
  */
-const WARM_TIMEOUT_MS = 40 * 60_000;
 const warmStarted = Date.now();
-say(`warming park seed ${CANONICAL_PARK_SEED} — built on the first request since the source changed, which can take minutes`);
-for (;;) {
-  try {
-    const response = await fetch(`${BASE}/parks/${CANONICAL_PARK_SEED}.json`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    await response.arrayBuffer();
-    break;
-  } catch (error) {
-    const timedOut = String((error as { cause?: { code?: string } })?.cause?.code ?? '').includes('TIMEOUT');
-    if (!timedOut || Date.now() - warmStarted > WARM_TIMEOUT_MS) {
+{
+  const response = await fetch(`${BASE}/parks/${CANONICAL_PARK_SEED}.json`, { signal: AbortSignal.timeout(READY_TIMEOUT_MS) }).catch(
+    (error: unknown) => {
       stopServer();
       throw new Error(`park seed ${CANONICAL_PARK_SEED} did not come from ${BASE}/parks/${CANONICAL_PARK_SEED}.json: ${String(error)}`);
-    }
+    },
+  );
+  if (!response.ok) {
+    const why = (await response.text()).slice(0, 600);
+    stopServer();
+    throw new Error(`park seed ${CANONICAL_PARK_SEED} did not come from ${BASE}/parks/${CANONICAL_PARK_SEED}.json — HTTP ${response.status}: ${why}`);
   }
+  await response.arrayBuffer();
 }
-say(`park seed ${CANONICAL_PARK_SEED} ready, ${((Date.now() - warmStarted) / 1000).toFixed(1)} s after it was asked for`);
+say(`park seed ${CANONICAL_PARK_SEED} served from the checked-in parks in ${Date.now() - warmStarted} ms`);
 
 let exitCode = 0;
 for (const command of commands) {
@@ -177,6 +173,12 @@ for (const command of commands) {
       CHECK_BOOK_READER_URL: BASE,
       CHECK_MENU_REACH_URL: BASE,
       CHECK_RENDER_BUDGET_URL: BASE,
+      CHECK_STATIC_FREEZE_URL: BASE,
+      // check:dom-churn reads this one; without it the check falls back to
+      // port 5173 and measures nothing, or somebody else's game.
+      CHECK_DOM_CHURN_URL: BASE,
+      // The same hole, found at integration: check:cull-audit reads this one.
+      CHECK_CULL_AUDIT_URL: BASE,
     },
   });
   if (result.status !== 0) {

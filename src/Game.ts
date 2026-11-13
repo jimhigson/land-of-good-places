@@ -1,4 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
+import { doorwayTapTarget } from './entities/doorwayTap';
 import { FrameStrides } from './entities/frameStrides';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
@@ -39,7 +40,7 @@ import {
   WornKeychain,
 } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
-import type { NavGrid } from './world/NavGrid';
+import { NAV_WARM_BUDGET_MS, type NavGrid } from './world/NavGrid';
 import { playerNavGrid } from './world/playerLattice';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
@@ -56,6 +57,7 @@ import { makeSessionUnsavable, type SavedPlace } from './state/save';
 import { libraryDenContains } from './world/library/layout';
 import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from './world/spaces';
 import { PerfProbe, perfRequested } from './core/perfProbe';
+import { freezeParkStatics } from './world/parkStatics';
 import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
@@ -78,6 +80,8 @@ import { BookGlance } from './world/library/bookGlance';
 import { StoryCamera } from './world/library/storyCamera';
 import { OwlLensFade } from './world/library/owlLensFade';
 import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
+import { cullCrowdsFor } from './entities/npc/InstancedCrowd';
+import { noteNpcViewCamera } from './entities/npc/simLod';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -243,9 +247,10 @@ export class Game {
    * The owl fades as she passes the lens (`world/library/owlLensFade.ts`):
    * story time's held shot is in her flight path from cushion 3. Applied just
    * before the frame is drawn, from the eye that draws it, and undone straight
-   * after — nothing else ever sees her faded.
+   * after — nothing else ever sees her faded. Made the first frame the owl
+   * exists: she is in the reading room's lazy chunk (`world/interiors.ts`).
    */
-  private readonly owlFade: OwlLensFade;
+  private owlFade: OwlLensFade | null = null;
   private readonly drawnEye = new Vector3();
 
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
@@ -298,6 +303,17 @@ export class Game {
       this.camera,
       worldOptions,
     );
+    // Everything above is placed: the props that never move again stop being
+    // re-derived every frame (`world/parkStatics.ts`, 120 fps plan step 13).
+    freezeParkStatics(this.world);
+    // The live game takes every space she is not in out of the scene graph
+    // (120 fps plan, step 2). Here rather than in `World`, on purpose: a
+    // headless `World` built by a check keeps the one graph it always had —
+    // see `world/DrawnSpaces.ts`.
+    this.world.drawnSpaces.detachUndrawn();
+    // The sun's shadow map is drawn only when something in it changed
+    // (`world/sunShadowCache.ts`, 120 fps plan step 12).
+    this.world.dayNight.installShadowCache(this.engine.renderer);
 
     // Spawn at the park edge by the gate, looking into the park — or wherever a
     // continued game left off (see `resolveSpawn`).
@@ -316,7 +332,6 @@ export class Game {
     this.world.library.adoptRestoredPlayer();
     this.bookGlance = new BookGlance(this.world.library);
     this.storyCamera = new StoryCamera(this.world.library, this.world.collision, this.camera, this.player);
-    this.owlFade = new OwlLensFade(this.world.library.owl);
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -469,6 +484,8 @@ export class Game {
       () => this.world.building.visibleSurfaceCeiling,
     );
     this.engine.scene.add(this.tapNavigator.group);
+    // A tap in an interior's way out walks her on through it (QA on #743).
+    this.tapNavigator.throughDoorway = (x, y, z) => doorwayTapTarget(this.world.doorwayExits, x, y, z);
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
@@ -1155,17 +1172,35 @@ export class Game {
       const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
       this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
+        this.beginEngineFrame();
         probe.begin();
         this.tick(tick);
         probe.end();
+        this.engine.endFrame();
       });
     } else {
-      this.loop = new Loop((tick) => this.tick(tick));
+      this.loop = new Loop((tick) => {
+        this.beginEngineFrame();
+        this.tick(tick);
+        this.engine.endFrame();
+      });
     }
   }
 
   /** The `?perf=1` overlay, when the URL asked for it. */
   private perfOverlay: PerfOverlay | null = null;
+
+  /**
+   * The quality governor's frame bracket (120 fps plan, step 17): `Engine`
+   * times the frame and may change the pixel ratio here, before anything is
+   * drawn. Adaptation pauses while a wipe covers the screen and when she
+   * changes space — a room's first frames are slow for reasons pixels cannot
+   * fix. See `core/adaptiveResolution.ts`.
+   */
+  private beginEngineFrame(): void {
+    const { x, z } = this.player.position;
+    this.engine.beginFrame(this.transitions.wiping, spaceAt(x, z));
+  }
 
   /** What the perf overlay's JSON says about where and on what it was measured. */
   private perfContext(): Record<string, unknown> {
@@ -1178,6 +1213,7 @@ export class Game {
       gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
+      adaptiveResolution: this.engine.adaptiveResolution.state(),
       canvas: [gl.drawingBufferWidth, gl.drawingBufferHeight],
       viewport: [window.innerWidth, window.innerHeight],
       hardwareConcurrency: navigator.hardwareConcurrency,
@@ -1801,8 +1837,21 @@ export class Game {
   /** See `entities/frameStrides.ts`: once a frame, or once a stride while dashing. */
   private readonly strides = new FrameStrides();
 
+  /**
+   * **Her route lattice, a slice at a time** (step 1b of the 120 fps plan,
+   * `docs/perf/FRAME-DROPS-2026-11.md`): laid behind the cat bus (`main.ts`
+   * calls this every ride frame) and over the first frames of any space she
+   * walks into, never inside the first tap — that was one 526 ms task. True
+   * once the lattice describes the space she is in. See `NavGrid.warm`.
+   */
+  warmNavigation(): boolean {
+    const sampler = this.player.groundSampler;
+    return sampler ? this.navGrid.warm(sampler, NAV_WARM_BUDGET_MS) : false;
+  }
+
   private tick(tick: LoopTick): void {
     this.input.update();
+    this.warmNavigation();
 
     // Changing her look rebuilds the player's model in place, which a ride or
     // a climb is not prepared for — see `Hud.setLookAvailable`, which owns the
@@ -2174,9 +2223,11 @@ export class Game {
     // The owl fades while she is close to the lens that draws this frame, and
     // only for the drawing (`world/library/owlLensFade.ts`).
     (this.cameraOverride ?? this.camera.camera).getWorldPosition(this.drawnEye);
-    this.owlFade.apply(this.drawnEye);
+    const owl = this.world.library.owlIfFurnished;
+    if (owl && !this.owlFade) this.owlFade = new OwlLensFade(owl);
+    this.owlFade?.apply(this.drawnEye);
     this.render();
-    this.owlFade.restore();
+    this.owlFade?.restore();
   }
 
   private updateHud(tick: LoopTick): void {
@@ -2235,6 +2286,15 @@ export class Game {
       this.sky.render(renderer);
       renderer.clearDepth();
       const camera = this.cameraOverride ?? this.camera.camera;
+      // Only the children this camera can see are drawn (step 4 of
+      // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
+      // The same call picks each child's level of detail by how much of the
+      // picture she fills (step 16; `core/instancedLod.ts`).
+      cullCrowdsFor(this.engine.scene, camera);
+      // …and the children it cannot see are simulated in fewer, longer steps
+      // (step 11; `entities/npc/simLod.ts`, `check:npc-sim-lod`). Same camera,
+      // after the cull has brought its world matrix up to date.
+      noteNpcViewCamera(camera);
       renderer.render(this.engine.scene, camera);
       // The ferris wheel's car, drawn a second time over the finished frame.
       // The camera is bolted inside it, so nothing outside it should ever be in

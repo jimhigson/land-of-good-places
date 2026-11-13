@@ -328,6 +328,14 @@ function wallFootprintDepth(wall: Readonly<WallCollider>, x: number, z: number):
 const HOP_STEP_ABOVE = 0.02;
 
 /**
+ * The furthest behind a cache may be for {@link CollisionWorld.forEachChangeSince}
+ * to walk the changes it missed one by one; further behind, it rebuilds whole.
+ * A lazy room registers a few hundred colliders at once (the reptile hall: 453);
+ * a story time a handful. Past this, walking the log costs more than it saves.
+ */
+const CHANGE_WALK_LIMIT = 8192;
+
+/**
  * **Where a body of `radius` walking from `(fromX, fromZ)` towards `(toX, toZ)`
  * first touches a footprint** (`depthAt`: positive inside it) — and the way
  * into it there, a body's radius and a little, for a question about the top
@@ -1785,6 +1793,99 @@ export class CollisionWorld {
   }
 
   /**
+   * **Where every revision changed the world** — the plan footprint (x/z
+   * bounds) of the collider that moved it, so a cache of this world
+   * (`NavGrid`'s lattice) can redo just that patch, or nothing at all for a
+   * change in another space, instead of rebuilding everything. Found the hard
+   * way (docs/perf/FRAME-DROPS-2026-11.md): the library owl's flight toggles her
+   * colliders and every lattice rebuilt whole (0.5 s on an M4 Pro, twice per
+   * story time); and a lazy room registers hundreds of colliders 279 m from the
+   * park, after which the park's lattice rebuilt whole (QA on #759, 459–517 ms).
+   * A first version kept only the last 256 footprints plus coarse blocks behind
+   * them; a block reached back into the park's construction, spanned the park,
+   * and `check:nav-spaces` went red — so the log is exact.
+   *
+   * A change of unknown extent ({@link clear}, a re-topping of many circles, a
+   * demotion pass) is logged as NaN and recorded in {@link everywhereAt}, and
+   * anyone asking across it is told to rebuild whole.
+   */
+  /**
+   * Revision `r`'s footprint at `(r - 1) · 4`: min x, min z, max x, max z, or
+   * NaN for a change with none. Every change since the world was made, four
+   * numbers each (the park's construction is a few thousand); grown by
+   * doubling, never per change.
+   */
+  private changeLog = new Float64Array(4096);
+  /** The latest revision whose change had no footprint to give: everywhere. */
+  private everywhereAt = 0;
+
+  private logChange(minX: number, minZ: number, maxX: number, maxZ: number): void {
+    const at = (this.revisionCounter - 1) * 4;
+    if (at + 4 > this.changeLog.length) {
+      const grown = new Float64Array(this.changeLog.length * 2);
+      grown.set(this.changeLog);
+      this.changeLog = grown;
+    }
+    this.changeLog[at] = minX;
+    this.changeLog[at + 1] = minZ;
+    this.changeLog[at + 2] = maxX;
+    this.changeLog[at + 3] = maxZ;
+  }
+
+  /** Bumps {@link revision} for a change confined to this plan rectangle. */
+  private changed(minX: number, minZ: number, maxX: number, maxZ: number): void {
+    this.revisionCounter += 1;
+    this.logChange(minX, minZ, maxX, maxZ);
+  }
+
+  /** Bumps {@link revision} for a change with no one footprint. */
+  private changedEverywhere(): void {
+    this.revisionCounter += 1;
+    this.everywhereAt = this.revisionCounter;
+    this.logChange(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
+  }
+
+  private changedCircle(circle: { readonly x: number; readonly z: number; readonly radius: number }): void {
+    this.changed(circle.x - circle.radius, circle.z - circle.radius, circle.x + circle.radius, circle.z + circle.radius);
+  }
+
+  private changedWall(wall: WallCollider): void {
+    // A top drawn off the footprint is read where it is drawn, so the patch takes it in.
+    const reach = wall.halfThickness + Math.abs(wall.topShiftX) + Math.abs(wall.topShiftZ);
+    this.changed(
+      Math.min(wall.x1, wall.x2) - reach,
+      Math.min(wall.z1, wall.z2) - reach,
+      Math.max(wall.x1, wall.x2) + reach,
+      Math.max(wall.z1, wall.z2) + reach,
+    );
+  }
+
+  private changedBox(box: BoxCollider): void {
+    const reachX = Math.abs(box.cos) * box.halfX + Math.abs(box.sin) * box.halfZ + box.rounding;
+    const reachZ = Math.abs(box.sin) * box.halfX + Math.abs(box.cos) * box.halfZ + box.rounding;
+    this.changed(box.cx - reachX, box.cz - reachZ, box.cx + reachX, box.cz + reachZ);
+  }
+
+  /**
+   * **Every change since `revision`, by its plan footprint** — `visit` once per
+   * revision, oldest first. Returns false when the log cannot answer — one of
+   * the changes had no footprint ({@link changedEverywhere}), or the cache is
+   * more than {@link CHANGE_WALK_LIMIT} changes behind — and the caller must
+   * then rebuild whole, exactly as before this existed.
+   */
+  forEachChangeSince(revision: number, visit: (minX: number, minZ: number, maxX: number, maxZ: number) => void): boolean {
+    if (revision < 0 || this.everywhereAt > revision) return false;
+    if (this.revisionCounter - revision > CHANGE_WALK_LIMIT) return false;
+    for (let r = revision + 1; r <= this.revisionCounter; r += 1) {
+      const at = (r - 1) * 4;
+      const minX = this.changeLog[at] ?? Number.NaN;
+      if (Number.isNaN(minX)) return false;
+      visit(minX, this.changeLog[at + 1] ?? 0, this.changeLog[at + 2] ?? 0, this.changeLog[at + 3] ?? 0);
+    }
+    return true;
+  }
+
+  /**
    * Swaps the soft boundary. Used on every change of space.
    *
    * A whole {@link ParkBoundary} rather than a centre and a radius, because the
@@ -1897,7 +1998,7 @@ export class CollisionWorld {
       ...this.heights(x, z, topHeight, autoHoppable, topIsAbsolute, baseHeight, navStamped, hopHeight),
     });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
-    this.revisionCounter += 1;
+    this.changed(x - radius, z - radius, x + radius, z + radius);
     return id;
   }
 
@@ -1927,8 +2028,9 @@ export class CollisionWorld {
   removeCircle(id: number): boolean {
     const index = this.circles.findIndex((circle) => circle.id === id);
     if (index === -1) return false;
-    this.circles.splice(index, 1);
-    this.revisionCounter += 1;
+    const [removed] = this.circles.splice(index, 1);
+    if (removed) this.changedCircle(removed);
+    else this.changedEverywhere();
     return true;
   }
 
@@ -1981,7 +2083,7 @@ export class CollisionWorld {
     this.walls.push(wall);
     if (!unshifted(wall)) this.shiftedTops.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
-    this.revisionCounter += 1;
+    this.changedWall(wall);
     return wall;
   }
 
@@ -2000,7 +2102,7 @@ export class CollisionWorld {
       circle.topHeight = top;
       circle.topRadius = radiusFor(circle.x, circle.z, top);
     }
-    this.revisionCounter += 1;
+    this.changedEverywhere();
   }
 
   /**
@@ -2029,7 +2131,7 @@ export class CollisionWorld {
     } else {
       delete wall.topSlope;
     }
-    this.revisionCounter += 1;
+    this.changedWall(wall);
   }
 
   /**
@@ -2050,7 +2152,7 @@ export class CollisionWorld {
     this.walls.splice(at, 1);
     const shifted = this.shiftedTops.indexOf(wall);
     if (shifted !== -1) this.shiftedTops.splice(shifted, 1);
-    this.revisionCounter += 1;
+    this.changedWall(wall);
   }
 
   /**
@@ -2076,7 +2178,7 @@ export class CollisionWorld {
     this.walls.push(wall);
     if (!unshifted(wall) && !this.shiftedTops.includes(wall)) this.shiftedTops.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, wall.halfThickness);
-    this.revisionCounter += 1;
+    this.changedWall(wall);
   }
 
   /**
@@ -2133,7 +2235,7 @@ export class CollisionWorld {
     // The narrowest band a mover could hope to skip in one frame: its thin
     // axis, rounding and all.
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, Math.min(box.halfX, box.halfZ) + rounding);
-    this.revisionCounter += 1;
+    this.changedBox(box);
     return box;
   }
 
@@ -2197,7 +2299,7 @@ export class CollisionWorld {
     const at = this.boxes.indexOf(box);
     if (at === -1) return;
     this.boxes.splice(at, 1);
-    this.revisionCounter += 1;
+    this.changedBox(box);
   }
 
   /** Takes back a wall or a box — whichever it is. See {@link removeWall}, {@link removeBox}. */
@@ -2214,7 +2316,7 @@ export class CollisionWorld {
     if (this.boxes.includes(box)) return;
     this.boxes.push(box);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, Math.min(box.halfX, box.halfZ) + box.rounding);
-    this.revisionCounter += 1;
+    this.changedBox(box);
   }
 
   get colliderCount(): number {
@@ -2227,7 +2329,7 @@ export class CollisionWorld {
     this.shiftedTops.length = 0;
     this.boxes.length = 0;
     this.thinnestHalfWidth = Infinity;
-    this.revisionCounter += 1;
+    this.changedEverywhere();
   }
 
   /**
@@ -3279,7 +3381,7 @@ export class CollisionWorld {
 
     // A demotion changes the map `NavGrid` bakes, so it has to invalidate the
     // cached lattice exactly as any other mutation would.
-    if (demoted > 0) this.revisionCounter += 1;
+    if (demoted > 0) this.changedEverywhere();
 
     if (problems.length > 0) {
       console.error(

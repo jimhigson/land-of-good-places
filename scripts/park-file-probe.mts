@@ -26,8 +26,10 @@
  * to be the restart the loop accepted.
  *
  * `perturb` hydrates from the file with the Sky Cruiser's track raised half a
- * metre: the control on the instrument. Its digest must differ from the
- * file's, or the comparison is blind to the file's contents.
+ * metre and its first tree moved a metre east: the control on both
+ * instruments. The whole-park digest (`park`) and the placement digest
+ * (`layout`, `scripts/lib/parkLayoutDigest.mts`) must each differ from the
+ * file's, or that comparison is blind to the file's contents.
  */
 import './headless-canvas.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -53,6 +55,11 @@ if (!solving) {
   if (mode === 'perturb') {
     const points = file.features.cruiser.profile.points as Json[];
     for (let i = 1; i < points.length; i += 3) points[i] = (points[i] as number) + 0.5;
+    // And one placed thing moved on the ground, which a raised track is not:
+    // the placement digest reads claims, and a claim has no height.
+    const tree = (file.features.world as unknown as { trees: Json[][] }).trees[0];
+    if (!tree || typeof tree[0] !== 'number') throw new Error('park-file-probe: the file has no first tree to move — the placement control has nothing to perturb');
+    tree[0] = tree[0] + 1;
   }
   // The file's restart, exactly as `boot/prebuiltPark.ts` applies it: before
   // any park module loads, since the restart is read once at module load.
@@ -82,6 +89,7 @@ const { PARK_RESTART, PARK_SEED, PARK_SEED_ASKED } = await import('../src/world/
 const { overriddenRestart } = await import('../src/world/parkRestart.ts');
 const { buildHeadlessPark } = await import('./park-harness.mts');
 const { digestScene } = await import('./lib/parkDigest.mts');
+const { digestBuiltPark } = await import('./lib/parkLayoutDigest.mts');
 
 // Drive the plan the way the game does — through the park's own forcing
 // path — so a hydrate run takes the client's route and a solve run the
@@ -99,6 +107,8 @@ if (solving && !stats) throw new Error('park-file-probe: the plan solved but pub
 
 const park = buildHeadlessPark();
 const digest = mode === 'write' ? { park: '', meshes: 0, byName: new Map<string, string>() } : digestScene(park.scene);
+// Straight after the build, before anything else can commit a claim.
+const placement = await digestBuiltPark(park.world);
 
 // Written after the park is built: the world phase's decisions only exist once
 // a `World` has searched them.
@@ -138,6 +148,8 @@ console.log(
     restartFrom: overriddenRestart() === null ? 'record' : 'file',
     generationSeed: PARK_SEED,
     park: digest.park,
+    layout: placement.layout,
+    layoutClaims: placement.claims,
     meshes: digest.meshes,
     byName: Object.fromEntries(digest.byName),
     hydrated: plan.parkPlanHydrated(),
