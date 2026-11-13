@@ -2288,7 +2288,9 @@ export class Game {
       const camera = this.cameraOverride ?? this.camera.camera;
       // Only the children this camera can see are drawn (step 4 of
       // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
-      cullCrowdsFor(this.engine.scene, camera);
+      // The drawing buffer's height sizes each child in device pixels, which
+      // is what picks her level of detail (step 16; `core/instancedLod.ts`).
+      cullCrowdsFor(this.engine.scene, camera, renderer.domElement.height);
       // …and the children it cannot see are simulated in fewer, longer steps
       // (step 11; `entities/npc/simLod.ts`, `check:npc-sim-lod`). Same camera,
       // after the cull has brought its world matrix up to date.

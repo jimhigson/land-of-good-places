@@ -1,6 +1,7 @@
 import {
   Color,
   Frustum,
+  type BufferGeometry,
   type Camera,
   Group,
   InstancedMesh,
@@ -11,6 +12,14 @@ import {
   Sphere,
   type Material,
 } from 'three';
+import {
+  LOD_DEFAULT_VIEWPORT_HEIGHT_PX,
+  LOD_FULL,
+  LOD_LOW,
+  lowDetailGeometry,
+  nextLodLevel,
+  projectedDiameterPx,
+} from '../../core/instancedLod';
 
 /**
  * Many copies of one authored model, for a handful of draw calls.
@@ -66,6 +75,18 @@ import {
  *   The cost of packing is that **slot ≠ member**: an instance id from a
  *   raycast or `getMatrixAt` does not name a child. Nothing asks today; ask the
  *   crowd, not the buffer, if something ever needs to.
+ * - **Every part is drawn at one of two levels of detail, chosen per child per
+ *   draw** (step 16 of the same plan). Beside each part variant's mesh sits a
+ *   second one over `lowDetailGeometry` of the same prototype geometry — a
+ *   quarter of the triangles, derived at load, so there is still only the one
+ *   model. `cullTo` asks how wide each child is drawn through the camera it is
+ *   given and puts her in exactly one of the two; under the ordinary camera a
+ *   child is ~23 px tall and always in the far one. The choice has hysteresis
+ *   (`core/instancedLod.ts` owns the thresholds), and a child who is off
+ *   screen — kept only for the shadow she throws onto it — is always the far
+ *   level, so the shadow pass draws full detail only for the few children the
+ *   main pass is drawing at full detail too. A crowd nobody ever calls
+ *   `cullTo` on (a preview, a mini-game) stays at full detail, as before.
  */
 
 /** One part of the prototype, and the instanced mesh (or meshes) that draw it. */
@@ -78,6 +99,12 @@ interface CrowdPart {
    * currently waving, without a per-child material.
    */
   readonly variants: readonly InstancedMesh[];
+  /**
+   * The far level of each variant, same order: the same material over
+   * `lowDetailGeometry` of the same source. `null` where the part is too small
+   * to have one, and then `variants[v]` draws every child at both levels.
+   */
+  readonly low: readonly (InstancedMesh | null)[];
 }
 
 /** A member's animatable copy of the prototype. Pose it, then `commit`. */
@@ -119,6 +146,18 @@ const scratchMatrix = new Matrix4();
 const cullSphere = new Sphere();
 const cullFrustum = new Frustum();
 const cullMatrix = new Matrix4();
+/**
+ * What {@link InstancedCrowd.cullTo} needs to size a child on screen: see
+ * `projectedDiameterPx` in `core/instancedLod.ts`.
+ */
+export interface CrowdLodView {
+  /** `projection × view` of the camera about to draw. */
+  readonly viewProjection: Matrix4;
+  /** `projection.elements[5] × viewport height in device px / 2`. */
+  pixelsPerUnitAtW1: number;
+}
+/** The one view {@link cullCrowdsFor} fills in per draw; shares {@link cullMatrix}. */
+const lodView: CrowdLodView = { viewProjection: cullMatrix, pixelsPerUnitAtW1: 0 };
 /** Every crowd not yet disposed — what {@link cullCrowdsFor} walks. */
 const LIVE_CROWDS = new Set<InstancedCrowd>();
 /**
@@ -172,6 +211,12 @@ export class InstancedCrowd {
   private readonly packBox = new Float32Array(6);
   /** Scratch for {@link cullTo}: whether each member is kept for this draw. */
   private readonly keep: Uint8Array;
+  /**
+   * Each member's level of detail (`LOD_FULL` / `LOD_LOW`), as the last
+   * {@link cullTo} with a view left it — kept between draws because the choice
+   * has hysteresis. Full until a camera says otherwise.
+   */
+  private readonly level: Uint8Array;
 
   constructor(prototype: Object3D, capacity: number, options: CrowdOptions) {
     this.capacity = capacity;
@@ -184,9 +229,10 @@ export class InstancedCrowd {
     const parts: CrowdPart[] = [];
     for (const source of sources) {
       const materials = options.materialsFor(source);
-      const variants = materials.map((material) => {
-        const mesh = new InstancedMesh(source.geometry, material, capacity);
-        mesh.name = `crowd:${source.name || source.geometry.type}`;
+      const lowGeometry = lowDetailGeometry(source.geometry);
+      const build = (material: Material, geometry: BufferGeometry, suffix: string): InstancedMesh => {
+        const mesh = new InstancedMesh(geometry, material, capacity);
+        mesh.name = `crowd:${source.name || source.geometry.type}${suffix}`;
         mesh.castShadow = options.castShadowFor?.(source) ?? false;
         mesh.receiveShadow = options.receiveShadow ?? false;
         // Culled, against a sphere `flush` rebuilds from the live instances —
@@ -204,8 +250,12 @@ export class InstancedCrowd {
         this.slotMember.set(mesh, new Int32Array(capacity).fill(-1));
         this.group.add(mesh);
         return mesh;
-      });
-      parts.push({ source, variants });
+      };
+      const variants = materials.map((material) => build(material, source.geometry, ''));
+      const low = materials.map((material) =>
+        lowGeometry === source.geometry ? null : build(material, lowGeometry, ':low'),
+      );
+      parts.push({ source, variants, low });
     }
 
     this.parts = parts;
@@ -218,6 +268,7 @@ export class InstancedCrowd {
       return sphere.center.length() + sphere.radius;
     }));
     this.keep = new Uint8Array(capacity);
+    this.level = new Uint8Array(capacity).fill(LOD_FULL);
     LIVE_CROWDS.add(this);
     this.partCount = parts.reduce((total, part) => total + part.variants.length, 0);
   }
@@ -354,11 +405,17 @@ export class InstancedCrowd {
    * shadow camera is not the view camera and there is more than one shadow
    * light (the sun, the castle's key). Those parts keep every member and their
    * union sphere, which three.js culls per pass on its own.
+   *
+   * **Given `view`, it also chooses every child's level of detail** for this
+   * draw, by how wide her sphere is drawn through it (see the class doc). A
+   * child off screen is the far level. Without `view` the levels stay as they
+   * were.
    */
-  cullTo(frustum: Frustum): void {
+  cullTo(frustum: Frustum, view?: CrowdLodView): void {
     const memberTotal = this.members.length;
     const toWorld = this.group.matrixWorld;
     const scale = toWorld.getMaxScaleOnAxis();
+    let levelChanged = false;
     for (let m = 0; m < memberTotal; m += 1) {
       if (!this.memberShows(m)) {
         this.keep[m] = 0;
@@ -368,6 +425,20 @@ export class InstancedCrowd {
       cullSphere.center.applyMatrix4(toWorld);
       cullSphere.radius *= scale;
       const inside = sphereSide(frustum, cullSphere);
+      if (view) {
+        const c = cullSphere.center;
+        // Off screen she is kept only for her shadow: no pixels at all.
+        const level = nextLodLevel(
+          this.level[m]!,
+          inside === -1
+            ? 0
+            : projectedDiameterPx(view.viewProjection, view.pixelsPerUnitAtW1, c.x, c.y, c.z, cullSphere.radius),
+        );
+        if (level !== this.level[m]) {
+          this.level[m] = level;
+          levelChanged = true;
+        }
+      }
       // Wholly in or wholly out is decided by the child's own sphere; one
       // straddling the frustum asks her parts, so a child whose union sphere
       // pokes into the frame with nothing of her in it is not drawn.
@@ -377,7 +448,11 @@ export class InstancedCrowd {
       const part = this.parts[p];
       if (!part) continue;
       for (let v = 0; v < part.variants.length; v += 1) {
-        if (part.variants[v]?.castShadow) continue;
+        if (part.variants[v]?.castShadow) {
+          // Everybody stays in; only which level's mesh holds her can change.
+          if (levelChanged) this.pack(p, v, null);
+          continue;
+        }
         this.pack(p, v, this.keep);
       }
     }
@@ -413,15 +488,28 @@ export class InstancedCrowd {
   }
 
   /**
-   * Writes one part variant's buffer: the members wearing it (and, given
-   * `keep`, only those kept) into slots `0..count-1`, its bounding sphere the
-   * sphere round those children's boxes.
+   * Writes one part variant's buffers — each child wearing it into the mesh of
+   * her own level of detail, and into no other.
    */
   private pack(p: number, v: number, keep: Uint8Array | null): void {
     const part = this.parts[p];
-    const mesh = part?.variants[v];
-    const slots = mesh ? this.slotMember.get(mesh) : undefined;
-    if (!part || !mesh || !slots) return;
+    const full = part?.variants[v];
+    if (!part || !full) return;
+    const low = part.low[v] ?? null;
+    // No far level for this part: the one mesh holds every child at any level.
+    this.packInto(full, p, v, keep, low ? LOD_FULL : -1);
+    if (low) this.packInto(low, p, v, keep, LOD_LOW);
+  }
+
+  /**
+   * Writes one mesh's buffer: the members wearing variant `v` of part `p` at
+   * `level` (any level if negative) — and, given `keep`, only those kept —
+   * into slots `0..count-1`, its bounding sphere the sphere round those
+   * children's boxes.
+   */
+  private packInto(mesh: InstancedMesh, p: number, v: number, keep: Uint8Array | null, level: number): void {
+    const slots = this.slotMember.get(mesh);
+    if (!slots) return;
     const partTotal = this.parts.length;
     const memberTotal = this.members.length;
     const coloursDirty = this.coloursDirty;
@@ -437,6 +525,7 @@ export class InstancedCrowd {
       const at = m * partTotal + p;
       if (this.committedChoice[at] !== v) continue;
       if (keep && !keep[m]) continue;
+      if (level >= 0 && this.level[m] !== level) continue;
       // Element by element: a `subarray` view here would allocate per instance per frame.
       for (let e = 0; e < 16; e += 1) matrices[count * 16 + e] = this.committedMatrix[at * 16 + e]!;
       if (colours && (coloursDirty || slots[count] !== m)) {
@@ -457,9 +546,16 @@ export class InstancedCrowd {
     }
     if (count > 0) this.sphereOfBox(0, box, sphere);
     else sphere.makeEmpty();
+    // A slot past `count` is remembered as holding whoever it last held, and
+    // skips its colour write when she comes back. That is only true while her
+    // colour has not changed in the meantime — and children now move between a
+    // part's two level meshes all the time — so a recolour forgets them.
+    if (coloursDirty) slots.fill(-1, count);
     mesh.count = count;
     mesh.visible = count > 0;
-    mesh.instanceMatrix.needsUpdate = true;
+    // An empty mesh is not drawn, so there is nothing to upload for it: under
+    // the ordinary camera that is every full-detail mesh, every frame.
+    if (count > 0) mesh.instanceMatrix.needsUpdate = true;
     if (recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
@@ -467,6 +563,7 @@ export class InstancedCrowd {
     LIVE_CROWDS.delete(this);
     for (const part of this.parts) {
       for (const variant of part.variants) variant.dispose();
+      for (const variant of part.low) variant?.dispose();
     }
   }
 }
@@ -488,19 +585,29 @@ const EMPTY_SPHERE = new Sphere();
  * own `flush` packed them, which is always correct to draw. A crowd whose
  * `flush` has not run since its last `commit` is trimmed against its last
  * flush, which is the buffer the renderer would upload anyway.
+ *
+ * `viewportHeightPx` is the height, in device pixels, of what is being drawn
+ * into (`renderer.domElement.height`): each child's level of detail is chosen
+ * by how many of those pixels she covers. A caller with no renderer to ask
+ * gets `LOD_DEFAULT_VIEWPORT_HEIGHT_PX`.
  */
-export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
+export function cullCrowdsFor(
+  scene: Object3D,
+  camera: Camera,
+  viewportHeightPx: number = LOD_DEFAULT_VIEWPORT_HEIGHT_PX,
+): void {
   // Parents too: a ride's camera rides on something. Both of these repeat work
   // `render` is about to do anyway, so they cannot disagree with it.
   camera.updateWorldMatrix(true, false);
   cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   cullFrustum.setFromProjectionMatrix(cullMatrix, camera.coordinateSystem, camera.reversedDepth);
+  lodView.pixelsPerUnitAtW1 = (camera.projectionMatrix.elements[5]! * viewportHeightPx) / 2;
   for (const crowd of LIVE_CROWDS) {
     // Not in this scene, or switched off (an interior she is not in): not drawn
     // by this render at all, so there is nothing to trim.
     if (!drawnIn(crowd.group, scene)) continue;
     crowd.group.updateWorldMatrix(true, false);
-    crowd.cullTo(cullFrustum);
+    crowd.cullTo(cullFrustum, lodView);
   }
 }
 
