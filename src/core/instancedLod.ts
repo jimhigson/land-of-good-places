@@ -12,15 +12,15 @@ import { BufferAttribute, BufferGeometry, type InterleavedBufferAttribute, type 
  *    model to keep in step with the first: retune the model and its far level
  *    follows on the next reload.
  * 2. **Which level does this instance want through this camera?**
- *    {@link projectedDiameterPx} and {@link nextLodLevel} — by how big it is
- *    **on screen, in CSS pixels**, never by raw distance and never in device
+ *    {@link projectedShare} and {@link nextLodLevel} — by how much of the
+ *    picture's height it fills, never by raw distance and never in device
  *    pixels. The park camera is a 9.5° lens ~120 m away, so everything is at
- *    the same distance and distance says nothing. And a device pixel is not a
- *    size: the same child on the same window is twice as many of them on a
- *    retina panel, and a different number again whenever the resolution
- *    governor (`core/adaptiveResolution.ts`) steps — a rule in device pixels
- *    put every child at full detail on exactly the screens that can least
- *    afford it.
+ *    much the same distance and distance says little. And a device pixel is
+ *    not a size: the same child on the same window is twice as many of them
+ *    on a retina panel, and a different number again whenever the resolution
+ *    governor (`core/adaptiveResolution.ts`) steps — the first version of this
+ *    chose in device pixels, and put all 63,366 on-screen crowd parts at full
+ *    detail on a 3× screen, which is to say it never switched on.
  */
 
 /** Full detail: the geometry as authored. */
@@ -35,21 +35,39 @@ export const LOD_LOW = 1;
  * whatever it had, so nobody flickers on the boundary.
  *
  * A share of the picture, not a count of pixels, so the choice is the same at
- * device pixel ratio 1, 2 and 3, under every step of the resolution governor
- * (`core/adaptiveResolution.ts`) and on a canvas of any size: the camera
- * frames a fixed height of world (`CAMERA_VIEW_HEIGHT` at zoom 1), so the same
- * child at the same zoom is the same share of every screen, and it is the
- * zoom — her pinch, a ride, a cut-scene — that brings her close. In CSS
- * pixels on a 900-pixel-tall window the switch is at 900 × this.
+ * device pixel ratio 1, 2 and 3, under every step of the resolution governor,
+ * and on a canvas of any size: the camera frames a fixed height of world
+ * (`CAMERA_VIEW_HEIGHT` at zoom 1), so the same child at the same zoom is the
+ * same share of every screen, and it is the zoom — her pinch, a ride, a
+ * cut-scene — that brings a child close. In CSS pixels, on a window 900 tall,
+ * the switch is a sphere 540 px tall going up and 450 px coming down.
  *
- * The values, and the evidence for them, are with {@link LOD_LOW_TOLERANCE_M}.
+ * **Measured in the game** (seed 5, `/spawn`, 1440×900): `InstancedCrowd`'s
+ * sphere round a child is ~2.9 × her height on screen, and under the ordinary
+ * camera (zoom 1) a child is 60–118 CSS px tall, her sphere 0.16–0.42 of the
+ * picture — always the far level. A pinch to zoom ~1.4–2 brings the nearest
+ * children to 0.6, a child 165–230 px tall, where the authored model takes
+ * over; `CAMERA_ZOOM_MAX` (5.5) is full detail for everyone in frame. The far
+ * level was compared with full detail in the same frozen frame at shares 0.3,
+ * 0.5 and 0.75 (children up to 290 CSS px tall at device pixel ratio 2): about
+ * 0.1 % of a child's pixels differ by more than 8/255, every one a band or
+ * silhouette edge moved by a device pixel — so the switch sits under the
+ * largest size the far level was seen to pass, not at it.
  */
-export const LOD_FULL_ABOVE_SHARE = 0.25;
-export const LOD_LOW_BELOW_SHARE = 0.2;
+export const LOD_FULL_ABOVE_SHARE = 0.6;
+export const LOD_LOW_BELOW_SHARE = 0.5;
 
 /**
  * How far the far level may stand from the authored surface, in metres of
  * world: see {@link simplifyWithin} for exactly what is bounded.
+ *
+ * Measured over the crowd child's 44 parts, the furthest any source vertex
+ * ends up from the far surface is about half this. 6 mm keeps 71 % of the
+ * prototype's triangles (39,968 → 28,468); a child of 14.0–23.8 k triangles is
+ * 9.4–15.5 k at the far level. Compared in the game, same frozen frame, on
+ * the mohican child at zoom 1: 10 mm (63 %) left 0.38 % of her pixels more
+ * than 8/255 off, in runs along the arms and the hair that a 4× crop shows;
+ * 6 mm left 0.12 %, single pixels on band edges.
  */
 export const LOD_LOW_TOLERANCE_M = 0.006;
 
@@ -137,7 +155,7 @@ export function nextLodLevel(current: number, share: number): number {
   return current;
 }
 
-/** Far levels already derived, per source geometry and then per {@link levelKey}. */
+/** Far levels already derived, per source geometry and then per tolerance and texturing. */
 const lowCache = new WeakMap<BufferGeometry, Map<string, BufferGeometry>>();
 
 /**

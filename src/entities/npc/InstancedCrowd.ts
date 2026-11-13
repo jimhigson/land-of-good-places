@@ -268,11 +268,8 @@ export class InstancedCrowd {
       const scale = scratchMatrix.multiplyMatrices(toPrototype, source.matrixWorld).getMaxScaleOnAxis();
       // Only a part whose material reads its UVs needs its UV seams kept.
       const textured = materials.some((material) => (material as Material & { map?: unknown }).map != null);
-      // EXPERIMENT (remove): ?lodTol=<mm>
-      const xq = typeof location === 'undefined' ? null : new URLSearchParams(location.search);
-      const xTol = xq?.get('lodTol') ? Number(xq.get('lodTol')) / 1000 : LOD_LOW_TOLERANCE_M;
       const lowGeometry =
-        scale > 0 ? lowDetailGeometry(source.geometry, xTol / scale, textured) : source.geometry;
+        scale > 0 ? lowDetailGeometry(source.geometry, LOD_LOW_TOLERANCE_M / scale, textured) : source.geometry;
       const build = (material: Material, geometry: BufferGeometry, suffix: string): InstancedMesh => {
         const mesh = new InstancedMesh(geometry, material, capacity);
         mesh.name = `crowd:${source.name || source.geometry.type}${suffix}`;
