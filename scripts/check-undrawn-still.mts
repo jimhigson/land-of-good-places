@@ -171,8 +171,16 @@ const cameraForward = new Vector3(0, 0, 1);
 let frame = 0;
 const step = (): void => {
   const context: FrameContext = { dt: DT, elapsed: frame * DT, input, playerPosition: player.position, cameraForward, frame };
+  // The camera breathes in and out a little every frame, as a child's pinches
+  // and the camera's own follow keep it doing: anything that re-sizes itself
+  // to the screen for a space nobody can see (a name pill, a bubble) moves,
+  // and is counted. A camera standing dead still would hide all of it.
+  camera.snapTo(player.position);
+  camera.snapZoomTarget(1 + 0.15 * Math.sin(frame * 0.05));
   quietly(() => {
     world.update(context);
+    // …and the labels decided after every system, as `Game.tick` does.
+    world.labels.resolve({ camera: camera.camera, width: 1280, height: 720 }, DT);
     if (mutate) {
       building.banquet.update(context.elapsed);
       building.wildPets.update(context);
@@ -333,6 +341,11 @@ function measure(frames: number, exempt: readonly Object3D[] = []): { totals: Ma
 }
 
 if (mutate) console.log('--mutate: the park and its crowd updated wherever she is, the banquet, the wild pets and the hotel animated every frame — as before step 3\n');
+// What this cannot see, said on every run (CLAUDE.md, "a check can pass
+// without checking anything"): it reads transforms and buffers, so a system
+// that only writes a material (a light's intensity, an emissive colour) or a
+// label's screen size for a space nobody can see is invisible to it.
+process.stderr.write('undrawn-still: not measured — material and uniform writes (light intensities, colours) and label sizing; transforms and vertex/instance buffers only\n');
 
 // ------------------------------------------------------------------- garden
 
