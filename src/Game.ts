@@ -2275,7 +2275,9 @@ export class Game {
   /**
    * What drawing the park tells the simulation about the camera, before the
    * draw: only the children this camera can see are drawn (step 4 of
-   * docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`), and the children it
+   * docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`) — the same call picks
+   * each child's level of detail by how much of the picture she fills (step 16;
+   * `core/instancedLod.ts`) — and the children it
    * cannot see are simulated in fewer, longer steps (step 11;
    * `entities/npc/simLod.ts`, `check:npc-sim-lod`) — same camera, after the
    * cull has brought its world matrix up to date. Its own method so a

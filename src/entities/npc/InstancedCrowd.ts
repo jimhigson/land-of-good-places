@@ -1,6 +1,7 @@
 import {
   Color,
   Frustum,
+  type BufferGeometry,
   type Camera,
   Group,
   InstancedMesh,
@@ -11,6 +12,15 @@ import {
   Sphere,
   type Material,
 } from 'three';
+import {
+  LOD_FULL,
+  LOD_LOW,
+  LOD_LOW_TOLERANCE_M,
+  getLodMode,
+  lowDetailGeometry,
+  nextLodLevel,
+  projectedShare,
+} from '../../core/instancedLod';
 
 /**
  * Many copies of one authored model, for a handful of draw calls.
@@ -66,6 +76,26 @@ import {
  *   The cost of packing is that **slot ≠ member**: an instance id from a
  *   raycast or `getMatrixAt` does not name a child. Nothing asks today; ask the
  *   crowd, not the buffer, if something ever needs to.
+ * - **Every part is drawn at one of two levels of detail, chosen per child per
+ *   draw** (step 16 of the same plan). Beside each part variant's mesh sits a
+ *   second one over `lowDetailGeometry` of the same prototype geometry —
+ *   derived at load within `LOD_LOW_TOLERANCE_M` of the authored surface, so
+ *   there is still only the one model. `cullTo` asks how tall each child is
+ *   drawn through the camera it is given, as a share of the picture, and puts
+ *   her in exactly one of the two for the main pass; under the ordinary camera
+ *   that is always the far one. The choice has hysteresis
+ *   (`core/instancedLod.ts` owns the thresholds and the evidence for them).
+ *   A crowd nobody ever calls `cullTo` on (a preview, a mini-game) stays at
+ *   full detail in its main pass, as before.
+ * - **The shadow pass draws every child from the far level, always.** A part
+ *   that casts carries, after the children its far mesh draws in the main
+ *   pass, every other child wearing it — the ones drawn at full detail, and
+ *   the ones off screen who still throw a shadow onto it — and the far mesh's
+ *   `onBeforeShadow` widens its draw to all of them, `onAfterShadow` narrows it
+ *   back. The full-detail mesh never casts. So the main pass draws each child
+ *   once, at one level, and only if she is on screen; every shadow light draws
+ *   every child once, from the far level. (`?crowdLod=off` casts from full
+ *   detail instead, so it is the engine as it was.)
  */
 
 /** One part of the prototype, and the instanced mesh (or meshes) that draw it. */
@@ -78,6 +108,34 @@ interface CrowdPart {
    * currently waving, without a per-child material.
    */
   readonly variants: readonly InstancedMesh[];
+  /**
+   * The far level of each variant, same order: the same material over
+   * `lowDetailGeometry` of the same source. `null` where the part is too small
+   * to have one, and then `variants[v]` draws every child at both levels.
+   */
+  readonly low: readonly (InstancedMesh | null)[];
+  /** Whether this part throws a shadow (`CrowdOptions.castShadowFor`). */
+  readonly casts: boolean;
+}
+
+/**
+ * What one instanced mesh holds this draw. Slots `0..main-1` are the children
+ * the main pass draws; a mesh a part casts from carries the rest of the part's
+ * children after them, to `shadow`, for the shadow pass alone.
+ */
+interface MeshDraw {
+  readonly mesh: InstancedMesh;
+  /** Which member each slot held at the last pack. */
+  readonly slots: Int32Array;
+  /** Box round every child written this pack: min x, y, z, max x, y, z. */
+  readonly box: Float32Array;
+  /** Instances the main pass draws. */
+  main: number;
+  /** Instances the shadow pass draws (≥ `main`). */
+  shadow: number;
+  /** Slots written so far in this pack. */
+  written: number;
+  recoloured: boolean;
 }
 
 /** A member's animatable copy of the prototype. Pose it, then `commit`. */
@@ -119,6 +177,18 @@ const scratchMatrix = new Matrix4();
 const cullSphere = new Sphere();
 const cullFrustum = new Frustum();
 const cullMatrix = new Matrix4();
+/**
+ * What {@link InstancedCrowd.cullTo} needs to size a child on screen: see
+ * `projectedShare` in `core/instancedLod.ts`.
+ */
+export interface CrowdLodView {
+  /** `projection × view` of the camera about to draw. */
+  readonly viewProjection: Matrix4;
+  /** `projection.elements[5]` of that camera. */
+  lensScale: number;
+}
+/** The one view {@link cullCrowdsFor} fills in per draw; shares {@link cullMatrix}. */
+const lodView: CrowdLodView = { viewProjection: cullMatrix, lensScale: 0 };
 /** Every crowd not yet disposed — what {@link cullCrowdsFor} walks. */
 const LIVE_CROWDS = new Set<InstancedCrowd>();
 /**
@@ -153,8 +223,10 @@ export class InstancedCrowd {
   private readonly committedMatrix: Float32Array;
   /** Each member's colour per part, 3 floats per `member * parts + part`. */
   private readonly colour: Float32Array;
-  /** Which member each packed slot held at the last flush, per variant mesh. */
-  private readonly slotMember = new Map<InstancedMesh, Int32Array>();
+  /** What each instanced mesh holds this draw — see {@link MeshDraw}. */
+  private readonly draws = new Map<InstancedMesh, MeshDraw>();
+  /** Scratch for {@link pack}: the members a cast-from mesh carries for the shadow pass only. */
+  private readonly shadowOnly: Int32Array;
   /** A colour changed since the last flush, so every packed colour is rewritten. */
   private coloursDirty = true;
   /**
@@ -168,10 +240,14 @@ export class InstancedCrowd {
    * sphere's centre distance plus radius, in the part's frame.
    */
   private readonly partReach: Float32Array;
-  /** Scratch box for {@link pack}. */
-  private readonly packBox = new Float32Array(6);
   /** Scratch for {@link cullTo}: whether each member is kept for this draw. */
   private readonly keep: Uint8Array;
+  /**
+   * Each member's level of detail (`LOD_FULL` / `LOD_LOW`), as the last
+   * {@link cullTo} with a view left it — kept between draws because the choice
+   * has hysteresis. Full until a camera says otherwise.
+   */
+  private readonly level: Uint8Array;
 
   constructor(prototype: Object3D, capacity: number, options: CrowdOptions) {
     this.capacity = capacity;
@@ -181,13 +257,24 @@ export class InstancedCrowd {
     const sources = collectParts(prototype);
     this.sources = sources;
 
+    // A part's far level is bounded in metres of world, and its geometry is
+    // drawn scaled by however the prototype holds it.
+    prototype.updateWorldMatrix(true, true);
+    const toPrototype = new Matrix4().copy(prototype.matrixWorld).invert();
     const parts: CrowdPart[] = [];
     for (const source of sources) {
       const materials = options.materialsFor(source);
-      const variants = materials.map((material) => {
-        const mesh = new InstancedMesh(source.geometry, material, capacity);
-        mesh.name = `crowd:${source.name || source.geometry.type}`;
-        mesh.castShadow = options.castShadowFor?.(source) ?? false;
+      const casts = options.castShadowFor?.(source) ?? false;
+      const scale = scratchMatrix.multiplyMatrices(toPrototype, source.matrixWorld).getMaxScaleOnAxis();
+      // Only a part whose material reads its UVs needs its UV seams kept.
+      const textured = materials.some((material) => (material as Material & { map?: unknown }).map != null);
+      const lowGeometry =
+        scale > 0 ? lowDetailGeometry(source.geometry, LOD_LOW_TOLERANCE_M / scale, textured) : source.geometry;
+      const build = (material: Material, geometry: BufferGeometry, suffix: string): InstancedMesh => {
+        const mesh = new InstancedMesh(geometry, material, capacity);
+        mesh.name = `crowd:${source.name || source.geometry.type}${suffix}`;
+        // `pack` says which of a part's meshes casts, every draw.
+        mesh.castShadow = casts;
         mesh.receiveShadow = options.receiveShadow ?? false;
         // Culled, against a sphere `flush` rebuilds from the live instances —
         // see the class doc.
@@ -201,11 +288,32 @@ export class InstancedCrowd {
         }
         mesh.count = 0;
         mesh.visible = false;
-        this.slotMember.set(mesh, new Int32Array(capacity).fill(-1));
+        const draw: MeshDraw = {
+          mesh,
+          slots: new Int32Array(capacity).fill(-1),
+          box: new Float32Array(6),
+          main: 0,
+          shadow: 0,
+          written: 0,
+          recoloured: false,
+        };
+        this.draws.set(mesh, draw);
+        // The shadow pass draws every child this mesh carries; the main pass
+        // only the first `main`. Made once here, so a draw allocates nothing.
+        mesh.onBeforeShadow = () => {
+          mesh.count = draw.shadow;
+        };
+        mesh.onAfterShadow = () => {
+          mesh.count = draw.main;
+        };
         this.group.add(mesh);
         return mesh;
-      });
-      parts.push({ source, variants });
+      };
+      const variants = materials.map((material) => build(material, source.geometry, ''));
+      const low = materials.map((material) =>
+        lowGeometry === source.geometry ? null : build(material, lowGeometry, ':low'),
+      );
+      parts.push({ source, variants, low, casts });
     }
 
     this.parts = parts;
@@ -218,6 +326,8 @@ export class InstancedCrowd {
       return sphere.center.length() + sphere.radius;
     }));
     this.keep = new Uint8Array(capacity);
+    this.shadowOnly = new Int32Array(capacity);
+    this.level = new Uint8Array(capacity).fill(LOD_FULL);
     LIVE_CROWDS.add(this);
     this.partCount = parts.reduce((total, part) => total + part.variants.length, 0);
   }
@@ -349,13 +459,19 @@ export class InstancedCrowd {
    * per part. Her committed box decides the clear cases; one whose box straddles
    * the frustum is decided part by part, against each part's exact sphere.
    *
-   * **Shadow-casting parts are left alone.** The same buffer feeds the shadow
-   * pass, and a child just off the screen still throws her shadow onto it; the
-   * shadow camera is not the view camera and there is more than one shadow
-   * light (the sun, the castle's key). Those parts keep every member and their
-   * union sphere, which three.js culls per pass on its own.
+   * **Shadows are not trimmed.** A child just off the screen still throws her
+   * shadow onto it; the shadow camera is not the view camera and there is more
+   * than one shadow light (the sun, the castle's key). So a casting part's
+   * far-level mesh carries every member past its main-pass ones, its sphere
+   * is the union of all of them, and three.js culls it per pass on its own
+   * (see the class doc).
+   *
+   * **Given `view`, it also chooses every child's level of detail** for this
+   * draw, by how tall her sphere is drawn through it as a share of the picture
+   * (see the class doc). A child off screen is the far level. Without `view`
+   * the levels stay as they were.
    */
-  cullTo(frustum: Frustum): void {
+  cullTo(frustum: Frustum, view?: CrowdLodView): void {
     const memberTotal = this.members.length;
     const toWorld = this.group.matrixWorld;
     const scale = toWorld.getMaxScaleOnAxis();
@@ -368,6 +484,14 @@ export class InstancedCrowd {
       cullSphere.center.applyMatrix4(toWorld);
       cullSphere.radius *= scale;
       const inside = sphereSide(frustum, cullSphere);
+      if (view) {
+        const c = cullSphere.center;
+        // Off screen she is drawn only into shadows: no pixels at all.
+        this.level[m] = nextLodLevel(
+          this.level[m]!,
+          inside === -1 ? 0 : projectedShare(view.viewProjection, view.lensScale, c.x, c.y, c.z, cullSphere.radius),
+        );
+      }
       // Wholly in or wholly out is decided by the child's own sphere; one
       // straddling the frustum asks her parts, so a child whose union sphere
       // pokes into the frame with nothing of her in it is not drawn.
@@ -376,10 +500,7 @@ export class InstancedCrowd {
     for (let p = 0; p < this.parts.length; p += 1) {
       const part = this.parts[p];
       if (!part) continue;
-      for (let v = 0; v < part.variants.length; v += 1) {
-        if (part.variants[v]?.castShadow) continue;
-        this.pack(p, v, this.keep);
-      }
+      for (let v = 0; v < part.variants.length; v += 1) this.pack(p, v, this.keep);
     }
   }
 
@@ -413,60 +534,109 @@ export class InstancedCrowd {
   }
 
   /**
-   * Writes one part variant's buffer: the members wearing it (and, given
-   * `keep`, only those kept) into slots `0..count-1`, its bounding sphere the
-   * sphere round those children's boxes.
+   * Writes one part variant's buffers, in one walk over the members.
+   *
+   * Each child wearing it — and, given `keep`, kept for this draw — goes into
+   * the main-pass slots of the mesh of her own level of detail, and into no
+   * other mesh's. If the part casts, the mesh it casts from (the far level,
+   * or under `?crowdLod=off` the full one) then carries every other child
+   * wearing it, for the shadow pass alone. A part with no far level has one
+   * mesh, which is every level.
    */
   private pack(p: number, v: number, keep: Uint8Array | null): void {
     const part = this.parts[p];
-    const mesh = part?.variants[v];
-    const slots = mesh ? this.slotMember.get(mesh) : undefined;
-    if (!part || !mesh || !slots) return;
+    const fullMesh = part?.variants[v];
+    if (!part || !fullMesh) return;
+    const lowMesh = part.low[v] ?? null;
+    const full = this.draws.get(fullMesh);
+    const low = lowMesh ? (this.draws.get(lowMesh) ?? null) : null;
+    if (!full) return;
+    const castFrom = !part.casts ? null : low && getLodMode() !== 'off' ? low : full;
+    fullMesh.castShadow = castFrom === full;
+    if (lowMesh) lowMesh.castShadow = castFrom === low;
+
+    this.beginPack(full);
+    if (low) this.beginPack(low);
     const partTotal = this.parts.length;
     const memberTotal = this.members.length;
-    const coloursDirty = this.coloursDirty;
-    const matrices = mesh.instanceMatrix.array as Float32Array;
-    const colours = mesh.instanceColor?.array as Float32Array | undefined;
-    const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
-    let count = 0;
-    let recoloured = false;
-    const box = this.packBox;
+    let shadowOnly = 0;
+    for (let m = 0; m < memberTotal; m += 1) {
+      if (this.committedChoice[m * partTotal + p] !== v) continue;
+      const into = !keep || keep[m] ? (low && this.level[m] === LOD_LOW ? low : full) : null;
+      if (into) this.packMember(into, m, p);
+      if (castFrom && into !== castFrom) this.shadowOnly[shadowOnly++] = m;
+    }
+    full.main = full.written;
+    if (low) low.main = low.written;
+    for (let i = 0; i < shadowOnly; i += 1) this.packMember(castFrom!, this.shadowOnly[i]!, p);
+    this.endPack(full);
+    if (low) this.endPack(low);
+  }
+
+  private beginPack(draw: MeshDraw): void {
+    draw.written = 0;
+    draw.recoloured = false;
+    const box = draw.box;
     box[0] = box[1] = box[2] = Infinity;
     box[3] = box[4] = box[5] = -Infinity;
-    for (let m = 0; m < memberTotal; m += 1) {
-      const at = m * partTotal + p;
-      if (this.committedChoice[at] !== v) continue;
-      if (keep && !keep[m]) continue;
-      // Element by element: a `subarray` view here would allocate per instance per frame.
-      for (let e = 0; e < 16; e += 1) matrices[count * 16 + e] = this.committedMatrix[at * 16 + e]!;
-      if (colours && (coloursDirty || slots[count] !== m)) {
-        colours[count * 3] = this.colour[at * 3]!;
-        colours[count * 3 + 1] = this.colour[at * 3 + 1]!;
-        colours[count * 3 + 2] = this.colour[at * 3 + 2]!;
-        recoloured = true;
-      }
-      slots[count] = m;
-      // The mesh's bounds are the box round its children's own boxes: no
-      // transform per instance, and never smaller than any part it draws.
-      const b = m * 6;
-      for (let k = 0; k < 3; k += 1) {
-        if (this.memberBox[b + k]! < box[k]!) box[k] = this.memberBox[b + k]!;
-        if (this.memberBox[b + 3 + k]! > box[3 + k]!) box[3 + k] = this.memberBox[b + 3 + k]!;
-      }
-      count += 1;
+  }
+
+  /** Writes member `m`'s part `p` into the next slot of `draw`. */
+  private packMember(draw: MeshDraw, m: number, p: number): void {
+    const at = m * this.parts.length + p;
+    const slot = draw.written;
+    const matrices = draw.mesh.instanceMatrix.array as Float32Array;
+    const colours = draw.mesh.instanceColor?.array as Float32Array | undefined;
+    // Element by element: a `subarray` view here would allocate per instance per frame.
+    for (let e = 0; e < 16; e += 1) matrices[slot * 16 + e] = this.committedMatrix[at * 16 + e]!;
+    if (colours && (this.coloursDirty || draw.slots[slot] !== m)) {
+      colours[slot * 3] = this.colour[at * 3]!;
+      colours[slot * 3 + 1] = this.colour[at * 3 + 1]!;
+      colours[slot * 3 + 2] = this.colour[at * 3 + 2]!;
+      draw.recoloured = true;
     }
-    if (count > 0) this.sphereOfBox(0, box, sphere);
+    draw.slots[slot] = m;
+    // The mesh's bounds are the box round its children's own boxes: no
+    // transform per instance, and never smaller than any part it draws.
+    const b = m * 6;
+    const box = draw.box;
+    for (let k = 0; k < 3; k += 1) {
+      if (this.memberBox[b + k]! < box[k]!) box[k] = this.memberBox[b + k]!;
+      if (this.memberBox[b + 3 + k]! > box[3 + k]!) box[3 + k] = this.memberBox[b + 3 + k]!;
+    }
+    draw.written = slot + 1;
+  }
+
+  /**
+   * Finishes a pack: the main pass's count, the shadow pass's, and the sphere
+   * round every child the mesh carries — the main pass's and the shadow's,
+   * because three.js culls both passes against the one sphere.
+   */
+  private endPack(draw: MeshDraw): void {
+    const mesh = draw.mesh;
+    const total = draw.written;
+    draw.shadow = total;
+    const sphere = mesh.boundingSphere ?? (mesh.boundingSphere = new Sphere());
+    if (total > 0) this.sphereOfBox(0, draw.box, sphere);
     else sphere.makeEmpty();
-    mesh.count = count;
-    mesh.visible = count > 0;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    // A slot past `total` is remembered as holding whoever it last held, and
+    // skips its colour write when she comes back. That is only true while her
+    // colour has not changed in the meantime — and children move between a
+    // part's two level meshes all the time — so a recolour forgets them.
+    if (this.coloursDirty) draw.slots.fill(-1, total);
+    mesh.count = draw.main;
+    mesh.visible = total > 0;
+    // An empty mesh is not drawn, so there is nothing to upload for it: under
+    // the ordinary camera that is every full-detail mesh, every frame.
+    if (total > 0) mesh.instanceMatrix.needsUpdate = true;
+    if (draw.recoloured && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   dispose(): void {
     LIVE_CROWDS.delete(this);
     for (const part of this.parts) {
       for (const variant of part.variants) variant.dispose();
+      for (const variant of part.low) variant?.dispose();
     }
   }
 }
@@ -488,6 +658,10 @@ const EMPTY_SPHERE = new Sphere();
  * own `flush` packed them, which is always correct to draw. A crowd whose
  * `flush` has not run since its last `commit` is trimmed against its last
  * flush, which is the buffer the renderer would upload anyway.
+ *
+ * It also chooses each child's level of detail for this draw, by how tall she
+ * is drawn through `camera` as a share of the picture — which needs nothing
+ * from the canvas, so the choice is the same at every pixel ratio and size.
  */
 export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
   // Parents too: a ride's camera rides on something. Both of these repeat work
@@ -495,12 +669,13 @@ export function cullCrowdsFor(scene: Object3D, camera: Camera): void {
   camera.updateWorldMatrix(true, false);
   cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   cullFrustum.setFromProjectionMatrix(cullMatrix, camera.coordinateSystem, camera.reversedDepth);
+  lodView.lensScale = camera.projectionMatrix.elements[5]!;
   for (const crowd of LIVE_CROWDS) {
     // Not in this scene, or switched off (an interior she is not in): not drawn
     // by this render at all, so there is nothing to trim.
     if (!drawnIn(crowd.group, scene)) continue;
     crowd.group.updateWorldMatrix(true, false);
-    crowd.cullTo(cullFrustum);
+    crowd.cullTo(cullFrustum, lodView);
   }
 }
 
