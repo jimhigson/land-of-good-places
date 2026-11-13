@@ -95,8 +95,18 @@ export const TINY_CASTER_RADIUS = 0;
  */
 export function sunShadowCacheRequested(): boolean {
   if (typeof location === 'undefined') return false;
-  return new URLSearchParams(location.search).get('shadowCache') === '1';
+  const asked = new URLSearchParams(location.search).get('shadowCache');
+  if (asked === '1') return true;
+  if (asked === '0') return false;
+  return SUN_SHADOW_CACHE_DEFAULT;
 }
+
+/**
+ * The one line to flip once somebody has watched it in motion. Stills match
+ * three's own pass (see HANDOFF-perf-step12.md); walking, the re-centre steps
+ * and the sun's steps have been counted but not yet looked at frame by frame.
+ */
+export const SUN_SHADOW_CACHE_DEFAULT = false;
 
 interface Entry {
   readonly matrix: Float64Array;
@@ -233,7 +243,7 @@ export class SunShadowCache {
         }
       `,
     });
-    // The tap: the same triangle, every fragment discarded.
+    // The tap: the same triangle, moved wholly outside clip space.
     this.tap = new Mesh(triangle, new MeshBasicMaterial());
     this.tap.name = 'sunShadowCache.tap';
     this.tap.castShadow = true;
@@ -242,12 +252,14 @@ export class SunShadowCache {
       name: 'sunShadowCache.tap',
       vertexShader: /* glsl */ `
         void main() {
-          gl_Position = vec4(position.xy, 0.0, 1.0);
+          gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         }
       `,
+      // Clipped away by the vertex stage; the colour is written only so the
+      // program has the output WebGL 2 insists on (see the sentinel's note).
       fragmentShader: /* glsl */ `
         void main() {
-          discard;
+          gl_FragColor = vec4(1.0);
         }
       `,
     });
