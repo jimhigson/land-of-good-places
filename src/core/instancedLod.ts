@@ -31,18 +31,68 @@ export const LOD_LOW = 1;
  *
  * Measured on the crowd's children (one of each of the nine hairstyles), the
  * sphere `InstancedCrowd` keeps round a child is 2.0–2.4 × her height, so she
- * goes to full detail somewhere between 140 and 170 px tall and back to the
- * far level between 115 and 140. The ordinary camera draws her ~23 px tall:
- * always the far level.
+ * goes to full detail somewhere between 50 and 59 px tall and back to the far
+ * level between 41 and 49. The ordinary camera at zoom 1 draws her ~23 px tall
+ * on an 1800 px buffer and ~35 px on a 2700 px one: the far level.
+ *
+ * **Why so low.** These were 340 / 280, which kept the far level up to
+ * 140–170 px of child. Pinch-zoom (`CAMERA_ZOOM_MAX`, 5.5×) draws her
+ * 125–190 px tall, and side-by-side crops at 60 and 110 px showed the far
+ * level plainly: it is a 3–22 cell grid per part, good for a child two dozen
+ * pixels high and nothing bigger. So it is used only at the size it was seen
+ * to pass, and a zoomed-in child is always the model as authored.
  */
-export const LOD_FULL_ABOVE_PX = 340;
-export const LOD_LOW_BELOW_PX = 280;
+export const LOD_FULL_ABOVE_PX = 120;
+export const LOD_LOW_BELOW_PX = 100;
 
 /** The far level's triangle budget, as a share of the geometry it stands in for. */
 export const LOD_LOW_TRIANGLE_RATIO = 0.25;
 
 /** Below this many triangles a geometry is its own far level: nothing to save. */
 export const LOD_MIN_TRIANGLES = 48;
+
+/**
+ * A far level whose surface area is more than this share away from its
+ * source's is a **different shape**, not a cheaper drawing of the same one,
+ * and the part keeps its source instead (see {@link lowDetailGeometry}).
+ *
+ * Measured over the crowd child's 44 parts, far area / source area: the body,
+ * skull, bags and hair shells sit between 0.83 and 1.16. The parts outside
+ * that are the ones clustering wrecks — the many-coned hair (0.77: a dozen
+ * spikes merged to three), a shoe part (0.58), a 216-triangle sphere (0.65),
+ * a 256-triangle hair piece (1.26), and the collar and hem (0.77). Those are
+ * 5.5 k of the prototype's 40 k triangles, so refusing them costs little.
+ */
+export const LOD_MAX_SURFACE_CHANGE = 0.2;
+
+/** Total area of a geometry's triangles, in its own units squared. */
+export function surfaceArea(geometry: BufferGeometry): number {
+  const position = geometry.getAttribute('position');
+  if (!position) return 0;
+  const index = geometry.index;
+  const total = triangleCount(geometry);
+  let area = 0;
+  for (let t = 0; t < total; t += 1) {
+    const a = index ? index.getX(t * 3) : t * 3;
+    const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+    const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+    const ux = position.getX(b) - position.getX(a), uy = position.getY(b) - position.getY(a), uz = position.getZ(b) - position.getZ(a);
+    const vx = position.getX(c) - position.getX(a), vy = position.getY(c) - position.getY(a), vz = position.getZ(c) - position.getZ(a);
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    area += Math.sqrt(nx * nx + ny * ny + nz * nz) / 2;
+  }
+  return area;
+}
+
+/**
+ * How far a far level's surface area is from its source's, as a share of the
+ * source's: 0 is the same area, 0.25 is a quarter lost or gained. `Infinity`
+ * for a source with no area to compare against.
+ */
+export function surfaceChange(source: BufferGeometry, low: BufferGeometry): number {
+  const from = surfaceArea(source);
+  return from > 0 ? Math.abs(surfaceArea(low) / from - 1) : Infinity;
+}
 
 /**
  * The drawing-buffer height assumed when a caller cannot say (a headless
@@ -105,8 +155,9 @@ const lowCache = new WeakMap<BufferGeometry, BufferGeometry>();
  * The far level of `source`: at most {@link LOD_LOW_TRIANGLE_RATIO} of its
  * triangles. Computed once per geometry and shared by everything drawing it.
  *
- * Returns `source` itself when there is nothing to gain or it cannot be done
- * safely (tiny, morph targets) — so a caller can always draw what it gets
+ * Returns `source` itself when there is nothing to gain, it cannot be done
+ * safely (tiny, morph targets), or the result is no longer the same shape
+ * ({@link LOD_MAX_SURFACE_CHANGE}) — so a caller can always draw what it gets
  * back, and compares with `===` to learn there is no second level.
  *
  * **For single-material draws only**: the far level has no `groups`, so a mesh
@@ -116,10 +167,11 @@ export function lowDetailGeometry(source: BufferGeometry): BufferGeometry {
   const cached = lowCache.get(source);
   if (cached) return cached;
   const triangles = triangleCount(source);
-  const low =
+  const simplified =
     triangles < LOD_MIN_TRIANGLES
-      ? source
-      : (clusterSimplify(source, Math.max(LOD_MIN_TRIANGLES / 2, Math.floor(triangles * LOD_LOW_TRIANGLE_RATIO))) ?? source);
+      ? null
+      : clusterSimplify(source, Math.max(LOD_MIN_TRIANGLES / 2, Math.floor(triangles * LOD_LOW_TRIANGLE_RATIO)));
+  const low = simplified && surfaceChange(source, simplified) <= LOD_MAX_SURFACE_CHANGE ? simplified : source;
   lowCache.set(source, low);
   return low;
 }

@@ -40,9 +40,12 @@
  *
  * 4. **One level of detail each, and the far one under this camera** (step 16).
  *    Every part with a far-level mesh is drawn for a child by exactly one of
- *    its two meshes — never both (two surfaces fighting), never neither — and
- *    under every pose here, which is the ordinary follow camera on a
- *    {@link DEVICE_PIXEL_RATIO}× screen, that one is the far level.
+ *    its two meshes — never both (two surfaces fighting), never neither, under
+ *    every pose. On the **park poses at zoom 1** — the ordinary follow camera
+ *    on a {@link DEVICE_PIXEL_RATIO}× screen — that one is the far level. The
+ *    poses at `CAMERA_ZOOM_MAX` draw a child several times larger, where full
+ *    detail is the right answer, and the interiors are not asserted either
+ *    way; the run says on stderr how many parts each clause covered.
  *
  * Poses: the real `IsoCamera`, resized to the desktop (1440×900) and the phone
  * (390×844), at the default zoom and zoomed out; centred on every park child,
@@ -71,7 +74,7 @@ import {
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { CROWD_BOUNDS_MARGIN, InstancedCrowd, cullCrowdsFor } from '../src/entities/npc/InstancedCrowd.ts';
-import { LOD_LOW_TRIANGLE_RATIO, LOD_MIN_TRIANGLES, triangleCount } from '../src/core/instancedLod.ts';
+import { LOD_LOW_TRIANGLE_RATIO, LOD_MAX_SURFACE_CHANGE, LOD_MIN_TRIANGLES, surfaceChange, triangleCount } from '../src/core/instancedLod.ts';
 import { CAMERA_ZOOM_MAX } from '../src/core/constants.ts';
 import { CASTLE_FLOORS } from '../src/world/building/floors.ts';
 import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
@@ -304,13 +307,15 @@ const tally: Record<'park' | 'interior', SceneTally> = { park: freshTally(), int
 const failures: string[] = [];
 /** On-screen parts that have a far level, and how many of those were drawn at full detail. */
 let partsWithLevels = 0;
+/** Of those, the ones measured on a pose where the far level is the only right answer. */
+let partsFarExpected = 0;
 let partsAtFullDetail = 0;
 let fullDetailReports = 0;
 let partsOnScreen = 0;
 let partsInShadow = 0;
 const worldMatrix = new Matrix4();
 
-function measure(label: string, kind: 'park' | 'interior'): void {
+function measure(label: string, kind: 'park' | 'interior', expectFarLevel = false): void {
   scene.updateMatrixWorld(true);
   const cam = iso.camera;
   cam.updateMatrixWorld(true);
@@ -351,7 +356,10 @@ function measure(label: string, kind: 'park' | 'interior'): void {
             partsWithLevels += 1;
             if (drawing.length > 1) {
               failures.push(`${label}: ${mesh.name} draws one child at both levels of detail (${drawing.map((d) => d.name).join(' and ')})`);
-            } else if (drawing[0] === levels[0]) {
+            } else if (!expectFarLevel) {
+              // One level, and either is right: a child at `CAMERA_ZOOM_MAX`
+              // is several times the switch size and wants the full model.
+            } else if ((partsFarExpected += 1) > 0 && drawing[0] === levels[0]) {
               partsAtFullDetail += 1;
               if (fullDetailReports < 5) {
                 fullDetailReports += 1;
@@ -502,6 +510,8 @@ for (let round = 0; round < ROUNDS; round += 1) {
   step(zero, 600);
   for (const [name, width, height] of ASPECTS) {
     if (process.env['SKIP_PARK']) break;
+    // Named for what it was once thought to do: `CAMERA_ZOOM_MAX` is the
+    // closest the camera gets (larger is closer), so `true` is zoomed IN.
     for (const zoomedOut of [false, true]) {
       // Children in the park, each one put in turn at every edge of the frame.
       for (let k = round % 2; k < kids.length; k += 2) {
@@ -516,7 +526,7 @@ for (let round = 0; round < ROUNDS; round += 1) {
             .addScaledVector(iso.screenUpAxis as Vector3, -oy * iso.viewHalfHeight);
           focus.y = target.y;
           frameOn(focus, width, height, zoomedOut);
-          measure(`round ${round} ${name}${zoomedOut ? ' zoomed out' : ''}, ${kid.name} at (${ox},${oy})`, 'park');
+          measure(`round ${round} ${name}${zoomedOut ? ' at CAMERA_ZOOM_MAX' : ''}, ${kid.name} at (${ox},${oy})`, 'park', !zoomedOut);
         }
       }
     }
@@ -636,10 +646,13 @@ process.stderr.write(
 if (partsOnScreen === 0 || partsInShadow === 0) failures.push('no crowd part was ever on screen — the check measured nothing');
 
 // The far level itself: every part's is inside its triangle budget, and the
-// parts that have none are the ones too small to need one.
+// parts that have none are the ones too small to need one, or the ones whose
+// far level `lowDetailGeometry` refused as no longer the same shape.
 let fullTris = 0;
 let lowTris = 0;
 let partsWithFarLevel = 0;
+/** Big enough for a far level, and refused one: counted and announced, not failed. */
+let partsKeptAsAuthored = 0;
 let partTotal = 0;
 for (const crowd of crowds) {
   for (const part of insides(crowd).parts) {
@@ -654,17 +667,29 @@ for (const crowd of crowds) {
       if (low > budget || low < 4) {
         failures.push(`${crowd.group.name}: ${part.low[0].name} has ${low} triangles for a ${full}-triangle part, budget 4..${budget}`);
       }
+      const change = surfaceChange(part.source.geometry, part.low[0].geometry);
+      if (!(change <= LOD_MAX_SURFACE_CHANGE)) {
+        failures.push(
+          `${crowd.group.name}: ${part.low[0].name} has a surface area ${(change * 100).toFixed(1)} % away from the part it stands in for ` +
+            `(${full} -> ${low} triangles), limit ${LOD_MAX_SURFACE_CHANGE * 100} %`,
+        );
+      }
     } else if (full >= LOD_MIN_TRIANGLES) {
-      failures.push(`${crowd.group.name}: ${part.variants[0]?.name} has ${full} triangles and no far level`);
+      partsKeptAsAuthored += 1;
     }
   }
 }
 process.stderr.write(
-  `check:crowd-cull: level of detail — ${partsWithFarLevel} of ${partTotal} parts have a far level; every part of every crowd ` +
-    `${fmt(fullTris)} triangles at full detail, ${fmt(lowTris)} at the far level; ${partsWithLevels} on-screen parts with two levels checked, ` +
-    `${partsAtFullDetail} drawn at full detail (must be 0 under this camera at ${DEVICE_PIXEL_RATIO}x)\n`,
+  `check:crowd-cull: level of detail — ${partsWithFarLevel} of ${partTotal} parts have a far level, ${partsKeptAsAuthored} more are big enough ` +
+    `and keep the authored geometry (far level refused as a different shape); every part of every crowd ` +
+    `${fmt(fullTris)} triangles at full detail, ${fmt(lowTris)} at the far level; ${partsWithLevels} on-screen parts with two levels checked for ` +
+    `one level each, ${partsFarExpected} of them on park poses at zoom 1 where the far level is required, ` +
+    `${partsAtFullDetail} of those drawn at full detail (must be 0 at ${DEVICE_PIXEL_RATIO}x); ` +
+    `poses at CAMERA_ZOOM_MAX and interiors assert one level only, not which\n`,
 );
 if (partsWithLevels === 0) failures.push('no on-screen part had a far level — the level-of-detail half measured nothing');
+if (partsFarExpected === 0) failures.push('no part with a far level was on screen on a park pose at zoom 1 — "the far level under the ordinary camera" measured nothing');
+if (partsWithFarLevel === 0) failures.push('no part of any crowd has a far level — every one was refused or too small');
 
 if (failures.length > 0) {
   const shown = failures.slice(0, 20);
