@@ -15,7 +15,7 @@
  * ## What it measures
  *
  * For each space (park, every castle deck, hotel, library, reptile house, the
- * rides), with the clock frozen, it walks the scene exactly as three's
+ * rides), at one fixed moment (below), it walks the scene exactly as three's
  * `projectObject` does — `visible`, layers, `frustumCulled`, the object's own
  * bounding sphere — so it knows which meshes three **will draw** this frame.
  * Then, for each of those, it asks the honest question three cannot: is any of
@@ -30,7 +30,31 @@
  *   than {@link OVERSIZED_RADIUS_M} (one sphere for most of the park), or a
  *   **stale bound** — an instanced mesh whose live instances have moved
  *   outside the sphere three cached, which is the opposite fault (something
- *   on screen could be culled) and fails outright.
+ *   on screen could be culled) and fails outright. three caches that sphere on
+ *   the mesh's first cull and never looks again, so a bound that holds at one
+ *   instant can be broken a second later: after the audit the world runs on
+ *   for {@link SWEEP_SECONDS} of its own seconds and every instanced mesh is
+ *   looked at ten times a second ({@link installStaleSweep}).
+ *
+ * ## Which frame — the same one on every machine
+ *
+ * A scene is not audited "twenty frames after she got there": a frame is a
+ * different amount of the world's time on every machine (on a GPU twenty are
+ * a third of a second; on CI's SwiftShader each is clamped at 1/12 s), and a
+ * ride's camera moves. That was the whole of CI run 43439027681's red: the sky
+ * cruiser audited on its station on a Mac and half way up the chain lift on
+ * the runner, 210,420 off-screen triangles against 386,120.
+ *
+ * Each scene names its moment instead ({@link Scene.clock}) and opens with
+ * `?clock=<seconds>` (`core/checkClock.ts`): the world is held from the first
+ * frame, stepped in fixed 1/60 s steps while nothing runs on the wall clock (an
+ * iris, a lazy room, the ball pit's budgeted warm-up), and held at the moment.
+ * Measured, 13 November 2026: all eleven scenes identical — every offender,
+ * every count — on an Apple M4 Pro twice and on SwiftShader twice
+ * (`SWIFTSHADER=1`, the runner's renderer); only the on-screen control's lit
+ * pixel count differs, by a few pixels between the two rasterisers. A red run
+ * can be opened in a browser at its moment — `/sky-cruiser?seed=5&clock=2` —
+ * and looked at.
  *
  * ## Why the instrument can be trusted (its controls)
  *
@@ -110,37 +134,48 @@ interface Scene {
   readonly offDraws: number;
   readonly offTris: number;
   /**
-   * Instanced meshes whose cached bound already missed live instances when this
-   * check landed, in files its author did not own. A ratchet like the rest:
-   * the count may only fall, every one is named on stderr on every run, and a
-   * space without this field tolerates none.
+   * Instanced meshes whose bound three culls by is known to miss live
+   * instances — at the audited moment or in the sweep after it. A ratchet like
+   * the rest: the count may only fall, every one is named on stderr on every
+   * run, and a space without this field tolerates none. None does today.
    */
   readonly knownStale?: number;
 }
 
 /**
- * Measured on `perf-step10-instanced-tiles` with `perf/120fps-base` merged
- * (f6ffaee4: the crowd cull among it), canonical seed 5, 1000×700 at DPR 1,
- * 13 November 2026, **one run** — re-measure with `MEASURE=1` and lower these
- * whenever a step removes more. Before the crowd cull the park figure was
- * 1.88 M, 1.62 M of it the crowd.
+ * **Measured, not guessed — and the same everywhere.** Each figure is the
+ * off-screen count at its scene's moment, canonical seed 5, 1000×700 at DPR 1,
+ * 13 November 2026, on `fix/cull-audit-ci`: identical, offender for offender,
+ * on an Apple M4 Pro (Metal) twice and on SwiftShader — CI's renderer — twice.
+ * Re-measure with `MEASURE=1` and lower these whenever a change removes more.
  *
- * The reptile house's `knownStale` are six snake meshes (`reptile-adults`,
- * `snake.mint` — segments and outline) whose instances have moved outside the
- * bound three cached for them.
+ * Re-derived from the first figures (`perf-step10-instanced-tiles`, one run on
+ * a GPU, each frozen ~0.4 s into its scene — on SwiftShader ~2.5 s in, which
+ * is the whole of CI run 43439027681's red): every ceiling fell (the old ones
+ * also carried 5 draws and 25,000 triangles of slack for the moving ride
+ * camera, which a fixed moment does not need) except the slide's triangles,
+ * 290,910 → 355,485. That is the moment, not the game: 2 s down the chute
+ * looks across more of the park than 0.4 s did — the crowd's park-wide bound,
+ * the lamp posts and the flowers, all `oversized bound` offenders already
+ * listed — and the old figure described no moment anyone chose. CI's own
+ * reading of it, about 2.5 s in, was 316,104.
+ *
+ * The reptile house's six tolerated stale bounds (snakes) are fixed, and so are
+ * the four the sweep then found beside them, the hotel's motes and the ball
+ * pit's balls: no scene tolerates one any more (`knownStale` was 6, now unset).
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 37, offTris: 348_392 },
-  'castle deck 0': { path: '/castle?deck=0', clock: 1, space: 'castle.', offDraws: 18, offTris: 55_390 },
-  'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 362_008 },
-  'castle deck 2': { path: '/castle?deck=2', clock: 1, space: 'castle.', offDraws: 17, offTris: 119_900 },
+  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 39, offTris: 368_916 },
+  'castle deck 0': { path: '/castle?deck=0', clock: 1, space: 'castle.', offDraws: 18, offTris: 55_366 },
+  'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 336_806 },
+  'castle deck 2': { path: '/castle?deck=2', clock: 1, space: 'castle.', offDraws: 17, offTris: 120_438 },
   hotel: { path: '/hotel', clock: 1, space: 'hotel.', offDraws: 17, offTris: 52_288 },
-  library: { path: '/library', clock: 1, space: 'library', offDraws: 19, offTris: 224_304 },
-  'reptile house': { path: '/reptile-house', clock: 1, space: 'reptileHouse', offDraws: 18, offTris: 297_312, knownStale: 6 },
+  library: { path: '/library', clock: 1, space: 'library', offDraws: 18, offTris: 211_256 },
+  'reptile house': { path: '/reptile-house', clock: 1, space: 'reptileHouse', offDraws: 18, offTris: 297_312 },
   'rail race': { path: '/rail-race', clock: 2, space: '', riding: true, offDraws: 5, offTris: 40_132 },
-  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 210_420 },
-  ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 27, offTris: 376_792 },
-  slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 27, offTris: 241_736 },
+  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 214_416 },
+  ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 27, offTris: 379_316 },
+  slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 27, offTris: 323_168 },
 };
 
 const at = (scene: Scene): string =>
