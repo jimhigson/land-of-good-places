@@ -1811,10 +1811,30 @@ export class CollisionWorld {
   private readonly changeBounds = new Float64Array(CHANGE_LOG * 4);
   /** The latest revision whose change had no footprint to give: everywhere. */
   private everywhereAt = 0;
+  /**
+   * **Older changes, coarsely** — the plan bounds of every {@link CHANGE_LOG}
+   * revisions in a row, four numbers per block, so block `b` holds the union of
+   * revisions `b·CHANGE_LOG + 1 … (b + 1)·CHANGE_LOG`. A cache that fell further
+   * behind than the ring can still learn *where* the world changed: a lazy room
+   * registers hundreds of colliders in one burst 279 m from the park (QA on
+   * #759: a 459–517 ms park rebuild 3.4 s after she first walked into the
+   * castle), and its block lies wholly off the park's lattice. Bounds only grow,
+   * so the answer is conservative, never wrong. Four numbers per 256 changes.
+   */
+  private readonly blockBounds: number[] = [];
+  private blockMinX = Infinity;
+  private blockMinZ = Infinity;
+  private blockMaxX = -Infinity;
+  private blockMaxZ = -Infinity;
 
   /** Bumps {@link revision} for a change confined to this plan rectangle. */
   private changed(minX: number, minZ: number, maxX: number, maxZ: number): void {
     this.revisionCounter += 1;
+    this.blockMinX = Math.min(this.blockMinX, minX);
+    this.blockMinZ = Math.min(this.blockMinZ, minZ);
+    this.blockMaxX = Math.max(this.blockMaxX, maxX);
+    this.blockMaxZ = Math.max(this.blockMaxZ, maxZ);
+    this.closeBlock();
     const slot = this.revisionCounter % CHANGE_LOG;
     this.changeRevision[slot] = this.revisionCounter;
     const at = slot * 4;
@@ -1828,6 +1848,17 @@ export class CollisionWorld {
   private changedEverywhere(): void {
     this.revisionCounter += 1;
     this.everywhereAt = this.revisionCounter;
+    this.closeBlock();
+  }
+
+  /** Files the running block's bounds once it spans {@link CHANGE_LOG} revisions. */
+  private closeBlock(): void {
+    if (this.revisionCounter % CHANGE_LOG !== 0) return;
+    this.blockBounds.push(this.blockMinX, this.blockMinZ, this.blockMaxX, this.blockMaxZ);
+    this.blockMinX = Infinity;
+    this.blockMinZ = Infinity;
+    this.blockMaxX = -Infinity;
+    this.blockMaxZ = -Infinity;
   }
 
   private changedCircle(circle: { readonly x: number; readonly z: number; readonly radius: number }): void {
@@ -1853,15 +1884,30 @@ export class CollisionWorld {
 
   /**
    * **Every change since `revision`, by its plan footprint** — `visit` once per
-   * revision in between, oldest first. Returns false, having visited nothing
-   * that matters, when the log cannot answer: the changes are older than the
-   * ring holds, or one of them had no footprint ({@link changedEverywhere}).
-   * Then the caller must rebuild whole, exactly as before this existed.
+   * revision the ring still holds, and once per {@link blockBounds} block for
+   * anything older (one rectangle round a whole block: coarser, never wrong).
+   * Returns false when the log cannot answer — one of the changes had no
+   * footprint ({@link changedEverywhere}) — and the caller must then rebuild
+   * whole, exactly as before this existed.
    */
   forEachChangeSince(revision: number, visit: (minX: number, minZ: number, maxX: number, maxZ: number) => void): boolean {
     if (revision < 0 || this.everywhereAt > revision) return false;
-    if (this.revisionCounter - revision > CHANGE_LOG) return false;
-    for (let r = revision + 1; r <= this.revisionCounter; r += 1) {
+    // Revisions older than the ring: the bounds of each whole block they fall
+    // in (every such block is complete — see {@link blockBounds}).
+    const ringFrom = Math.max(revision, this.revisionCounter - CHANGE_LOG);
+    if (ringFrom > revision) {
+      const firstBlock = Math.floor(revision / CHANGE_LOG);
+      const lastBlock = Math.floor((ringFrom - 1) / CHANGE_LOG);
+      for (let b = firstBlock; b <= lastBlock; b += 1) {
+        const at = b * 4;
+        if (at + 3 >= this.blockBounds.length) return false;
+        const minX = this.blockBounds[at] ?? Infinity;
+        const maxX = this.blockBounds[at + 2] ?? -Infinity;
+        if (minX > maxX) continue;
+        visit(minX, this.blockBounds[at + 1] ?? 0, maxX, this.blockBounds[at + 3] ?? 0);
+      }
+    }
+    for (let r = ringFrom + 1; r <= this.revisionCounter; r += 1) {
       const slot = r % CHANGE_LOG;
       if (this.changeRevision[slot] !== r) return false;
       const at = slot * 4;
