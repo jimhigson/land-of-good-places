@@ -34,10 +34,48 @@ Plan: `docs/perf/FRAME-DROPS-2026-11.md` on `origin/perf/frame-drops-2026-11`
 4. vitest `test/building/ballPacing.test.ts` (add to shard map) + headless
    measure script against own dev server.
 
-## Status
+## Status (second engineer, 13 Nov 09:15)
 
-- [ ] 1-2 interpolation
-- [ ] 3 warm-up
-- [ ] tests, red proof
-- [ ] browser measurement
-- [ ] check / test:procgen / PR
+- [x] 1-2 interpolation (`ballPhysics.ts` drawX/Y/Z + drawDirty, `BallPit.ts` draws from them)
+- [x] 3 warm-up: `settle()` under a 2 ms frame budget, min one sub-step a frame
+- [x] guard `test/building/ballPacing.test.ts` (6 tests, in procgen shard 4), proved red twice:
+  - `interpolate(1)` in `step()` → `2 failed | 4 passed`, "expected 36226 to be +0"
+    (drawn held still 36226 of 72452 ball-frames) and "expected 0 to be greater than 0"
+  - `this.px[i] = x` inside `interpolate()` → `4 failed | 2 passed`, fingerprints
+    `ae4978a3`/`b396c390` against the pinned `1f38a64b`/`06cf593d`
+- [x] audit of the rest of `src/` — see below
+- [ ] browser measurement: NOT done. A dev park for this source hash is a fresh
+  ~30 minute solve of seed 5 on the loaded Mac; headless Chromium is 60 Hz anyway.
+- no PR from this branch: the integrator merges it into `perf/120fps`.
+
+## Audit: every other frame-rate assumption found
+
+Fixed here:
+- `src/minigames/dodgems/tree.ts` — apple floor friction `*= 0.9` and leaf drag
+  `*= 0.98` were per-frame multipliers; now `Math.pow(k, dt * 60)` (exactly k at 1/60).
+
+Found, not fixed (and why):
+- `src/art/models/ponytail.ts:81,277` `DRAG = 0.986` per sub-step and
+  `src/entities/balloonString.ts:50,150` `DRAG = 0.965` per frame: position
+  Verlet, so the implicit velocity and the constraint passes are per-step too.
+  Converting the drag alone would not make them rate-independent, and they have
+  been looked at on Jim's 120 Hz Mac as they are. Needs a time-corrected Verlet
+  and his eye.
+- `x += (target - x) * Math.min(1, dt * k)` eases (linearised, first-order
+  correct, differ by <0.1 % between 60 and 120 Hz at these k):
+  `minigames/ferrisWheel/gondola.ts:703`, `ferrisWheel/sparks.ts:137`,
+  `world/Fountain.ts:546`, `world/train/puffs.ts:111`,
+  `world/reptileHouse/exhibits.ts:278,1220`, `entities/npc/NpcSystem.ts:1235`.
+- `core/Loop.ts:68` fps read-out EMA `* 0.08` per frame, and
+  `entities/frameStrides.ts:112` typical-dt EMA `* 0.1` per frame: estimators
+  that converge in frames, not animation.
+
+Not 60 Hz assumptions (checked): `core/Loop.ts` (plain rAF, hitch clamp 1/12),
+`core/Spring.ts:30`, `Highlights.ts:84` FROZEN_DT (paused only),
+`ArrivalSequence.ts:840` BEAT_STEP (replay), `railRace/simulate.ts:468,1207,1278`
+(offline), `world/standing.ts:125` (probe), `catBus.ts:2094` (divide guard),
+`NpcSystem.ts:958` far children every other frame with doubled dt,
+`ui/characterCreationPreview.ts` (own rAF, real dt), `candyShower.ts:436` and
+`dodgems/tree.ts` bounce multipliers (per bounce, not per frame). Every
+`setInterval`/`setTimeout` in `src/` is a UI timer, autosave or version poll —
+none drives animation.
