@@ -37,10 +37,10 @@ import { builtParkFileOf, isSearchScript, parkSwitches } from './lib/builtParks.
 
 installDeterministicMath();
 globalThis.__LGP_RESOLVE_RESTART__ = acceptedRestartSync;
-// And the shipped park file itself, when there is one for this source: a
-// process that builds a supported seed's park with no explicit restart and no
-// park-changing switch hydrates it from `.parks/` (`builtParkFileOf`) instead of
-// solving it — the park the game ships, proven equal to the solve.
+// And the shipped park file itself, checked in under `parks/`: a process that
+// builds a supported seed's park with no explicit restart and no
+// park-changing switch hydrates it from there (`builtParkFileOf`) instead of
+// solving it — the park the game ships, held to this source by validate:parks.
 globalThis.__LGP_RESOLVE_PARK_FILE__ = (seed) => builtParkFileOf(process.cwd(), seed, process.env);
 
 import { resolveTsExtension } from './ts-extension-resolver.mjs';

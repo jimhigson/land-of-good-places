@@ -67,6 +67,15 @@ in step by hand"*. That is withdrawn. They are kept in step by a machine:
   restored only into the same park built by the same code. See "What is no
   longer guaranteed" below for the cost.
 
+**Measured, 13 November** (a Mac shared with other agents, load 8-40, three
+seeds at a time): validating all sixteen against `origin/main` merged in took
+1382 s, every seed accepted, 133 measures, 190-312 s a seed; with
+`check:stall-accommodate` added and a render-only edit inside the closure, 1324
+s, every seed accepted, 134 measures, 193-241 s a seed, no solve process seen in
+598 samples. Re-stamping all sixteen from that validation: 1.8 s. The same
+render-only edit used to cost a re-solve of all sixteen. CI runs one seed a
+runner, so the wall time there is one seed's.
+
 **Merge conflicts in `parks/`.** `.gitattributes` makes each park file a whole
 file (`-merge`), so a conflict leaves one side intact and parseable. Rule: take
 main's (`git checkout origin/main -- parks/`), run `pnpm run build:parks` under
