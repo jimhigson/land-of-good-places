@@ -56,6 +56,9 @@ const POOLS: readonly (readonly [number, number])[] = [
   [18, 0],
 ];
 
+/** How many warm pools are painted on the floor — one per light the hall used to hang there. */
+export const REPTILE_LIGHT_POOL_COUNT = POOLS.length;
+
 /**
  * The two fills standing in for the six pools' reach. Fitted against six
  * `PointLight(fairyWarm, 3.2, 30, decay 1)` at 5 m over {@link POOLS}: the

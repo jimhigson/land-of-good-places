@@ -29,6 +29,9 @@ const SEGMENTS = 28;
  */
 const POOL_LIFT = DECAL_STEP * 4;
 
+/** The pools mesh's name: how a check finds the painted glow under the hall root. */
+export const LIGHT_POOLS_MESH_NAME = 'reptile-house-light-pools';
+
 export interface LightPoolSpot {
   readonly x: number;
   readonly z: number;
@@ -91,7 +94,7 @@ export function buildLightPools(spots: readonly LightPoolSpot[], radius: number,
     fog: false,
   });
   const mesh = new Mesh(geometry, material);
-  mesh.name = 'reptile-house-light-pools';
+  mesh.name = LIGHT_POOLS_MESH_NAME;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   // Light is not a thing to tap or to stand on.
