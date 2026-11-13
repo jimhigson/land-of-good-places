@@ -76,9 +76,42 @@
  * animation from here: `World.parkDrawn` answers yes everywhere, the crowd
  * lives everywhere, and the banquet, the wild pets and the hotel's rooms are
  * animated every frame wherever she is.
+ *
+ * Proved against: seed 5 hydrated from its prebuilt file, `perf/undrawn-indoors`
+ * at ce7f6f3d, she stands at the entrance spot (`ENTRANCE_PLAYER_X/Z`), 600
+ * garden frames, 240 in each room, 13 Nov 2026. Green, then `--mutate` (exit 1):
+ *
+ * ```
+ * garden (garden), 600 frames, 6534 objects under a hidden ancestor: undrawn object-changes 0, on 0 of 600 frames
+ * hotel lobby (hotel.lobby), 240 frames, 5723 objects under a hidden ancestor: undrawn object-changes 0, on 0 of 240 frames
+ *   the crowd's buffers rewritten on 0 of 240 frames; the train still
+ * … library, reptile house, castle great hall and roof the same; the mall:
+ *   exempt in castle mall: the train, which the crowd living here rides — 5520 object-changes under it, the crowd rewritten on 240 of 240 frames
+ * control 4, back in the garden: 10620 changes under the-park in 60 frames, the crowd rewritten on 60, the train moved 4.00 m
+ *
+ * --mutate:
+ * garden: 43542 changes to objects in spaces that are not drawn, on 600 of 600 frames
+ *       7200  the-big-building-inside: building-shell-floor-1 > great-hall-diners-1 > crowd:BufferGeometry
+ *       2400  the-land-hotel-inside: the-land-hotel-inside > kid > body
+ * hotel lobby: 58350 changes to objects that are not drawn, on 240 of 240 frames
+ *       6000  the-park: fairy-lights > fairy-bulbs:tiles > fairy-bulbs
+ *       5280  the-park: anchor-plots > anchor:dodgems > dodgems:ride
+ * hotel lobby: the crowd's instance buffers were rewritten on 240 of 240 frames
+ * hotel lobby: the train moved from 44.32 to 60.32 m along its loop while nobody could see it
+ * … and the same three for the library, the reptile house and the great hall;
+ * castle mall: 52923 changes; castle roof: 52551 changes and the crowd rewritten.
+ * ```
+ *
+ * Two gates the mutation does not reach, because nothing outside the class can
+ * call round them, were found by this instrument before they existed (same
+ * seed and spot, the commit before ce7f6f3d): **Sunny's head in the park**,
+ * 240 changes in every room's 240 frames under
+ * `the-park: the-reptile-house-outside > reptileHouse.exterior > rh-head-pivot`,
+ * and **the castle's grown-up**, 1242 in the garden and 494 in every room
+ * under `the-big-building-inside > grown-up`. Both read 0 with their gates.
  */
 import './headless-canvas.mjs';
-import { InstancedMesh, Object3D, Vector3 } from 'three';
+import { InstancedMesh, type Mesh, Object3D, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { saveFlags } from '../src/state/flags.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
@@ -154,7 +187,7 @@ const step = (): void => {
 /** Ten numbers per object: position, quaternion, scale. */
 const STRIDE = 10;
 const last = new Map<Object3D, Float64Array>();
-const lastVersion = new Map<InstancedMesh, number>();
+const lastVersion = new Map<Object3D, number>();
 
 /** The nearest few names above an object, so a change is attributed to something a person can find. */
 function label(object: Object3D): string {
@@ -222,8 +255,13 @@ function sweep(watch: Object3D | string | null = null, exempt: readonly Object3D
     snap[0] = p.x; snap[1] = p.y; snap[2] = p.z;
     snap[3] = q.x; snap[4] = q.y; snap[5] = q.z; snap[6] = q.w;
     snap[7] = s.x; snap[8] = s.y; snap[9] = s.z;
-    if (object instanceof InstancedMesh) {
-      const version = object.instanceMatrix.version;
+    // Buffers rewritten count too: an instance buffer (`InstancedCrowd.flush`,
+    // a twinkling string's colours) or a vertex buffer (the fountain's
+    // ripples). Versions only ever grow, so their sum moves when any one does.
+    const mesh = object as Partial<Mesh> & { instanceColor?: { version: number } | null };
+    if (mesh.isMesh === true && mesh.geometry) {
+      let version = mesh.geometry.getAttribute('position')?.version ?? 0;
+      if (object instanceof InstancedMesh) version += object.instanceMatrix.version + (object.instanceColor?.version ?? 0);
       if (lastVersion.get(object) !== version) changed = true;
       lastVersion.set(object, version);
     }
