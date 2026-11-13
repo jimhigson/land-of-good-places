@@ -40,8 +40,9 @@ import {
   WornKeychain,
 } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
-import { NAV_WARM_BUDGET_MS, type NavGrid } from './world/NavGrid';
+import type { NavGrid } from './world/NavGrid';
 import { playerNavGrid } from './world/playerLattice';
+import { RouteScheduler } from './world/routeScheduler';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
@@ -156,6 +157,13 @@ export class Game {
   readonly player: Player;
   readonly hud: Hud;
   readonly navGrid: NavGrid;
+  /**
+   * **Every route the game finds, a couple of milliseconds a frame** — her
+   * taps, her companions' walks and the crowd's trips, and her own lattice
+   * laid behind the cat bus and on entering a space, all out of one budget
+   * (step 1b of the 120 fps plan; `world/routeScheduler.ts`).
+   */
+  readonly routes = new RouteScheduler();
   readonly tapNavigator: TapNavigator;
   readonly pointer: PointerControls;
   readonly screenControls: ScreenControls;
@@ -459,6 +467,10 @@ export class Game {
     // up onto — from its one owner, which `check:hotel` builds too, and whose
     // windows the put-down rule floods (`world/dismount.ts`).
     this.navGrid = playerNavGrid(this.world);
+    // Her lattice is kept laid over the space she is in, ahead of anything
+    // asked of it — behind the cat bus first, then on entering each space.
+    this.routes.keepWarm(this.navGrid, () => this.player.groundSampler);
+    this.world.npcs.useRouteScheduler(this.routes);
 
     // And the same map, handed to the parade — issues #602 and #605, the pets
     // that walked through the bedroom wall to get to bed and warped back
@@ -467,7 +479,7 @@ export class Game {
     // in `petRoute.ts`, because the walker is not what a lattice costs and a
     // second lattice charges the first nap another second of blocked main
     // thread (#607).
-    this.parade.setNavGrid(this.navGrid);
+    this.parade.setNavGrid(this.navGrid, this.routes);
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
@@ -482,6 +494,7 @@ export class Game {
       // What a tap may land on is what the castle's cutaway leaves visible —
       // one owner: the same `currentDeck` that drives the floor fade.
       () => this.world.building.visibleSurfaceCeiling,
+      this.routes,
     );
     this.engine.scene.add(this.tapNavigator.group);
     // A tap in an interior's way out walks her on through it (QA on #743).
@@ -1817,6 +1830,7 @@ export class Game {
     for (const system of this.systems) system.dispose?.();
     this.miniGames.dispose();
     this.tapNavigator.dispose();
+    this.routes.dispose();
     this.tapBurst.dispose();
     this.raceHud.dispose();
     this.screenControls.dispose();
@@ -1838,15 +1852,18 @@ export class Game {
   private readonly strides = new FrameStrides();
 
   /**
-   * **Her route lattice, a slice at a time** (step 1b of the 120 fps plan,
-   * `docs/perf/FRAME-DROPS-2026-11.md`): laid behind the cat bus (`main.ts`
-   * calls this every ride frame) and over the first frames of any space she
-   * walks into, never inside the first tap — that was one 526 ms task. True
-   * once the lattice describes the space she is in. See `NavGrid.warm`.
+   * **This frame's route-finding** (step 1b of the 120 fps plan,
+   * `docs/perf/FRAME-DROPS-2026-11.md`): a new frame's budget, her lattice
+   * laid a slice further — behind the cat bus (`main.ts` calls this every ride
+   * frame) and over the first frames of any space she walks into, never inside
+   * the first tap, which was one 526 ms task — then whatever routes are still
+   * being found, hers first. Called once a frame, first thing in `tick`. True
+   * once the lattice describes the space she is in. See `RouteScheduler`.
    */
   warmNavigation(): boolean {
-    const sampler = this.player.groundSampler;
-    return sampler ? this.navGrid.warm(sampler, NAV_WARM_BUDGET_MS) : false;
+    this.routes.beginFrame();
+    this.routes.run();
+    return this.routes.isWarm(this.navGrid);
   }
 
   private tick(tick: LoopTick): void {

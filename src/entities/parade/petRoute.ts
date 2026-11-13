@@ -1,6 +1,7 @@
 import type { Vector3 } from 'three';
 import type { GroundSampler } from '../Player';
 import { MAX_ROUTE_WAYPOINTS, type NavGrid } from '../../world/NavGrid';
+import { ROUTE_PRIORITY, RouteRequest, type RouteScheduler } from '../../world/routeScheduler';
 
 /**
  * **How a companion gets anywhere it is not already** — issues #602 and #605.
@@ -55,6 +56,17 @@ import { MAX_ROUTE_WAYPOINTS, type NavGrid } from '../../world/NavGrid';
  * step is the ordinary seek" that `TapNavigator`'s `SHORTFALL_TOLERANCE`
  * comment describes. That leg is short and inside one room, so there is
  * nothing in it to walk through.
+ *
+ * ## While a route is being found
+ *
+ * In the game a plan is asked of `Game`'s `RouteScheduler` and answered a
+ * slice a frame, behind her own taps (step 1b of the 120 fps plan). Until it
+ * is, a companion **keeps walking the route it has**, and one with no route
+ * yet **holds where it is**: it has no collision of its own, so the straight
+ * line a tap's walk can afford is a line through a wall here. A question being
+ * answered is never asked again over the top of itself — a far one restarted
+ * every few frames by the drift rule would never be answered at all — so a
+ * goal that keeps moving is re-planned once the current answer has landed.
  */
 
 /**
@@ -120,6 +132,14 @@ export class PetRoute {
    *  `Parade` so a check can report the routing cost it really paid. */
   plans = 0;
 
+  /** The plan asked of a scheduler and not yet taken; made on the first ask. */
+  private request: RouteRequest | null = null;
+
+  /** True while a plan has been asked for and not answered. */
+  get waiting(): boolean {
+    return this.request?.pending ?? false;
+  }
+
   /**
    * **Did the last plan come back with anything at all?**
    *
@@ -156,19 +176,33 @@ export class PetRoute {
     bodyY: number,
     dt: number,
     out: Vector3,
+    /** `Game`'s route scheduler, or `null` to plan there and then — see the file comment. */
+    routes: RouteScheduler | null = null,
   ): boolean {
     this.sincePlan += dt;
+    // A plan asked on an earlier frame has been answered: walk it from here.
+    if (this.request?.status === 'done') this.land(this.request);
     const drifted = Math.hypot(goalX - this.goalX, goalZ - this.goalZ) > REPLAN_DRIFT;
 
     if (!this.planned) {
-      this.plan(navGrid, sampler, goalX, goalZ, goalY, bodyX, bodyZ, bodyY);
+      this.plan(navGrid, sampler, goalX, goalZ, goalY, bodyX, bodyZ, bodyY, routes);
+    } else if (this.waiting) {
+      // Being answered: never asked again over the top of itself.
     } else if (drifted && this.sincePlan >= REPLAN_COOLDOWN) {
-      this.plan(navGrid, sampler, goalX, goalZ, goalY, bodyX, bodyZ, bodyY);
+      this.plan(navGrid, sampler, goalX, goalZ, goalY, bodyX, bodyZ, bodyY, routes);
     } else if (this.length === 0) {
       this.retryIn -= dt;
       if (this.retryIn <= 0) {
-        this.plan(navGrid, sampler, goalX, goalZ, goalY, bodyX, bodyZ, bodyY);
+        this.plan(navGrid, sampler, goalX, goalZ, goalY, bodyX, bodyZ, bodyY, routes);
       }
+    }
+
+    if (this.waiting && this.index >= this.length) {
+      // No route to walk while the first is found: hold here rather than take
+      // the straight line through whatever is in the way.
+      out.x = bodyX;
+      out.z = bodyZ;
+      return true;
     }
 
     while (this.index < this.length) {
@@ -204,6 +238,25 @@ export class PetRoute {
     this.planned = false;
     this.length = 0;
     this.index = 0;
+    this.forgetRequest();
+  }
+
+  /** The scheduler that took the last ask, so {@link clear} can withdraw it. */
+  private askedOf: RouteScheduler | null = null;
+
+  private forgetRequest(): void {
+    const request = this.request;
+    if (!request) return;
+    if (this.askedOf) this.askedOf.cancel(request);
+    else request.status = 'idle';
+  }
+
+  /** Takes an answered plan as the route to walk, from its first waypoint. */
+  private land(request: RouteRequest): void {
+    request.status = 'idle';
+    this.points.set(request.out.subarray(0, request.count * 2));
+    this.length = request.count;
+    this.index = 0;
   }
 
   private plan(
@@ -215,14 +268,24 @@ export class PetRoute {
     bodyX: number,
     bodyZ: number,
     bodyY: number,
+    routes: RouteScheduler | null,
   ): void {
     this.planned = true;
-    this.index = 0;
     this.retryIn = RETRY_SECONDS;
     this.sincePlan = 0;
     this.goalX = goalX;
     this.goalZ = goalZ;
     this.plans += 1;
+    if (routes) {
+      // Asked into a buffer of its own, so the route being walked stays
+      // walkable until the new one lands.
+      const request = (this.request ??= new RouteRequest(ROUTE_PRIORITY.companion));
+      this.askedOf = routes;
+      routes.ask(request, navGrid, sampler, bodyX, bodyZ, bodyY, goalX, goalZ, goalY);
+      if (request.status === 'done') this.land(request);
+      return;
+    }
+    this.index = 0;
     this.length = navGrid.findRoute(
       bodyX,
       bodyZ,
