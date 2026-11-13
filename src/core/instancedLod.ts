@@ -247,9 +247,18 @@ const FLIP_COS = 0.2;
  * - **The surface stays a surface**: a collapse that would pinch it (the link
  *   condition) or fold a face over ({@link FLIP_COS}) is refused, and vertices
  *   that shared a position still share one, so a closed part stays closed.
+ * - **A smoothed fold keeps its triangles.** Where a vertex's normal is more
+ *   than ~35° ({@link FOLD_COS}) from one of its own faces — a normal averaged
+ *   round a sharp turn, like the hem joining a hair shell's outer skin to its
+ *   inner one — that vertex and its one-ring are never collapsed. A toon ramp
+ *   draws a band wherever such a normal is interpolated, and how wide the band
+ *   is depends on exactly which triangles carry it: measured in the game, the
+ *   mohican's hem band moved visibly at a 3 mm bound until this was added.
  *
  * Linear-ish in practice (a heap of candidate collapses); the crowd child's
- * forty thousand triangles are tens of milliseconds at load.
+ * forty thousand triangles took 114–133 ms at load on an M4 Pro at load
+ * average 12, once per crowd (the banquet's crowd builds its own prototype,
+ * so it pays again).
  *
  * Returns `null` if the geometry cannot be simplified at all.
  */
