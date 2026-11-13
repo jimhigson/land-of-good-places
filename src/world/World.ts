@@ -542,12 +542,15 @@ export class World implements GameSystem {
     // taken out of the graph until `Game` calls `drawnSpaces.detachUndrawn()`,
     // so a headless `World` (every Node check) is one graph, as it always was.
     //
-    // A space added later registers its root here, on this list, and is then
-    // covered by `check:drawn-spaces` without anything else being told.
+    // The labels are the stems `spaces.ts` gives each place's space id
+    // (`castle.`, `hotel.`, `reptileHouse…`, `library`), which is what lets
+    // `check:render-budget` ask, in every space, that nothing registered under
+    // another stem is in the graph. A space added later registers its root on
+    // this list and is covered by that check without anything else being told.
     this.drawnSpaces = new DrawnSpaces(scene);
     this.drawnSpaces.register('castle', this.building.interiorRoot);
     this.drawnSpaces.register('hotel', this.hotel.hotelRoot);
-    this.drawnSpaces.register('reptile-house', this.reptileHouse.hallRoot, this.reptileHouse.forecourtRoot);
+    this.drawnSpaces.register('reptileHouse', this.reptileHouse.hallRoot, this.reptileHouse.forecourtRoot);
     // The library's children's models hang under a root of their own, at an
     // identity transform beside the room (an `NpcCharacter` writes world
     // positions onto its model's root); the Library shows and hides them with

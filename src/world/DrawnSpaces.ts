@@ -70,8 +70,10 @@ export class DrawnSpaces {
    * Puts `roots` in the scene — this replaces the `scene.add` — as belonging
    * to `space`, and from here on their `visible` is their membership.
    *
-   * `space` is a label for the guard's report (`check:drawn-spaces`) and for
-   * {@link census}; nothing branches on it.
+   * `space` is the stem of the place's space id in `spaces.ts` (`castle`,
+   * `hotel`, `reptileHouse`, `library`). Nothing in the game branches on it;
+   * the guard (`check:render-budget`) uses it to say which roots may be in the
+   * graph in the space she is standing in.
    */
   register(space: string, ...roots: Object3D[]): void {
     for (const root of roots) {
