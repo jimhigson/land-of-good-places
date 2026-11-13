@@ -257,6 +257,8 @@ export const NAV_GRID_BUILDS = {
   worstSliceMs: 0,
   forced: 0,
   worstForcedMs: 0,
+  /** Lattices taken back off the shelf of a grid that follows her, instead of built again — see `NavGrid`'s `shelf`. */
+  unshelved: 0,
   patching: true,
   verify: false,
   /** How far past a change's footprint a patch reaches, as a share of the real margin. 1 in the game; a check sets 0 to prove the verifier sees a short patch. */
@@ -565,6 +567,25 @@ interface ConnectorEdge {
 /** Where along a wall segment {@link NavGrid}'s step test is asked: both ends and the middle. */
 const WALL_STEP_SAMPLES = [0, 0.5, 1] as const;
 
+/** A whole lattice put aside by a grid that follows her — see `NavGrid`'s `shelf`. */
+interface ShelvedLattice {
+  readonly boundary: ParkBoundary;
+  readonly revision: number;
+  readonly cells: number;
+  readonly originX: number;
+  readonly originZ: number;
+  readonly blocked: Uint8Array<ArrayBuffer>;
+  readonly hopBand: Uint8Array<ArrayBuffer>;
+  readonly paved: Uint8Array<ArrayBuffer>;
+  readonly flatCost: number;
+  readonly levelStart: Int32Array<ArrayBuffer>;
+  readonly nodeHeight: Float32Array<ArrayBuffer>;
+  readonly nodeCell: Int32Array<ArrayBuffer>;
+  readonly nodeCount: number;
+  readonly connectorEdges: Map<number, ConnectorEdge[]>;
+  readonly builtConnectors: readonly LevelConnector[];
+}
+
 /**
  * **One A\* in flight** — its open list, scores, back-pointers and best
  * fallback ending, and which lattice it was begun on.
@@ -696,12 +717,25 @@ export class NavGrid {
   private pointRigid = new Uint8Array(0);
 
   /** Connector edges by node, rebuilt with the lattice. */
-  private readonly connectorEdges = new Map<number, ConnectorEdge[]>();
+  private connectorEdges = new Map<number, ConnectorEdge[]>();
   private builtConnectors: readonly LevelConnector[] = [];
 
   private built = false;
   private builtBoundary: ParkBoundary | null = null;
   private builtRevision = -1;
+
+  /**
+   * **The lattice she left, kept** — for a grid that follows her
+   * (`pinnedBoundary` null): the park's whole lattice is put on this shelf
+   * when she walks into a room, and taken down again when she walks back out,
+   * brought up to date by a patch like any other. Without it every way out of
+   * every room re-laid the whole park — 380 ms of building (Node, seed 5) that
+   * the 2 ms budget spreads over ~200 frames, during which her taps had no
+   * route to walk and the crowd's plans waited behind it. One shelf: the space
+   * she was last in. A room's boundary is made afresh on each entry, so only a
+   * boundary that is the same object — the garden's — ever comes down again.
+   */
+  private shelf: ShelvedLattice | null = null;
 
   private reachedGoal = false;
   private routeEndY = 0;
@@ -1186,6 +1220,9 @@ export class NavGrid {
       }
     }
 
+    // Back in a space she has been in: its lattice comes off the shelf.
+    if (!(this.built && this.builtBoundary === boundary)) this.unshelve(boundary);
+
     if (this.built && this.builtBoundary === boundary) {
       if (this.builtRevision === this.collision.revision) return true;
       // A collider came or went since this lattice was laid: redo the cells it
@@ -1201,6 +1238,9 @@ export class NavGrid {
           return true;
         }
       }
+    } else {
+      // Into a new space: the lattice in hand goes on the shelf first.
+      this.shelve();
     }
 
     const began = performance.now();
@@ -1385,6 +1425,9 @@ export class NavGrid {
    */
   warm(sample: GroundSampler, budgetMs: number): boolean {
     const boundary = this.pinnedBoundary ?? this.collision.playBounds;
+    // Back in a space she has been in: its lattice comes off the shelf, and a
+    // half-laid lattice of the space she has just left is dropped.
+    if (!(this.built && this.builtBoundary === boundary) && this.pendingBuild?.boundary !== boundary) this.unshelve(boundary);
     if (this.built && this.builtBoundary === boundary) {
       if (this.builtRevision === this.collision.revision) return true;
       if (NAV_GRID_BUILDS.patching) {
@@ -1402,6 +1445,8 @@ export class NavGrid {
     const began = performance.now();
     let pending = this.pendingBuild;
     if (!pending || pending.boundary !== boundary) {
+      // Into a new space: the lattice in hand goes on the shelf first.
+      if (this.builtBoundary !== boundary) this.shelve();
       this.pendingBuild = null;
       this.built = false;
       // Whoever holds a flood of the old lattice must hear that it is gone.
@@ -1510,6 +1555,94 @@ export class NavGrid {
     this.builtBoundary = boundary;
     this.builtRevision = this.collision.revision;
     this.generation += 1;
+  }
+
+  // ------------------------------------------------------------ the shelf
+
+  /** The lattice in hand, as the shelf keeps it. */
+  private capture(boundary: ParkBoundary): ShelvedLattice {
+    return {
+      boundary,
+      revision: this.builtRevision,
+      cells: this.cells,
+      originX: this.originX,
+      originZ: this.originZ,
+      blocked: this.blocked,
+      hopBand: this.hopBand,
+      paved: this.paved,
+      flatCost: this.flatCost,
+      levelStart: this.levelStart,
+      nodeHeight: this.nodeHeight,
+      nodeCell: this.nodeCell,
+      nodeCount: this.nodeCount,
+      connectorEdges: this.connectorEdges,
+      builtConnectors: this.builtConnectors,
+    };
+  }
+
+  /**
+   * Puts the lattice in hand on the {@link shelf} — only a grid that follows
+   * her, and only a whole one — leaving empty arrays for the next build to lay
+   * fresh rather than over the shelved ones.
+   */
+  private shelve(): void {
+    if (this.pinnedBoundary !== null || this.windowAround !== null) return;
+    if (!this.built || this.builtBoundary === null) return;
+    this.shelf = this.capture(this.builtBoundary);
+    this.blocked = new Uint8Array(0);
+    this.hopBand = new Uint8Array(0);
+    this.paved = new Uint8Array(0);
+    this.levelStart = new Int32Array(0);
+    this.nodeHeight = new Float32Array(0);
+    this.nodeCell = new Int32Array(0);
+    this.nodeCount = 0;
+    this.connectorEdges = new Map();
+    this.builtConnectors = [];
+    this.built = false;
+    this.builtBoundary = null;
+    this.builtRevision = -1;
+    this.generation += 1;
+  }
+
+  /**
+   * Takes the {@link shelf}'s lattice down when it describes `boundary`,
+   * putting the one in hand (if whole) up in its place; true if it did. It
+   * comes down as it was laid, at the revision it was laid at — whoever asks
+   * next brings it up to date with an ordinary patch.
+   */
+  private unshelve(boundary: ParkBoundary): boolean {
+    const shelf = this.shelf;
+    if (!shelf || shelf.boundary !== boundary) return false;
+    this.shelf = this.built && this.builtBoundary !== null && this.builtBoundary !== boundary ? this.capture(this.builtBoundary) : null;
+    this.pendingBuild = null;
+    this.cells = shelf.cells;
+    this.originX = shelf.originX;
+    this.originZ = shelf.originZ;
+    this.blocked = shelf.blocked;
+    this.hopBand = shelf.hopBand;
+    this.paved = shelf.paved;
+    this.flatCost = shelf.flatCost;
+    this.levelStart = shelf.levelStart;
+    this.nodeHeight = shelf.nodeHeight;
+    this.nodeCell = shelf.nodeCell;
+    this.nodeCount = shelf.nodeCount;
+    this.connectorEdges = shelf.connectorEdges;
+    this.builtConnectors = shelf.builtConnectors;
+    // The search scratch is shared by every lattice this grid holds: grown,
+    // never shrunk, to the largest of them.
+    if (this.path.length < this.nodeCount) {
+      this.path = new Int32Array(this.nodeHeight.length);
+      this.pathVia = new Int32Array(this.nodeHeight.length);
+    }
+    this.syncSearch.fit(this.nodeCount, this.nodeHeight.length);
+    this.queuedSearch?.fit(this.nodeCount, this.nodeHeight.length);
+    this.sizePointBuffers();
+    this.built = true;
+    this.builtBoundary = boundary;
+    this.builtRevision = shelf.revision;
+    this.generation += 1;
+    NAV_GRID_BUILDS.unshelved += 1;
+    return true;
   }
 
   /**
