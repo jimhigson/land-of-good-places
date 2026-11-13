@@ -137,16 +137,35 @@ interface Sample {
   readonly at: readonly [number, number];
   /** Names of running animations on targets that are not painted. */
   readonly hiddenAnimations: readonly string[];
+  /** Wall-clock ms the {@link SAMPLE_FRAMES} took — printed, so every run shows its frame rate. */
+  readonly sampleMs: number;
+}
+
+/**
+ * The longest any one wait took, against the {@link BOOT_TIMEOUT_MS} each is
+ * allowed — printed at the end of every run, so a CI log shows the margin
+ * this check has left rather than only whether it ran out.
+ */
+let slowestWait = { ms: 0, what: 'nothing' };
+async function timed<T>(what: string, wait: Promise<T>): Promise<T> {
+  const started = Date.now();
+  const result = await wait;
+  const ms = Date.now() - started;
+  if (ms > slowestWait.ms) slowestWait = { ms, what };
+  return result;
 }
 
 async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const g = (window as unknown as { game?: { player?: unknown; engine?: unknown } }).game;
-      return Boolean(g && g.player && g.engine);
-    },
-    undefined,
-    { timeout: BOOT_TIMEOUT_MS, polling: 250 },
+  await timed(
+    'the park to boot',
+    page.waitForFunction(
+      () => {
+        const g = (window as unknown as { game?: { player?: unknown; engine?: unknown } }).game;
+        return Boolean(g && g.player && g.engine);
+      },
+      undefined,
+      { timeout: BOOT_TIMEOUT_MS, polling: 250 },
+    ),
   );
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
@@ -222,10 +241,13 @@ async function ready(page: Page): Promise<void> {
 
 async function frames(page: Page, n: number): Promise<void> {
   const from = await page.evaluate(() => (window as unknown as { __tally: { frames: number } }).__tally.frames);
-  await page.waitForFunction(
-    (until) => (window as unknown as { __tally: { frames: number } }).__tally.frames >= until,
-    from + n,
-    { timeout: BOOT_TIMEOUT_MS, polling: 100 },
+  await timed(
+    `${n} frames`,
+    page.waitForFunction(
+      (until) => (window as unknown as { __tally: { frames: number } }).__tally.frames >= until,
+      from + n,
+      { timeout: BOOT_TIMEOUT_MS, polling: 100 },
+    ),
   );
 }
 
@@ -241,6 +263,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     const w = window as unknown as {
       __domCounts: Map<string, number>;
       __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
+      __sampleStarted: number;
     };
     w.__domCounts.clear();
     w.__tally.frames = 0;
@@ -249,6 +272,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     w.__tally.draws = 0;
     w.__tally.drawsCounted = 0;
     w.__tally.drawsSkipped = 0;
+    w.__sampleStarted = performance.now();
   });
   const before = await metrics();
   await frames(page, SAMPLE_FRAMES);
@@ -258,8 +282,10 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     const w = window as unknown as {
       __domCounts: Map<string, number>;
       __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
+      __sampleStarted: number;
       game: { selection?: { selected: { id?: string } | null }; player: { position: { x: number; z: number } } };
     };
+    const sampleMs = performance.now() - w.__sampleStarted;
     const selected = w.game.selection?.selected ?? null;
     const painted = (element: Element | null): boolean => {
       for (let e = element; e; e = e.parentElement) {
@@ -273,6 +299,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
       .filter((a) => a.playState === 'running' && !painted((a.effect as KeyframeEffect | null)?.target ?? null))
       .map((a) => String((a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id));
     return {
+      sampleMs,
       hiddenAnimations,
       tally: { ...w.__tally },
       dom: [...w.__domCounts.entries()].sort((a, b) => b[1] - a[1]),
@@ -296,6 +323,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     selected: got.selected,
     at: got.at,
     hiddenAnimations: got.hiddenAnimations,
+    sampleMs: got.sampleMs,
   };
 }
 
@@ -303,7 +331,8 @@ const per = (n: number, s: Sample): string => (n / s.frames).toFixed(2);
 
 function report(label: string, s: Sample): void {
   say(
-    `${label}: at ${s.at.map((v) => v.toFixed(1)).join(', ')}, selected ${s.selected ?? 'nothing'}, ${s.frames} frames — ` +
+    `${label}: at ${s.at.map((v) => v.toFixed(1)).join(', ')}, selected ${s.selected ?? 'nothing'}, ` +
+      `${s.frames} frames in ${(s.sampleMs / 1000).toFixed(1)} s (${((s.frames * 1000) / s.sampleMs).toFixed(0)} fps) — ` +
       `DOM mutations ${s.mutations} (${per(s.mutations, s)}/frame), style recalcs ${s.styleRecalcs} (${per(s.styleRecalcs, s)}/frame), ` +
       `layouts ${s.layouts} (${per(s.layouts, s)}/frame), renderer.render ${per(s.renders, s)}/frame, ` +
       `render-target binds ${per(s.targetBinds, s)}/frame, draw calls ${s.draws} (busiest frame)`,
@@ -442,6 +471,10 @@ say(
     'animations ticking on hidden elements (the iris dots, the boot hint) are NOT fixed, only counted',
 );
 say(`asserted on the idle spawn only (park seed ${SEED}, ${SAMPLE_FRAMES} frames); the selected sample is asserted for render calls alone, and other spaces and mini-games are not covered`);
+say(
+  `frames drawn without pixels (GL draws skipped, see the file comment); slowest single wait ${(slowestWait.ms / 1000).toFixed(1)} s ` +
+    `(${slowestWait.what}) of the ${BOOT_TIMEOUT_MS / 1000} s each is allowed`,
+);
 if (MEASURE) {
   say('MEASURE=1: counts printed, nothing asserted');
 } else if (failures.length > 0) {
