@@ -39,6 +39,7 @@
     "check:npc-separation": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-separation.mts",
     "check:npc-dispersal": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-dispersal.mts",
     "check:crowd-cull": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-crowd-cull.mts",
+    "check:npc-sim-lod": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-sim-lod.mts",
     "check:npc-presence": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-npc-presence.mts",
     "check:ride-camera": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-ride-camera.mts",
     "check:orientation": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-orientation-math.mts",

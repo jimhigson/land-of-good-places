@@ -49,7 +49,8 @@ import { faceOnGround } from '../../world/up';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
-import { CHAT_STATIONARY_SPEED_EPS, type ChatBudget } from './chatActivity';
+import { CHAT_GIVEUP_RADIUS, CHAT_STATIONARY_SPEED_EPS, type ChatBudget } from './chatActivity';
+import { NpcSimLod, npcView, SIM_POSE, type NpcView } from './simLod';
 import type { ClimbableTreeSeed } from '../../world/Scenery';
 
 /**
@@ -124,8 +125,9 @@ export const MAX_CONCURRENT_CHATTERS = 2;
  * ### Cost
  *
  * Every child is instanced and every child shares one toon material, so adding
- * the thirteenth costs nothing but a matrix. Behaviour for children far from
- * the camera runs at half rate. Nothing in the frame path allocates.
+ * the thirteenth costs nothing but a matrix. A child the camera cannot see is
+ * steered every other frame and posed every fourth, on banked time
+ * (`simLod.ts`). Nothing in the frame path allocates.
  */
 
 /**
@@ -143,8 +145,8 @@ export const MAX_CONCURRENT_CHATTERS = 2;
  *
  * Cost is not the constraint (see this file's header): every child is instanced
  * and shares one toon material, so *"adding the thirteenth costs nothing but a
- * matrix"*. Behaviour for children far from the camera already runs at half
- * rate.
+ * matrix"*. Children the camera cannot see are simulated in fewer, longer
+ * steps (`simLod.ts`).
  */
 const NPC_DENSITY_PER_SQUARE_METRE = 12 / CIRCULAR_PARK_AREA;
 export const NPC_COUNT = Math.round(NPC_DENSITY_PER_SQUARE_METRE * PARK_BOUNDARY.area);
@@ -186,8 +188,17 @@ export const SEPARATION = CHILD_FOOTPRINT;
  */
 export const PLAYER_SEPARATION = CHILD_FOOTPRINT / 2 + PLAYER_RADIUS;
 
-/** Beyond this from the player, behaviour runs every other frame. */
-const FAR_DISTANCE = 34;
+/**
+ * Closer to the player than this, a child is stepped every frame whether the
+ * camera sees her or not — she may be about to notice the player, wave, copy
+ * a hop, walk up for a chat or be walked into, and all of that is the
+ * player's business the moment she turns round.
+ *
+ * Asked of the chat's own give-up radius, the widest reach any reaction to
+ * the player has, with a couple of metres over so a child is back at full
+ * rate before she is inside it.
+ */
+const EVERY_FRAME_NEAR_PLAYER = CHAT_GIVEUP_RADIUS + 2;
 
 /** How far behind its child a pet trails, in metres. */
 const PET_TRAIL = 1.15;
@@ -543,7 +554,20 @@ export class NpcSystem implements GameSystem {
    * marked present indefinitely is the correct behaviour for them.
    */
   private readonly visitRemaining = new Map<NpcCharacter, number>();
-  private frame = 0;
+  /**
+   * Who is stepped this frame, and with how much time — simulation LOD, step
+   * 11 of docs/perf/FRAME-DROPS-2026-11.md. See `simLod.ts`. Public so
+   * `check:npc-sim-lod` and the perf harness can read its counts and switch it
+   * off for a like-for-like run.
+   */
+  readonly simLod = new NpcSimLod();
+  /**
+   * What the camera sees — `simLod.ts`'s `npcView`, which `Game.render` keeps
+   * current, unless somebody (a check) hands in its own.
+   */
+  view: NpcView = npcView;
+  /** Parallel to `characters`: 1 for a child whose instance matrices are left as they were this frame. */
+  private commitSkipped: Uint8Array = new Uint8Array(0);
   /**
    * Set by `attachPlayer`, once the player exists — `null` for the handful of
    * frames before `World.attachPlayer` runs. Needed (rather than just the
@@ -843,6 +867,7 @@ export class NpcSystem implements GameSystem {
     // `characters` and writes one distance per index, so a short array here
     // would silently stop measuring the last few.
     this.labelDistances = new Float32Array(this.characters.length);
+    this.commitSkipped = new Uint8Array(this.characters.length);
   }
 
   /** Installs the building's ground sampler, so the ground floor is walkable. */
@@ -941,7 +966,8 @@ export class NpcSystem implements GameSystem {
     const { dt, elapsed } = context;
     if (dt <= 0) return;
 
-    this.frame += 1;
+    this.simLod.beginFrame();
+    this.view.tick();
     this.playerPosition.copy(context.playerPosition);
 
     // Hand out this frame's route-planning budget before anybody is stepped.
@@ -974,23 +1000,29 @@ export class NpcSystem implements GameSystem {
       // Somewhere the player is not: marked present, not simulated (#362).
       // Left exactly where they stood, so walking in on them shows them where
       // they were rather than teleporting or popping them into place.
-      if (this.elsewhere.has(character)) continue;
+      if (this.elsewhere.has(character)) {
+        // Deliberately not lived, so not banked either.
+        this.simLod.forget(i);
+        this.commitSkipped[i] = 0;
+        continue;
+      }
 
-      // Children a long way off think every other frame, and think twice as
-      // hard when they do. Nobody has ever noticed a distant child deciding to
-      // turn left 16 milliseconds late.
-      const far = character.position.distanceToSquared(this.playerPosition) >
-        FAR_DISTANCE * FAR_DISTANCE;
-      if (far && (this.frame + i) % 2 !== 0) continue;
+      // A child nobody can see steers every other frame and is posed every
+      // fourth, with the time in between banked and handed to her next step
+      // whole (`simLod.ts`). Everybody else is stepped every frame.
+      const plan = this.simLod.plan(i, dt, playerHopped, this.steppedEveryFrame(character, i));
+      this.commitSkipped[i] = plan & SIM_POSE ? 0 : 1;
+      if (plan === 0) continue;
 
-      const charDt = far ? dt * 2 : dt;
+      const charDt = this.simLod.stepDt;
       character.update(
         charDt,
         elapsed,
         this.playerPosition,
-        playerHopped,
+        this.simLod.stepHopped,
         this.playerStationaryFor,
         playerWearingHat,
+        (plan & SIM_POSE) !== 0,
       );
       // Only an individually-modelled avatar has anything here — the
       // simulated ponytail's physics update, today. Must run after
@@ -1003,8 +1035,16 @@ export class NpcSystem implements GameSystem {
     this.separateFromPlayer(dt);
     this.offTheLine(dt);
 
-    for (const character of this.characters) {
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      if (!character) continue;
       character.syncTransform();
+      // A throttled child's matrices are uploaded on the frames she is posed
+      // and left alone between them: she is off screen by more than
+      // `SIM_LOD_VIEW_MARGIN`, and what is in the buffer is where she stood at
+      // most three frames ago. `commit` is the walk of her whole skeleton, so
+      // this is most of what not posing her saves.
+      if (this.commitSkipped[i] === 1) continue;
       // Only set on an instanced `KidAvatar` — a one-off `CharacterModel`
       // avatar is a real scene object with no instance buffer to flush.
       const member = character.avatar.member;
@@ -1020,6 +1060,43 @@ export class NpcSystem implements GameSystem {
     // {@link updateLabels}).
     this.updateBubbles();
     this.updateLabels();
+  }
+
+  /**
+   * **Whether child `index` must be stepped every frame** — the one place
+   * that decides who simulation LOD may throttle. Anything a player can see,
+   * touch or be part of says yes:
+   *
+   * - **somebody else is placing her**: a script (the cat bus), a tree climb,
+   *   a seat or a hop onto one, the train carrying her or her waiting place on
+   *   its platform. Those owners write her every frame and expect her own
+   *   `update` to keep pace with them.
+   * - **she is in the air** — a hop or a drop is integrated a frame at a time.
+   * - **she is talking**, bubble up.
+   * - **she is near the player** ({@link EVERY_FRAME_NEAR_PLAYER}), seen or not.
+   * - **the camera sees her**, or could see her shadow: `NpcView.onScreen`,
+   *   the single owner of "on screen" for NPC simulation.
+   *
+   * Everybody else — a child walking a path on the far side of the park — is
+   * throttled, on banked time.
+   */
+  private steppedEveryFrame(character: NpcCharacter, index: number): boolean {
+    if (
+      character.scripted ||
+      character.climbing ||
+      character.carried ||
+      character.seated ||
+      character.isAirborne ||
+      character.holdsGround ||
+      onTheTrain(character)
+    ) {
+      return true;
+    }
+    if (this.speechTextOf(index) !== null) return true;
+    const at = character.position;
+    if (at.distanceToSquared(this.playerPosition) < EVERY_FRAME_NEAR_PLAYER * EVERY_FRAME_NEAR_PLAYER) return true;
+    const half = character.avatar.height / 2;
+    return this.view.onScreen(at.x, at.y + half, at.z, half);
   }
 
   /**
