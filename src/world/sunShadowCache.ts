@@ -86,6 +86,16 @@ const SETTLE_MS = 750;
  */
 export const TINY_CASTER_RADIUS = 0;
 
+/**
+ * Whether the cache is switched on. **Off unless the URL says `?shadowCache=1`**
+ * while it is being proved: off, `DayNight` leaves the sun's map to three.js
+ * exactly as before step 12 (redrawn in full every frame).
+ */
+export function sunShadowCacheRequested(): boolean {
+  if (typeof location === 'undefined') return false;
+  return new URLSearchParams(location.search).get('shadowCache') === '1';
+}
+
 interface Entry {
   readonly matrix: Float64Array;
   geometry: BufferGeometry | null;
@@ -184,9 +194,6 @@ export class SunShadowCache {
   constructor(light: DirectionalLight, scene: Scene) {
     this.light = light;
     this.scene = scene;
-    // Three's own pass must never touch the sun again: the wrapper owns it.
-    light.shadow.autoUpdate = false;
-    light.shadow.needsUpdate = false;
 
     // One triangle covering the whole map; its depth is the cache's.
     const triangle = new BufferGeometry();
@@ -238,6 +245,9 @@ export class SunShadowCache {
    * pass, which draws the same scene again on its own layer).
    */
   install(renderer: WebGLRenderer): void {
+    // Three's own pass must never touch the sun again: the wrapper owns it.
+    this.light.shadow.autoUpdate = false;
+    this.light.shadow.needsUpdate = false;
     const shadowMap = renderer.shadowMap;
     const original = shadowMap.render.bind(shadowMap) as ShadowRender;
     shadowMap.render = (lights: Light[], scene: Scene, camera: Camera): void => {

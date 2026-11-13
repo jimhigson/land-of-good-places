@@ -27,7 +27,7 @@ import { angleDelta, clamp, clamp01, lerp, smoothstep, TAU } from '../core/mathU
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Sky } from './Sky';
 import { gameStore } from '../state';
-import { SunShadowCache, type SunShadowStats } from './sunShadowCache';
+import { SunShadowCache, sunShadowCacheRequested, type SunShadowStats } from './sunShadowCache';
 
 /** How far she walks from the sun's shadow frustum's centre before it follows her (m). See `followPlayer`. */
 export const SHADOW_RECENTRE_DISTANCE = 2;
@@ -385,6 +385,8 @@ export class DayNight implements GameSystem {
   private readonly shadowCentre = new Vector3();
   private readonly placedSunDirection = new Vector3();
   private shadowPlaced = false;
+  /** Whether {@link SunShadowCache} owns the sun's map. Off, everything below is exactly as it was before step 12. */
+  private shadowCacheOn = false;
 
   constructor(
     scene: Scene,
@@ -605,7 +607,9 @@ export class DayNight implements GameSystem {
    * renderer and the world both exist.
    */
   installShadowCache(renderer: WebGLRenderer): void {
+    if (!sunShadowCacheRequested()) return;
     this.shadowCache.install(renderer);
+    this.shadowCacheOn = true;
   }
 
   /** What the shadow cache did on the last frame and in total; for `?perf=1` and checks. */
@@ -783,6 +787,14 @@ export class DayNight implements GameSystem {
    */
   private followPlayer(playerPosition: Vector3): void {
     const sun = this.sunDirection;
+    if (!this.shadowCacheOn) {
+      // Three's own pass redraws the map every frame: follow her continuously.
+      this.keyLight.target.position.copy(playerPosition);
+      this.keyLight.target.updateMatrixWorld();
+      this.keyLight.position.copy(playerPosition).addScaledVector(sun, 95);
+      this.keyLight.updateMatrixWorld();
+      return;
+    }
     // Distance across the light's view, not along it: the frustum is 190 m
     // deep, so a jump or a climb never needs it to move; walking sideways to
     // the sun does.
@@ -892,7 +904,8 @@ export class DayNight implements GameSystem {
     //
     // The sun's map is drawn by `SunShadowCache` now (three's own
     // `autoUpdate` stays off), which also never skips the first map.
-    this.shadowCache.active = sunStrength > 0.02;
+    if (this.shadowCacheOn) this.shadowCache.active = sunStrength > 0.02;
+    else this.keyLight.shadow.autoUpdate = sunStrength > 0.02 || this.keyLight.shadow.map === null;
 
     this.moonDirection.copy(this.sunDirection).negate();
     this.moonLight.position.copy(this.moonDirection).multiplyScalar(120);
