@@ -2245,6 +2245,10 @@ export class Game {
     this.owlFade?.apply(this.drawnEye);
     this.render();
     this.owlFade?.restore();
+    // A route asked between now and the next tick — a tap, a press on the map —
+    // is answered at the start of that tick, out of that frame's budget, rather
+    // than spending a second budget in the gap (see `RouteScheduler.endFrame`).
+    this.routes.endFrame();
   }
 
   private updateHud(tick: LoopTick): void {

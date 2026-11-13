@@ -275,14 +275,21 @@ const PATCH_MAX_SHARE = 0.25;
  * How a sliced build ({@link NavGrid.warm}) cuts each pass, between looks at
  * the clock: rows of the boundary's `contains` sweep, rows of solids (every
  * collider is offered to each band, so wider is cheaper overall), rows of the
- * bridge exemption, and cells of levels. Small enough that one piece is a
- * fraction of a millisecond to a few on the whole park; the budget, not these,
- * decides how many pieces a frame runs.
+ * bridge exemption, and cells of levels. The budget, not these, decides how
+ * many pieces a frame runs; these decide how far past it the last one can run.
+ *
+ * Since the warm-up shares one 2 ms frame budget with every route search
+ * (`RouteScheduler`), a piece has to be well under it. Measured on the park
+ * (seed 5, Node, 13 Nov 2026), per piece, cold JIT / warm: 48 solid rows were
+ * **4.30 / 1.64 ms**, 12 are 2.65 / 0.71 (phase total 16.5 → 22.9 ms cold,
+ * 8.9 → 11.4 warm); 128 level cells were 1.17 / 0.74 ms, 64 are about half.
+ * The cold figures are the first build of a process, which is laid behind the
+ * cat bus.
  */
 const BUILD_BOUNDARY_ROWS = 8;
-const BUILD_SOLID_ROWS = 48;
+const BUILD_SOLID_ROWS = 12;
 const BUILD_BRIDGE_ROWS = 16;
-const BUILD_LEVEL_CELLS = 128;
+const BUILD_LEVEL_CELLS = 64;
 
 /**
  * **Milliseconds of route-finding one frame may spend** — lattice building and

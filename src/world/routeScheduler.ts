@@ -141,7 +141,26 @@ export class RouteScheduler {
     this.spentMs = 0;
     this.frame += 1;
     this.stats.frames += 1;
+    this.open = true;
   }
+
+  /**
+   * The frame's own work is over — called at the end of `Game.tick`. Anything
+   * asked from now until the next {@link beginFrame} is answered at the start
+   * of that frame, out of its budget, rather than there and then: a tap
+   * arrives in a DOM event *between* two frames, and the time spent on it there
+   * lands in the very interval the next frame's budget is spent in. Answered
+   * then, it still comes before the frame's `TapNavigator.update`, so a short
+   * tap sets her off on its route on exactly the frame it always did — a
+   * measured 4.0 ms of route-finding in one frame interval (2 ms in the tap's
+   * event, 2 ms in the next tick) without this, 2 ms with it.
+   */
+  endFrame(): void {
+    this.open = false;
+  }
+
+  /** Between {@link beginFrame} and {@link endFrame}: work asked now may be done now. */
+  private open = false;
 
   /** The frame number {@link beginFrame} has counted to. */
   get frameNumber(): number {
@@ -176,8 +195,9 @@ export class RouteScheduler {
    * **Asks `grid` for a route**, writing the answer into `request.out` when it
    * comes. Asking a request that is still waiting replaces its question (a new
    * tap, a new destination) — the half-done search for the old one is dropped.
-   * Then spends whatever this frame has left, so a short route is usually
-   * answered before this returns: look at `request.status`.
+   * Then, inside a frame, spends whatever the frame has left, so a short route
+   * is usually answered before this returns: look at `request.status`. Outside
+   * one it waits for the next ({@link endFrame}).
    */
   ask(
     request: RouteRequest,
@@ -206,7 +226,7 @@ export class RouteScheduler {
       request.status = 'queued';
       this.queue.push(request);
     }
-    this.run();
+    if (this.open) this.run();
   }
 
   /** Forget a question nobody wants answered any more. */
