@@ -72,9 +72,14 @@ const FILL_INTENSITY = 6.5;
 const FILL_DISTANCE = 40;
 const WARM_AMBIENT = 0.19;
 
-/** A painted pool's reach, and how much light its middle adds (the fit's shortfall under an old pool, 0.1–0.37). */
+/**
+ * A painted pool's reach, and how much light its middle adds. The fit's
+ * shortfall under an old pool is 0.1–0.37, but the sand is already close to
+ * white under the key, and the first cut at 0.3 clipped to six yellow discs
+ * (seen in a screenshot, not predicted). A third of that reads as a glow.
+ */
 const POOL_GLOW_RADIUS = 6;
-const POOL_GLOW_PEAK = 0.3;
+const POOL_GLOW_PEAK = 0.1;
 
 export class ReptileLighting {
   readonly group = new Group();
