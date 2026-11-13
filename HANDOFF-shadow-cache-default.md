@@ -30,6 +30,18 @@ differs in 0 of 4,194,304 texels.
 - Baseline audit, same scene, cache as merged: 12/12 audits **0 differing**
   (10 composite frames, 2 static).
 
+### Audit results (all seed 5, dev server, harness `sc/scenes.mjs`, `sc/scenes2.mjs`, `sc/changes.mjs`)
+**0 differing texels in every audit** after the hardening commit 993c27cf:
+park morning/noon/sunset standing, walking (16), rail race racing (40 consecutive
+frames, cart 114,22 -> 66,-71), ferris (16), sky cruiser (16), slide (12), cat bus
+/arrive (16), park train passing (36), trampoline bounce (30), library -> park and
+reptile house -> park (24 consecutive frames from the first after the door each),
+20 kinds of one-off static change with the sun held still.
+Interiors (/hotel, /library, /reptile-house, /castle?deck=0): the sun is not drawn
+(indoors) in either mode, so there is no sun map to differ.
+Gap found and fixed (993c27cf): a swapped position attribute / index (fresh object,
+same version 0) went unseen: 85,885 stale texels. Not hit by any game path today.
+
 ### What it does standing at `/spawn?pos=0,10` (t≈0.35)
 ~112 movers every frame (statue turntable 24 meshes, her 22, pet parade 21, an
 NPC 28, face-paint stall 6, crowd face patches, ferris 3, fountain water);
