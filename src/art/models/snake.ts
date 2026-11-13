@@ -158,7 +158,7 @@ const SCRATCH_AHEAD = new Vector3();
 /**
  * The step three.js's own `Curve.getTangent` takes either side of `t`. Not a
  * tuning number of ours: it is here only so {@link sampleSpine} lands on the
- * same two points `getTangentAt` would, and `check:snake-spine` compares the
+ * same two points `getTangentAt` would, and `check:hot-path-churn` compares the
  * two bit for bit — a three.js upgrade that changes it turns that check red.
  */
 const TANGENT_STEP = 0.0001;
@@ -174,7 +174,9 @@ const TANGENT_STEP = 0.0001;
  * 18.6 MB/s). Same arithmetic in the same order, into scratch vectors.
  */
 export function sampleSpine(path: CatmullRomCurve3, u: number, position: Vector3, tangent: Vector3): void {
-  const t = path.getUtoTmapping(u);
+  // Called with `u` alone, exactly as `getPointAt` calls it — the typings
+  // insist on a `distance` three.js itself never passes here.
+  const t = (path.getUtoTmapping as (u: number) => number).call(path, u);
   path.getPoint(t, position);
   path.getPoint(Math.max(0, t - TANGENT_STEP), SCRATCH_BEHIND);
   path.getPoint(Math.min(1, t + TANGENT_STEP), SCRATCH_AHEAD);

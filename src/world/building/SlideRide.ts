@@ -258,7 +258,7 @@ export class SlideRide {
     // The order is what keeps the picture identical. Both meshes share one
     // world matrix, so the transparent sort ties on depth and falls through to
     // object id — creation order. **The back-face mesh must therefore be
-    // created first**; `check:slide-chute-materials` holds that, and holds
+    // created first**; `check:hot-path-churn` holds that, and holds
     // that no ride part goes back to the two-pass material.
     const clearGeometry = buildChute(frames, (arc) => isClearBand(arc, this.length));
     const clear: Mesh[] = [];
