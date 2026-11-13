@@ -89,6 +89,15 @@ const OVERSIZED_RADIUS_M = 40;
 const HEADROOM = 1.1;
 const FLOOR_TRIS = 2_000;
 const FLOOR_DRAWS = 2;
+/**
+ * Added on top of {@link HEADROOM}, because a ride is frozen on whichever
+ * frame the freeze lands on and its camera is moving: measured over three runs
+ * of the same code, the sky cruiser's off-screen draws read 17, 19 and 22, and
+ * one fine tile of bushes crossing the screen edge is up to 22 k triangles
+ * (69 instances × 320). A percentage of a small number cannot absorb that.
+ */
+const SLACK_DRAWS = 5;
+const SLACK_TRIS = 25_000;
 
 interface Scene {
   readonly path: string;
@@ -108,28 +117,28 @@ interface Scene {
 }
 
 /**
- * Measured on `perf-step10-instanced-tiles` (origin/main 46ef5a64 + the tiles),
- * canonical seed 5, 1000×700 at DPR 1, 13 November 2026. Nearly all of every
- * figure is the park crowd (`npcs/crowd`, `frustumCulled = false`: 1.62 M of
- * the park's 1.88 M), which another step owns — when that lands, re-measure
- * with `MEASURE=1` and lower these in the same change.
+ * Measured on `perf-step10-instanced-tiles` with `perf/120fps-base` merged
+ * (f6ffaee4: the crowd cull among it), canonical seed 5, 1000×700 at DPR 1,
+ * 13 November 2026, **one run** — re-measure with `MEASURE=1` and lower these
+ * whenever a step removes more. Before the crowd cull the park figure was
+ * 1.88 M, 1.62 M of it the crowd.
  *
  * The reptile house's `knownStale` are six snake meshes (`reptile-adults`,
  * `snake.mint` — segments and outline) whose instances have moved outside the
  * bound three cached for them.
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', space: 'garden', offDraws: 72, offTris: 1_879_352 },
-  'castle deck 0': { path: '/castle?deck=0', space: 'castle.', offDraws: 86, offTris: 1_699_240 },
-  'castle deck 1': { path: '/castle?deck=1', space: 'castle.', offDraws: 91, offTris: 8_220_210 },
-  'castle deck 2': { path: '/castle?deck=2', space: 'castle.', offDraws: 81, offTris: 1_763_848 },
-  hotel: { path: '/hotel', space: 'hotel.', offDraws: 81, offTris: 1_697_760 },
-  library: { path: '/library', space: 'library', offDraws: 82, offTris: 1_869_104 },
-  'reptile house': { path: '/reptile-house', space: 'reptileHouse', offDraws: 82, offTris: 1_942_428, knownStale: 6 },
-  'rail race': { path: '/rail-race', space: '', riding: true, offDraws: 15, offTris: 1_239_716 },
-  'sky cruiser': { path: '/sky-cruiser', space: '', riding: true, offDraws: 22, offTris: 1_568_488 },
-  ferris: { path: '/ferris', space: '', riding: true, offDraws: 88, offTris: 1_948_392 },
-  slide: { path: '/slide', space: '', riding: true, offDraws: 48, offTris: 1_590_124 },
+  park: { path: '/spawn', space: 'garden', offDraws: 37, offTris: 348_392 },
+  'castle deck 0': { path: '/castle?deck=0', space: 'castle.', offDraws: 18, offTris: 55_390 },
+  'castle deck 1': { path: '/castle?deck=1', space: 'castle.', offDraws: 18, offTris: 362_008 },
+  'castle deck 2': { path: '/castle?deck=2', space: 'castle.', offDraws: 17, offTris: 119_900 },
+  hotel: { path: '/hotel', space: 'hotel.', offDraws: 17, offTris: 52_288 },
+  library: { path: '/library', space: 'library', offDraws: 19, offTris: 224_304 },
+  'reptile house': { path: '/reptile-house', space: 'reptileHouse', offDraws: 18, offTris: 297_312, knownStale: 6 },
+  'rail race': { path: '/rail-race', space: '', riding: true, offDraws: 5, offTris: 40_132 },
+  'sky cruiser': { path: '/sky-cruiser', space: '', riding: true, offDraws: 12, offTris: 210_420 },
+  ferris: { path: '/ferris', space: '', riding: true, offDraws: 27, offTris: 376_792 },
+  slide: { path: '/slide', space: '', riding: true, offDraws: 27, offTris: 241_736 },
 };
 
 const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}&perf=1`;
@@ -699,8 +708,8 @@ for (const [name, scene] of Object.entries(BUDGETS)) {
     }
   }
   if (MEASURE) continue;
-  const drawCeiling = Math.max(FLOOR_DRAWS, Math.ceil(scene.offDraws * HEADROOM));
-  const triCeiling = Math.max(FLOOR_TRIS, Math.ceil(scene.offTris * HEADROOM));
+  const drawCeiling = Math.max(FLOOR_DRAWS, Math.ceil(scene.offDraws * HEADROOM) + SLACK_DRAWS);
+  const triCeiling = Math.max(FLOOR_TRIS, Math.ceil(scene.offTris * HEADROOM) + SLACK_TRIS);
   say(`  budget: off-screen draws ${offDraws} / ceiling ${drawCeiling}, off-screen tris ${offTris} / ceiling ${triCeiling}`);
   if (offDraws > drawCeiling) failures.push(`${name}: ${offDraws} draws a frame for meshes wholly off the screen, ceiling ${drawCeiling} (measured ${scene.offDraws})`);
   if (offTris > triCeiling) failures.push(`${name}: ${offTris} triangles a frame off the screen, ceiling ${triCeiling} (measured ${scene.offTris})`);
