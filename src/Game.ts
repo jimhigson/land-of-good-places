@@ -311,6 +311,9 @@ export class Game {
     // headless `World` built by a check keeps the one graph it always had —
     // see `world/DrawnSpaces.ts`.
     this.world.drawnSpaces.detachUndrawn();
+    // The sun's shadow map is drawn only when something in it changed
+    // (`world/sunShadowCache.ts`, 120 fps plan step 12).
+    this.world.dayNight.installShadowCache(this.engine.renderer);
 
     // Spawn at the park edge by the gate, looking into the park — or wherever a
     // continued game left off (see `resolveSpawn`).

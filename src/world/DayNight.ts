@@ -6,6 +6,7 @@ import {
   Scene,
   Vector2,
   Vector3,
+  type WebGLRenderer,
 } from 'three';
 import {
   DAY_LENGTH_SECONDS,
@@ -26,6 +27,34 @@ import { angleDelta, clamp, clamp01, lerp, smoothstep, TAU } from '../core/mathU
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Sky } from './Sky';
 import { gameStore } from '../state';
+import { SunShadowCache, sunShadowCacheRequested, type SunShadowStats } from './sunShadowCache';
+
+/** How far she walks from the sun's shadow frustum's centre before it follows her (m). See `followPlayer`. */
+export const SHADOW_RECENTRE_DISTANCE = 2;
+/** The height whose shadow tip {@link SUN_STEP_TOLERANCE} is measured at (m). */
+export const SUN_STEP_HEIGHT = 5;
+/** How far that shadow tip may lag the true sun before the light steps (m) — about a texel. */
+export const SUN_STEP_TOLERANCE = 0.03;
+
+/** The light's frame as last placed (`followPlayer`); module scratch, one `DayNight` per game. */
+const shadowAxisX = new Vector3();
+const shadowAxisY = new Vector3();
+const shadowOffset = new Vector3();
+
+/**
+ * Whether the sun has moved far enough from `placed` that a
+ * {@link SUN_STEP_HEIGHT}-tall thing's shadow tip has moved more than
+ * {@link SUN_STEP_TOLERANCE} on flat ground. Near the horizon the tip runs off
+ * to infinity, so there every frame steps — which is also where the light has
+ * faded to nothing and the map is not drawn at all.
+ */
+export function sunStepNeeded(placed: Vector3, sun: Vector3): boolean {
+  if (placed.y < 0.02 || sun.y < 0.02) return placed.x !== sun.x || placed.y !== sun.y || placed.z !== sun.z;
+  const tipX = sun.x / sun.y - placed.x / placed.y;
+  const tipZ = sun.z / sun.y - placed.z / placed.y;
+  const reach = SUN_STEP_TOLERANCE / SUN_STEP_HEIGHT;
+  return tipX * tipX + tipZ * tipZ > reach * reach;
+}
 
 /**
  * Time of day: the sun's arc, the colour of everything, and when the fairy
@@ -350,6 +379,14 @@ export class DayNight implements GameSystem {
 
   private readonly scene: Scene;
   private readonly sky: Sky;
+  /** Draws the sun's shadow map only when something in it changed. See {@link SunShadowCache}. */
+  private readonly shadowCache: SunShadowCache;
+  /** Where the shadow frustum is centred, and the sun it was placed for. See `followPlayer`. */
+  private readonly shadowCentre = new Vector3();
+  private readonly placedSunDirection = new Vector3();
+  private shadowPlaced = false;
+  /** Whether {@link SunShadowCache} owns the sun's map. Off, everything below is exactly as it was before step 12. */
+  private shadowCacheOn = false;
 
   constructor(
     scene: Scene,
@@ -379,6 +416,7 @@ export class DayNight implements GameSystem {
     this.keyLight.shadow.radius = 3;
     this.keyLight.shadow.blurSamples = 10;
     scene.add(this.keyLight, this.keyLight.target);
+    this.shadowCache = new SunShadowCache(this.keyLight, scene);
 
     // The moon. Positioned exactly the way the sun's key light is — a point
     // far out along the direction the light comes *from*, aimed at a target —
@@ -563,6 +601,22 @@ export class DayNight implements GameSystem {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
   }
 
+  /**
+   * Hands the sun's shadow pass to {@link SunShadowCache}. Until this is
+   * called nothing draws the sun's map, so `Game` calls it as soon as the
+   * renderer and the world both exist.
+   */
+  installShadowCache(renderer: WebGLRenderer): void {
+    if (!sunShadowCacheRequested()) return;
+    this.shadowCache.install(renderer);
+    this.shadowCacheOn = true;
+  }
+
+  /** What the shadow cache did on the last frame and in total; for `?perf=1` and checks. */
+  shadowStats(): Readonly<SunShadowStats> {
+    return this.shadowCache.stats();
+  }
+
   update(context: FrameContext): void {
     if (!this.paused) {
       this.time += context.dt / DAY_LENGTH_SECONDS;
@@ -710,13 +764,67 @@ export class DayNight implements GameSystem {
     this.paintSkyQuad(sunDirection, altitude, look, nightFactor);
   }
 
-  /** Keeps the shadow frustum centred on the action rather than the origin. */
+  /**
+   * Keeps the shadow frustum centred on the action rather than the origin —
+   * **in steps, not continuously** (120 fps plan, step 12). Every move of the
+   * light redraws the whole static shadow cache ({@link SunShadowCache}), so
+   * the light moves only when it has to:
+   *
+   * - **she has moved {@link SHADOW_RECENTRE_DISTANCE}** across the light's
+   *   view from the frustum's centre. 26 m of frustum either side, so she is
+   *   never nearer its edge than 24 m; at full speed (7.4 m/s) that is under
+   *   four steps a second;
+   * - **the sun has swung far enough to move a shadow** —
+   *   {@link SUN_STEP_TOLERANCE} at the tip of a {@link SUN_STEP_HEIGHT}-tall
+   *   thing, about a texel of the 2048² map, which VSM's blur spreads over
+   *   three. The day is 150 s long, so at noon that is ~5 steps a second and
+   *   in the low morning sun many more; each is one cache redraw, against the
+   *   120 a second this used to cost.
+   *
+   * The centre is snapped to the shadow map's texel grid in the light's own
+   * frame, so a re-centre with the sun unchanged rasterises every static edge
+   * onto exactly the texels it had — no shimmer as she walks.
+   */
   private followPlayer(playerPosition: Vector3): void {
-    this.keyLight.target.position.copy(playerPosition);
+    const sun = this.sunDirection;
+    if (!this.shadowCacheOn) {
+      // Three's own pass redraws the map every frame: follow her continuously.
+      this.keyLight.target.position.copy(playerPosition);
+      this.keyLight.target.updateMatrixWorld();
+      this.keyLight.position.copy(playerPosition).addScaledVector(sun, 95);
+      this.keyLight.updateMatrixWorld();
+      return;
+    }
+    // Distance across the light's view, not along it: the frustum is 190 m
+    // deep, so a jump or a climb never needs it to move; walking sideways to
+    // the sun does.
+    shadowOffset.subVectors(playerPosition, this.shadowCentre);
+    const across = shadowOffset.dot(shadowAxisX) ** 2 + shadowOffset.dot(shadowAxisY) ** 2;
+    const far = across > SHADOW_RECENTRE_DISTANCE * SHADOW_RECENTRE_DISTANCE;
+    if (this.shadowPlaced && !far && !sunStepNeeded(this.placedSunDirection, sun)) return;
+
+    // The light's frame, as `Object3D.lookAt` builds it for the shadow camera
+    // (z towards the light, x = up × z, y = z × x).
+    const z = sun;
+    shadowAxisX.set(z.z, 0, -z.x);
+    if (shadowAxisX.lengthSq() < 1e-8) shadowAxisX.set(1, 0, 0);
+    shadowAxisX.normalize();
+    shadowAxisY.crossVectors(z, shadowAxisX);
+    const texel = (2 * SHADOW_AREA) / this.keyLight.shadow.mapSize.x;
+    const u = playerPosition.dot(shadowAxisX);
+    const v = playerPosition.dot(shadowAxisY);
+    this.shadowCentre
+      .copy(playerPosition)
+      .addScaledVector(shadowAxisX, Math.round(u / texel) * texel - u)
+      .addScaledVector(shadowAxisY, Math.round(v / texel) * texel - v);
+    this.placedSunDirection.copy(sun);
+    this.shadowPlaced = true;
+
+    this.keyLight.target.position.copy(this.shadowCentre);
     this.keyLight.target.updateMatrixWorld();
     this.keyLight.position
-      .copy(playerPosition)
-      .addScaledVector(this.sunDirection, 95);
+      .copy(this.shadowCentre)
+      .addScaledVector(sun, 95);
     this.keyLight.updateMatrixWorld();
   }
 
@@ -793,7 +901,11 @@ export class DayNight implements GameSystem {
     // counts and recompiles every material in the park) skips the pass
     // outright. Never frozen before the first map exists, or the shader would
     // sample a texture that was never created.
-    this.keyLight.shadow.autoUpdate = sunStrength > 0.02 || this.keyLight.shadow.map === null;
+    //
+    // The sun's map is drawn by `SunShadowCache` now (three's own
+    // `autoUpdate` stays off), which also never skips the first map.
+    if (this.shadowCacheOn) this.shadowCache.active = sunStrength > 0.02;
+    else this.keyLight.shadow.autoUpdate = sunStrength > 0.02 || this.keyLight.shadow.map === null;
 
     this.moonDirection.copy(this.sunDirection).negate();
     this.moonLight.position.copy(this.moonDirection).multiplyScalar(120);
