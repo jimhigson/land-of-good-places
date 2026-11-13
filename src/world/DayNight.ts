@@ -49,6 +49,7 @@ const shadowOffset = new Vector3();
  * faded to nothing and the map is not drawn at all.
  */
 export function sunStepNeeded(placed: Vector3, sun: Vector3): boolean {
+  // flat-ok: `placed` and `sun` are unit sun DIRECTIONS (sunDirection), so .y is sin(elevation), not a height on the sphere
   if (placed.y < 0.02 || sun.y < 0.02) return placed.x !== sun.x || placed.y !== sun.y || placed.z !== sun.z;
   const tipX = sun.x / sun.y - placed.x / placed.y;
   const tipZ = sun.z / sun.y - placed.z / placed.y;
