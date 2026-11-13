@@ -181,6 +181,8 @@ for (const command of commands) {
       // check:dom-churn reads this one; without it the check falls back to
       // port 5173 and measures nothing, or somebody else's game.
       CHECK_DOM_CHURN_URL: BASE,
+      // The same hole, found at integration: check:cull-audit reads this one.
+      CHECK_CULL_AUDIT_URL: BASE,
     },
   });
   if (result.status !== 0) {

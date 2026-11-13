@@ -54,8 +54,13 @@ const MAX_MUTATIONS_PER_FRAME = 0.05;
  * `#boot-splash.hidden`). Each fades out before it is hidden, so pausing it
  * needs a "the fade has finished" signal CSS does not have; see
  * {@link MAX_HIDDEN_RUNNING_ANIMATIONS}. Lower this to 0.05 with that fix.
+ *
+ * 1.25, not 1.05: the count is not exactly frame-locked. It read 249 in 249
+ * frames on one run and 257 in 251 (1.02) on another of the same code, and
+ * 1.05 left a 3 % margin on a check that had never run on a software
+ * renderer. What this ceiling is for is a second recalculation a frame (2.0).
  */
-const MAX_STYLE_RECALCS_PER_FRAME = 1.05;
+const MAX_STYLE_RECALCS_PER_FRAME = 1.25;
 /**
  * Animations in `playState: 'running'` whose target is not painted (an
  * ancestor at `visibility: hidden` or `opacity: 0`), on the idle park.
