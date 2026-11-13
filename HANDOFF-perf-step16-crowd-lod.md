@@ -59,3 +59,35 @@ No PR: the integrator merges this into `perf/120fps`. `origin/perf/120fps-base` 
 pnpm run check:crowd-cull -- --mutate=both-levels
 pnpm run check:crowd-cull -- --mutate=full-detail
 ```
+
+## Review fixes, 13 Nov 09:50-10:00 (second engineer)
+
+Both blocking findings were real; both are changed in `c36ddb9f`, base re-merged after.
+
+- **Far level visibly wrong at reachable sizes.** Two changes in `src/core/instancedLod.ts`:
+  - Thresholds 340/280 -> **120/100 px of bounding sphere** (child goes full at
+    50-59 px tall, back at 41-49). At `CAMERA_ZOOM_MAX` she is 125-190 px: always
+    the authored model now. The far level is only for the zoom-1 camera.
+  - `lowDetailGeometry` **refuses a far level whose surface area is more than 20 %
+    from its source's** (`LOD_MAX_SURFACE_CHANGE`, `surfaceChange`). Measured headless
+    over the 44 prototype parts: 7 refused — collar 0.77, hem 0.77, the 620-triangle
+    part under each leg 0.58, hair.drape 2808 triangles 0.77, hair.drape 256
+    triangles 1.26, a 216-triangle crown sphere 0.65. 37 keep a far level, worst
+    17.1 %. Prototype far total 8,480 -> 13,015 of 39,968 triangles.
+  - A minimum-grid rule was tried first and **disproved by measurement**: the torso
+    clusters on a 4-cell grid and looked fine, the spiky hair on a 10-cell one and
+    did not. Grid size does not predict what fails; area change does separate them.
+  - **Inferred, not looked at:** that the 2808-triangle `hair.drape` geometry is the
+    spiky hair and the 620-triangle leg part is the sandal. Nothing was re-shot.
+    The strap sliver is not known to be caught. No evidence exists between 23 and
+    60 px of child height, and the switch is now at ~50.
+- **`check:crowd-cull` contradicted its own poses.** Confirmed by reading: half the
+  park poses are at `CAMERA_ZOOM_MAX` (the flag is called `zoomedOut`; it zooms in).
+  The far level is now required on **park poses at zoom 1 only**; every pose still
+  requires one level per child; interiors assert one level, not which. Every far
+  level must be inside `LOD_MAX_SURFACE_CHANGE`; a part refused a far level is
+  announced on stderr instead of failing. Three "measured nothing" guards.
+
+Still to do first: **run `check:crowd-cull` to the end and prove `--mutate=both-levels`
+and `--mutate=full-detail` red.** Every edit to `instancedLod.ts` changes the park
+source hash, so each run starts with a seed-5 acceptance loop.
