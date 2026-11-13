@@ -16,6 +16,7 @@ import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
 /** Where the screening woodland starts, beyond the edge. Was 71.5 against a 60 m wall. */
 const TREELINE_OUTSET_INNER = 11.5;
 import { PALETTE } from '../core/palette';
+import { TiledInstances } from '../core/tiledInstances';
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
@@ -270,7 +271,7 @@ export class Scenery {
   private readonly hideableInstances: HideableInstance[][];
   private readonly treeColliders: TreeCollider[];
   private readonly bushColliders: BushCollider[];
-  private readonly bushMesh: InstancedMesh;
+  private readonly bushMesh: TiledInstances;
   private readonly collision: CollisionWorld;
 
   /**
@@ -418,7 +419,7 @@ export class Scenery {
       for (let b = 0; b < clump.instanceCount; b += 1) {
         this.bushMesh.setMatrixAt(clump.instanceStart + b, HIDDEN_MATRIX);
       }
-      this.bushMesh.instanceMatrix.needsUpdate = true;
+      this.bushMesh.commit();
       this.collision.removeCircle(clump.id);
       this.bushesMutable.splice(i, 1);
       this.bushColliders.splice(i, 1);
@@ -589,7 +590,7 @@ function buildFoliage(
   hideableInstances: HideableInstance[][];
   treeColliders: TreeCollider[];
   bushColliders: BushCollider[];
-  bushMesh: InstancedMesh;
+  bushMesh: TiledInstances;
 } {
   const group = new Group();
   group.name = 'foliage';
@@ -656,18 +657,27 @@ function buildFoliage(
   }
 
   const bushGeometry = facetted(new IcosahedronGeometry(1, 2));
-  const trunkMesh = makeInstanced('tree-trunks', FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunks, true);
-  const canopyMesh = makeInstanced('tree-canopies', FOLIAGE_GEOMETRY.round, foliageMaterial(0.85), roundCanopies, true);
-  const coneMesh = makeInstanced('tree-cones', FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), coneCanopies, true);
-  const bushMesh = makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true);
-  group.add(trunkMesh, canopyMesh, coneMesh, bushMesh);
+  // Perf step 10 (frustum culling): each of these was ONE mesh over the whole
+  // park, so every tree and bush was submitted whenever one was on screen.
+  // `TiledInstances` re-groups the very same instances into ground tiles that
+  // three culls one by one; an instance keeps the index it has here, and
+  // `locate` hands back the tile mesh and row that now hold it.
+  const trunkMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-trunks', FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunks, true));
+  const canopyMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-canopies', FOLIAGE_GEOMETRY.round, foliageMaterial(0.85), roundCanopies, true));
+  const coneMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-cones', FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), coneCanopies, true));
+  const bushMesh = TiledInstances.fromInstancedMesh(makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true));
+  group.add(trunkMesh.group, canopyMesh.group, coneMesh.group, bushMesh.group);
 
   const scratchMatrix = new Matrix4();
   const hideableInstances: HideableInstance[][] = occluderRefs.map((refs) =>
     refs.map(({ kind, index }) => {
-      const mesh = kind === 'trunk' ? trunkMesh : kind === 'round' ? canopyMesh : coneMesh;
-      mesh.getMatrixAt(index, scratchMatrix);
-      return { mesh, index, matrix: scratchMatrix.clone() };
+      const tiles = kind === 'trunk' ? trunkMesh : kind === 'round' ? canopyMesh : coneMesh;
+      // Hiding and restoring writes a zero matrix or this original one, both of
+      // which the tile's built bound already contains, so writing straight to
+      // the tile mesh (as `setTreeHidden` does) never needs a bounds refresh.
+      const { mesh, row } = tiles.locate(index);
+      mesh.getMatrixAt(row, scratchMatrix);
+      return { mesh, index: row, matrix: scratchMatrix.clone() };
     }),
   );
 
