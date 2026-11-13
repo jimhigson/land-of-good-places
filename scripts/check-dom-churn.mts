@@ -166,6 +166,8 @@ interface Sample {
   readonly hiddenAnimations: readonly string[];
   /** Wall-clock ms the {@link SAMPLE_FRAMES} took — printed, so every run shows its frame rate. */
   readonly sampleMs: number;
+  /** The WebGL renderer string: which rasteriser the frames would have gone to. */
+  readonly glRenderer: string;
 }
 
 /**
@@ -250,6 +252,9 @@ async function ready(page: Page): Promise<void> {
       multiDraw['multiDrawArraysWEBGL'] = skip;
       multiDraw['multiDrawElementsWEBGL'] = skip;
     }
+    // Which rasteriser this ran on, for the log: a CI run should say SwiftShader.
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    w['__glRenderer'] = String(debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     const setTarget = renderer.setRenderTarget.bind(renderer);
     renderer.setRenderTarget = (...a: unknown[]) => {
       if (a[0]) tally.targets++;
@@ -310,6 +315,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
       __domCounts: Map<string, number>;
       __tally: { frames: number; renders: number; targets: number; draws: number; drawsCounted: number; drawsSkipped: number };
       __sampleStarted: number;
+      __glRenderer: string;
       game: { selection?: { selected: { id?: string } | null }; player: { position: { x: number; z: number } } };
     };
     const sampleMs = performance.now() - w.__sampleStarted;
@@ -327,6 +333,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
       .map((a) => String((a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id));
     return {
       sampleMs,
+      glRenderer: w.__glRenderer,
       hiddenAnimations,
       tally: { ...w.__tally },
       dom: [...w.__domCounts.entries()].sort((a, b) => b[1] - a[1]),
@@ -351,6 +358,7 @@ async function sample(context: BrowserContext, page: Page): Promise<Sample> {
     at: got.at,
     hiddenAnimations: got.hiddenAnimations,
     sampleMs: got.sampleMs,
+    glRenderer: got.glRenderer,
   };
 }
 
@@ -400,6 +408,7 @@ try {
 }
 
 const failures: string[] = [];
+let glRenderer = '(never reached)';
 // SWIFTSHADER=1 forces the software rasteriser CI's runners have, as
 // check:render-budget and check:static-freeze do, so a local run can see CI's frame.
 const args = ['--mute-audio', ...(process.env.SWIFTSHADER === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])];
@@ -420,6 +429,7 @@ try {
   await ready(page);
   const idle = await sample(context, page);
   report('idle', idle);
+  glRenderer = idle.glRenderer;
 
   if (seeds.length === 0) failures.push(`the page never reported its park seed, so the pin to ${SEED} is unproven`);
   else if (seeds.some((s) => s !== SEED)) failures.push(`asked for park seed ${SEED}, the page built ${seeds.join(', ')}`);
@@ -502,7 +512,7 @@ say(
 );
 say(`asserted on the idle spawn only (park seed ${SEED}, ${SAMPLE_FRAMES} frames); the selected sample is asserted for render calls alone, and other spaces and mini-games are not covered`);
 say(
-  `frames drawn without pixels (GL draws skipped, see the file comment); slowest single wait ${(slowestWait.ms / 1000).toFixed(1)} s ` +
+  `frames drawn without pixels (GL draws skipped, see the file comment) on ${glRenderer}; slowest single wait ${(slowestWait.ms / 1000).toFixed(1)} s ` +
     `(${slowestWait.what}) of the ${BOOT_TIMEOUT_MS / 1000} s each is allowed`,
 );
 if (MEASURE) {
