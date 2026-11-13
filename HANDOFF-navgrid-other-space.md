@@ -14,6 +14,19 @@ lattice rebuilt whole on a park child's next plan.
   Green 0.3 ms; `NAV_SPACES_MUTATE=whole` red at 451 ms; #751's code red (416 ms, 1 whole).
 - check:library NAV REBUILDS still green (5 patches, worst 1.5 ms).
 
-## Todo
-- PR off main after #751 merges; before/after frame on the #759 preview repro
-  (/spawn?pos=24.52,-18.17&facing=180&seed=5, walk in the castle door).
+## Handed over 13 Nov (to the NavGrid workflow engineer)
+Proven:
+- `check:nav-spaces` green on this branch: hall's 291 solids -> 0 whole park rebuilds, lattice ==
+  whole rebuild, park-middle control seen; park's next plan 0.3 ms (Node).
+- Red with `NAV_SPACES_MUTATE=whole` (1 whole rebuild, 451 ms). Red on #751's code (ring of 256),
+  but that run used the earlier selection (453 solids incl. the house's outside): 1 whole, 416 ms.
+- The ring+256-block and 16-block versions both stayed red on the same check (see commit log).
+- `check:library` NAV REBUILDS still green here (5 patches, 210 cells, worst 1.5 ms, 5/5 verified).
+- `tsc --noEmit` passes. Shard wiring verified by parsing `scripts` (old step set kept, +check:nav-spaces).
+Unproven:
+- Full `pnpm run check` / `test:procgen` not run on this branch; no CI run yet.
+- The final hall-only check not re-run against #751's code (291 > 256 ring, so it should go red).
+- No browser before/after frame on the #759 castle repro (#759 not on main; preview needs parks).
+- `coalesceRects` is O(n^3) worst case; measured only up to 162 rects. Change log grows 4 floats
+  per revision for the session; CHANGE_WALK_LIMIT = 8192 is a judgement, not a measurement.
+- Stacked on #751 (not yet merged): rebase onto main once #751 lands.
