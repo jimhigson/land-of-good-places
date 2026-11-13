@@ -10276,12 +10276,14 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     fouls.push(`the cat bus is ${bus.height.toFixed(2)} m tall, which is too big even for a bus`);
   }
   if (!bus.hasDriver) fouls.push('the cat bus has nobody driving it');
-  // Every seat but hers. Both numbers measured off the built park — the seat
+  // Every seat but hers and her companion's (the one across the gangway, kept
+  // for the pet who rides beside her — Jim, 19 Oct 2026: "one rides on the seat
+  // alongside the player"). Both numbers measured off the built park — the seat
   // count from the bus that was built, the passenger count from how many of the
   // crowd are actually under the arrival's control.
-  if (bus.kidCount !== bus.seatCount - 1) {
+  if (bus.kidCount !== bus.seatCount - 2) {
     fouls.push(
-      `expected ${bus.seatCount - 1} other children to arrive with her, found ` +
+      `expected ${bus.seatCount - 2} other children to arrive with her, found ` +
         `${bus.kidCount} under the arrival\u2019s control`,
     );
   }
