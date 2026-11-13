@@ -3,7 +3,7 @@
 import '../../scripts/headless-canvas.mjs';
 // The park's solver, as every test that builds park modules installs it.
 import '../../procgen/install.ts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Vector3 } from 'three';
 import { LazyPart } from '../../src/world/LazyPart';
 import { REPTILE_HALL } from '../../src/world/interiors';
@@ -62,6 +62,69 @@ describe('a lazy part', () => {
     await expect(part.load()).resolves.toBe(7);
     expect(fetched).toEqual(['plain', 'plain', 'fresh 1']);
     expect(part.loaded).toBe(7);
+  });
+});
+
+describe('a lazy part that is slow rather than hung (#752)', () => {
+  it('keeps a fetch that lands after its deadline, and the next load joins it rather than fetching again', async () => {
+    let fetches = 0;
+    let land: (value: number) => void = () => {};
+    const part = new LazyPart<number>(
+      'the slow room',
+      () => {
+        fetches += 1;
+        return new Promise<number>((resolve) => {
+          land = resolve;
+        });
+      },
+      { timeoutMs: 30, retryAfterMs: 0 },
+    );
+    await expect(part.load()).rejects.toThrow(/did not arrive within 30 ms/);
+    land(9);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(part.loaded, 'the late arrival is kept').toBe(9);
+    await expect(part.load()).resolves.toBe(9);
+    expect(fetches, 'and nothing was fetched twice').toBe(1);
+  });
+
+  it('a retry while the slow fetch is still on its way joins it', async () => {
+    let fetches = 0;
+    let land: (value: number) => void = () => {};
+    const part = new LazyPart<number>(
+      'the slower room',
+      () => {
+        fetches += 1;
+        return new Promise<number>((resolve) => {
+          land = resolve;
+        });
+      },
+      { timeoutMs: 30, retryAfterMs: 0, refetch: () => Promise.reject(new Error('should not refetch a fetch still on its way')) },
+    );
+    await expect(part.load()).rejects.toThrow(/did not arrive/);
+    const again = part.load();
+    land(4);
+    await expect(again).resolves.toBe(4);
+    expect(fetches).toBe(1);
+  });
+
+  it('has no deadline on the dev server, where a first load compiles its graph', async () => {
+    // Vitest runs with `import.meta.env.DEV` true, as the dev server does.
+    let land: (value: number) => void = () => {};
+    const part = new LazyPart<number>('the compiling room', () => new Promise<number>((resolve) => { land = resolve; }));
+    vi.useFakeTimers();
+    try {
+      const loading = part.load();
+      let settled = 'pending';
+      loading.then(() => (settled = 'resolved'), () => (settled = 'rejected'));
+      // Well past the built game's 20 s guard: a cold dev server took 24 s.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(settled, 'still waiting for the compile, not given up on').toBe('pending');
+      land(3);
+      await expect(loading).resolves.toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
