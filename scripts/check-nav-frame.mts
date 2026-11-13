@@ -88,41 +88,46 @@
  * onto a solid, must see a frame over {@link FRAME_LIMIT_MS}. Otherwise the
  * instrument could not see what this check exists to catch.
  *
- * ## Proved red — seed 5, restart 1, on commit 6e3f1fba (13 Nov 2026, this Mac)
+ * ## Proved red — seed 5, restart 1, on commit 85eeb4e7 (13 Nov 2026, this Mac)
  *
  * The session above, unchanged; geometry is the checked-in park's
- * (`parks/5.json`). Green on the same commit: worst frame 3.13 ms CPU, p99
- * 2.23 ms, 84 answers compared, 0 lattices built in one task.
+ * (`parks/5.json`). The Mac was at a load average of ~50 for these runs (a
+ * full `check`, `test:procgen` and a browser QA beside it), which is why the
+ * red numbers are larger than the 33–55 ms of an idle machine. Green on the
+ * same commit, same load: worst frame of play 3.23 ms CPU (crowd), p99 2.29 ms,
+ * 76 answers compared, 0 lattices built in one task; GC taken off route-finding
+ * calls 519.8 ms in all (worst 100.59 ms in one call — what the GC exclusion is
+ * for). An earlier green, idle-ish (load ~7, 6e3f1fba): worst 3.13 ms.
  *
  * `NAV_FRAME_MUTATE=sync` — her navigator, her parade and the crowd built
  * with no scheduler, i.e. today's code (exit 1, 3 failures):
  *
  * ```
- * ✗ no frame spent more than 6 ms of CPU finding its way: worst 491.66 ms (cold), p99 1.06 ms, 29 over the limit, 46 over the 2 ms budget, of 5586 frames
- *   a worst frame: 491.66 ms CPU (cold): warm@379² 2.49, findRoute@379² 455.33, findRoute@379² 33.84
- *   a worst frame: 117.54 ms CPU (castle): findRoute@192² 117.53
- *   a worst frame: 69.81 ms CPU (crowd): findRoute@379² 35.67, findRoute@379² 34.13
- * ✗ every answer is the whole search's route, float for float (0 compared, ...)
- * ✗ after her first lattice: 0 lattice(s) laid in slices, 1 laid whole in one task (0² in castle), 1 half-laid one finished in one go — must be 0 and 0, with at least 1 sliced
+ * ✗ no frame of play spent more than 6 ms of CPU finding its way: worst 239.18 ms (castle), p99 1.50 ms, 43 over the limit, 54 over the 2 ms budget, of 5584 frames
+ *   a worst frame: 953.05 ms CPU (cold): warm@379² 2.18, findRoute@379² 895.52, findRoute@379² 55.35
+ *   a worst frame: 239.18 ms CPU (castle): findRoute@192² 239.17
+ *   a worst frame: 138.14 ms CPU (crowd): findRoute@379² 71.52, findRoute@379² 66.62
+ *   a worst frame: 82.33 ms CPU (park taps): findRoute@379² 82.32
+ * ✗ every answer is the whole search's route, float for float (0 compared, 0 whose lattice had moved on before they could be)
+ * ✗ after her first lattice: 0 lattice(s) laid in slices, 1 laid whole in one task (192² in castle), 1 half-laid one finished in one go — must be 0 and 0, with at least 1 sliced
  * ```
  *
- * (The 455 ms is a companion's first plan finishing her half-laid park
- * lattice in one go; 117 ms the mall's lattice laid whole inside a child's
- * plan — the 55 ms Chrome measured, in Node; "0²" was the label read before
- * the build sized it, since fixed to read after.)
+ * (The 895 ms is a companion's first plan finishing her half-laid park lattice
+ * in one go; the 239 ms is the mall's lattice laid whole inside a child's
+ * plan — the 55 ms Chrome measured on an idle Mac.)
  *
  * `NAV_FRAME_MUTATE=deadline` — the scheduler's deadline ignored, so each
  * request it touches is answered whole (exit 1, 1 failure):
  *
  * ```
- * ✗ no frame spent more than 6 ms of CPU finding its way: worst 112.89 ms (castle), p99 2.37 ms, 29 over the limit, 309 over the 2 ms budget, of 5999 frames
- *   a worst frame: 112.89 ms CPU (castle): warm@192² 1.71, advanceRequest@192² 111.18
- *   a worst frame: 36.33 ms CPU (park taps): advanceRequest@379² 36.32
+ * ✗ no frame of play spent more than 6 ms of CPU finding its way: worst 213.56 ms (castle), p99 3.69 ms, 48 over the limit, 132 over the 2 ms budget, of 5652 frames
+ *   a worst frame: 213.56 ms CPU (castle): warm@192² 1.82, advanceRequest@192² 211.74
+ *   a worst frame: 89.15 ms CPU (park taps): advanceRequest@379² 88.86
  * ```
  *
- * Its answers stayed equal to the whole search's (81 compared): the mutation
+ * Its answers stayed equal to the whole search's (84 compared): the mutation
  * breaks the slicing, not the search, and the equality clause rightly passes.
- * The control line passed in both runs (34.0/33.8 and 35.1/34.7 ms).
+ * The control line passed in all three runs.
  */
 import './headless-canvas.mjs';
 import v8 from 'node:v8';
