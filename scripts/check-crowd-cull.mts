@@ -6,6 +6,9 @@
  * pnpm run check:crowd-cull -- --mutate=centre  # prove the "nobody culled" half red (pop-in)
  * pnpm run check:crowd-cull -- --mutate=stale   # … and again (bounds computed once)
  * pnpm run check:crowd-cull -- --mutate=uncull  # prove the "nobody wasted" half red
+ * pnpm run check:crowd-cull -- --mutate=both-levels     # prove "one level of detail each" red
+ * pnpm run check:crowd-cull -- --mutate=full-detail     # LOD never switches on: "far level under the ordinary camera" red
+ * pnpm run check:crowd-cull -- --mutate=no-full-detail  # full detail lost up close: "full detail at CAMERA_ZOOM_MAX" red
  * ```
  *
  * Step 4 of the 120 fps plan (docs/perf/FRAME-DROPS-2026-11.md, item 4): the
@@ -30,11 +33,34 @@
  * 2. **No shadow is lost (shadow pass).** The same, for the shadow-casting
  *    parts against the sun's real shadow camera — a child just off the edge of
  *    the screen still throws a shadow onto it.
- * 3. **Nobody off screen is drawn.** Every instance a drawn part submits
- *    must belong to a child with some part on screen — zero tolerance — except
- *    the shadow-casting parts, which keep every child because the same buffer
- *    feeds the shadow pass. Their off-screen triangles are counted and held to
- *    a ratcheted budget per scene (park / interior).
+ * 3. **Nobody off screen is drawn.** Every instance the main pass submits
+ *    must belong to a child with some part on screen — zero tolerance, the
+ *    shadow-casting parts included: since step 16 a casting part carries its
+ *    off-screen children past its main-pass count, for the shadow pass alone.
+ *
+ * 4. **One level of detail each: the far one under the ordinary camera, full
+ *    detail up close, and every shadow from the far one** (step 16). Every
+ *    part with a far-level mesh is drawn for a child by exactly one of its two
+ *    meshes — never both (two surfaces fighting), never neither, under every
+ *    pose. On the **park poses at zoom 1** — the ordinary follow camera — that
+ *    one is the far level; on the **poses at `CAMERA_ZOOM_MAX`** it is full
+ *    detail for every child whose body alone fills the switch's share of the
+ *    picture (measured here from her own parts; the sphere the code sizes her
+ *    by encloses them, so it is larger still) — one far up a zoomed frame is
+ *    small, and either level is right for her; the interiors assert one
+ *    level, not which. The level is chosen by
+ *    the share of the picture a child fills, which nothing about the screen's
+ *    pixels enters (`cullCrowdsFor` is given none), so these hold at every
+ *    device pixel ratio; the run states both clauses in CSS pixels on its own
+ *    viewports — how tall the children it measured were, against the switch.
+ *    And a casting part with a far level casts **from** it: its full-detail
+ *    mesh never casts, and its far mesh's shadow draw (its own
+ *    `onBeforeShadow`, called here as three.js calls it) holds every child in
+ *    the shadow frustum.
+ *
+ * 5. **The far level is within its bound.** Every vertex of every part's
+ *    source geometry lies within `LOD_LOW_TOLERANCE_M` of its far level's
+ *    surface, in metres of world, and the far level has fewer triangles.
  *
  * Poses: the real `IsoCamera`, resized to the desktop (1440×900) and the phone
  * (390×844), at the default zoom and zoomed out; centred on every park child,
@@ -51,6 +77,7 @@ import './headless-canvas.mjs';
 import {
   Box3,
   Frustum,
+  Triangle,
   InstancedMesh,
   Matrix4,
   Sphere,
@@ -63,6 +90,13 @@ import {
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { CROWD_BOUNDS_MARGIN, InstancedCrowd, cullCrowdsFor } from '../src/entities/npc/InstancedCrowd.ts';
+import {
+  LOD_FULL_ABOVE_SHARE,
+  LOD_LOW_BELOW_SHARE,
+  LOD_LOW_TOLERANCE_M,
+  setLodMode,
+  triangleCount,
+} from '../src/core/instancedLod.ts';
 import { CAMERA_ZOOM_MAX } from '../src/core/constants.ts';
 import { CASTLE_FLOORS } from '../src/world/building/floors.ts';
 import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
@@ -100,14 +134,68 @@ InstancedCrowd.prototype.commit = function (this: InstancedCrowd, member): void 
 
 /** The fields this check reads; present before and after step 4. */
 interface CrowdInsides {
-  readonly parts: readonly { readonly source: { geometry: BufferGeometry }; readonly variants: readonly InstancedMesh[] }[];
+  readonly parts: readonly CrowdPartInsides[];
   readonly members: readonly {
     readonly proxies: readonly Object3D[];
     readonly variant: Uint8Array;
     readonly shown: Uint8Array;
   }[];
 }
-const insides = (crowd: InstancedCrowd): CrowdInsides => crowd as unknown as CrowdInsides;
+interface CrowdPartInsides {
+  readonly source: Object3D & { geometry: BufferGeometry };
+  readonly variants: readonly InstancedMesh[];
+  /** The far level of each variant, or null where the part has none (step 16). */
+  readonly low: readonly (InstancedMesh | null)[];
+  /** Whether the part throws a shadow. */
+  readonly casts: boolean;
+}
+const insides = (crowd: InstancedCrowd): CrowdInsides & { readonly prototype: Object3D } =>
+  crowd as unknown as CrowdInsides & { readonly prototype: Object3D };
+/** Every mesh that may draw variant `v` of a part: full detail, then the far level if it has one. */
+function levelMeshes(part: CrowdPartInsides, v: number): InstancedMesh[] {
+  const full = part.variants[v];
+  const low = part.low[v];
+  return full ? (low ? [full, low] : [full]) : [];
+}
+/** Every instanced mesh of a part, both levels of every variant. */
+function allMeshes(part: CrowdPartInsides): InstancedMesh[] {
+  return part.variants.flatMap((_, v) => levelMeshes(part, v));
+}
+/** The CSS height of the viewport the current pose is drawn into (`frameOn` sets it). */
+let viewportCssHeight = 900;
+
+if (mutation === 'full-detail') {
+  // Level of detail never switching on — what the first version did on a 3×
+  // screen, where a rule in device pixels made every child look close.
+  setLodMode('off');
+}
+if (mutation === 'no-full-detail') {
+  // The far level everywhere: a child brought close keeps the cheap model.
+  setLodMode('low');
+}
+if (mutation === 'both-levels') {
+  // Step 16 without its level filter: every child the far mesh draws in the
+  // main pass is drawn by the full-detail mesh as well.
+  interface Draw { mesh: InstancedMesh; slots: Int32Array; main: number; written: number }
+  const proto = InstancedCrowd.prototype as unknown as {
+    pack(this: unknown, p: number, v: number, keep: Uint8Array | null): void;
+    packMember(this: unknown, draw: Draw, m: number, p: number): void;
+  };
+  const realPack = proto.pack;
+  proto.pack = function (this: unknown, p: number, v: number, keep: Uint8Array | null): void {
+    realPack.call(this, p, v, keep);
+    const self = this as { parts: readonly CrowdPartInsides[]; draws: Map<InstancedMesh, Draw> };
+    const part = self.parts[p];
+    const full = part?.variants[v] ? self.draws.get(part.variants[v]) : undefined;
+    const low = part?.low[v] ? self.draws.get(part.low[v]) : undefined;
+    if (!full || !low || full.written !== full.main) return;
+    for (let i = 0; i < low.main; i += 1) proto.packMember.call(this, full, low.slots[i]!, p);
+    full.main = full.written;
+    full.mesh.count = full.main;
+    full.mesh.visible = full.main > 0;
+    full.mesh.instanceMatrix.needsUpdate = true;
+  };
+}
 
 const park = buildHeadlessPark();
 const { world, camera: iso, scene } = park;
@@ -143,7 +231,7 @@ if (crowds.size === 0) {
 
 if (mutation === 'uncull') {
   // Today's code before step 4: never culled.
-  for (const crowd of crowds) for (const part of insides(crowd).parts) for (const mesh of part.variants) mesh.frustumCulled = false;
+  for (const crowd of crowds) for (const part of insides(crowd).parts) for (const mesh of allMeshes(part)) mesh.frustumCulled = false;
 }
 if (mutation === 'stale') {
   // The obvious wrong fix the class comment always warned about: culling on,
@@ -151,7 +239,7 @@ if (mutation === 'stale') {
   // back a fresh copy of that first sphere, so nothing can update it.
   for (const crowd of crowds) {
     for (const part of insides(crowd).parts) {
-      for (const mesh of part.variants) {
+      for (const mesh of allMeshes(part)) {
         mesh.frustumCulled = true;
         const stale = (mesh.boundingSphere ?? new Sphere()).clone();
         Object.defineProperty(mesh, 'boundingSphere', { get: () => stale.clone(), set: () => {} });
@@ -189,10 +277,32 @@ function visibleChain(object: Object3D): boolean {
   return true;
 }
 
-/** Whether three.js's own projectObject / shadow pass would submit it. */
+/** Whether three.js's own projectObject would submit it to the main pass. */
 function passes(mesh: InstancedMesh, frustum: Frustum): boolean {
   if (!visibleChain(mesh)) return false;
   if (mesh.count === 0) return false;
+  return !mesh.frustumCulled || frustum.intersectsObject(mesh);
+}
+
+/**
+ * How many instances the shadow pass draws of `mesh` — read by calling its own
+ * `onBeforeShadow` and `onAfterShadow` exactly as three.js's `WebGLShadowMap`
+ * does round the draw, so this is the count that pass really submits.
+ */
+function shadowCount(mesh: InstancedMesh): number {
+  const main = mesh.count;
+  const hooks = mesh as unknown as { onBeforeShadow(): void; onAfterShadow(): void };
+  hooks.onBeforeShadow();
+  const drawn = mesh.count;
+  hooks.onAfterShadow();
+  if (mesh.count !== main) failures.push(`${mesh.name}: onAfterShadow left its count at ${mesh.count}, the main pass had ${main}`);
+  return drawn;
+}
+
+/** Whether three.js's shadow pass would submit it: cast, visible, something to draw, in the light's frustum. */
+function passesShadow(mesh: InstancedMesh, frustum: Frustum): boolean {
+  if (!mesh.castShadow || !visibleChain(mesh)) return false;
+  if (shadowCount(mesh) === 0) return false;
   return !mesh.frustumCulled || frustum.intersectsObject(mesh);
 }
 
@@ -224,14 +334,14 @@ const partSphere = new Sphere();
 const nearSphere = new Sphere();
 const slotMatrix = new Matrix4();
 /**
- * Does a slot below `count` hold this matrix? Compared at float32 precision —
- * the instance buffer is a `Float32Array`, and 600 m out (the castle's floors)
- * a float32 is only good to ~6e-5 m, which an early version of this check
- * read as a missing child.
+ * Does a slot below `count` (the main pass's, unless told) hold this matrix?
+ * Compared at float32 precision — the instance buffer is a `Float32Array`, and
+ * 600 m out (the castle's floors) a float32 is only good to ~6e-5 m, which an
+ * early version of this check read as a missing child.
  */
-function holds(mesh: InstancedMesh, matrix: Matrix4): boolean {
+function holds(mesh: InstancedMesh, matrix: Matrix4, count = mesh.count): boolean {
   const e = matrix.elements;
-  for (let i = 0; i < mesh.count; i += 1) {
+  for (let i = 0; i < count; i += 1) {
     mesh.getMatrixAt(i, slotMatrix);
     const s = slotMatrix.elements;
     let same = true;
@@ -247,24 +357,44 @@ interface SceneTally {
   poses: number;
   drawCalls: number;
   tris: number;
-  /** Shadow-casting parts drawn off screen — legitimate, budgeted. */
-  shadowTris: number;
-  worstShadowTris: number;
-  worstShadowPose: string;
-  /** Non-shadow parts drawn for a child wholly off screen — forbidden. */
+  /** Triangles the shadow pass submits for the crowd (the sun only), summed over poses. */
+  shadowPassTris: number;
+  /** Main-pass instances drawn for a child wholly off screen — forbidden. */
   wasteTris: number;
   wasteReports: number;
 }
-const freshTally = (): SceneTally => ({
-  poses: 0, drawCalls: 0, tris: 0, shadowTris: 0, worstShadowTris: 0, worstShadowPose: '', wasteTris: 0, wasteReports: 0,
-});
+const freshTally = (): SceneTally => ({ poses: 0, drawCalls: 0, tris: 0, shadowPassTris: 0, wasteTris: 0, wasteReports: 0 });
 const tally: Record<'park' | 'interior', SceneTally> = { park: freshTally(), interior: freshTally() };
 const failures: string[] = [];
+/** On-screen parts that have a far level, checked for one level each. */
+let partsWithLevels = 0;
+/** Of those, the ones on a pose where one level is the only right answer, and how many had the other. */
+let partsFarExpected = 0;
+let partsAtFullDetail = 0;
+let partsFullExpected = 0;
+let partsAtFarLevel = 0;
+let levelReports = 0;
 let partsOnScreen = 0;
 let partsInShadow = 0;
+/** Casting parts with a far level, and how many of them cast from full detail. */
+let castingPartsChecked = 0;
+let castFromFull = 0;
+/**
+ * How tall the children were on screen, in CSS pixels, measured here from
+ * their own parts' spheres (never from the sphere the code under test sizes
+ * them by) — per kind of pose, the shortest and tallest child with anything
+ * on screen.
+ */
+const tallCss = { ordinary: { min: Infinity, max: 0 }, close: { min: Infinity, max: 0 } };
 const worldMatrix = new Matrix4();
+const viewPoint = new Vector3();
 
-function measure(label: string, kind: 'park' | 'interior'): void {
+/**
+ * `expect`: which level every on-screen part with two must be drawn at on
+ * this pose — `far` under the ordinary camera, `full` at `CAMERA_ZOOM_MAX`,
+ * or `either` (interiors) where only "exactly one" is asserted.
+ */
+function measure(label: string, kind: 'park' | 'interior', expect: 'far' | 'full' | 'either' = 'either'): void {
   scene.updateMatrixWorld(true);
   const cam = iso.camera;
   cam.updateMatrixWorld(true);
@@ -273,21 +403,52 @@ function measure(label: string, kind: 'park' | 'interior'): void {
   );
   sunLight.shadow.updateMatrices(sunLight);
   const shadow = sunLight.shadow.getFrustum();
+  const lens = cam.projectionMatrix.elements[5]!;
 
-  const onScreen = new Map<InstancedMesh, number>();
   const membersNearScreen = new Set<object>();
   for (const crowd of crowds) {
     const { parts, members } = insides(crowd);
+    // Whether this crowd is drawn at all (an interior she is not in is not).
+    // Asked of the crowd, never of a part's mesh: since step 16 a mesh holding
+    // nobody this draw is hidden, and the full-detail one usually is.
+    if (!visibleChain(crowd.group)) continue;
     for (const member of members) {
       const choice = committed.get(member);
       if (!choice) continue;
+      // Her height on screen, from her own parts (never from the sphere the
+      // code under test sizes her by): clip-space y over w, as a share of the
+      // picture. The code's sphere encloses every part, so it is never shorter.
+      let top = -Infinity, bottom = Infinity;
+      for (let p = 0; p < parts.length; p += 1) {
+        const proxy = member.proxies[p];
+        if (choice[p]! < 0 || !proxy) continue;
+        worldMatrix.multiplyMatrices(crowd.group.matrixWorld, proxy.matrixWorld);
+        partSphere.copy(enclosingSphere(parts[p]!.source.geometry)).applyMatrix4(worldMatrix);
+        viewPoint.copy(partSphere.center).applyMatrix4(cam.matrixWorldInverse);
+        const w = -viewPoint.z;
+        if (w <= 1e-6) continue;
+        const y = (lens * viewPoint.y) / w;
+        const r = (lens * partSphere.radius) / w;
+        if (y + r > top) top = y + r;
+        if (y - r < bottom) bottom = y - r;
+      }
+      const bodyShare = top > bottom ? (top - bottom) / 2 : 0;
+      // At `CAMERA_ZOOM_MAX` full detail is required of every child whose body
+      // alone fills the switch's share; one far up a zoomed frame is small,
+      // and the far level is right for her.
+      const close = expect === 'full' && bodyShare >= LOD_FULL_ABOVE_SHARE;
+      let seen = false;
       for (let p = 0; p < parts.length; p += 1) {
         const chosen = choice[p]!;
         if (chosen < 0) continue;
         const part = parts[p]!;
-        const mesh = part.variants[chosen];
+        const levels = levelMeshes(part, chosen);
         const proxy = member.proxies[p];
-        if (!mesh || !proxy || !visibleChain(mesh)) continue;
+        if (levels.length === 0 || !proxy) continue;
+        // The mesh drawing her in the main pass: whichever level holds her
+        // instance below its count. Before step 16 that was the only mesh.
+        const drawing = levels.filter((candidate) => candidate.count > 0 && holds(candidate, proxy.matrixWorld));
+        const mesh = drawing[0] ?? levels[0]!;
         worldMatrix.multiplyMatrices(mesh.matrixWorld, proxy.matrixWorld);
         partSphere.copy(enclosingSphere(part.source.geometry)).applyMatrix4(worldMatrix);
         // The "drawn for nobody" side is judged with the crowd's own margin and
@@ -297,8 +458,38 @@ function measure(label: string, kind: 'park' | 'interior'): void {
         nearSphere.radius += CROWD_BOUNDS_MARGIN + 0.02;
         if (view.intersectsSphere(nearSphere)) membersNearScreen.add(member);
         if (view.intersectsSphere(partSphere)) {
+          seen = true;
+          if (levels.length > 1) {
+            partsWithLevels += 1;
+            if (drawing.length > 1) {
+              failures.push(`${label}: ${mesh.name} draws one child at both levels of detail (${drawing.map((d) => d.name).join(' and ')})`);
+            } else if (expect === 'far') {
+              partsFarExpected += 1;
+              if (drawing[0] === levels[0]) {
+                partsAtFullDetail += 1;
+                if (levelReports < 6) {
+                  levelReports += 1;
+                  failures.push(
+                    `${label}: ${mesh.name} drawn at full detail (${trisOf(mesh)} triangles, far level ${trisOf(levels[1]!)}) ` +
+                      `under the ordinary camera, on a ${viewportCssHeight} CSS px tall viewport`,
+                  );
+                }
+              }
+            } else if (close) {
+              partsFullExpected += 1;
+              if (drawing[0] === levels[1]) {
+                partsAtFarLevel += 1;
+                if (levelReports < 6) {
+                  levelReports += 1;
+                  failures.push(
+                    `${label}: ${mesh.name} drawn at the far level for a child ${(bodyShare * viewportCssHeight).toFixed(0)} CSS px tall ` +
+                      `on a ${viewportCssHeight} px viewport (${bodyShare.toFixed(2)} of the picture), at CAMERA_ZOOM_MAX`,
+                  );
+                }
+              }
+            }
+          }
           partsOnScreen += 1;
-          onScreen.set(mesh, (onScreen.get(mesh) ?? 0) + 1);
           if (!passes(mesh, view)) {
             const s = mesh.boundingSphere ? mesh.boundingSphere.clone().applyMatrix4(mesh.matrixWorld) : null;
             const c = partSphere.center;
@@ -324,34 +515,53 @@ function measure(label: string, kind: 'park' | 'interior'): void {
             if (process.env['STOP_AFTER'] && failures.length >= Number(process.env['STOP_AFTER'])) { console.error(failures.join('\n')); process.exit(1); }
           }
         }
-        if (mesh.castShadow && shadow.intersectsSphere(partSphere)) {
-          partsInShadow += 1;
-          if (!passes(mesh, shadow)) {
-            failures.push(`${label}: ${mesh.name} culled from the shadow pass with a child in the shadow frustum`);
+        if (part.casts) {
+          // Every shadow from the far level: the full-detail mesh of a part
+          // that has a far one never casts, and the far one does.
+          const castFrom = levels.filter((candidate) => candidate.castShadow);
+          if (levels.length > 1) {
+            castingPartsChecked += 1;
+            if (levels[0]!.castShadow) {
+              castFromFull += 1;
+              if (castFromFull <= 3) failures.push(`${label}: ${levels[0]!.name} casts its shadow from full detail, beside its far level ${levels[1]!.name}`);
+            }
+          }
+          if (castFrom.length !== 1) {
+            failures.push(`${label}: ${levels[0]!.name} casts from ${castFrom.length} meshes, not one`);
+          } else if (shadow.intersectsSphere(partSphere)) {
+            partsInShadow += 1;
+            const caster = castFrom[0]!;
+            if (!holds(caster, proxy.matrixWorld, shadowCount(caster))) {
+              failures.push(`${label}: ${caster.name} holds no instance for a child in the shadow frustum, within its shadow draw`);
+            } else if (!passesShadow(caster, shadow)) {
+              failures.push(`${label}: ${caster.name} culled from the shadow pass with a child in the shadow frustum`);
+            }
           }
         }
+      }
+      if (seen && bodyShare > 0 && (expect === 'far' || close)) {
+        const px = bodyShare * viewportCssHeight;
+        const bucket = expect === 'far' ? tallCss.ordinary : tallCss.close;
+        if (px < bucket.min) bucket.min = px;
+        if (px > bucket.max) bucket.max = px;
       }
     }
   }
 
   const t = tally[kind];
   t.poses += 1;
-  let shadowTris = 0;
   for (const crowd of crowds) {
     const { parts, members } = insides(crowd);
     for (let p = 0; p < parts.length; p += 1) {
       const part = parts[p]!;
-      for (let v = 0; v < part.variants.length; v += 1) {
-        const mesh = part.variants[v]!;
+      for (let v = 0; v < part.variants.length; v += 1) for (const mesh of levelMeshes(part, v)) {
+        if (passesShadow(mesh, shadow)) t.shadowPassTris += trisOf(mesh) * shadowCount(mesh);
         if (!passes(mesh, view)) continue;
         t.drawCalls += 1;
         t.tris += trisOf(mesh) * mesh.count;
-        if (mesh.castShadow) {
-          // Kept for the shadow pass; counted, budgeted, not forbidden.
-          shadowTris += trisOf(mesh) * Math.max(0, mesh.count - (onScreen.get(mesh) ?? 0));
-          continue;
-        }
-        // Every other drawn instance must be a child with something on screen.
+        // Every instance the main pass draws must be a child with something on
+        // screen — the casting parts too, whose off-screen children ride past
+        // the main pass's count for the shadow pass alone.
         for (let i = 0; i < mesh.count; i += 1) {
           mesh.getMatrixAt(i, slotMatrix);
           const owner = members.find((m) => committed.get(m)?.[p] === v && sameTranslation(slotMatrix, m.proxies[p]!.matrixWorld));
@@ -368,11 +578,6 @@ function measure(label: string, kind: 'park' | 'interior'): void {
       }
     }
   }
-  t.shadowTris += shadowTris;
-  if (shadowTris > t.worstShadowTris) {
-    t.worstShadowTris = shadowTris;
-    t.worstShadowPose = label;
-  }
 }
 
 function sameTranslation(a: Matrix4, b: Matrix4): boolean {
@@ -383,10 +588,11 @@ function sameTranslation(a: Matrix4, b: Matrix4): boolean {
 }
 
 /** Places the camera as `Game` would after a door: snapped, then one update. */
-function frameOn(focus: Vector3, width: number, height: number, zoomedOut: boolean): void {
+function frameOn(focus: Vector3, width: number, height: number, zoomedIn: boolean): void {
   const context = step(focus);
   iso.resize(width, height);
-  if (zoomedOut) iso.snapZoomTarget(CAMERA_ZOOM_MAX);
+  viewportCssHeight = height;
+  if (zoomedIn) iso.snapZoomTarget(CAMERA_ZOOM_MAX);
   else iso.snapZoomTarget(1);
   iso.snapTo(focus);
   iso.update(context, focus, zero);
@@ -433,21 +639,22 @@ for (let round = 0; round < ROUNDS; round += 1) {
   step(zero, 600);
   for (const [name, width, height] of ASPECTS) {
     if (process.env['SKIP_PARK']) break;
-    for (const zoomedOut of [false, true]) {
+    // `CAMERA_ZOOM_MAX` is the closest the camera gets (larger is closer).
+    for (const zoomedIn of [false, true]) {
       // Children in the park, each one put in turn at every edge of the frame.
       for (let k = round % 2; k < kids.length; k += 2) {
         const kid = kids[k]!;
         if (spaceAt(kid.position.x, kid.position.z) !== SPACE_GARDEN) continue;
         target.copy(kid.position);
-        frameOn(target, width, height, zoomedOut);
+        frameOn(target, width, height, zoomedIn);
         for (const [ox, oy] of edgeOffsets) {
           // Pushing the child to the right of the frame moves the focus left.
           focus.copy(target)
             .addScaledVector(iso.screenRightAxis as Vector3, -ox * iso.viewHalfWidth)
             .addScaledVector(iso.screenUpAxis as Vector3, -oy * iso.viewHalfHeight);
           focus.y = target.y;
-          frameOn(focus, width, height, zoomedOut);
-          measure(`round ${round} ${name}${zoomedOut ? ' zoomed out' : ''}, ${kid.name} at (${ox},${oy})`, 'park');
+          frameOn(focus, width, height, zoomedIn);
+          measure(`round ${round} ${name}${zoomedIn ? ' at CAMERA_ZOOM_MAX' : ''}, ${kid.name} at (${ox},${oy})`, 'park', zoomedIn ? 'full' : 'far');
         }
       }
     }
@@ -532,39 +739,99 @@ withCrowdsShown(() => {
 });
 
 // ------------------------------------------------------------- the verdict
-/**
- * Off-screen triangles of **shadow-casting** parts, **mean** per pose — a budget
- * on the mean, not a cap on any one pose (the worst poses run well over it). Those parts
- * keep every child, because the buffer they draw from also feeds the shadow
- * pass (`InstancedCrowd.cullTo`). Ratchet down, never up. Every other part
- * drawn for a child wholly off screen is a failure outright, above.
- *
- * Measured (seed 5): park 86,986 at ROUNDS=1 and 95,654 at the default 2 —
- * it moves with which children the rounds put at which edge, so the budget
- * carries ~15 % over the higher figure; interior 439,449, mostly the great
- * hall's banquet, every diner's head and body kept for the castle key light's
- * shadow.
- */
-const SHADOW_BUDGET = { park: 110_000, interior: 500_000 } as const;
-
 const fmt = (n: number): string => Math.round(n).toLocaleString('en-GB');
 for (const kind of ['park', 'interior'] as const) {
   const t = tally[kind];
-  const meanShadow = t.shadowTris / Math.max(1, t.poses);
   console.log(
     `check:crowd-cull ${kind}: ${t.poses} poses; per pose ${(t.drawCalls / t.poses).toFixed(1)} crowd draw calls, ` +
-      `${fmt(t.tris / t.poses)} crowd tris; off screen: ${fmt(t.wasteTris / t.poses)} non-shadow (must be 0), ` +
-      `mean ${fmt(meanShadow)} shadow-casting (mean budget ${fmt(SHADOW_BUDGET[kind])}; worst single pose ${fmt(t.worstShadowTris)}, not capped, at ${t.worstShadowPose || '—'})`,
+      `${fmt(t.tris / t.poses)} crowd tris in the main pass, ${fmt(t.shadowPassTris / t.poses)} in the sun's shadow pass; ` +
+      `main pass off screen: ${fmt(t.wasteTris / t.poses)} (must be 0, casting parts included)`,
   );
-  if (meanShadow > SHADOW_BUDGET[kind]) {
-    failures.push(`${kind}: ${fmt(meanShadow)} off-screen shadow-casting crowd triangles per pose, budget ${fmt(SHADOW_BUDGET[kind])}`);
-  }
   if (t.wasteTris > 0) failures.push(`${kind}: ${fmt(t.wasteTris)} triangles drawn in all for children wholly off screen`);
 }
 process.stderr.write(
   `check:crowd-cull: ${crowds.size} crowds, ${partsOnScreen} on-screen parts and ${partsInShadow} shadow-frustum parts checked\n`,
 );
 if (partsOnScreen === 0 || partsInShadow === 0) failures.push('no crowd part was ever on screen — the check measured nothing');
+
+// The far level itself: fewer triangles, and every source vertex within the
+// bound of its surface — measured here, point to triangle, in metres of world.
+let fullTris = 0;
+let lowTris = 0;
+let partsWithFarLevel = 0;
+let partTotal = 0;
+let worstDeviation = 0;
+let worstPart = '';
+const measuredGeometry = new WeakSet<BufferGeometry>();
+const triangle = new Triangle();
+const ta = new Vector3(), tb = new Vector3(), tc = new Vector3(), tp = new Vector3(), tq = new Vector3();
+const toPrototype = new Matrix4();
+for (const crowd of crowds) {
+  const prototype = insides(crowd).prototype;
+  prototype.updateWorldMatrix(true, true);
+  for (const part of insides(crowd).parts) {
+    partTotal += 1;
+    const source = part.source.geometry;
+    const lowMesh = part.low[0];
+    const full = triangleCount(source);
+    const low = lowMesh ? triangleCount(lowMesh.geometry) : full;
+    fullTris += full;
+    lowTris += low;
+    if (!lowMesh) continue;
+    partsWithFarLevel += 1;
+    if (!(low < full) || low < 4) failures.push(`${crowd.group.name}: ${lowMesh.name} has ${low} triangles for a ${full}-triangle part`);
+    if (measuredGeometry.has(source)) continue;
+    measuredGeometry.add(source);
+    const scale = toPrototype.copy(prototype.matrixWorld).invert().multiply(part.source.matrixWorld).getMaxScaleOnAxis();
+    const sp = source.getAttribute('position');
+    const lp = lowMesh.geometry.getAttribute('position');
+    const li = lowMesh.geometry.index;
+    const lowCorner = (k: number): number => (li ? li.getX(k) : k);
+    let worst = 0;
+    for (let i = 0; i < sp.count; i += 1) {
+      tp.fromBufferAttribute(sp, i);
+      let best = Infinity;
+      for (let k = 0; k < low * 3 && best > 0; k += 3) {
+        ta.fromBufferAttribute(lp, lowCorner(k));
+        tb.fromBufferAttribute(lp, lowCorner(k + 1));
+        tc.fromBufferAttribute(lp, lowCorner(k + 2));
+        triangle.set(ta, tb, tc).closestPointToPoint(tp, tq);
+        const d = tq.distanceToSquared(tp);
+        if (d < best) best = d;
+      }
+      if (best > worst) worst = best;
+    }
+    const metres = Math.sqrt(worst) * scale;
+    if (metres > worstDeviation) {
+      worstDeviation = metres;
+      worstPart = lowMesh.name;
+    }
+    if (!(metres <= LOD_LOW_TOLERANCE_M)) {
+      failures.push(`${crowd.group.name}: ${lowMesh.name} leaves a source vertex ${(metres * 1000).toFixed(2)} mm from its surface, bound ${LOD_LOW_TOLERANCE_M * 1000} mm`);
+    }
+  }
+}
+const cssRange = (r: { min: number; max: number }): string => (r.max > 0 ? `${r.min.toFixed(0)}–${r.max.toFixed(0)}` : 'none');
+process.stderr.write(
+  `check:crowd-cull: level of detail — ${partsWithFarLevel} of ${partTotal} parts have a far level; every part of every crowd ` +
+    `${fmt(fullTris)} triangles at full detail, ${fmt(lowTris)} at the far level; worst source vertex ${(worstDeviation * 1000).toFixed(2)} mm ` +
+    `from its far level (${worstPart || '—'}), bound ${LOD_LOW_TOLERANCE_M * 1000} mm.\n` +
+    `  ${partsWithLevels} on-screen parts with two levels checked for one level each.\n` +
+    `  Ordinary camera (park poses at zoom 1, 1440×900 and 390×844 CSS px): children ${cssRange(tallCss.ordinary)} CSS px tall; ` +
+    `${partsFarExpected} parts required at the far level, ${partsAtFullDetail} at full detail (must be 0).\n` +
+    `  Close (park poses at CAMERA_ZOOM_MAX, children whose body alone is ${LOD_FULL_ABOVE_SHARE} of the picture or more): children ${cssRange(tallCss.close)} CSS px tall; ` +
+    `${partsFullExpected} parts required at full detail, ${partsAtFarLevel} at the far level (must be 0).\n` +
+    `  The switch is a child's sphere ${LOD_FULL_ABOVE_SHARE} of the picture's height going up, ${LOD_LOW_BELOW_SHARE} coming down — ` +
+    `${(LOD_FULL_ABOVE_SHARE * 900).toFixed(0)} / ${(LOD_LOW_BELOW_SHARE * 900).toFixed(0)} CSS px on a 900 px tall viewport, ` +
+    `${(LOD_FULL_ABOVE_SHARE * 844).toFixed(0)} / ${(LOD_LOW_BELOW_SHARE * 844).toFixed(0)} on an 844 px one; no pixel ratio enters it, ` +
+    `so these verdicts are the same at device pixel ratio 1, 2 and 3. Interiors assert one level, not which.\n` +
+    `  Shadows: ${castingPartsChecked} casting parts with a far level checked (per child per pose), ${castFromFull} casting from full detail (must be 0).\n`,
+);
+if (partsWithLevels === 0) failures.push('no on-screen part had a far level — the level-of-detail half measured nothing');
+if (partsFarExpected === 0) failures.push('no part with a far level was on screen on a park pose at zoom 1 — "the far level under the ordinary camera" measured nothing');
+if (partsFullExpected === 0) failures.push('no part with a far level was on screen at CAMERA_ZOOM_MAX — "full detail up close" measured nothing');
+if (castingPartsChecked === 0) failures.push('no casting part with a far level was measured — "every shadow from the far level" measured nothing');
+if (partsWithFarLevel === 0) failures.push('no part of any crowd has a far level — every one was refused or too small');
 
 if (failures.length > 0) {
   const shown = failures.slice(0, 20);
