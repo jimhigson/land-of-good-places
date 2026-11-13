@@ -1,8 +1,10 @@
 import type { LazyPart } from './LazyPart';
 import { chunkPart } from './lazyChunks';
-import { SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
+import { HOTEL_ROOM_Z, SPACE_LIBRARY, SPACE_REPTILE_HOUSE, type SpaceId } from './spaces';
 import type * as ReptileHallModule from './reptileHouse/hall';
 import type * as FerrisShowModule from './ferrisWheel/show';
+import type * as LibraryRoomModule from './library/room';
+import type * as HotelInteriorModule from './hotel/interior';
 
 /**
  * **Every room that is fetched when she goes into it** — the one list.
@@ -25,8 +27,14 @@ export const REPTILE_HALL = chunkPart<typeof ReptileHallModule>('the Reptile Hou
 /** The Space Ferris Wheel's sky show: clouds, space, the four friends and the sparks — built on boarding. */
 export const FERRIS_SHOW = chunkPart<typeof FerrisShowModule>('the ferris wheel sky show', 'src/world/ferrisWheel/show.ts', () => import('./ferrisWheel/show'));
 
+/** The Library's reading room and secret den: shell, furniture, books, the owl, the dragon, the cat. */
+export const LIBRARY_ROOM = chunkPart<typeof LibraryRoomModule>('the Library reading room', 'src/world/library/room.ts', () => import('./library/room'));
+
+/** The Land Hotel's inside: five rooms, their furniture and solids, the guests, and the hotel kit's inside half. */
+export const HOTEL_INTERIOR = chunkPart<typeof HotelInteriorModule>('the Land Hotel interior', 'src/world/hotel/interior.ts', () => import('./hotel/interior'));
+
 /** Every lazy room, for the boot's preloading and Node's providing. */
-export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW];
+export const LAZY_INTERIORS: readonly LazyPart<unknown>[] = [REPTILE_HALL, FERRIS_SHOW, LIBRARY_ROOM, HOTEL_INTERIOR];
 
 /**
  * The rooms a boot must load before the game is built: the one a restored save
@@ -41,5 +49,11 @@ export function interiorsToPreload(space: SpaceId | undefined, pathname: string)
   if (space === SPACE_REPTILE_HOUSE) parts.add(REPTILE_HALL);
   if (pathname === '/reptile-house' || pathname === '/tortoise-ride') parts.add(REPTILE_HALL);
   if (pathname === '/ferris') parts.add(FERRIS_SHOW);
+  if (space === SPACE_LIBRARY) parts.add(LIBRARY_ROOM);
+  // `/book?id=` too: a page that pictures the library draws the room's own
+  // owl and shelves (`LazyBookReader` loads the room with the reader).
+  if (pathname === '/library' || pathname === '/library-den' || pathname === '/book') parts.add(LIBRARY_ROOM);
+  if (HOTEL_ROOM_Z.some(([room]) => room === space)) parts.add(HOTEL_INTERIOR);
+  if (pathname === '/hotel' || pathname.startsWith('/hotel-')) parts.add(HOTEL_INTERIOR);
   return [...parts];
 }

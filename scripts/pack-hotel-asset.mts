@@ -17,15 +17,65 @@
  */
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { packGlbAsset } from './lib/pack-glb-asset.mts';
+import { glbNodeNames, glbSubset } from './lib/splitGlb.mts';
+import { isHotelBootPart } from '../src/art/models/hotelKitSplit.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+const glbPath = resolve(here, '../src/art/assets/hotel.glb');
+const whole = readFileSync(glbPath);
+
+/**
+ * **Cut in two at pack time** (`src/art/models/hotelKitSplit.ts` owns which
+ * part goes where): the boot kit — the tower, its doors, and the parts other
+ * places borrow — and the inside kit, which loads with the hotel's interior
+ * when she walks in. The budget below is still for the whole authored file;
+ * the cut adds only one glTF header and manifest's worth of bytes.
+ */
+const names = glbNodeNames(whole);
+const bootNames = names.filter(isHotelBootPart);
+const insideNames = names.filter((name) => !isHotelBootPart(name));
+if (!bootNames.some((name) => name.startsWith('tower-')) || insideNames.length === 0) {
+  console.error(`pack:hotel: the cut is wrong — boot ${bootNames.length} parts, inside ${insideNames.length}`);
+  process.exit(1);
+}
+// The budget argued for below is the whole authored file's, so it is held on
+// the whole file too, not only on each half.
+if (whole.length > 720 * 1024) {
+  console.error(`pack:hotel: hotel.glb is ${whole.length} bytes, over the 720 KB budget argued for below`);
+  process.exit(1);
+}
+console.log(`pack:hotel: ${bootNames.length} boot parts, ${insideNames.length} inside parts, ${whole.length} bytes whole`);
+
+const doc = (which: string): string[] => [
+  `The Land Hotel, as authored geometry — ${which}.`,
+  '',
+  '**Generated — do not edit.** `npm run pack:hotel` rebuilds it from',
+  '`hotel.glb`, cut in two by `src/art/models/hotelKitSplit.ts`; that file',
+  'is itself written by `npm run blend:hotel` (from `art/blend/hotel.blend`,',
+  'which is in turn *generated* by `art/blend/hotel_build.py` — that script',
+  'is the authoring source, not the .blend). See `scripts/pack-kid-asset.mts`',
+  'for why the bytes are imported rather than fetched.',
+];
+
 packGlbAsset({
-  glbPath: resolve(here, '../src/art/assets/hotel.glb'),
+  glbPath,
+  bytes: glbSubset(whole, (name) => !isHotelBootPart(name)),
+  modulePath: resolve(here, '../src/art/assets/hotelInsideGlb.ts'),
+  constantName: 'HOTEL_INSIDE_GLB_BASE64',
+  label: 'pack:hotel (inside kit, loaded on entry)',
+  budgetBytes: 720 * 1024,
+  docLines: doc('the inside kit: the furniture, the staircases, the chandelier and the suite’s television, loaded with the interior when she walks in'),
+});
+
+packGlbAsset({
+  glbPath,
+  bytes: glbSubset(whole, isHotelBootPart),
   modulePath: resolve(here, '../src/art/assets/hotelGlb.ts'),
   constantName: 'HOTEL_GLB_BASE64',
-  label: 'pack:hotel',
+  label: 'pack:hotel (boot kit)',
   /**
    * 640 KB, against the 150 KB every other asset gets.
    *
@@ -129,16 +179,5 @@ packGlbAsset({
    *   refuses.
    */
   budgetBytes: 720 * 1024,
-  docLines: [
-    'The Land Hotel, as authored geometry: the crystal tower, the furniture',
-    'that goes inside it, the lift, the suite’s television, and the lobby’s',
-    'grand staircase.',
-    '',
-    '**Generated — do not edit.** `npm run pack:hotel` rebuilds it from',
-    '`hotel.glb`, which is itself written by `npm run blend:hotel` (from',
-    '`art/blend/hotel.blend`, which is in turn *generated* by',
-    '`art/blend/hotel_build.py` — that script is the authoring source, not',
-    'the .blend). See `scripts/pack-kid-asset.mts` for why the bytes are',
-    'imported rather than fetched.',
-  ],
+  docLines: doc('the boot kit: the tower and its front doors, and the lift, pet bowl, pet bed, breakfast bowls and disco ball other places borrow'),
 });

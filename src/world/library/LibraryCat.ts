@@ -6,6 +6,7 @@ import { playPurr } from '../../ui/chime';
 import { measureTop } from '../measuredTop';
 import { LIBRARY_LINES } from './libraryLines';
 import { LIBRARY_CAT_PILE } from './layout';
+import { CAT_ZONE_ID } from './roomIds';
 import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
 
 /**
@@ -90,8 +91,8 @@ export const CAT_HEART_SCALE = 0.5;
  */
 export const CAT_BUBBLE_OVER = CAT_HEARTS_OVER + PUFF_RISE + (CAT_HEART_SCALE * PUFF_END_SCALE) / 2 + 0.15;
 
-/** Her Pet zone's id (`Library.ts` builds the zone) — the item her purr's bubble answers. */
-export const CAT_ZONE_ID = 'library-cat';
+/** Her Pet zone's id — `roomIds.ts`'s. */
+export { CAT_ZONE_ID };
 
 /** The two solids' names — what `LIBRARY_CHECK_REMOVE` takes out by. */
 export const CAT_SOLID = 'the library cat';

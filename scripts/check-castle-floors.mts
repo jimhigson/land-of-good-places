@@ -1,4 +1,5 @@
 import './headless-canvas.mjs';
+import { CASTLE_DOOR_ARRIVAL_IN, CASTLE_DOOR_ARRIVAL_X } from '../src/world/building/layout.ts';
 import { BUILDING_STEP_UP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   CASTLE_FLOORS,
@@ -95,8 +96,8 @@ portals.push({
   id: 'door:garden->mall',
   from: SPACE_GARDEN,
   to: CASTLE_MALL.space,
-  arriveX: floorX(CASTLE_MALL, 0),
-  arriveZ: floorZ(CASTLE_MALL, CASTLE_MALL.halfZ - 6.5),
+  arriveX: floorX(CASTLE_MALL, CASTLE_DOOR_ARRIVAL_X),
+  arriveZ: floorZ(CASTLE_MALL, CASTLE_MALL.halfZ - CASTLE_DOOR_ARRIVAL_IN),
 });
 const exitBand = castleExitBand();
 portals.push({

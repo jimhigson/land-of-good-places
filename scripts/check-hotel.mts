@@ -124,15 +124,8 @@ import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 import { walkableGroundAt } from '../src/world/building/surfaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { HOTEL_LOBBY_Z, HOTEL_ORIGIN_X } from '../src/core/constants.ts';
-import {
-  CAFE_TABLE_A,
-  CAFE_TABLE_B,
-  TABLE_TOP,
-  TOWER_DOOR_HALF,
-  TOWER_FACADE_ALONG,
-  RECEPTION_X,
-  RECEPTION_Z,
-} from '../src/world/hotel/Hotel.ts';
+import { TOWER_DOOR_HALF, TOWER_FACADE_ALONG } from '../src/world/hotel/Hotel.ts';
+import { CAFE_TABLE_A, CAFE_TABLE_B, TABLE_TOP, RECEPTION_X, RECEPTION_Z } from '../src/world/hotel/interior.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { gameStore, walksInParade } from '../src/state/index.ts';
 import { shopItem, ALL_CATALOGUE_ITEMS } from '../src/world/building/shops/catalogue.ts';
