@@ -41,6 +41,8 @@
  * LIBRARY_CHECK_MUTATE=story-breath-off pnpm run check:library     # the camera held dead still (`IsoCamera.breath` still): STORY CAMERA's breathing floor must go red
  * LIBRARY_CHECK_MUTATE=story-breath-wild pnpm run check:library    # the breath ten times over: STORY CAMERA's breathing ceiling must go red
  * LIBRARY_CHECK_MUTATE=owl-no-fade pnpm run check:library          # the owl never fades at the lens (before 11 Nov): STORY CAMERA's "never over the screen" must go red
+ * LIBRARY_CHECK_MUTATE=nav-whole-rebuilds pnpm run check:library  # every collider change rebuilds the lattice whole (before step 1 of the 120 fps plan): NAV REBUILDS must go red
+ * LIBRARY_CHECK_MUTATE=nav-short-patch pnpm run check:library     # patches cut to the change's bare footprint: NAV REBUILDS' whole-vs-patched proof must go red
  * LIBRARY_CHECK_MUTATE=story-stage-as-it-was pnpm run check:library  # the stand-ins as they happened to be (before 26 Oct): STORY CAMERA's "the same stage at every sit" must go red
  * ```
  *
@@ -258,6 +260,8 @@ import { GATHER_TIMEOUT, STORY_EVERY, STORY_FIRST_AFTER, STORY_LISTENER_SECRET_I
 import { Parade } from '../src/entities/parade/Parade.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { playerNavGrid } from '../src/world/playerLattice.ts';
+import { NAV_GRID_BUILDS, NavGrid } from '../src/world/NavGrid.ts';
+import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { visibleBounds, visiblePoints, visibleReachXZ } from '../src/art/style/measure.ts';
 import { KID_HEIGHT } from '../src/art/models/kidHeight.ts';
 import { PLAYER_SEPARATION, SEPARATION } from '../src/entities/npc/NpcSystem.ts';
@@ -414,6 +418,8 @@ const MUTATIONS = [
   'story-breath-wild',
   'story-stage-as-it-was',
   'owl-no-fade',
+  'nav-whole-rebuilds',
+  'nav-short-patch',
 ] as const;
 type Mutation = Exclude<(typeof MUTATIONS)[number], ''>;
 const MUTATE = process.env['LIBRARY_CHECK_MUTATE'] ?? '';
@@ -4785,6 +4791,37 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   if (blocked !== null) note("DROPPED a 0.9 m disc on cushion 4 (Juno's) on purpose — this run must go red: not every child sits");
   if (mutating('no-story')) note('ASKED FOR NO STORY on purpose — this run must go red: the vacuity guard');
   else library.requestStoryTime();
+  // NAV REBUILDS (docs/perf/FRAME-DROPS-2026-11.md, step 1): every lattice
+  // in the game is counted from here to the end of the story, and every patch
+  // is proved against a whole rebuild laid beside it.
+  if (mutating('nav-whole-rebuilds')) {
+    NAV_GRID_BUILDS.patching = false;
+    note('PATCHING TURNED OFF on purpose (every collider change rebuilds whole, as before step 1) — NAV REBUILDS must go red');
+  }
+  if (mutating('nav-short-patch')) {
+    NAV_GRID_BUILDS.reachScale = 0;
+    note("PATCHES CUT SHORT on purpose (no walker's margin round a change) — NAV REBUILDS' whole-vs-patched proof must go red");
+  }
+  // The lattices that plan while story time runs, exactly as the game builds
+  // them: the park children's (`JourneyPlanner`'s garden grid — the one that
+  // froze the frame, docs/perf/FRAME-DROPS-2026-11.md) and her own, which
+  // follows the play bounds into the reading room. Each is asked a question
+  // every frame of the story, as a route plan would ask it, so every collider
+  // the story moves is met by every lattice that would see it.
+  const sampleGround = (x: number, z: number, y: number): number => world.building.surfaces.sample(x, z, y);
+  const navProbes = [
+    new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, world.routeConnectors, world.routeBridgeCovers, GARDEN_PLAY_BOUNDARY),
+    playerNavGrid(world),
+  ];
+  const navAsk = (): void => {
+    for (const grid of navProbes) grid.canStandAt(OX, OZ, LIBRARY_FLOOR_Y, sampleGround);
+  };
+  navAsk();
+  NAV_GRID_BUILDS.verify = true;
+  const navBefore = { full: NAV_GRID_BUILDS.full, patched: NAV_GRID_BUILDS.patched, cells: NAV_GRID_BUILDS.patchedCells, verified: NAV_GRID_BUILDS.verified, fullMs: NAV_GRID_BUILDS.fullMs, patchMs: NAV_GRID_BUILDS.patchMs };
+  NAV_GRID_BUILDS.worstFullMs = 0;
+  NAV_GRID_BUILDS.worstPatchMs = 0;
+  NAV_GRID_BUILDS.mismatches.length = 0;
 
   const said = new Set<string>();
   const phaseAt: Partial<Record<StoryPhase, number>> = {};
@@ -4825,6 +4862,7 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
   const LIMIT = 150;
   while (t < LIMIT) {
     child.step();
+    navAsk();
     // The label manager decides, once a frame after every system, which labels are drawn (`Game.tick`'s order).
     world.labels.resolve(view, CHILD_DT);
     t += CHILD_DT;
@@ -4932,6 +4970,32 @@ console.log('\nSTORY — the owl calls, flies to the big chair, the children sit
     if (phaseAt.dispersing !== undefined && phase === 'idle' && kids.every((kid, i) => !Number.isNaN(offCushionAt[i]!) || kid.driver.mode === 'stroll')) break;
   }
   if (blocked !== null) collision.removeCircle(blocked);
+  {
+    const full = NAV_GRID_BUILDS.full - navBefore.full;
+    const patched = NAV_GRID_BUILDS.patched - navBefore.patched;
+    const verified = NAV_GRID_BUILDS.verified - navBefore.verified;
+    const cells = NAV_GRID_BUILDS.patchedCells - navBefore.cells;
+    // The time it cost, against the 8.3 ms frame (CLAUDE.md, 120 fps) — reported, never asserted:
+    // headless Node on a busy machine is no clock to gate on; the counts above are the gate.
+    process.stderr.write(
+      `NAV REBUILDS timing (this machine, Node, not asserted): whole builds ${(NAV_GRID_BUILDS.fullMs - navBefore.fullMs).toFixed(1)} ms in all, worst ${NAV_GRID_BUILDS.worstFullMs.toFixed(1)} ms; ` +
+        `patches ${(NAV_GRID_BUILDS.patchMs - navBefore.patchMs).toFixed(1)} ms in all, worst ${NAV_GRID_BUILDS.worstPatchMs.toFixed(1)} ms (verification's own whole builds excluded)\n`,
+    );
+    NAV_GRID_BUILDS.verify = false;
+    NAV_GRID_BUILDS.patching = true;
+    NAV_GRID_BUILDS.reachScale = 1;
+    say(
+      full === 0 && patched > 0,
+      `NAV REBUILDS: through the whole story (${t.toFixed(1)} s, the owl's flights and landings included) ${full} lattice(s) were rebuilt whole and ${patched} ` +
+        `brought up to date by patching ${cells} cell(s) — must be 0 whole and at least 1 patch` +
+        (patched === 0 ? ' (NO PATCH RAN: this clause asserts nothing about patching)' : ''),
+    );
+    say(
+      verified === patched && NAV_GRID_BUILDS.mismatches.length === 0,
+      `NAV REBUILDS: every patch matches a whole rebuild laid beside it, cell for cell and level for level — ${verified} of ${patched} proved` +
+        (NAV_GRID_BUILDS.mismatches.length ? `; DIFFERENCES: ${NAV_GRID_BUILDS.mismatches.slice(0, 3).join(' | ')}` : ''),
+    );
+  }
   const book = BOOKS.find((candidate) => candidate.title !== '' && said.has(LIBRARY_LINES.owl.storyBegin(candidate.title))) ?? null;
   const reached = phaseAt.reading !== undefined;
   say(
