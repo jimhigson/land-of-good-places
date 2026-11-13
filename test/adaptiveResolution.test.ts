@@ -15,7 +15,7 @@ import {
 /**
  * The adaptive-resolution controller (120 fps plan, step 17) on synthetic
  * frame traces. Each trace is a run of frames of one shape — the interval the
- * display showed and the main thread's ms — fed exactly as `Engine.frameTimed`
+ * display showed and the main thread's ms — fed exactly as `Engine.beginFrame`
  * feeds it. The shapes are the ones the plan measured: a 120 Hz screen keeping
  * up (8.33 ms), the reptile house's GPU-bound drops (16.7 ms with ~3 ms CPU),
  * a CPU-bound hitch (16.7 ms with 14 ms CPU), and a 60 Hz phone keeping up.
