@@ -1776,9 +1776,9 @@ const NOT_DRIVEN: Readonly<Record<string, string>> = {
     'the climb bailing out because its tree vanished mid-climb — defensive, unreachable in a built park; endRide through the rule like every other',
   'src/world/building/Building.ts: player.endRide({ #2':
     "the helter-skelter's own landing — no trigger in this build starts a non-giant slide (`startRide` is only called for the ginormous slide)",
-  'src/world/hotel/Hotel.ts: player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);':
+  'src/world/hotel/interior.ts: player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);':
     '/hotel-breakfast with every Floor 1 chair taken — guests take 3 of its 14 chairs, so the link always seats her (driven via the chairs)',
-  'src/world/hotel/Hotel.ts: player.endRide(stood);':
+  'src/world/hotel/interior.ts: player.endRide(stood);':
     "a window view let go before its iris reached the middle — headless, the iris's middle runs at once, so the shot is always up by then",
   'src/world/reptileHouse/ReptileHouse.ts: player.teleportTo(mat.x, REPTILE_HOUSE_FLOOR_Y, mat.z, facing);':
     "the Reptile House's doormat on its own forecourt — only when the park has no plot for the building; this park has one (the plot's doormat is driven)",
