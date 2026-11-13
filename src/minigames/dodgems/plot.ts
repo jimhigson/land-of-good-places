@@ -216,6 +216,11 @@ export function buildDodgemsPlot(
       3.16,
       Math.sin(angle) * (RINK_RADIUS + 0.9),
     );
+    // A handle on a driven node: `update` below scales it every frame, and a
+    // node carrying `userData` is left live by the browser's static passes
+    // (`world/staticFreeze.ts`, `world/staticBatch.ts`), which would otherwise
+    // freeze or merge it as furniture.
+    bulb.userData.twinkles = true;
     root.add(bulb);
     bulbs.push(bulb);
   }

@@ -1,9 +1,11 @@
 import {
+  Box3,
   BufferAttribute,
   BufferGeometry,
   Group,
   Matrix3,
   Matrix4,
+  DoubleSide,
   Mesh,
   NormalBlending,
   Object3D,
@@ -149,6 +151,23 @@ export interface BatchAreaOptions {
    * on the frames it looks).
    */
   readonly shareEqualMaterials?: boolean;
+  /**
+   * Subtrees left entirely alone: something under them moves without a
+   * `userData` handle to say so (an arrival that drives past, a wheel that
+   * turns), and the caller knows it.
+   */
+  readonly skip?: ReadonlySet<Object3D>;
+  /**
+   * Merge see-through meshes too — for an area whose see-through parts are
+   * one material and do not cross each other or anything else see-through
+   * (a park's worth of fairy cables, the glitter on one rink floor). three
+   * sorts see-through draws back to front by object, so merged they sort as
+   * one: measured on seed 5 to change no more pixels than moving the camera
+   * ten micrometres does (`scripts/static-batch-diff.mts`). Never with
+   * {@link shareEqualMaterials}'s sharing, and never a double-sided material,
+   * which three draws in two passes per object.
+   */
+  readonly transparentToo?: boolean;
 }
 
 /** What batching one area did. */
@@ -211,14 +230,14 @@ const defaultHooks = Object3D.prototype;
  * render-state half of the rules above; the static half (live nodes between it
  * and the root) is asked by the caller, which walks that chain anyway.
  */
-function cannotMerge(mesh: Mesh): string | null {
+function cannotMerge(mesh: Mesh, transparentToo = false): string | null {
   const kind = mesh as Mesh & { isInstancedMesh?: boolean; isSkinnedMesh?: boolean; isBatchedMesh?: boolean };
   if (kind.isInstancedMesh || kind.isSkinnedMesh || kind.isBatchedMesh) return 'instanced or skinned';
   const material = mesh.material;
   if (Array.isArray(material)) return 'several materials';
   if (!material.visible) return 'material hidden';
-  if (material.transparent) return 'transparent';
-  if (!material.depthTest || !material.depthWrite) return 'depth-order dependent';
+  if (material.transparent && (!transparentToo || (material.side === DoubleSide && !material.forceSinglePass))) return 'transparent';
+  if (!material.depthTest || (!material.depthWrite && !material.transparent)) return 'depth-order dependent';
   if (material.blending !== NormalBlending) return 'blending';
   if ((material as Material & { wireframe?: boolean }).wireframe) return 'wireframe';
   if (!mesh.frustumCulled) return 'not culled';
@@ -462,19 +481,41 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
     readonly mesh: Mesh;
     readonly inMeasured: boolean;
     readonly values: string | null;
+    readonly tile: string;
   }
   const buckets = new Map<string, Candidate[]>();
+  /**
+   * Each tile's one origin, in the root's frame, shared by every batch in it.
+   * An ink outline is a second mesh hugging its object at a few millimetres;
+   * drawn, the two used to share one model matrix, so their depths rounded
+   * together. Baked into batches with origins of their own they round apart,
+   * and silhouette pixels flip between line and object — measured, 1,659
+   * pixels beside the dodgems. One origin per tile keeps them rounding alike.
+   */
+  const tileOrigins = new Map<string, Vector3>();
+  // Where a unit is, for its tile: the middle of what it draws, not its
+  // origin — a fairy cable's tube is built in world coordinates on a mesh at
+  // (0, 0, 0), and by its origin every cable in the park is in one tile.
+  const middles = new Map<Object3D, Vector3>();
+  const middleOf = (unit: Object3D): Vector3 => {
+    let middle = middles.get(unit);
+    if (!middle) {
+      middle = new Box3().setFromObject(unit).getCenter(new Vector3());
+      middles.set(unit, middle);
+    }
+    return middle;
+  };
   const rootInverse = root.matrixWorld.clone().invert();
   const fromTransforms = new Matrix4();
   const fromMatrices = new Matrix4();
   const visit = (node: Object3D, depth: number, unit: Object3D, chainStatic: boolean, inMeasured: boolean): void => {
-    if (!node.visible) return;
+    if (!node.visible || options.skip?.has(node)) return;
     const here = depth === options.unitDepth ? node : unit;
     const staticHere = chainStatic && (node === root || !isLeftLive(node));
     const measuredHere = inMeasured || options.measuredWhole.has(node);
     const mesh = node as Mesh;
     if (mesh.isMesh) {
-      let reason: string | null = staticHere ? cannotMerge(mesh) : 'live';
+      let reason: string | null = staticHere ? cannotMerge(mesh, options.transparentToo === true) : 'live';
       if (reason === null && groupOrderOf(mesh) !== 0) reason = 'group renderOrder';
       if (reason === null) {
         // The audit holds a source to its transforms (position, quaternion,
@@ -485,16 +526,19 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
         if (!composed || !(maxDelta(composed, fromMatrices) <= 1e-5)) reason = 'matrix not from its transform';
       }
       const material = mesh.material as Material;
-      const values = reason === null && options.shareEqualMaterials ? materialValues(material) : null;
+      // A see-through material is only ever merged with itself: its draws are
+      // ordered per object, so two equal ones are not interchangeable.
+      const values = reason === null && options.shareEqualMaterials && !material.transparent ? materialValues(material) : null;
       if (reason !== null) {
         keep(reason);
       } else {
-        here.getWorldPosition(scratchVector);
-        const tileX = Math.floor(scratchVector.x / options.tileSize);
-        const tileZ = Math.floor(scratchVector.z / options.tileSize);
+        const middle = middleOf(here);
+        const tileX = Math.floor(middle.x / options.tileSize);
+        const tileZ = Math.floor(middle.z / options.tileSize);
+        const tile = `${tileX},${tileZ}`;
+        if (!tileOrigins.has(tile)) tileOrigins.set(tile, middle.clone().applyMatrix4(rootInverse));
         const key = [
-          tileX,
-          tileZ,
+          tile,
           values ?? material.uuid,
           mesh.castShadow ? 1 : 0,
           mesh.receiveShadow ? 1 : 0,
@@ -506,7 +550,7 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
           bucket = [];
           buckets.set(key, bucket);
         }
-        bucket.push({ mesh, inMeasured: measuredHere, values });
+        bucket.push({ mesh, inMeasured: measuredHere, values, tile });
       }
     }
     for (const child of node.children) visit(child, depth + 1, here, staticHere, measuredHere);
@@ -527,16 +571,11 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
     }
     const sources = bucket.map((candidate) => candidate.mesh);
     const first = sources[0] as Mesh;
-    // The batch's origin: the middle of its sources, in the root's frame, so
-    // the baked coordinates stay small (float32 is kindest near zero).
-    centre.set(0, 0, 0);
-    for (const source of sources) {
-      const geometry = source.geometry;
-      if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
-      scratchSphere.copy(geometry.boundingSphere as Sphere).applyMatrix4(source.matrixWorld);
-      centre.add(scratchSphere.center);
-    }
-    centre.multiplyScalar(1 / sources.length).applyMatrix4(rootInverse);
+    // The batch's origin: its tile's, in the root's frame — near its contents,
+    // so the baked coordinates stay small (float32 is kindest near zero), and
+    // the same for every batch of the tile (see `tileOrigins`).
+    for (const source of sources) if (source.geometry.boundingSphere === null) source.geometry.computeBoundingSphere();
+    centre.copy(tileOrigins.get((bucket[0] as Candidate).tile) as Vector3);
     frame.copy(root.matrixWorld).multiply(scratchMatrix.makeTranslation(centre.x, centre.y, centre.z));
     frameInverse.copy(frame).invert();
 
