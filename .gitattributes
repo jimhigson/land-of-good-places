@@ -1,0 +1,8 @@
+# The checked-in parks (docs/design/PREBUILT-PARKS.md, "Checked in"). Each park
+# file is one ~135 KB line of solver output: a textual diff of it says nothing,
+# and a textual merge of two solves would be neither park — so git treats them
+# as whole files (a conflict leaves yours intact and parseable; take main's with
+# `git checkout origin/main -- parks/` and run `pnpm run build:parks`). The
+# manifest is one seed per line and merges like any text.
+parks/*.json linguist-generated=true -diff -merge
+parks/manifest.json linguist-generated=true diff merge

@@ -44,26 +44,47 @@ export function parkFileName(seed: number): string {
 }
 
 /**
- * Where `pnpm run build:parks` writes park files, relative to the repository
- * root, for `vite build` to ship. Not tracked: a committed copy of the
- * generator's output would be a second definition of every park, kept in step
- * by hand.
+ * **Where the solved parks live, checked in** — `parks/<seed>.json` and
+ * `parks/manifest.json`, relative to the repository root. `vite build` ships
+ * them, the dev server serves them and every Node check hydrates from them;
+ * nothing solves a park unless `pnpm run build:parks` is asked to
+ * (`docs/design/PREBUILT-PARKS.md`, "Checked in").
+ *
+ * They are tracked (Jim, 13 November 2026: *"how about if we checked in the
+ * result of the solve so we don't have to do it every time?"*). What keeps a
+ * checked-in park honest is no longer "its source hash matches" but "this
+ * source still accepts it": `pnpm run validate:parks`, which CI runs per seed.
  */
-export const PREBUILT_PARKS_OUT = '.parks';
+export const PREBUILT_PARKS_OUT = 'parks';
 
-/** The manifest `build:parks` writes beside the files — see {@link PrebuiltParksManifest}. */
+/** The manifest beside the park files — see {@link PrebuiltParksManifest}. */
 export const PREBUILT_PARKS_MANIFEST = 'manifest.json';
 
-/** What `build:parks` solved, and from what source. */
+/** What the manifest records about one checked-in park. */
+export interface CheckedInPark {
+  /** The seed's accepted restart — the restart its file was solved at. */
+  readonly restart: number;
+  /** sha256 of the park file's bytes: the manifest line is about exactly this file. */
+  readonly file: string;
+  /**
+   * The placement digest of the park this file hydrates into
+   * (`scripts/lib/parkLayoutDigest.mts`), as measured when the line was
+   * stamped. `validate:parks` requires the current code to reproduce it, so
+   * the same decisions cannot quietly become a different park.
+   */
+  readonly layout: string;
+  /**
+   * `scripts/lib/park-source-hash.mjs` of the tree the park was **solved**
+   * under. A note for people, never a gate: a park stays checked in for as
+   * long as the current source accepts it, whatever it was solved under.
+   */
+  readonly solvedUnder: string;
+}
+
+/** The checked-in parks, one entry per seed (`scripts/lib/checked-in-parks.mjs` reads and writes it). */
 export interface PrebuiltParksManifest {
   readonly format: number;
-  /** `scripts/lib/park-source-hash.mjs` of the tree the parks were solved from. */
-  readonly sourceHash: string;
-  readonly seeds: readonly number[];
-  /** Each seed's accepted restart, found by `build:parks`'s accept loop for this source. */
-  readonly restarts: Readonly<Record<string, number>>;
-  /** Each seed's proven whole-park digest (`scripts/lib/parkDigest.mts`). */
-  readonly digests: Readonly<Record<string, string>>;
+  readonly seeds: Readonly<Record<string, CheckedInPark>>;
 }
 
 /**
