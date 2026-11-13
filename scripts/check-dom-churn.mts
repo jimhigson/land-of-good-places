@@ -71,6 +71,33 @@
  * 1/12 s) and at 1 fps 120 times the wall-clock time, so a slow frame inflates
  * precisely the noise this has to see past. Fast frames keep the sample the
  * shape it has on the family's machines.
+ *
+ * ## Proved red, 13 Nov 2026
+ *
+ * On 39adb126 (main c1bdb168 plus this file's draw stub), seed 5, standing at
+ * the spawn (-1.6, 51.6), 1000×700, DPR 1, 360 frames settled then 240
+ * sampled:
+ *
+ * - **SwiftShader, `Hud.setGamepadConnected` with its guard removed**, so it
+ *   writes the same `data-connected` every frame — the bug `ui/dataFlag.ts`
+ *   was written for:
+ *   ```
+ *   DOM mutation records: 245 in 245 frames = 1.00 a frame, ceiling 0.05 — standing
+ *   still at the spawn. Busiest: 245× attributes[data-connected] div.pill.pill--pad
+ *   ```
+ *   Style recalculations stayed at 1.00 a frame: the hidden animations already
+ *   cost one, and a second dirty element shares it. It is the mutation
+ *   ceiling, not the style one, that sees this class of bug.
+ * - **GPU, `drawElements` left out of the stub** — the control:
+ *   ```
+ *   idle: the GL draw stub skipped 41229 draws in 245 frames while three counted
+ *   134425 — a draw went around `renderer.render`, or three drew through an
+ *   entry point this does not skip
+ *   ```
+ *
+ * Green on the same code: GPU 15.5 s; SwiftShader 30.1 s; SwiftShader with the
+ * browser held to the efficiency cores, 213 s — where main's version timed out
+ * after 300.7 s on the same `frames` → `sample` stack as CI's.
  */
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
@@ -339,7 +366,10 @@ function report(label: string, s: Sample): void {
   );
   for (const [key, n] of s.top) say(`    ${String(n).padStart(5)}  ${(n / s.frames).toFixed(2)}/frame  ${key}`);
   say(`    running animations on unpainted elements: ${s.hiddenAnimations.length}${s.hiddenAnimations.length ? ` (${s.hiddenAnimations.join(', ')})` : ''}`);
-  say(`    control: GL draws skipped ${s.drawsSkipped}, three counted ${s.drawsCounted} (${per(s.drawsSkipped, s)}/frame) — no pixels drawn, the rest of every frame ran`);
+  say(
+    `    control: GL draws skipped ${s.drawsSkipped}, three counted ${s.drawsCounted} (${per(s.drawsSkipped, s)}/frame) — ` +
+      (controlFailure(label, s) === null ? 'every draw skipped, the rest of every frame ran' : 'CONTROL FAILED'),
+  );
 }
 
 /**
