@@ -1,91 +1,94 @@
 /**
- * **`owed:undrawn-still` — nothing that is not drawn is animated** (120 fps
- * plan, step 3; `docs/perf/FRAME-DROPS-2026-11.md` on #746).
+ * **`check:undrawn-still` — nothing that is not drawn is animated** (120 fps
+ * plan, steps 2 and 3; `docs/perf/FRAME-DROPS-2026-11.md`).
  *
  * ```
- * pnpm run owed:undrawn-still              # NOT in the check chain — see below
- * pnpm run owed:undrawn-still -- --mutate  # prove it can go red
- * MEASURE=1 pnpm run owed:undrawn-still    # print what moved, assert nothing
+ * pnpm run check:undrawn-still              # in the check chain (a node shard)
+ * pnpm run check:undrawn-still -- --mutate  # prove it can go red
+ * MEASURE=1 pnpm run check:undrawn-still    # print what moved, assert nothing
  * ```
- *
- * ## Owed: this is red, and so it gates nothing yet
- *
- * Its first ever run was at integration (13 Nov 2026, seed 5 hydrated from a
- * prebuilt file, player in the garden, 600 frames) and it exited 1: **5384
- * changes under the undrawn hotel on 600 of 600 frames** — 2400 under
- * `the-land-hotel-inside > kid > body`, 600 each under the lobby statue's
- * turntable, `hotel:hotel.lobby` and `hotel:hotel.suite`, 592 under each of two
- * shopkeepers. The castle, library and reptile hall were still. Both controls
- * held (3300 changes with the great hall drawn; wild pets out on the roof).
- *
- * So it is registered as `owed:` rather than `check:` — a `check:*` script no
- * workflow reaches fails `check:chain-coverage`, and one in a shard would turn
- * the gate red for the hotel's updaters, which the landing did not touch. Gate
- * those on `isDrawn`, see this exit 0, then rename it back to
- * `check:undrawn-still` and add it to a node shard in the same change.
  *
  * ## Why this exists
  *
- * The target is 120 fps, 8.3 ms a frame (CLAUDE.md). The plan's profile of the
- * park found most of a millisecond of every frame spent posing the castle
- * banquet's twenty-four diners while she was in the park, the reptile house or
- * the library — a room 600 m away that was not drawn. The roof garden's wild
- * pets ran the same way, building and disposing pet models in a space nobody
- * could see for the whole session.
+ * The target is 120 fps, 8.3 ms a frame (CLAUDE.md). Every space but the one
+ * she stands in is out of the scene graph (`world/DrawnSpaces.ts`), and the
+ * rule for what may run in it is the same one: **a frame that changes
+ * something nobody can see did work nobody can see.** The plan's profile found
+ * most of a millisecond of every park frame posing a banquet nobody could see;
+ * this branch's found the whole park — its crowd, its train, its rides, its
+ * fountain and flowers — simulated for a child standing in a hotel lobby six
+ * hundred metres away, ~0.7 ms of a 4.7 ms frame on the M4 Pro.
  *
  * Wall-clock time cannot be asserted in CI (a software rasteriser's timings
- * describe nothing), but **this** can be asserted exactly, on any machine: a
- * frame that changes something nobody can see did work nobody can see. So
+ * describe nothing), but **this** can be asserted exactly, on any machine. So
  * this counts it.
  *
  * ## What is measured
  *
- * The real `World` (`park-harness.mts`), stepped through the real
- * `world.update` at 1/60 with the player standing in the garden — where she
- * spends nearly all of a session, and where every interior is undrawn.
+ * The real `World` (`park-harness.mts`) and a real `Player`, stepped through
+ * the real `world.update` at 1/60:
  *
- * Every frame, every object with an **invisible ancestor** — the castle's
- * `interiorRoot` or a storey that is not hers, the hotel, the library, the
- * reptile hall — is compared with itself a frame earlier: position, rotation
- * and scale, and for an `InstancedMesh` its instance buffer's `version` (which
- * `InstancedCrowd.flush` bumps). An object appearing under a hidden ancestor
- * counts too: something built it. Any of these is work done for a space
- * nobody is looking at, and it is attributed to the named group it happened
- * under, so a red run says *what* is still running.
+ * 1. **The garden** — where she spends most of a session, and where every
+ *    interior is undrawn.
+ * 2. **Every room**, walked into through its own door code and out again the
+ *    way its door lets her out: the hotel lobby, the library, the Reptile
+ *    House, the castle's mall, great hall and roof. In each, the park is
+ *    undrawn too (`World.parkRoot`).
  *
- * "Invisible ancestor", not "invisible": an object that hides **itself** — an
- * empty speech bubble, a withheld label — is a thing switched off in a space
- * that is drawn. What this guards is whole spaces.
+ * Every frame, every object with an **invisible ancestor** — a space's root,
+ * written `visible = false` by its owner (headless, a hidden space stays in the
+ * one graph; `DrawnSpaces` only detaches in the live game) — is compared with
+ * itself a frame earlier: position, rotation, scale, and for an `InstancedMesh`
+ * its instance buffer's `version`. An object appearing under a hidden ancestor
+ * counts too. Each change is attributed to the named group it happened under,
+ * so a red run says *what* is still running.
+ *
+ * **The crowd is measured separately**, because its group is never hidden:
+ * it is everywhere the crowd is (`World.parkRoot`'s note). In a room the crowd
+ * never visits, its instance buffers must not be rewritten at all — every
+ * child of it is held still (`NpcSystem.crowdLiveAt`).
+ *
+ * ## What may move where nobody can see it, and why
+ *
+ * **In the castle's mall only: the train.** The mall's shoppers come in from
+ * the garden, so the crowd lives while she shops (`NpcSystem.crowdLiveAt`),
+ * and the train its children ride and queue for keeps the crowd's hours —
+ * held still under a living crowd, its platforms would fill. Printed on every
+ * run, with how much moved, so an exemption cannot widen in silence.
  *
  * ## The controls
  *
- * A check that reads zero must be shown able to read something else, so after
- * the garden a real `Player` is walked into the castle through the door's own
- * code (`enterCastleSpawn`, what `/castle?deck=` uses):
+ * A check that reads zero must be shown able to read something else:
  *
- * 1. **The great hall, drawn.** The diners must move there and their instance
- *    buffers must flush. If the instrument cannot see the banquet being posed
- *    in the one room where it is drawn, its zero in the garden means nothing.
- * 2. **The roof garden, drawn**, after the whole garden run unseen. The animals
- *    must already be out on the very first frame — the roof "was already
- *    going" when she arrived (`WildPets.catchUp`) — and must move after it.
+ * 1. **The great hall, drawn** — the diners must move on every frame.
+ * 2. **The roof, drawn** — the wild pets are already out on the first frame
+ *    (`WildPets.catchUp`: the roof "was already going") and move after it.
+ * 3. **The mall** — the crowd's buffers must be rewritten: the crowd probe
+ *    can read a living crowd, and the mall keeps its shoppers.
+ * 4. **Back in the garden** — the park must move again within a few frames,
+ *    and the crowd with it: the instrument can see the park move, and the
+ *    park comes back.
  *
  * ## Proving it red
  *
- * `--mutate` puts back the shape before step 3 — the banquet and the wild pets
- * updated every frame wherever she is — by calling both from this script after
- * each `world.update`. The code under test stays the shipping code.
+ * `--mutate` puts back the shape before step 3 by changing nothing in the
+ * shipping code but the two questions every gate asks, and calling the gated
+ * animation from here: `World.parkDrawn` answers yes everywhere, the crowd
+ * lives everywhere, and the banquet, the wild pets and the hotel's rooms are
+ * animated every frame wherever she is.
  */
 import './headless-canvas.mjs';
 import { InstancedMesh, Object3D, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { saveFlags } from '../src/state/flags.ts';
 import { InputSystem } from '../src/core/input/InputSystem.ts';
-import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { Player } from '../src/entities/Player.ts';
 import { CASTLE_ROOF } from '../src/world/building/floors.ts';
 import { CASTLE_GREAT_HALL_DECK } from '../src/world/building/castleFurniture.ts';
 import { banquetGroupName, type GreatHallBanquet } from '../src/world/building/greatHallBanquet.ts';
 import type { WildPets } from '../src/world/building/WildPets.ts';
+import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
+import { spaceAt } from '../src/world/spaces.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
 const mutate = process.argv.includes('--mutate');
@@ -93,29 +96,54 @@ const MEASURE = process.env['MEASURE'] === '1';
 const DT = 1 / 60;
 /** Frames before the first comparison: the park's own first-frame settling. */
 const WARM_FRAMES = 30;
-/** Ten seconds in the garden: several wild-pet emergences' worth on the old code. */
+/** Ten seconds in the garden. */
 const GARDEN_FRAMES = Number(process.env['FRAMES'] ?? 600);
-/** Frames in each drawn room for the controls. */
+/** Four seconds in each room. */
+const ROOM_FRAMES = Number(process.env['ROOM_FRAMES'] ?? 240);
+/** Frames for each control. */
 const CONTROL_FRAMES = 60;
 
-const park = buildHeadlessPark();
-const world = park.world;
-const scene = park.scene;
-const building = world.building as unknown as { banquet: GreatHallBanquet; wildPets: WildPets };
+// No cat bus: she is standing in the park, as a returning save or a deep link has her.
+saveFlags.markArrived();
+const park = quietly(() => buildHeadlessPark());
+const { world, scene, camera } = park;
+const building = world.building as unknown as {
+  banquet: GreatHallBanquet;
+  wildPets: WildPets;
+  spaces: { changeTo(midpoint: () => void): void };
+  leaveInterior(): void;
+};
 const wildPets = building.wildPets as unknown as { root: Object3D; live: unknown[] };
+const hotelInterior = (): { animate(context: FrameContext): void; leaveToPark(): void } | null =>
+  (world.hotel as unknown as { interior: { animate(context: FrameContext): void; leaveToPark(): void } | null }).interior;
 
 const input = new InputSystem();
-let playerPosition = new Vector3(0, 0, 0);
+const player = quietly(() => new Player(world.collision, camera, new Vector3(ENTRANCE_PLAYER_X, 0, ENTRANCE_PLAYER_Z)));
+scene.add(player.group);
+quietly(() => world.attachPlayer(player));
+const standInPark = (): void => {
+  player.teleportTo(ENTRANCE_PLAYER_X, world.building.surfaces.sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 3), ENTRANCE_PLAYER_Z, 0);
+};
+standInPark();
+
+if (mutate) {
+  // The park before step 3: every park updater and the whole crowd, every
+  // frame, wherever she is. Only the questions change; the gates are the
+  // shipping code's.
+  Object.defineProperty(world, 'parkDrawn', { get: () => true });
+  world.npcs.crowdLiveAt = () => true;
+}
+
 const cameraForward = new Vector3(0, 0, 1);
 let frame = 0;
 const step = (): void => {
-  const context: FrameContext = { dt: DT, elapsed: frame * DT, input, playerPosition, cameraForward, frame };
+  const context: FrameContext = { dt: DT, elapsed: frame * DT, input, playerPosition: player.position, cameraForward, frame };
   quietly(() => {
     world.update(context);
     if (mutate) {
-      // The park before step 3: both, every frame, wherever she is.
       building.banquet.update(context.elapsed);
       building.wildPets.update(context);
+      hotelInterior()?.animate(context);
     }
   });
   frame += 1;
@@ -146,9 +174,11 @@ function hiddenSpace(object: Object3D): string {
   return found;
 }
 
-/** True when `object` sits under the named group. */
-function under(object: Object3D, name: string): boolean {
-  for (let o: Object3D | null = object; o; o = o.parent) if (o.name === name) return true;
+/** True when `object` sits under `root`, or under the group named `root`. */
+function under(object: Object3D, root: Object3D | string): boolean {
+  for (let o: Object3D | null = object; o; o = o.parent) {
+    if (typeof root === 'string' ? o.name === root : o === root) return true;
+  }
   return false;
 }
 
@@ -157,7 +187,9 @@ interface Sweep {
   readonly undrawn: number;
   /** Undrawn objects that changed since the last sweep, by space and label. */
   readonly changedUndrawn: Map<string, number>;
-  /** Drawn objects under the named watch group that changed — the controls' reading. */
+  /** Undrawn objects that changed under an exempt root (see the header). */
+  readonly changedExempt: number;
+  /** Drawn objects under the watched group or root that changed — the controls' reading. */
   readonly changedWatched: number;
 }
 
@@ -167,9 +199,10 @@ interface Sweep {
  * snapshot is refreshed, drawn or not, so an object that has just become
  * undrawn is compared against where it really was.
  */
-function sweep(watch: string | null = null): Sweep {
+function sweep(watch: Object3D | string | null = null, exempt: readonly Object3D[] = []): Sweep {
   const changedUndrawn = new Map<string, number>();
   let changedWatched = 0;
+  let changedExempt = 0;
   let undrawn = 0;
   const visit = (object: Object3D, ancestorHidden: boolean): void => {
     let snap = last.get(object);
@@ -197,75 +230,153 @@ function sweep(watch: string | null = null): Sweep {
     if (ancestorHidden) {
       undrawn += 1;
       if (changed) {
-        const key = `${hiddenSpace(object)}: ${label(object)}`;
-        changedUndrawn.set(key, (changedUndrawn.get(key) ?? 0) + 1);
+        if (exempt.some((root) => under(object, root))) {
+          changedExempt += 1;
+        } else {
+          const key = `${hiddenSpace(object)}: ${label(object)}`;
+          changedUndrawn.set(key, (changedUndrawn.get(key) ?? 0) + 1);
+        }
       }
-    } else if (changed && watch !== null && under(object, watch)) {
-      changedWatched += 1;
     }
+    if (changed && watch !== null && under(object, watch) && !ancestorHidden) changedWatched += 1;
     const hidden = ancestorHidden || !object.visible;
     for (const child of object.children) visit(child, hidden);
   };
   for (const child of scene.children) visit(child, false);
-  return { undrawn, changedUndrawn, changedWatched };
+  return { undrawn, changedUndrawn, changedExempt, changedWatched };
+}
+
+/** Every instance buffer the crowd draws its children and their pets with. */
+const crowdMeshes: InstancedMesh[] = [];
+world.npcs.group.traverse((object) => {
+  if (object instanceof InstancedMesh) crowdMeshes.push(object);
+});
+const crowdVersions = new Map<InstancedMesh, number>();
+/** How many of the crowd's instance buffers were rewritten since the last call. */
+function crowdRewrites(): number {
+  let rewritten = 0;
+  for (const mesh of crowdMeshes) {
+    const version = mesh.instanceMatrix.version;
+    if (crowdVersions.has(mesh) && crowdVersions.get(mesh) !== version) rewritten += 1;
+    crowdVersions.set(mesh, version);
+  }
+  return rewritten;
 }
 
 const failures: string[] = [];
 const check = (ok: boolean, message: string): void => {
   if (!ok) failures.push(message);
 };
+const report = (heading: string, totals: Map<string, number>, frames: number, changedFrames: number): number => {
+  const changedTotal = [...totals.values()].reduce((a, b) => a + b, 0);
+  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  console.log(`${heading}: undrawn object-changes ${changedTotal}, on ${changedFrames} of ${frames} frames${ranked.length === 0 ? '' : ', by space and group:'}`);
+  for (const [key, n] of ranked.slice(0, 12)) console.log(`  ${String(n).padStart(8)}  ${key}`);
+  return changedTotal;
+};
+
+/** Steps `frames` frames, sweeping each, and returns what changed where nobody could see it. */
+function measure(frames: number, exempt: readonly Object3D[] = []): { totals: Map<string, number>; changedFrames: number; exempt: number; undrawn: number; crowd: number } {
+  const totals = new Map<string, number>();
+  let changedFrames = 0;
+  let exemptChanges = 0;
+  let undrawn = 0;
+  let crowd = 0;
+  for (let i = 0; i < frames; i += 1) {
+    step();
+    const result = sweep(null, exempt);
+    undrawn = Math.max(undrawn, result.undrawn);
+    exemptChanges += result.changedExempt;
+    if (result.changedUndrawn.size > 0) changedFrames += 1;
+    for (const [key, n] of result.changedUndrawn) totals.set(key, (totals.get(key) ?? 0) + n);
+    if (crowdRewrites() > 0) crowd += 1;
+  }
+  return { totals, changedFrames, exempt: exemptChanges, undrawn, crowd };
+}
+
+if (mutate) console.log('--mutate: the park and its crowd updated wherever she is, the banquet, the wild pets and the hotel animated every frame — as before step 3\n');
 
 // ------------------------------------------------------------------- garden
 
 for (let i = 0; i < WARM_FRAMES; i += 1) step();
 sweep(); // the baseline every later sweep compares against
-
-const totals = new Map<string, number>();
-let undrawnSeen = 0;
-let changedFrames = 0;
-for (let i = 0; i < GARDEN_FRAMES; i += 1) {
-  step();
-  const result = sweep();
-  undrawnSeen = Math.max(undrawnSeen, result.undrawn);
-  if (result.changedUndrawn.size > 0) changedFrames += 1;
-  for (const [key, n] of result.changedUndrawn) totals.set(key, (totals.get(key) ?? 0) + n);
+crowdRewrites();
+{
+  const garden = measure(GARDEN_FRAMES);
+  const total = report(`garden (${spaceAt(player.position.x, player.position.z)}), ${GARDEN_FRAMES} frames, ${garden.undrawn} objects under a hidden ancestor`, garden.totals, GARDEN_FRAMES, garden.changedFrames);
+  check(garden.undrawn > 1000, `only ${garden.undrawn} objects were under a hidden ancestor in the garden — the interiors are not where this check thinks, so its zero would mean nothing`);
+  check(total === 0, `the garden: ${total} changes to objects in spaces that are not drawn, on ${garden.changedFrames} of ${GARDEN_FRAMES} frames — gate it on \`isDrawn\` (src/core/drawn.ts)`);
 }
-const changedTotal = [...totals.values()].reduce((a, b) => a + b, 0);
-const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
 
-console.log(
-  `garden: ${GARDEN_FRAMES} frames at ${DT.toFixed(4)} s, ${undrawnSeen} objects under a hidden ancestor` +
-    (mutate ? ' (--mutate: banquet and wild pets updated every frame, as before step 3)' : ''),
-);
-console.log(`  frames on which something undrawn changed: ${changedFrames} of ${GARDEN_FRAMES}`);
-console.log(`  undrawn object-changes: ${changedTotal}${ranked.length === 0 ? ' (none)' : ', by space and group:'}`);
-for (const [key, n] of ranked.slice(0, 30)) console.log(`  ${String(n).padStart(8)}  ${key}`);
+// -------------------------------------------------------------------- rooms
 
-check(undrawnSeen > 1000, `only ${undrawnSeen} objects were under a hidden ancestor in the garden — the interiors are not where this check thinks, so its zero would mean nothing`);
-check(
-  changedTotal === 0,
-  `${changedTotal} changes to objects in spaces that are not drawn, on ${changedFrames} of ${GARDEN_FRAMES} frames ` +
-    `(worst: ${ranked.slice(0, 3).map(([k, n]) => `${n}× ${k}`).join('; ')}). Something is being animated ` +
-    'where nobody can see it — gate it on `isDrawn` (src/core/drawn.ts)',
-);
+interface Room {
+  readonly name: string;
+  readonly enter: () => boolean;
+  readonly leave: () => void;
+  /** The crowd lives here (`NpcSystem.crowdLiveAt`), and with it the train. */
+  readonly crowdLives: boolean;
+}
+
+const leaveCastle = (): void => building.spaces.changeTo(() => building.leaveInterior());
+const rooms: Room[] = [
+  {
+    name: 'hotel lobby',
+    enter: () => world.hotel.requestEnterLobby(),
+    leave: () => hotelInterior()?.leaveToPark(),
+    crowdLives: false,
+  },
+  {
+    name: 'library',
+    enter: () => world.library.requestEnter(),
+    leave: () => (world.library as unknown as { standOutside(facing: number): void }).standOutside(0),
+    crowdLives: false,
+  },
+  {
+    name: 'reptile house',
+    enter: () => world.reptileHouse.requestEnter(),
+    leave: () => (world.reptileHouse as unknown as { leaveToOutside(): void }).leaveToOutside(),
+    crowdLives: false,
+  },
+  { name: 'castle mall', enter: () => world.building.enterCastleSpawn(0), leave: leaveCastle, crowdLives: true },
+  { name: 'castle great hall', enter: () => world.building.enterCastleSpawn(CASTLE_GREAT_HALL_DECK), leave: leaveCastle, crowdLives: false },
+  { name: 'castle roof', enter: () => world.building.enterCastleSpawn(CASTLE_ROOF.index), leave: leaveCastle, crowdLives: false },
+];
+
+const train = world.train as unknown as { group: Object3D; distance: number };
+let mallCrowdFrames = 0;
+for (const room of rooms) {
+  const entered = quietly(() => room.enter());
+  check(entered, `${room.name}: its door refused her — the room cannot be measured`);
+  step(); // the door's midpoint has run; she is in the room
+  const space = spaceAt(player.position.x, player.position.z);
+  sweep();
+  crowdRewrites();
+  const trainAt = train.distance;
+  const exempt = room.crowdLives ? [train.group] : [];
+  const result = measure(ROOM_FRAMES, exempt);
+  const total = report(`${room.name} (${space}), ${ROOM_FRAMES} frames, ${result.undrawn} objects under a hidden ancestor`, result.totals, ROOM_FRAMES, result.changedFrames);
+  check(world.parkDrawn === false || mutate, `${room.name}: the park still says it is drawn while she is in '${space}'`);
+  check(result.undrawn > 1000, `${room.name}: only ${result.undrawn} objects under a hidden ancestor — the park and the other rooms are not where this check thinks`);
+  check(total === 0, `${room.name}: ${total} changes to objects that are not drawn, on ${result.changedFrames} of ${ROOM_FRAMES} frames — gate it on \`isDrawn\` (src/core/drawn.ts)`);
+  if (room.crowdLives) {
+    process.stderr.write(`  exempt in ${room.name}: the train, which the crowd living here rides — ${result.exempt} object-changes under it, the crowd rewritten on ${result.crowd} of ${ROOM_FRAMES} frames\n`);
+    mallCrowdFrames = result.crowd;
+  } else {
+    console.log(`  the crowd's buffers rewritten on ${result.crowd} of ${ROOM_FRAMES} frames; the train ${train.distance === trainAt ? 'still' : `moved ${(train.distance - trainAt).toFixed(2)} m`}`);
+    check(result.crowd === 0, `${room.name}: the crowd's instance buffers were rewritten on ${result.crowd} of ${ROOM_FRAMES} frames — a crowd that never comes in here is being simulated`);
+    check(train.distance === trainAt, `${room.name}: the train moved from ${trainAt.toFixed(2)} to ${train.distance.toFixed(2)} m along its loop while nobody could see it`);
+  }
+  quietly(() => room.leave());
+  step();
+  check(spaceAt(player.position.x, player.position.z) === 'garden', `${room.name}: leaving put her in '${spaceAt(player.position.x, player.position.z)}', not the garden`);
+}
 
 // ------------------------------------------------------------- the controls
 
-const camera = new IsoCamera();
-const player = quietly(() => new Player(world.collision, camera, new Vector3(0, 0, 0)));
-scene.add(player.group);
-world.building.attachPlayer(player);
-playerPosition = player.position;
-
-/** Into `deck` through the door's own code; steps once so the iris's midpoint has run. */
-function enter(deck: number): void {
-  const ok = world.building.enterCastleSpawn(deck);
-  check(ok, `enterCastleSpawn(${deck}) refused — the control cannot reach the room it measures`);
-}
-
 // 1. The great hall: the diners are drawn and must be posed.
 const hall = banquetGroupName(CASTLE_GREAT_HALL_DECK);
-enter(CASTLE_GREAT_HALL_DECK);
+check(quietly(() => world.building.enterCastleSpawn(CASTLE_GREAT_HALL_DECK)), 'the great hall refused her — control 1 cannot run');
 step();
 sweep();
 let hallChanged = 0;
@@ -276,7 +387,7 @@ for (let i = 0; i < CONTROL_FRAMES; i += 1) {
   hallChanged += result.changedWatched;
   if (result.changedWatched > 0) hallFrames += 1;
 }
-console.log(`control, the great hall drawn: ${hallChanged} changes under ${hall}, on ${hallFrames} of ${CONTROL_FRAMES} frames`);
+console.log(`control 1, the great hall drawn: ${hallChanged} changes under ${hall}, on ${hallFrames} of ${CONTROL_FRAMES} frames`);
 check(
   hallFrames === CONTROL_FRAMES,
   `in the great hall, drawn, the diners changed on only ${hallFrames} of ${CONTROL_FRAMES} frames — ` +
@@ -284,22 +395,42 @@ check(
 );
 
 // 2. The roof: lived in arrears, so already out on the first frame.
-enter(CASTLE_ROOF.index);
+check(quietly(() => world.building.enterCastleSpawn(CASTLE_ROOF.index)), 'the roof refused her — control 2 cannot run');
 step();
 const outOnArrival = wildPets.live.length;
 sweep();
 let roofChanged = 0;
 for (let i = 0; i < CONTROL_FRAMES; i += 1) {
   step();
-  roofChanged += sweep(wildPets.root.name).changedWatched;
+  roofChanged += sweep(wildPets.root).changedWatched;
 }
-console.log(`control, the roof drawn: ${outOnArrival} wild pets out on the first frame, ${roofChanged} changes under ${wildPets.root.name} in ${CONTROL_FRAMES} frames`);
-check(
-  outOnArrival > 0,
-  'the roof was empty on the first frame she could see it — the time it spent undrawn was not lived, ' +
-    'so she arrives to a roof that starts when she looks at it (Building.update promises the opposite)',
-);
+console.log(`control 2, the roof drawn: ${outOnArrival} wild pets out on the first frame, ${roofChanged} changes under ${wildPets.root.name} in ${CONTROL_FRAMES} frames`);
+check(outOnArrival > 0, 'the roof was empty on the first frame she could see it — the time it spent undrawn was not lived');
 check(roofChanged > 0, `on the roof, drawn, nothing under ${wildPets.root.name} moved in ${CONTROL_FRAMES} frames`);
+
+// 3. The mall: measured above — the crowd lives there.
+console.log(`control 3, the mall: the crowd's buffers rewritten on ${mallCrowdFrames} of ${ROOM_FRAMES} frames`);
+check(mallCrowdFrames > ROOM_FRAMES / 2, `in the castle's mall the crowd was rewritten on only ${mallCrowdFrames} of ${ROOM_FRAMES} frames — the crowd that shops there is not living, or this probe cannot see it live`);
+
+// 4. Back in the garden: the park and its crowd carry on.
+quietly(leaveCastle);
+step();
+sweep();
+crowdRewrites();
+const trainBack = train.distance;
+let parkChanged = 0;
+let crowdBack = 0;
+for (let i = 0; i < CONTROL_FRAMES; i += 1) {
+  step();
+  parkChanged += sweep(world.parkRoot).changedWatched;
+  if (crowdRewrites() > 0) crowdBack += 1;
+}
+console.log(
+  `control 4, back in the garden: ${parkChanged} changes under ${world.parkRoot.name} in ${CONTROL_FRAMES} frames, ` +
+    `the crowd rewritten on ${crowdBack}, the train moved ${(train.distance - trainBack).toFixed(2)} m`,
+);
+check(parkChanged > CONTROL_FRAMES, `back in the garden, only ${parkChanged} changes under the park in ${CONTROL_FRAMES} frames — the park did not come back, or this instrument cannot see it move`);
+check(crowdBack > CONTROL_FRAMES / 2, `back in the garden, the crowd was rewritten on only ${crowdBack} of ${CONTROL_FRAMES} frames`);
 
 // ------------------------------------------------------------------- verdict
 

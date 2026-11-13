@@ -1448,7 +1448,10 @@ export class Building implements GameSystem {
     // `entities/Player.ts`.
     player.flyCeiling = this.inside ? INDOOR_FLY_CEILING : PARK_FLY_CEILING;
 
-    this.grownUp.update(dt, elapsed, this.grownUpComing);
+    // Breathing and blinking, nothing she could arrive in the middle of: only
+    // while the grown-up is drawn (`check:undrawn-still` found it posed in
+    // every space, the park included, 494 changes in four seconds).
+    if (isDrawn(this.grownUp.root)) this.grownUp.update(dt, elapsed, this.grownUpComing);
     this.shops.update(dt, elapsed);
     this.updateVisibleFloor(player);
   }
