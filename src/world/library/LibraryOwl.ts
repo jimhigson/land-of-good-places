@@ -672,7 +672,6 @@ export class LibraryOwl {
 
   // --------------------------------------------------------------- state
 
-  /** At her desk — where her Talk zone is offered. */
   /**
    * **Her perch on the story chair** ({@link owlPerch}), and how far her
    * bubble's tail stands over her head ({@link OWL_BUBBLE_OVER_HEAD}) — asked
@@ -693,6 +692,7 @@ export class LibraryOwl {
     return glowBeaconBase(placed);
   }
 
+  /** At her desk — where her Talk zone is offered. */
   get atDesk(): boolean {
     return this.atDeskFlag;
   }
@@ -1247,4 +1247,3 @@ export class LibraryOwl {
     this.bubble.anchorAt(at.x, at.y + this.handle.height + OWL_BUBBLE_OVER_HEAD, at.z);
   }
 }
-
