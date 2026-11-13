@@ -1,3 +1,4 @@
+import { audioContext } from '../../core/audio';
 import {
   BufferAttribute,
   Color,
@@ -335,26 +336,9 @@ export function createWaterSplashEffects(): WaterSplashEffects {
  * Deliberately not reusing `ui/chime.ts`: that file synthesises tuned notes
  * for the shops, this wants filtered noise instead, and the fountain's own
  * effects file is the right home for the sound that goes with them. Same
- * lazy-`AudioContext` technique — browsers only allow audio to start from a
- * response to user input, which every trigger here always is.
+ * shared `AudioContext` (`core/audio.ts`), built at boot and unlocked on the
+ * first gesture.
  */
-let audioContext: AudioContext | null = null;
-
-function ensureAudioContext(): AudioContext | null {
-  if (audioContext) {
-    if (audioContext.state === 'suspended') void audioContext.resume();
-    return audioContext;
-  }
-  const Ctor =
-    window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  try {
-    audioContext = new Ctor();
-  } catch {
-    return null;
-  }
-  return audioContext;
-}
 
 /** One second of white noise, generated once and reused for every burst. */
 let noiseBuffer: AudioBuffer | null = null;
@@ -370,7 +354,7 @@ function noise(ctx: AudioContext): AudioBuffer {
 }
 
 function playWaterBurst(duration: number, peakGain: number, frequencyFrom: number, frequencyTo: number): void {
-  const ctx = ensureAudioContext();
+  const ctx = audioContext();
   if (!ctx) return;
   const start = ctx.currentTime;
 
