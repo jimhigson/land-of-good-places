@@ -177,6 +177,9 @@ for (const command of commands) {
       CHECK_BOOK_READER_URL: BASE,
       CHECK_MENU_REACH_URL: BASE,
       CHECK_RENDER_BUDGET_URL: BASE,
+      // check:dom-churn reads this one; without it the check falls back to
+      // port 5173 and measures nothing, or somebody else's game.
+      CHECK_DOM_CHURN_URL: BASE,
     },
   });
   if (result.status !== 0) {
