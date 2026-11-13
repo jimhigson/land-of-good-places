@@ -29,12 +29,14 @@ export const LOD_LOW = 1;
  * {@link LOD_LOW_BELOW_PX}. Between the two it keeps whatever it had, so nobody
  * flickers on the boundary.
  *
- * Measured on the crowd's children, the sphere `InstancedCrowd` keeps round a
- * child is about 1.8 × her height, so these are a child roughly 150 px tall,
- * ± 10 %. The ordinary camera draws her ~23 px tall: always the far level.
+ * Measured on the crowd's children (one of each of the nine hairstyles), the
+ * sphere `InstancedCrowd` keeps round a child is 2.0–2.4 × her height, so she
+ * goes to full detail somewhere between 140 and 170 px tall and back to the
+ * far level between 115 and 140. The ordinary camera draws her ~23 px tall:
+ * always the far level.
  */
-export const LOD_FULL_ABOVE_PX = 300;
-export const LOD_LOW_BELOW_PX = 245;
+export const LOD_FULL_ABOVE_PX = 340;
+export const LOD_LOW_BELOW_PX = 280;
 
 /** The far level's triangle budget, as a share of the geometry it stands in for. */
 export const LOD_LOW_TRIANGLE_RATIO = 0.25;
