@@ -31,3 +31,22 @@ integrator merges into perf/120fps. Must merge `origin/perf/120fps-base` (with `
 - The park while she is indoors: its groups stay attached and its updaters still run. Needs a pixel proof per interior
   (hotel garden/ocean rooms, castle roof, reptile forecourt) that nothing of the park is in frame before detaching.
 - Lazy library/hotel roots on the base branch: check they still reach `World`'s register lines after the merge.
+
+## State at hand-back (13 Nov, 09:45)
+- `origin/perf/120fps-base` (8cae5514) merged with rerere off, no conflicts. Lazy hotel/library keep the same root objects
+  (`hotelRoot`, `roomRoot`) and write `visible` on them, so `World`'s register lines cover them with no edit to
+  `Hotel.ts` / `Library.ts` / `interior.ts` / `room.ts`.
+- `tsc --noEmit` 0, `typecheck:test` 0 on the merged head. `vitest run test/store/drawn-spaces.test.ts`: 2 passed.
+- **NOT RUN IN A BROWSER.** The dev server (5811) never finished building seed 5: World.ts/Building.ts are in the park
+  source closure, every edit re-keyed the cache, and with the Mac at load 30 one solve attempt took ~9 min. Restart 0
+  and 1 attempts are cached in `.parks/dev/d57c770f7c65e53f/5/.attempts` (hash of the merged head).
+  So: no before/after counts, `check:render-budget`'s new census never ran green, `MUTATE=reattach` never ran red,
+  `check:undrawn-still` never ran on this head (green or `--mutate`), wild-pets catch-up test never ran.
+- First thing to do next: `pnpm exec vite --port 5811 --strictPort`, wait for "[dev parks] seed 5 built", then
+  `CHECK_RENDER_BUDGET_URL=http://127.0.0.1:5811 pnpm run check:render-budget` (green), the same with
+  `MUTATE=reattach ONLY=park` (must fail naming a root and its object count), `pnpm run check:undrawn-still` and
+  `-- --mutate`, `pnpm exec vitest run test/store/wild-pets-catch.test.ts`. Do not edit World.ts/DrawnSpaces.ts/
+  Building.ts before measuring — each edit costs a re-solve.
+- Known hole to look at: content added under a root while it is detached and has never been attached since, then read
+  by bare `matrixWorld` from another space, reads stale/identity matrices (attach recomputes them). No such reader was
+  found (`doorwayExits` is numbers), but the audit was by grep, not by run.
