@@ -298,6 +298,11 @@ export class Game {
       this.camera,
       worldOptions,
     );
+    // The live game takes every space she is not in out of the scene graph
+    // (120 fps plan, step 2). Here rather than in `World`, on purpose: a
+    // headless `World` built by a check keeps the one graph it always had —
+    // see `world/DrawnSpaces.ts`.
+    this.world.drawnSpaces.detachUndrawn();
 
     // Spawn at the park edge by the gate, looking into the park — or wherever a
     // continued game left off (see `resolveSpawn`).

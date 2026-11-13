@@ -97,10 +97,24 @@ export class ShaderWarmup {
   private totalMs = 0;
   private worstSliceMs = 0;
 
-  constructor(renderer: WebGLRenderer, scene: Scene, camera: Camera) {
+  /**
+   * The roots that are out of the scene graph when the queue is built — the
+   * spaces she is not in (`world/DrawnSpaces.ts`, 120 fps plan step 2).
+   *
+   * They used to be found by walking the scene, hidden but present, and
+   * `compile()` warms hidden objects (see the class note) — so the castle, the
+   * hotel and the rest were compiled behind the bus with the park. Detached,
+   * a walk of the scene no longer reaches them; this hands them over so the
+   * warm-up compiles exactly what it compiled before, against the same live
+   * scene as `targetScene`. Asked once, when the queue is built.
+   */
+  private readonly detachedRoots: () => readonly Object3D[];
+
+  constructor(renderer: WebGLRenderer, scene: Scene, camera: Camera, detachedRoots: () => readonly Object3D[] = () => []) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
+    this.detachedRoots = detachedRoots;
   }
 
   /**
@@ -117,6 +131,9 @@ export class ShaderWarmup {
     if (this.doneFlag) return;
     if (!this.startedFlag) {
       this.queue = buildQueue(this.scene);
+      // A detached root is its own little graph: split it by the same rule, so
+      // its slices are the size they were when it hung under the scene.
+      for (const root of this.detachedRoots()) this.queue.push(...buildQueue(root));
       this.startedFlag = true;
     }
     const started = performance.now();
