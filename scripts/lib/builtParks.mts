@@ -1,41 +1,31 @@
 /**
- * **What `build:parks` found, read back** — for Node tooling that needs a
- * seed's accepted restart without searching for it. Node builtins, the source
- * hash and the format's leaf constants only, so the `--import` hook can load it
- * before its own resolver is registered (`acceptedPark.mts`'s
+ * **The checked-in parks, read back** — for Node tooling that needs a seed's
+ * accepted restart, or its park file, without searching for either. Node
+ * builtins and the format's leaf constants only, so the `--import` hook can
+ * load it before its own resolver is registered (`acceptedPark.mts`'s
  * `acceptedRestartSync` asks it first).
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-import {
-  PARK_FILE_FORMAT,
-  PREBUILT_PARKS_MANIFEST,
-  PREBUILT_PARKS_OUT,
-  type PrebuiltParksManifest,
-} from '../../src/world/prebuilt/parkFileName.ts';
-import { parkSourceHash } from './park-source-hash.mjs';
+import { PARK_FILE_FORMAT } from '../../src/world/prebuilt/parkFileName.ts';
+import { checkedInPark, readParksManifest } from './checked-in-parks.mjs';
 import { PARK_CHANGING_SWITCHES } from './acceptedPark.mts';
 
 /**
- * **Seed `seed`'s accepted restart, as `build:parks` found it for this exact
- * source** — or `null` if it has not: no manifest under `.parks/`, a manifest
- * from another source (its `sourceHash` is not this tree's), or one that does
- * not cover the seed. The one way Node tooling should learn a seed's restart
- * from a build rather than search for it; a `null` means run
- * `LGP_SEEDS=<seed> pnpm run build:parks` (or search, as `acceptParkCached` does).
+ * **Seed `seed`'s accepted restart, from its checked-in park** — or `null` when
+ * `parks/manifest.json` has no line for it (or is of another format). The one
+ * way Node tooling learns a seed's restart.
+ *
+ * **It does not ask whether the source changed.** The park is used for as long
+ * as it is checked in; whether this source still accepts it is
+ * `pnpm run validate:parks`' question, asked by CI on every commit. (Until
+ * 13 November 2026 this returned null whenever the park source hash had moved,
+ * and every caller then solved the seed again — 12-30 minutes for a park that
+ * came out identical.) A manifest that is there but unreadable throws
+ * (`readParksManifest`): it is a bad merge, not a missing park.
  */
 export function builtRestartOf(root: string, seed: number): number | null {
-  const path = join(root, PREBUILT_PARKS_OUT, PREBUILT_PARKS_MANIFEST);
-  if (!existsSync(path)) return null;
-  let manifest: PrebuiltParksManifest;
-  try {
-    manifest = JSON.parse(readFileSync(path, 'utf8')) as PrebuiltParksManifest;
-  } catch {
-    return null;
-  }
-  if (manifest.format !== PARK_FILE_FORMAT || manifest.sourceHash !== parkSourceHash(root)) return null;
-  const restart = manifest.restarts?.[String(seed)];
+  const manifest = readParksManifest(root);
+  if (!manifest || manifest.format !== PARK_FILE_FORMAT) return null;
+  const restart = manifest.seeds[String(seed)]?.restart;
   return typeof restart === 'number' ? restart : null;
 }
 
@@ -67,7 +57,12 @@ const SEARCH_SCRIPTS = new Set([
   'park-identity.mts',
   'scatter-digest.mts',
   'check-every-seed-builds.mts',
-  // Drives the world phase's stalls builder (`accommodate`), which only a search has.
+  // The one place the stalls builder a world-phase *search* drove is measured
+  // (on the canonical seed, in the check chain). Every acceptance attempt and
+  // every validation of a checked-in park asks the same measure of the
+  // hydrated park, over a builder resumed from its registry
+  // (`stallBuilder.ts`' `resumedStallBuilder`), so this solve is coverage of
+  // the search's builder, not the only way the measure is asked.
   'check-stall-accommodate.mts',
   'measure-tree-scatter.mts',
   'measure-bush-space.mts',
@@ -89,11 +84,14 @@ export function isSearchScript(): boolean {
  * solved park, in milliseconds instead of a solve's minutes.
  *
  * Null — so the process solves — when the file would not be the park it asked
- * for: no fresh manifest for this source and seed; an explicit restart **other
+ * for: no checked-in park for the seed; an explicit restart **other
  * than the shipped one** (`LGP_PARK_RESTART`, `__LGP_PARK_RESTART__`: the accept
  * loop's attempts, which are searching); a switch the park's code reads ({@link parkSwitches});
  * `LGP_SOLVE=1`; or a script in
  * {@link SEARCH_SCRIPTS}.
+ *
+ * A file that is not the one its manifest line records throws
+ * (`checkedInPark`): a check must never measure a park nobody can name.
  */
 export function builtParkFileOf(root: string, seed: number, env: Readonly<Record<string, string | undefined>>): unknown {
   if (env['LGP_SOLVE'] === '1' || env['LGP_PARK_FILE']) return null;
@@ -113,7 +111,5 @@ export function builtParkFileOf(root: string, seed: number, env: Readonly<Record
   for (const key of Object.keys(env)) {
     if (switches.has(key) && env[key] !== undefined && env[key] !== '') return null;
   }
-  const file = join(root, PREBUILT_PARKS_OUT, `${seed}.json`);
-  if (!existsSync(file)) return null;
-  return JSON.parse(readFileSync(file, 'utf8')) as unknown;
+  return checkedInPark(root, seed).park;
 }

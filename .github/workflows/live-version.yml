@@ -56,7 +56,7 @@ jobs:
     name: Live site is serving the newest commit
     runs-on: ubuntu-latest
     # Generous: most of this is waiting out a deploy that is legitimately
-    # mid-build, behind a Parks build that may be cold (see the step below).
+    # mid-build, behind its Parks validation (see the step below).
     timeout-minutes: 75
     steps:
       # A deploy runs the whole `npm run build` gate before it publishes, so
@@ -68,7 +68,7 @@ jobs:
         uses: actions/github-script@v8
         with:
           # The deploy is a job inside `ci.yml`'s run on main, behind its Parks
-          # build, so a CI run on main still in flight is a deploy that may yet
+          # validation, so a CI run on main still in flight is a deploy that may yet
           # land. A rate-limited or failed API call is retried, never read as
           # "no deploy in flight".
           script: |

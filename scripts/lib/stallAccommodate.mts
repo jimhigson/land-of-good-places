@@ -13,6 +13,8 @@ import { PLAYER_RADIUS } from '../../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../../src/entities/Player.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../../src/world/entrance/layout.ts';
 import { worldSolveStallBuilder } from '../../procgen/world/worldPhaseSolver.ts';
+import { resumedStallBuilder } from '../../procgen/world/stallBuilder.ts';
+import { offeredParkFile } from '../../src/world/prebuilt/parkFileStore.ts';
 import { isRefusal } from '../../procgen/boot/featureBuilder.ts';
 import { shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
 import { boothBoxFor } from '../../src/minigames/boothFootprint.ts';
@@ -149,10 +151,27 @@ export async function stallAccommodate(
 
     // ------------------------------------------------------- the booth to drive
 
-    const builder = worldSolveStallBuilder();
+    // **Searched or hydrated, the same builder class.** A searched park hands
+    // over the very builder its world phase drove. A park hydrated from its
+    // file (`validate:parks`, every checked-in park) drove none, so the stalls
+    // builder is resumed over the hydrated park's own collision world, registry
+    // and booths, with the booths its registry holds already committed
+    // (`resumedStallBuilder`) — what lets this be asked of a checked-in park
+    // without solving it again. Which one was measured is said on every run.
+    const hydrated = offeredParkFile() !== null;
+    const builder = hydrated
+      ? resumedStallBuilder(collision, claims, (id) => world.stalls.boothPlacement(id))
+      : worldSolveStallBuilder();
     if (!builder || !builder.accommodate) {
-      die('the world phase exposed no stalls builder with an accommodate — nothing to prove');
+      die(
+        hydrated
+          ? "the hydrated park's registry holds no stalls ledger to resume a builder over — nothing to prove"
+          : 'the world phase exposed no stalls builder with an accommodate — nothing to prove',
+      );
     }
+    write(
+      `  check:stall-accommodate seed ${seed}: driving ${hydrated ? 'a stalls builder resumed over the park hydrated from its file' : 'the stalls builder the world phase searched with'}\n`,
+    );
     const accommodate = builder.accommodate.bind(builder);
 
     /** Where a booth's prop is actually drawn, off the scene graph. */

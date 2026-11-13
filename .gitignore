@@ -65,5 +65,7 @@ coverage/
 test/procgen/vet-seed-*.test.ts
 seed-vetting*.jsonl
 
-# Prebuilt park files written by `pnpm run build:parks` for `vite build` to ship.
+# The solved parks are checked in, in `parks/` (docs/design/PREBUILT-PARKS.md,
+# "Checked in"). `.parks/` is where they lived before 13 Nov 2026, untracked;
+# still ignored so an older worktree's leftovers stay quiet.
 .parks/

@@ -115,13 +115,42 @@ function spurEndFor(id: string): readonly [number, number] {
 }
 
 
+/**
+ * **The stalls builder of a park that was not searched** — one hydrated from
+ * its park file — picked up where the search left it: every booth the registry
+ * holds a `stalls` section for, committed in ledger order, against the hydrated
+ * park's own collision world, registry and booths.
+ *
+ * `scripts/lib/stallAccommodate.mts` needs it so `check:stall-accommodate` can
+ * be asked of a checked-in park (`validate:parks`) without solving the seed
+ * again. It is the same {@link stallBuilder}: only `committed` is supplied
+ * rather than grown by `advance()`, and a hydrated registry holds exactly the
+ * sections the search committed (`worldPhase.ts`' `hydrateWorldPhase`).
+ *
+ * Null when the registry's `stalls` sections are not 0..n-1 over a prefix of
+ * {@link STALL_PLACEMENTS}' order — then there is no ledger to resume, and the
+ * caller must say so rather than measure some other builder.
+ */
+export function resumedStallBuilder(
+  collision: CollisionWorld,
+  claims: GroundClaims,
+  relocator: BoothRelocator,
+): FeatureBuilder | null {
+  const sections = claims.contributionsOf('stalls').map(([section]) => section);
+  const ids = stallIds();
+  if (sections.length === 0 || sections.length > ids.length || sections.some((section, i) => section !== i)) return null;
+  return stallBuilder(collision, claims, relocator, ids.slice(0, sections.length));
+}
+
+
 export function stallBuilder(
   collision: CollisionWorld,
   claims: GroundClaims,
   relocator: BoothRelocator,
+  alreadyCommitted: readonly string[] = [],
 ): FeatureBuilder {
   /** Stall ids committed so far, in ledger order — a section index is an index into this. */
-  const committed: string[] = [];
+  const committed: string[] = [...alreadyCommitted];
 
   /**
    * Is `(x, z)` a spot this booth may stand at? Every question the placement

@@ -4,27 +4,27 @@
  * production does: it fetches `/parks/<seed>.json` and hydrates, and has no
  * solver of its own (`docs/design/PREBUILT-PARKS.md`).
  *
- * Solving still happens, but here, in build tooling: the first request for a
- * seed runs `build:parks` for that seed in a child Node process — the same
- * accept loop and proof the shipped parks get, so the dev park is the
- * accepted park, never an unmeasured restart — caches the file under
- * `.parks/dev/<source hash>/<seed>/`, and serves it stamped with this build's
- * version. That can take minutes a seed (every attempt is a solve plus every
- * acceptance measure). The cache is keyed on {@link parkSourceHash}, so an edit to `src/`
- * re-solves on the next request rather than serving a park from other code.
+ * **The parks are the checked-in ones, and nothing is ever solved here.** Each
+ * request is answered from `parks/<seed>.json`, stamped with this build's
+ * version and its park stamp by the same function `vite build` ships them with
+ * (`checked-in-parks.mjs`'s `servedParkText`) — so a fresh worktree opens the
+ * game the moment `pnpm install` has finished, whatever has been edited.
+ *
+ * Until 13 November 2026 the first request after *any* edit inside the park
+ * source closure — a render-only one included — ran `build:parks` for that
+ * seed in a child process: 12-30 minutes before the page could draw, for a
+ * park that came out identical. That stopped a whole fleet of engineers
+ * opening the game one morning, and Jim asked why the solve was needed at all.
+ *
+ * It does not ask whether the edited source still *accepts* the park either:
+ * the dev server shows the tree as it is. `pnpm run validate:parks` answers
+ * that, and CI runs it on every push.
+ *
  * A seed outside the game's parks gets a 404 — the same error the game shows
- * for it in production. Files `build:parks` wrote for the current source are
- * served straight from `.parks/`, so a browser session over many seeds can be
- * made instant by running it first.
+ * for it in production. A park that is missing, or is not the file its
+ * manifest line records, gets a 500 whose text is what to do about it.
  */
-import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { promisify } from 'node:util';
-
-import { parkSourceHash } from './park-source-hash.mjs';
-
-const run = promisify(execFile);
+import { servedParkText } from './checked-in-parks.mjs';
 
 /**
  * @param {string} root repository root
@@ -32,51 +32,6 @@ const run = promisify(execFile);
  * @param {readonly number[]} seeds the seeds the game has
  */
 export function devParksMiddleware(root, version, seeds) {
-  /** @type {Map<string, Promise<string>>} */
-  const inFlight = new Map();
-
-  /** @param {number} seed */
-  async function parkFile(seed) {
-    const source = parkSourceHash(root);
-    // Parks `pnpm run build:parks` already solved from this very source are
-    // used as they are — run it once before a browser session that will visit
-    // many seeds, and nothing is solved on request.
-    try {
-      const manifest = JSON.parse(readFileSync(join(root, '.parks', 'manifest.json'), 'utf8'));
-      const built = join(root, '.parks', `${seed}.json`);
-      if (manifest.sourceHash === source && manifest.seeds.includes(seed) && existsSync(built)) return built;
-    } catch {
-      // No build:parks output (or an unreadable one): solve on request below.
-    }
-    const dir = join(root, '.parks', 'dev', source.slice(0, 16), String(seed));
-    const file = join(dir, `${seed}.json`);
-    if (existsSync(join(dir, 'manifest.json')) && existsSync(file)) return file;
-    const key = file;
-    let pending = inFlight.get(key);
-    if (!pending) {
-      pending = (async () => {
-        const started = Date.now();
-        console.log(`[dev parks] building seed ${seed}'s accepted park (first request since the source changed)…`);
-        // build:parks writes its manifest last, only once the file is proven,
-        // so a run that dies leaves no manifest and the next request starts it again.
-        await run(
-          process.execPath,
-          ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', 'scripts/build-parks.mts'],
-          {
-            cwd: root,
-            env: { ...process.env, LGP_SEEDS: String(seed), LGP_LANES: '1', LGP_PARKS_OUT: relative(root, dir) },
-            maxBuffer: 256 * 1024 * 1024,
-          },
-        );
-        if (!existsSync(join(dir, 'manifest.json'))) throw new Error(`build:parks wrote no manifest for seed ${seed}`);
-        console.log(`[dev parks] seed ${seed} built in ${((Date.now() - started) / 1000).toFixed(1)} s`);
-        return file;
-      })().finally(() => inFlight.delete(key));
-      inFlight.set(key, pending);
-    }
-    return pending;
-  }
-
   /** @type {(req: { url?: string }, res: any, next: () => void) => void} */
   return (req, res, next) => {
     const match = /^\/parks\/(\d+)\.json(?:\?.*)?$/.exec(req.url ?? '');
@@ -88,20 +43,20 @@ export function devParksMiddleware(root, version, seeds) {
       res.end(`no park ${seed}: this game has seeds ${seeds.join(', ')}`);
       return;
     }
-    parkFile(seed).then(
-      (file) => {
-        const parsed = JSON.parse(readFileSync(file, 'utf8'));
-        res.statusCode = 200;
-        res.setHeader('content-type', 'application/json');
-        res.setHeader('cache-control', 'no-store');
-        res.end(JSON.stringify({ ...parsed, build: version }));
-      },
-      (error) => {
-        console.error(`[dev parks] seed ${seed} failed to solve:`, error);
-        res.statusCode = 500;
-        res.setHeader('content-type', 'text/plain');
-        res.end(`park ${seed} failed to solve: ${String(error)}`);
-      },
-    );
+    let text;
+    try {
+      text = servedParkText(root, seed, version);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[dev parks] seed ${seed} cannot be served: ${message}`);
+      res.statusCode = 500;
+      res.setHeader('content-type', 'text/plain');
+      res.end(`park ${seed} cannot be served: ${message}`);
+      return;
+    }
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json');
+    res.setHeader('cache-control', 'no-store');
+    res.end(text);
   };
 }

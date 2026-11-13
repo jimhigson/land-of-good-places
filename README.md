@@ -79,10 +79,12 @@ pnpm run build
 CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… pnpm dlx wrangler deploy
 ```
 
-To re-run a deploy without pushing anything:
+To re-run a deploy without pushing anything, run CI on `main` — its deploy
+job publishes only once every checked-in park is still accepted
+(`deploy.yml` cannot be dispatched on its own, so nothing skips that):
 
 ```sh
-gh workflow run deploy.yml --repo jimhigson/land-of-good-places --ref main
+gh workflow run ci.yml --repo jimhigson/land-of-good-places --ref main
 ```
 
 With no Cloudflare credentials at all you can still put a build online, on a

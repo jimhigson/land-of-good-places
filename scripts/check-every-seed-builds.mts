@@ -128,7 +128,8 @@ interface SeedResult {
  * 813 s, 674 s and 638 s on four lanes, seed 15 never reached). Here the child
  * `check:park` measures the park hydrated from that file — the park a child's
  * device builds — and the layout trace is the one the solve recorded in it.
- * With no fresh `.parks/` (a local run on an edited tree) it solves, as before.
+ * Under `LGP_SOLVE=1`, or with no line for the seed in `parks/manifest.json`, it
+ * solves, as before; the checked-in parks make that the exception.
  */
 function shippedParkFile(seed: number): string | null {
   if (process.env['LGP_SOLVE'] === '1') return null;
@@ -402,8 +403,8 @@ process.stdout.write(
         .join('; ') || 'none unbuilt'
     }\n` +
     `  - COVERS: seeds ${SEEDS.join(',')} through the real check:park, ratchet on, one process each;\n` +
-    `    ${results.filter((r) => r.source === 'hydrated').length} measured on the shipped park file (.parks/, whose solve\n` +
-    `    build:parks proved), ${results.filter((r) => r.source === 'solved').length} solved from scratch here.\n` +
+    `    ${results.filter((r) => r.source === 'hydrated').length} measured on the checked-in park file (parks/, held to\n` +
+    `    this source by validate:parks), ${results.filter((r) => r.source === 'solved').length} solved from scratch here.\n` +
     `  - DOES NOT COVER: test/procgen's invariants (the two gates do not imply each other, #437),\n` +
     `    nor any seed outside this list — under totality every integer is a seed, and a rolling\n` +
     `    random draw is still owed (design doc, stage 5).\n`,

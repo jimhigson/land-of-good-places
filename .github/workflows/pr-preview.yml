@@ -13,8 +13,8 @@ name: PR preview
 # failure (syntax error, missing import) — it is not re-proving correctness
 # the other job already owns.
 on:
-  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
-  # run, so the parks it restores are already in this run's cache.
+  # Called from ci.yml. The parks it builds from are the checked-in ones
+  # (`parks/`), read straight from this checkout: nothing is solved or restored.
   workflow_call:
 
 # No `concurrency:` here: ci.yml, the caller, owns it.
@@ -33,9 +33,7 @@ jobs:
   preview:
     name: Deploy PR preview
     runs-on: ubuntu-latest
-    # Back to 10: the parks are found by the Parks workflow and restored here
-    # (the `parks` job above does the waiting), so this job only builds and
-    # uploads.
+    # 10: the parks are checked in, so this job only builds and uploads.
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -58,12 +56,11 @@ jobs:
         # reasoning as deploy.yml; the counts live in `.npmrc`.
         run: pnpm install --frozen-lockfile
 
-      # The accepted parks, found once per tree by the Parks workflow
-      # (`parks.yml`: build:parks's accept loop and proof, one runner per
-      # seed) and restored here; `vite build` below ships them and fails
-      # without them (LGP_REQUIRE_PARKS). Nothing is solved in this job.
-      - name: Restore the accepted parks
-        uses: ./.github/actions/restore-parks
+      # The parks are checked in (`parks/`): `vite build` below ships them
+      # from this checkout and fails if one is missing or is not the file its
+      # manifest line records. Nothing is solved or restored in this job, and
+      # it only runs once `parks.yml` has shown this commit still accepts them
+      # (`ci.yml`).
 
       # Client bundle only — see the on: comment above for why the check
       # suite is deliberately not run here.
@@ -74,10 +71,8 @@ jobs:
       # say it — and it is the same command the deploy runs, which is the point.
       # The checks run in `checks.yml`, which is required before merge.
       - name: Build
-        # Fails rather than ship a bundle whose parks are missing or were
-        # solved from other code (`prebuiltParksPlugin` in vite.config.ts).
-        env:
-          LGP_REQUIRE_PARKS: '1'
+        # Fails rather than ship a bundle with a park missing
+        # (`prebuiltParksPlugin` in vite.config.ts).
         run: pnpm run build
 
       # `wrangler versions upload` publishes a new Worker *version* with its

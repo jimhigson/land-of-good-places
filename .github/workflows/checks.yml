@@ -57,8 +57,8 @@ name: Checks
 #    load-bearing: without it a failed shard would make GitHub **skip** the
 #    aggregator, and **a skipped required check counts as passing**.
 on:
-  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
-  # run, so the parks it restores are already in this run's cache.
+  # Called from ci.yml. The parks it builds from are the checked-in ones
+  # (`parks/`), read straight from this checkout: nothing is solved or restored.
   workflow_call:
 
 # No `concurrency:` here: ci.yml, the caller, owns it.
@@ -133,9 +133,6 @@ jobs:
         # Registry hiccups are common enough to be worth retrying; the counts
         # live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
-
-      - name: Restore the accepted parks
-        uses: ./.github/actions/restore-parks
 
       # Every `check:served-*` step drives a real page in Chromium;
       # `playwright-core` ships the driver but not the browser.
