@@ -80,7 +80,7 @@
  * when a change removes waste; never raise one to make a PR pass without
  * saying what it buys.
  *
- * ## Proved red (13 November 2026, `fix/cull-audit-ci`, seed 5, 1000×700 DPR 1)
+ * ## Proved red (13 November 2026, `fix/cull-audit-ci` 84cd3f44, seed 5, 1000×700 DPR 1)
  *
  * Each clause broken on purpose and watched fail, with the inputs it failed
  * on — a transcript goes stale when the geometry under it moves, so the
@@ -88,19 +88,20 @@
  *
  * - **Budgets.** Every tile's bound 50× too wide (`refreshInstanceBounds`,
  *   `sphere.radius = (radius + margin) * 50`), so no tiled bush, tree, bulb
- *   or flower can be culled — against the budgets above (park 39 / 368,916,
- *   sky cruiser 12 / 214,416):
+ *   or flower can be culled — against the budgets above (park 36 / 256,628,
+ *   sky cruiser 12 / 173,584; the crowd's level of detail, #768, in):
  *   ```
- *   park: 181 draws a frame for meshes wholly off the screen, ceiling 43 (measured 39)
- *   park: 630456 triangles a frame off the screen, ceiling 405808 (measured 368916)
+ *   park: 178 draws a frame for meshes wholly off the screen, ceiling 40 (measured 36)
+ *   park: 518168 triangles a frame off the screen, ceiling 282291 (measured 256628)
  *   sky cruiser: 87 draws a frame for meshes wholly off the screen, ceiling 14 (measured 12)
- *   sky cruiser: 342680 triangles a frame off the screen, ceiling 235858 (measured 214416)
+ *   sky cruiser: 301848 triangles a frame off the screen, ceiling 190943 (measured 173584)
  *   ```
- * - **Stale bounds, the motes** (CI's red): the lobby's motes and glints left
- *   to three's cached bound again (`createDiscoSparkle` without its two
- *   `boundingSphere`s; three cached motes centre (0.566, −2.893, 0.405) r 4.956
- *   and glints r 0.627, in their own space, on the first draw). Neither is out
- *   at the audited moment, 1 s — which is why the sweep exists:
+ * - **Stale bounds, the motes** (CI's red): the lobby's glints, then its
+ *   motes, left to three's cached bound again (`createDiscoSparkle` without
+ *   that mesh's `boundingSphere`; three cached the motes' at centre (0.566,
+ *   −2.893, 0.405) r 4.956 and the glints' at r 0.627, in their own space, on
+ *   the first draw). Neither is out at the audited moment, 1 s — which is why
+ *   the sweep exists:
  *   ```
  *   hotel: stale bound — …/hotel.disco.glints: up to 8 of 90 instances outside the bound three culls by, first at 1.100 s, by up to 0.036 m
  *   hotel: stale bound — …/hotel.disco.motes: up to 3 of 40 instances outside the bound three culls by, first at 1.500 s, by up to 0.586 m
@@ -123,7 +124,7 @@
  * - **A second boot.** The page reloaded straight after its moment
  *   (`page.reload()` after `settle`):
  *   ```
- *   hotel: the page loaded again after its moment (0.2 s …/hotel?seed=5&perf=1&clock=1; 3.7 s …/hotel?seed=5&perf=1&clock=1) — the audit or the sweep ran on another boot
+ *   hotel: the page loaded again after its moment (0.7 s …/hotel?seed=5&perf=1&clock=1; 4.6 s …/hotel?seed=5&perf=1&clock=1) — the audit or the sweep ran on another boot
  *   ```
  *   Seen for real too: vite reloads the first page to connect after a source
  *   edit. A reload *before* the moment is harmless — the last boot is whole,
@@ -135,7 +136,10 @@
  * MEASURE=1 …    # print counts, assert only the controls
  * ONLY=park,hotel …
  * OUT=/path/to/audit.json …   # every scene's offenders, for reading
+ * SWIFTSHADER=1 …               # CI's software rasteriser, on a machine with a GPU
  * ```
+ *
+ * Open any scene's moment in a browser to look at it: `/slide?seed=5&clock=2`.
  */
 import { writeFileSync } from 'node:fs';
 import { chromium, type Page } from 'playwright-core';
