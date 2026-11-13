@@ -23,49 +23,93 @@
  * them, and nothing in the game's shared reader (`art/style/glb.ts`, inside the
  * prebuilt parks' source hash) had to change to carry them.
  * `check:library-glb` asserts the constant still equals the file's extras.
+ *
+ * **And it cuts the file in two** (#749's follow-up, Jim 12 Nov 2026: *"all
+ * interiors should be loaded on-demand on entering that room"*): the building
+ * and the few nodes the boot measures go to `libraryGlb.ts`, loaded with the
+ * park; everything drawn only in the reading room — furniture, books, the owl,
+ * the dragon, the cat — goes to `libraryRoomGlb.ts`, a lazy chunk fetched when
+ * she goes in. `src/art/models/libraryKitSplit.ts` owns which node is which;
+ * `scripts/lib/splitGlb.mts` does the cutting; `check:library-glb` cuts the
+ * committed file again and asserts both modules are exactly the two pieces.
+ * `LIBRARY_FACES` is written beside the room piece, which has every faced head.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packGlbAsset } from './lib/pack-glb-asset.mts';
+import { glbSubset } from './lib/splitGlb.mts';
+import { isLibraryBootNode } from '../src/art/models/libraryKitSplit.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const glbPath = resolve(here, '../src/art/assets/library.glb');
-const modulePath = resolve(here, '../src/art/assets/libraryGlb.ts');
+const bootModulePath = resolve(here, '../src/art/assets/libraryGlb.ts');
+const modulePath = resolve(here, '../src/art/assets/libraryRoomGlb.ts');
+
+/**
+ * 450 KB for the whole authored file: a whole building plus its furniture plus
+ * three creatures, against the castle interior's 200 KB (ten pieces of
+ * furniture) and the hotel's 640 KB (a tower and its rooms). The exterior is
+ * over a quarter of it — the six turned columns alone are ~45 KB — and the six
+ * instancing books are 28 triangles each, because there will be hundreds of
+ * them.
+ *
+ * Worth knowing before spending it: a box-built part costs ~30–50 bytes a
+ * triangle here (every sharp edge splits a vertex, and a plain box is 24
+ * vertices for 12 triangles); a smooth creature part about 25. Plain boxes
+ * for things nobody sees the edge of (the nest's page blocks and boards)
+ * were the biggest saving found.
+ */
+const budgetBytes = 450 * 1024;
+const whole = new Uint8Array(readFileSync(glbPath));
+if (whole.length > budgetBytes) {
+  console.error(`\n✗ pack:library: library.glb is ${(whole.length / 1024).toFixed(1)} KB, over its ${(budgetBytes / 1024).toFixed(1)} KB budget.\n`);
+  process.exit(1);
+}
 
 packGlbAsset({
   glbPath,
-  modulePath,
+  bytes: glbSubset(whole, isLibraryBootNode),
+  modulePath: bootModulePath,
   constantName: 'LIBRARY_GLB_BASE64',
-  label: 'pack:library',
-  /**
-   * 450 KB: a whole building plus its furniture plus three creatures, against
-   * the castle interior's 200 KB (ten pieces of furniture) and the hotel's
-   * 640 KB (a tower and its rooms). The exterior is over a quarter of it — the
-   * six turned columns alone are ~45 KB — and the six instancing books are 28
-   * triangles each, because there will be hundreds of them.
-   *
-   * Worth knowing before spending it: a box-built part costs ~30–50 bytes a
-   * triangle here (every sharp edge splits a vertex, and a plain box is 24
-   * vertices for 12 triangles); a smooth creature part about 25. Plain boxes
-   * for things nobody sees the edge of (the nest's page blocks and boards)
-   * were the biggest saving found.
-   */
-  budgetBytes: 450 * 1024,
+  label: 'pack:library (the building — loaded with the park)',
+  budgetBytes,
   docLines: [
-    '**The Library kit, as authored geometry.** Do not edit — generated.',
+    '**The Library kit\'s boot piece, as authored geometry.** Do not edit — generated.',
     '',
     'Written by `pnpm run blend:library`, which runs `art/blend/library_build.py`',
-    '(the authoring source), then `library_export.py`, then this packer.',
+    '(the authoring source), then `library_export.py`, then `pack:library`, which',
+    'cuts `library.glb` in two (`src/art/models/libraryKitSplit.ts` says which',
+    'node goes where). This piece loads with the park: the pillared exterior, and',
+    'the bookcase and the floor cushion, which the boot measures. Everything',
+    'drawn only in the reading room is `libraryRoomGlb.ts`, fetched when she goes in.',
+    '',
+    'Shape only: no colour, no material, no texture.',
+  ],
+});
+
+packGlbAsset({
+  glbPath,
+  bytes: glbSubset(whole, (name) => !isLibraryBootNode(name)),
+  modulePath,
+  constantName: 'LIBRARY_ROOM_GLB_BASE64',
+  label: 'pack:library (the reading room — loaded when she goes in)',
+  budgetBytes,
+  docLines: [
+    '**The Library kit\'s reading-room piece, as authored geometry.** Do not edit — generated.',
+    '',
+    'Written by `pnpm run blend:library`, which runs `art/blend/library_build.py`',
+    '(the authoring source), then `library_export.py`, then `pack:library`, which',
+    'cuts `library.glb` in two (`src/art/models/libraryKitSplit.ts` says which',
+    'node goes where). This piece is a lazy chunk, fetched when she goes in:',
     '',
     // No count here: the list below is the enumeration, and a typed number
     // beside it was wrong on the day it was written ("Seventeen", of twenty).
-    'Every asset of the kit in one file — the pillared exterior, a bookcase and',
-    'its hinged secret twin, the desk, two lamps, an armchair and a floor',
-    'cushion, six book blocks for instancing, a book pile, the open reader\'s',
-    'cover, the owl librarian, the baby dragon and its nest of books, and the',
-    'library cat. Each is its own asset with its own origin, so inside this file',
-    'they all overlap at the world origin, which is expected and harmless.',
+    'the hinged secret bookcase, the desk, two lamps, an armchair, six book',
+    'blocks for instancing, a book pile, the open reader\'s cover, the owl',
+    'librarian, the baby dragon and its nest of books, and the library cat.',
+    'Each is its own asset with its own origin, so inside this file they all',
+    'overlap at the world origin, which is expected and harmless.',
     '',
     'Shape only: no colour, no material, no texture. The owl, dragon and cat',
     'heads carry face UVs, painted through `planarUvCanvasTexture`.',
