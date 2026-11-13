@@ -51,8 +51,9 @@ import { DASH_RECOVER_SECONDS, dashBoost, dashBoostNow, dashSubsteps } from './t
  *   tap's A\* used to run inside the tap's own frame — 33–35 ms on an M4 Pro,
  *   four or five missed frames at 120 Hz — so in the game the route is asked
  *   of a {@link RouteScheduler} that answers it a couple of milliseconds a
- *   frame (step 1b of the 120 fps plan). Most taps are answered before the tap
- *   returns. A long one takes a few frames, and for those frames she walks
+ *   frame (step 1b of the 120 fps plan). Most taps are answered at the start
+ *   of the very next frame, before it steers her — the frame a tap always set
+ *   her off on. A long one takes a few frames, and for those frames she walks
  *   straight at the place she tapped, exactly the seek this class used before
  *   it could route, then turns onto the route the moment it lands — the same
  *   route a synchronous plan would have given. She does not dash until it has:
@@ -528,10 +529,11 @@ export class TapNavigator implements GameSystem {
    *   dropped, because arriving somewhere else must never press the button on a
    *   thing she never reached.
    *
-   * With a scheduler ({@link routes}) the question is asked and, if this
-   * frame's budget answers it, taken at once — every short tap. Otherwise the
-   * route stays empty, so every method below steers straight at the target,
-   * until {@link update} finds it answered ({@link routeLanded}).
+   * With a scheduler ({@link routes}) the question is asked, and taken at once
+   * if it is answered there and then (asked inside a frame, with budget left).
+   * Otherwise the route stays empty, so every method below steers straight at
+   * the target, until {@link update} finds it answered ({@link routeLanded}) —
+   * for a tap, which arrives between frames, usually the very next frame.
    */
   private planRoute(sampler: GroundSampler): void {
     this.routeIndex = 0;
