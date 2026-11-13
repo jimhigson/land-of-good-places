@@ -74,6 +74,24 @@ const LAZY_MODULES = [
   'src/art/assets/reptilePlantsGlb.ts',
   'src/art/assets/reptileNoodleGlb.ts',
   'src/art/assets/reptileStallGlb.ts',
+  // The Library's reading room and secret den — the room's piece of the Library
+  // kit, the den's kit, the furniture, the owl, the dragon and the cat
+  // (`world/interiors.ts`'s `LIBRARY_ROOM`). The building stays in the boot.
+  'src/world/library/room.ts',
+  'src/world/library/roomShell.ts',
+  'src/world/library/furnish.ts',
+  'src/world/library/LibraryOwl.ts',
+  'src/world/library/LibraryDen.ts',
+  'src/world/library/LibraryCat.ts',
+  'src/world/library/secretShelf.ts',
+  'src/art/models/libraryRoomAssets.ts',
+  'src/art/models/libraryRoomKit.ts',
+  'src/art/models/libraryCreatures.ts',
+  'src/art/models/libraryFaces.ts',
+  'src/art/models/libraryDenAssets.ts',
+  'src/art/models/libraryDenKit.ts',
+  'src/art/assets/libraryRoomGlb.ts',
+  'src/art/assets/libraryDenGlb.ts',
   // The Space Ferris Wheel's sky show, built on boarding (`world/ferrisWheel/show.ts`).
   'src/world/ferrisWheel/show.ts',
   'src/minigames/ferrisWheel/space.ts',

@@ -442,7 +442,14 @@ async function child(seed: number): Promise<void> {
         const qz = route[i * 2 + 1] ?? pz;
         const leg = Math.hypot(qx - px, qz - pz);
         if (walked + leg >= metres / 2 && leg > 2) {
-          const t = (metres / 2 - walked) / leg;
+          // On this leg, or — when the middle fell on legs too short to stand a
+          // door across (`leg > 2`) — at this leg's start, which is where those
+          // short legs end. Never before it: unclamped, `t` went negative and
+          // stood the band off the route altogether, 2.7 m beside a dash that
+          // went exactly where it was planned (seed 13, once #760 shifted the
+          // seeded stream these routes are drawn from: band at (54.15, -2.69),
+          // the route through (54.08, 0.14)).
+          const t = Math.max(0, (metres / 2 - walked) / leg);
           band = {
             what: 'a door-sized band across the route',
             centreX: px + (qx - px) * t,

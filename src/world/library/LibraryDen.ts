@@ -16,6 +16,7 @@ import { measureTop } from '../measuredTop';
 import { LIBRARY_LINES } from './libraryLines';
 import { ARRIVE_RADIUS } from '../../entities/TapNavigator';
 import { LIBRARY_DRAGON_NEST, LIBRARY_DRAGON_STAND, type LocalPoint } from './layout';
+import { DRAGON_REACH_RADIUS, DRAGON_STAND_RADIUS, DRAGON_ZONE_ID } from './roomIds';
 import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryProps } from './props';
 
 /**
@@ -77,17 +78,8 @@ import { posedFootprint, sweep, type BoxFootprint, type BoxWalls, type LibraryPr
 /** The dragon's own seeded stream: its breath's phase, its tail's and its puffs' timing, its sprites' scatter. */
 export const LIBRARY_DRAGON_SEED = 0x0b00d1;
 
-/**
- * **"Say hi!" is offered within this of the nest's middle, from every side**
- * (metres) — the zone's reach is measured from the nest (`reachX/reachZ`),
- * not from its stand, so a child who walks up against the dragon on the keys
- * from the east, the north or the west, or bumps its nest head-on, gets the
- * chip. (Measured from the stand alone at 0.55 m, the chip almost never came
- * on the keys: PR #739's QA round 2, 48 approaches.) The stand stays inside it
- * with a tapped walk's arrival to spare ({@link ARRIVE_RADIUS}), asserted
- * below, so a tap still lands her in reach.
- */
-export const DRAGON_REACH_RADIUS = 3;
+/** **"Say hi!"**'s reach from the nest's middle, metres — `roomIds.ts` owns it (the building asks it before the room is here). */
+export { DRAGON_REACH_RADIUS };
 
 /**
  * Within this of the nest's middle, in the den with the shelf open, she has
@@ -96,8 +88,8 @@ export const DRAGON_REACH_RADIUS = 3;
  */
 export const DRAGON_MEET_RADIUS = DRAGON_REACH_RADIUS;
 
-/** The zone's reach, for `Library.ts`'s Say hi zone. */
-export const DRAGON_STAND_RADIUS = DRAGON_REACH_RADIUS;
+/** The zone's reach, for `Library.ts`'s Say hi zone — `roomIds.ts`'s. */
+export { DRAGON_STAND_RADIUS };
 
 {
   const stand = Math.hypot(LIBRARY_DRAGON_STAND.x - LIBRARY_DRAGON_NEST.x, LIBRARY_DRAGON_STAND.z - LIBRARY_DRAGON_NEST.z);
@@ -158,8 +150,8 @@ const DRAGON_BUBBLE_OVER = 0.45;
 /** How many head turns across its range its body is measured over: every 0.15 rad of the 1.2 (see the constructor). */
 const POSE_TURN_STEPS = 9;
 
-/** Its Say hi zone's id (`Library.ts` builds the zone) — the item its words' bubble answers. */
-export const DRAGON_ZONE_ID = 'library-dragon';
+/** Its Say hi zone's id — `roomIds.ts`'s. */
+export { DRAGON_ZONE_ID };
 
 /** The Cute-o-dex card for meeting it — `state/secrets.ts`'s row. */
 export const DRAGON_FRIEND_SECRET = 'secret.babyDragon';
