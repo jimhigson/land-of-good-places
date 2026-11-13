@@ -6,6 +6,7 @@ import { stepReferenceFor, withinStep } from './building/stepReach';
 import { feetSampler, solidStepCeiling } from './standing';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
+import type { RouteRequest } from './routeScheduler';
 
 /**
  * The park, as something you can find a way across — **on every level of it**.
@@ -284,14 +285,27 @@ const BUILD_BRIDGE_ROWS = 16;
 const BUILD_LEVEL_CELLS = 128;
 
 /**
- * Milliseconds of lattice building a frame may spend in {@link NavGrid.warm} —
- * the one owner, for `Game` (her own lattice, every frame and every frame of
- * the cat-bus ride). About a quarter of the 8.3 ms frame the game is held to.
+ * **Milliseconds of route-finding one frame may spend** — lattice building and
+ * search together, her lattice, her companions' routes and the crowd's: the one
+ * owner, spent by `RouteScheduler` (`routeScheduler.ts`), which `Game` runs
+ * every frame and every frame of the cat-bus ride. About a quarter of the
+ * 8.3 ms frame the game is held to. (It was the lattice warm-up's alone, with
+ * every search free on top of it, until step 1b's second half.)
  */
 export const NAV_WARM_BUDGET_MS = 2;
 
 /** Nodes popped per piece of a sliced flood ({@link NavGrid.floodFromSearch}). */
 const FLOOD_PIECE = 4096;
+
+/**
+ * Expansions a search makes between looks at the clock while it is being run
+ * against a deadline ({@link NavGrid.advanceRequest}). An expansion is about
+ * half a microsecond on an M4 Pro (measured: 2,000–2,100 a millisecond, Node
+ * and Chrome alike) and a few on a phone, so a chunk overshoots a deadline by
+ * a fraction of a millisecond at worst, while the clock is read a few dozen
+ * times a frame rather than thousands.
+ */
+const SEARCH_CHUNK = 256;
 const CELL = NAV_CELL;
 const INVERSE_CELL = 1 / CELL;
 
@@ -544,6 +558,59 @@ interface ConnectorEdge {
 /** Where along a wall segment {@link NavGrid}'s step test is asked: both ends and the middle. */
 const WALL_STEP_SAMPLES = [0, 0.5, 1] as const;
 
+/**
+ * **One A\* in flight** — its open list, scores, back-pointers and best
+ * fallback ending, and which lattice it was begun on.
+ *
+ * A search used to keep all of this on the {@link NavGrid} itself, which is
+ * fine for a search that always runs to the end in one call. A search that
+ * stops between frames needs it somewhere a second search cannot overwrite:
+ * the player's grid is shared with her parade's companions, and the checks ask
+ * it synchronous questions all the time. So each grid has one of these for
+ * {@link NavGrid.findRoute} and one for the request it is answering a slice at
+ * a time ({@link NavGrid.advanceRequest}), sized exactly alike.
+ */
+class SearchContext {
+  gScore = new Float32Array(0);
+  fScore = new Float32Array(0);
+  cameFrom = new Int32Array(0);
+  cameVia = new Int32Array(0);
+  state = new Uint8Array(0);
+  heap = new Int32Array(0);
+  heapLength = 0;
+  /** The best fallback ending seen so far, and its score. */
+  bestNode = -1;
+  bestScore = Infinity;
+  expansions = 0;
+  startNode = -1;
+  goalNode = -1;
+  goalColumn = 0;
+  goalRow = 0;
+  goalY = 0;
+  /** The node the search ended on; -1 while it is still running. */
+  endNode = -1;
+  /** Set by `finishRoute`: did it reach the goal, and how high does it end. */
+  reachedGoal = false;
+  routeEndY = 0;
+  /** The lattice generation it was begun on (`NavGrid`'s `generation`). */
+  generation = -1;
+
+  /**
+   * Room for a lattice of `nodes` nodes, allocated `capacity` long when it
+   * must grow — the rule the grid's own search arrays always followed, so a
+   * heap here is exactly as long as the one a whole search would have had.
+   */
+  fit(nodes: number, capacity: number): void {
+    if (this.gScore.length >= nodes) return;
+    this.gScore = new Float32Array(capacity);
+    this.fScore = new Float32Array(capacity);
+    this.cameFrom = new Int32Array(capacity);
+    this.cameVia = new Int32Array(capacity);
+    this.state = new Uint8Array(capacity);
+    this.heap = new Int32Array(capacity);
+  }
+}
+
 export class NavGrid {
   /** Cells per side. 0 until the first lattice is built. */
   private cells = 0;
@@ -582,13 +649,28 @@ export class NavGrid {
   private nodeCell = new Int32Array(0);
   private nodeCount = 0;
 
-  private gScore = new Float32Array(0);
-  private fScore = new Float32Array(0);
-  private cameFrom = new Int32Array(0);
-  private cameVia = new Int32Array(0);
-  private state = new Uint8Array(0);
-  private heap = new Int32Array(0);
-  private heapLength = 0;
+  /**
+   * The search {@link findRoute} runs to the end in one call — the one every
+   * synchronous asker shares (the checks, the layout, `fountainHop`).
+   */
+  private readonly syncSearch = new SearchContext();
+  /**
+   * The search a {@link RouteRequest} runs **a slice at a time**
+   * ({@link advanceRequest}), and the request it is running for. Its own
+   * scratch, so a synchronous `findRoute` asked between two of its slices
+   * cannot disturb it. Allocated on the first request.
+   */
+  private queuedSearch: SearchContext | null = null;
+  private queuedFor: RouteRequest | null = null;
+  /** {@link RouteRequest.serial} of the asking {@link queuedFor} was begun for. */
+  private queuedSerial = -1;
+  /**
+   * **Which lattice this is**, bumped whenever a build starts or ends and on
+   * every patch — every change to the arrays a search reads. A search paused
+   * on one generation is begun afresh on the next, never continued over
+   * node numbers that now mean other places.
+   */
+  private generation = 0;
 
   /** The node path A* found, start-first, and how each step was taken. */
   private path = new Int32Array(0);
@@ -616,11 +698,6 @@ export class NavGrid {
 
   private reachedGoal = false;
   private routeEndY = 0;
-
-  /** The best fallback ending seen by the current search. Fields rather than
-   *  captured locals so a relaxation allocates nothing. */
-  private searchBestNode = -1;
-  private searchBestScore = Infinity;
 
   private readonly collision: CollisionWorld;
   /** The walker's own half-width — every collider is fattened by it. */
@@ -872,32 +949,156 @@ export class NavGrid {
     this.reachedGoal = false;
     this.routeEndY = startY;
     if (!this.ensureLattice(sample)) return 0;
+    const search = this.syncSearch;
+    if (!this.beginRoute(search, startX, startZ, startY, goalX, goalZ, goalY)) return 0;
+    this.stepSearch(search, Infinity);
+    const count = this.finishRoute(search, startX, startZ, startY, goalX, goalZ, sample, out);
+    this.reachedGoal = search.reachedGoal;
+    this.routeEndY = search.routeEndY;
+    return count;
+  }
 
+  /**
+   * **A route asked for and answered over as many frames as it takes** —
+   * step 1b of the 120 fps plan (`docs/perf/FRAME-DROPS-2026-11.md`): one tap's
+   * A\* was 33–35 ms in one frame on an M4 Pro, a crowd child's up to 37, and
+   * a first plan in a castle floor built that floor's whole lattice inside the
+   * child's frame (55 ms). {@link RouteScheduler} calls this with each frame's
+   * deadline; it lays the lattice if it must (a slice at a time, {@link warm}),
+   * then runs the request's A\* until the deadline, and returns true once the
+   * request is answered — its `count`, `reachedGoal`, `endY` and waypoints
+   * filled exactly as {@link findRoute} would have filled them for the same
+   * question asked of the lattice as it then stands.
+   *
+   * **The same search, paused — not a different one.** The open list, scores
+   * and fallback live in a {@link SearchContext} of their own; the loop is
+   * {@link stepSearch}, the one `findRoute` runs, stopped between two
+   * expansions and resumed there. So a finished route is the synchronous
+   * route to the bit — `check:nav-frame` asks both of the same questions and
+   * compares every float. If the lattice changes under a paused search (a
+   * patch, a rebuild, her walking into another space), it is begun again on
+   * the new one rather than continued over node numbers that now mean other
+   * places.
+   */
+  advanceRequest(request: RouteRequest, deadline: number): boolean {
+    const sample = request.sample;
+    if (!sample) return this.answer(request, 0, false, request.startY);
+    // The lattice first: a request is never answered from a half-laid one,
+    // and never makes one whole in a single task either.
+    if (!this.latticeReady()) {
+      const left = deadline - performance.now();
+      if (!(left > 0)) return false;
+      const ready = this.warm(sample, left);
+      if (!ready) {
+        // Nothing being laid and nothing laid: a space with no extent, which is
+        // `findRoute`'s "no lattice covering the start" — answered as it is.
+        if (!this.pendingBuild && !this.built) return this.answer(request, 0, false, request.startY);
+        return false;
+      }
+    }
+
+    let search = this.queuedSearch;
+    if (!search) {
+      search = new SearchContext();
+      search.fit(this.nodeCount, this.nodeHeight.length);
+      this.queuedSearch = search;
+    }
+    if (this.queuedFor !== request || this.queuedSerial !== request.serial || search.generation !== this.generation) {
+      search.fit(this.nodeCount, this.nodeHeight.length);
+      this.queuedFor = request;
+      this.queuedSerial = request.serial;
+      if (!this.beginRoute(search, request.startX, request.startZ, request.startY, request.goalX, request.goalZ, request.goalY)) {
+        this.queuedFor = null;
+        return this.answer(request, 0, false, request.startY);
+      }
+      request.begins += 1;
+    }
+    if (!this.stepSearch(search, deadline)) return false;
+    const count = this.finishRoute(search, request.startX, request.startZ, request.startY, request.goalX, request.goalZ, sample, request.out);
+    this.queuedFor = null;
+    request.expansions = search.expansions;
+    return this.answer(request, count, search.reachedGoal, search.routeEndY);
+  }
+
+  /** Fills a request's answer; always true, for {@link advanceRequest}'s returns. */
+  private answer(request: RouteRequest, count: number, reachedGoal: boolean, endY: number): boolean {
+    request.count = count;
+    request.reachedGoal = reachedGoal;
+    request.endY = endY;
+    return true;
+  }
+
+  /**
+   * Is the lattice in hand the one a question asked now would be answered on —
+   * laid over this space's boundary, at the collision world's revision, with
+   * no build in flight? What {@link ensureLattice} would leave untouched.
+   */
+  private latticeReady(): boolean {
+    const boundary = this.pinnedBoundary ?? this.collision.playBounds;
+    return this.built && this.pendingBuild === null && this.builtBoundary === boundary && this.builtRevision === this.collision.revision;
+  }
+
+  /**
+   * A route's two ends as nodes, and `search`'s A\* begun between them —
+   * {@link findRoute}'s own preamble, shared with {@link advanceRequest}.
+   * False when there is no answer to search for: the start off the lattice or
+   * nowhere to stand near it, or the goal off the lattice (both of which
+   * `findRoute` reports as 0 waypoints).
+   */
+  private beginRoute(
+    search: SearchContext,
+    startX: number,
+    startZ: number,
+    startY: number,
+    goalX: number,
+    goalZ: number,
+    goalY: number,
+  ): boolean {
     let startCell = this.cellAt(startX, startZ);
-    if (startCell < 0) return 0;
+    if (startCell < 0) return false;
     if (this.blocked[startCell] === 1) {
       // Standing inside something — squeezed against a wall, or dropped in by a
       // ride. Route from the nearest place she could stand instead; the walk
       // out of the overlap is the collision resolver's job and it is already
       // doing it.
       startCell = this.nearestFreeCell(startCell);
-      if (startCell < 0) return 0;
+      if (startCell < 0) return false;
     }
     const startNode = this.nodeNearest(startCell, startY);
-    if (startNode < 0) return 0;
+    if (startNode < 0) return false;
 
     const goalCell = this.cellAt(goalX, goalZ);
     // A goal off the edge of the lattice is not "unreachable", it is
     // unknowable. Say so, and let the caller fall back.
-    if (goalCell < 0) return 0;
+    if (goalCell < 0) return false;
     const goalNode = this.standableNodeIn(goalCell, goalY);
 
-    const endNode = this.search(startNode, goalNode, goalCell, goalY);
+    this.beginSearch(search, startNode, goalNode, goalCell, goalY);
+    return true;
+  }
+
+  /**
+   * A finished search, read back as waypoints in `out` — the tail of
+   * {@link findRoute}, shared with {@link advanceRequest}. Records in
+   * `search` whether the goal was reached and the height the route ends at.
+   */
+  private finishRoute(
+    search: SearchContext,
+    startX: number,
+    startZ: number,
+    startY: number,
+    goalX: number,
+    goalZ: number,
+    sample: GroundSampler,
+    out: Float32Array,
+  ): number {
+    const endNode = search.endNode;
+    const goalNode = search.goalNode;
     // Reaching the goal *node* is reaching the goal: the node was chosen as
     // the goal cell's level nearest `goalY`, so the level agreement is already
     // in the choice — a caller who only knows "somewhere on the ground" still
     // gets an honest yes on a hilltop whose one level is the hill.
-    this.reachedGoal = endNode === goalNode && goalNode >= 0;
+    search.reachedGoal = endNode === goalNode && goalNode >= 0;
     // A node's height is its level at the **cell centre**, up to 0.35 m from
     // the goal itself, and a reached route's last waypoint is the goal, not the
     // centre. On anything but level ground those are different heights: on the
@@ -907,10 +1108,10 @@ export class NavGrid {
     // walker standing on that node meets as she steps across to it, which is
     // exactly the sampler's question with the node's height as its reference.
     const nodeY = this.nodeHeight[endNode] ?? startY;
-    this.routeEndY = this.reachedGoal ? this.levelsOf(sample)(goalX, goalZ, nodeY) : nodeY;
+    search.routeEndY = search.reachedGoal ? this.levelsOf(sample)(goalX, goalZ, nodeY) : nodeY;
 
-    const pathLength = this.reconstruct(startNode, endNode);
-    return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
+    const pathLength = this.reconstruct(search, search.startNode, endNode);
+    return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, search.reachedGoal, search.routeEndY, out);
   }
 
   /**
@@ -1018,6 +1219,9 @@ export class NavGrid {
    * false) when the boundary has no extent to lay a lattice over.
    */
   private frameLattice(boundary: ParkBoundary): boolean {
+    // The arrays below are about to be cleared and refilled: any search paused
+    // over them is over a lattice that is going.
+    this.generation += 1;
     // Sized and centred on the boundary's own extent rather than on a radius
     // about a centre: the park's edge is neither circular nor, for the castle
     // interior, centred on the origin.
@@ -1286,22 +1490,19 @@ export class NavGrid {
   /** The tail every build shares: search buffers sized, connectors tied to nodes, the build stamped. */
   private finishBuild(boundary: ParkBoundary): void {
     const nodes = this.nodeCount;
-    if (this.gScore.length < nodes) {
-      this.gScore = new Float32Array(this.nodeHeight.length);
-      this.fScore = new Float32Array(this.nodeHeight.length);
-      this.cameFrom = new Int32Array(this.nodeHeight.length);
-      this.cameVia = new Int32Array(this.nodeHeight.length);
-      this.state = new Uint8Array(this.nodeHeight.length);
-      this.heap = new Int32Array(this.nodeHeight.length);
+    if (this.path.length < nodes) {
       this.path = new Int32Array(this.nodeHeight.length);
       this.pathVia = new Int32Array(this.nodeHeight.length);
     }
+    this.syncSearch.fit(nodes, this.nodeHeight.length);
+    this.queuedSearch?.fit(nodes, this.nodeHeight.length);
     this.resolveConnectors();
     this.sizePointBuffers();
 
     this.built = true;
     this.builtBoundary = boundary;
     this.builtRevision = this.collision.revision;
+    this.generation += 1;
   }
 
   /**
@@ -2075,54 +2276,93 @@ export class NavGrid {
 
   /**
    * A* from one node to another, over the eight-connected lattice plus the
-   * connector edges.
+   * connector edges — begun here, run by {@link stepSearch}.
    *
-   * Returns the node the route ends on: the goal when it was reached, and
-   * otherwise the reachable node that got nearest to it — nearest planar, with
+   * It ends on the goal when it reaches it, and otherwise on the reachable
+   * node that got nearest to it — nearest planar, with
    * {@link BEST_HEIGHT_WEIGHT}'s gentle preference for the goal's own level —
    * which is what makes "no route exists" degrade into "walk as close as you
    * can and stop" rather than into a shrug.
    */
-  private search(startNode: number, goalNode: number, goalCell: number, goalY: number): number {
-    this.state.fill(NEW, 0, this.nodeCount);
-    this.heapLength = 0;
+  private beginSearch(search: SearchContext, startNode: number, goalNode: number, goalCell: number, goalY: number): void {
+    search.state.fill(NEW, 0, this.nodeCount);
+    search.heapLength = 0;
 
     const goalX = goalCell % this.cells;
     const goalZ = (goalCell - goalX) / this.cells;
+    search.startNode = startNode;
+    search.goalNode = goalNode;
+    search.goalColumn = goalX;
+    search.goalRow = goalZ;
+    search.goalY = goalY;
+    search.endNode = -1;
+    search.expansions = 0;
+    search.generation = this.generation;
 
-    this.gScore[startNode] = 0;
-    this.fScore[startNode] = this.heuristic(this.nodeCell[startNode] ?? 0, goalX, goalZ);
-    this.cameFrom[startNode] = -1;
-    this.cameVia[startNode] = 0;
-    this.state[startNode] = OPEN;
-    this.push(startNode);
+    search.gScore[startNode] = 0;
+    search.fScore[startNode] = this.heuristic(this.nodeCell[startNode] ?? 0, goalX, goalZ);
+    search.cameFrom[startNode] = -1;
+    search.cameVia[startNode] = 0;
+    search.state[startNode] = OPEN;
+    this.push(search, startNode);
 
-    this.searchBestNode = startNode;
-    this.searchBestScore =
+    search.bestNode = startNode;
+    search.bestScore =
       this.heuristic(this.nodeCell[startNode] ?? 0, goalX, goalZ) +
       Math.abs((this.nodeHeight[startNode] ?? 0) - goalY) * BEST_HEIGHT_WEIGHT;
-    let expansions = 0;
+  }
 
-    while (this.heapLength > 0) {
-      const node = this.pop();
-      if (node === goalNode) return node;
-      if (this.state[node] === CLOSED) continue;
-      this.state[node] = CLOSED;
+  /**
+   * **Runs `search`'s A\* until it ends or `deadline` (a `performance.now()`
+   * time) passes**, looking at the clock every {@link SEARCH_CHUNK} expansions;
+   * true once it has ended, with `search.endNode` set. `Infinity` runs it to
+   * the end, which is all {@link findRoute} ever asks.
+   *
+   * It stops only at the top of the loop, between one node's expansion and the
+   * next pop, with everything it knows in `search` — so the next call carries
+   * on exactly where this one stopped, and a search run in slices does the very
+   * pops, relaxations and tie-breaks, in the very order, that one run whole
+   * does.
+   */
+  private stepSearch(search: SearchContext, deadline: number): boolean {
+    const goalNode = search.goalNode;
+    const goalX = search.goalColumn;
+    const goalZ = search.goalRow;
+    const goalY = search.goalY;
+    const timed = deadline !== Infinity;
+    if (timed && performance.now() >= deadline) return false;
+    let sinceLook = 0;
 
-      expansions += 1;
-      if (expansions > MAX_EXPANSIONS) break;
+    while (search.heapLength > 0) {
+      if (timed && sinceLook >= SEARCH_CHUNK) {
+        sinceLook = 0;
+        if (performance.now() >= deadline) return false;
+      }
+      const node = this.pop(search);
+      if (node === goalNode) {
+        search.endNode = node;
+        return true;
+      }
+      if (search.state[node] === CLOSED) continue;
+      search.state[node] = CLOSED;
+
+      search.expansions += 1;
+      if (search.expansions > MAX_EXPANSIONS) break;
+      sinceLook += 1;
 
       // The steps themselves — corners, hops, ground cost, levels, connectors
       // — are {@link forEachStep}'s, shared with {@link reachableFrom}.
+      this.expandSearch = search;
       this.expandFrom = node;
-      this.expandCost = this.gScore[node] ?? 0;
+      this.expandCost = search.gScore[node] ?? 0;
       this.expandGoalX = goalX;
       this.expandGoalZ = goalZ;
       this.expandGoalY = goalY;
       this.forEachStep(node, this.relaxStep);
     }
 
-    return this.searchBestNode;
+    search.endNode = search.bestNode;
+    return true;
   }
 
   /**
@@ -2148,9 +2388,11 @@ export class NavGrid {
     );
   }
 
-  // The node being expanded and its goal, held on the instance so the visitor
-  // {@link forEachStep} is handed can be one arrow allocated once rather than
-  // one per expansion — `search` expands up to MAX_EXPANSIONS nodes a route.
+  // The node being expanded, its search and its goal, held on the instance so
+  // the visitor {@link forEachStep} is handed can be one arrow allocated once
+  // rather than one per expansion — a search expands up to MAX_EXPANSIONS
+  // nodes a route.
+  private expandSearch: SearchContext = this.syncSearch;
   private expandFrom = -1;
   private expandCost = 0;
   private expandGoalX = 0;
@@ -2158,6 +2400,7 @@ export class NavGrid {
   private expandGoalY = 0;
   private readonly relaxStep = (neighbour: number, cost: number, via: number): void => {
     this.relax(
+      this.expandSearch,
       this.expandFrom,
       neighbour,
       this.expandCost + cost,
@@ -2170,6 +2413,7 @@ export class NavGrid {
 
   /** One A* relaxation, tracking the best fallback ending as it goes. */
   private relax(
+    search: SearchContext,
     node: number,
     neighbour: number,
     tentative: number,
@@ -2178,22 +2422,22 @@ export class NavGrid {
     goalZ: number,
     goalY: number,
   ): void {
-    if (this.state[neighbour] !== NEW && tentative >= (this.gScore[neighbour] ?? 0)) {
+    if (search.state[neighbour] !== NEW && tentative >= (search.gScore[neighbour] ?? 0)) {
       return;
     }
     const heuristic = this.heuristic(this.nodeCell[neighbour] ?? 0, goalX, goalZ);
-    this.gScore[neighbour] = tentative;
-    this.fScore[neighbour] = tentative + heuristic;
-    this.cameFrom[neighbour] = node;
-    this.cameVia[neighbour] = via;
-    this.state[neighbour] = OPEN;
-    this.push(neighbour);
+    search.gScore[neighbour] = tentative;
+    search.fScore[neighbour] = tentative + heuristic;
+    search.cameFrom[neighbour] = node;
+    search.cameVia[neighbour] = via;
+    search.state[neighbour] = OPEN;
+    this.push(search, neighbour);
 
     const score =
       heuristic + Math.abs((this.nodeHeight[neighbour] ?? 0) - goalY) * BEST_HEIGHT_WEIGHT;
-    if (score < this.searchBestScore) {
-      this.searchBestScore = score;
-      this.searchBestNode = neighbour;
+    if (score < search.bestScore) {
+      search.bestScore = score;
+      search.bestNode = neighbour;
     }
   }
 
@@ -2215,11 +2459,11 @@ export class NavGrid {
   }
 
   /** Walks `cameFrom` back from the end, writing the path start-first. */
-  private reconstruct(startNode: number, endNode: number): number {
+  private reconstruct(search: SearchContext, startNode: number, endNode: number): number {
     let length = 0;
-    for (let node = endNode; node >= 0; node = this.cameFrom[node] ?? -1) {
+    for (let node = endNode; node >= 0; node = search.cameFrom[node] ?? -1) {
       this.path[length] = node;
-      this.pathVia[length] = this.cameVia[node] ?? 0;
+      this.pathVia[length] = search.cameVia[node] ?? 0;
       length += 1;
       if (node === startNode) break;
       if (length >= this.path.length) break;
@@ -2261,6 +2505,8 @@ export class NavGrid {
     goalX: number,
     goalZ: number,
     pathLength: number,
+    reachedGoal: boolean,
+    routeEndY: number,
     out: Float32Array,
   ): number {
     // The true start, then the node centres — with each connector's own walk
@@ -2304,10 +2550,10 @@ export class NavGrid {
       this.pointRigid[points] = this.hopBand[cell] ?? 0;
       points += 1;
     }
-    if (this.reachedGoal) {
+    if (reachedGoal) {
       this.pointX[points] = goalX;
       this.pointZ[points] = goalZ;
-      this.pointY[points] = this.routeEndY;
+      this.pointY[points] = routeEndY;
       this.pointRigid[points] = 0;
       points += 1;
     }
@@ -2582,49 +2828,48 @@ export class NavGrid {
     return -1;
   }
 
-  private push(node: number): void {
-    let i = this.heapLength;
-    this.heapLength += 1;
-    this.heap[i] = node;
+  private push(search: SearchContext, node: number): void {
+    const heap = search.heap;
+    const fScore = search.fScore;
+    let i = search.heapLength;
+    search.heapLength += 1;
+    heap[i] = node;
     while (i > 0) {
       const parent = (i - 1) >> 1;
-      const parentNode = this.heap[parent] ?? 0;
-      const own = this.heap[i] ?? 0;
-      if ((this.fScore[parentNode] ?? 0) <= (this.fScore[own] ?? 0)) break;
-      this.heap[parent] = own;
-      this.heap[i] = parentNode;
+      const parentNode = heap[parent] ?? 0;
+      const own = heap[i] ?? 0;
+      if ((fScore[parentNode] ?? 0) <= (fScore[own] ?? 0)) break;
+      heap[parent] = own;
+      heap[i] = parentNode;
       i = parent;
     }
   }
 
-  private pop(): number {
-    const top = this.heap[0] ?? 0;
-    this.heapLength -= 1;
-    const last = this.heap[this.heapLength] ?? 0;
-    if (this.heapLength === 0) return top;
+  private pop(search: SearchContext): number {
+    const heap = search.heap;
+    const fScore = search.fScore;
+    const top = heap[0] ?? 0;
+    search.heapLength -= 1;
+    const length = search.heapLength;
+    const last = heap[length] ?? 0;
+    if (length === 0) return top;
 
-    this.heap[0] = last;
+    heap[0] = last;
     let i = 0;
     for (;;) {
       const left = i * 2 + 1;
       const right = left + 1;
       let smallest = i;
-      if (
-        left < this.heapLength &&
-        (this.fScore[this.heap[left] ?? 0] ?? 0) < (this.fScore[this.heap[smallest] ?? 0] ?? 0)
-      ) {
+      if (left < length && (fScore[heap[left] ?? 0] ?? 0) < (fScore[heap[smallest] ?? 0] ?? 0)) {
         smallest = left;
       }
-      if (
-        right < this.heapLength &&
-        (this.fScore[this.heap[right] ?? 0] ?? 0) < (this.fScore[this.heap[smallest] ?? 0] ?? 0)
-      ) {
+      if (right < length && (fScore[heap[right] ?? 0] ?? 0) < (fScore[heap[smallest] ?? 0] ?? 0)) {
         smallest = right;
       }
       if (smallest === i) break;
-      const swap = this.heap[i] ?? 0;
-      this.heap[i] = this.heap[smallest] ?? 0;
-      this.heap[smallest] = swap;
+      const swap = heap[i] ?? 0;
+      heap[i] = heap[smallest] ?? 0;
+      heap[smallest] = swap;
       i = smallest;
     }
     return top;
