@@ -352,9 +352,10 @@ export class ReptileHouse implements GameSystem {
   }
 
   /**
-   * Fetches the hall's floor and builds it, if nobody has. The door does this
-   * behind its iris; anything else that wants the hall furnished (a check
-   * driving a served build) can ask for it directly.
+   * Fetches the hall's floor and builds it, if nobody has — for anything that
+   * wants the hall furnished without walking in (a check driving a served
+   * build). The door does not come through here: it fetches at once and
+   * builds behind its shut iris ({@link changeToHall}).
    */
   furnish(): Promise<void> {
     if (this.hall) return Promise.resolve();
@@ -830,7 +831,11 @@ export class ReptileHouse implements GameSystem {
       this.hushDoor();
       midpoint();
     };
-    this.spaces.changeToFurnished(() => this.hall !== null, () => this.furnish(), inside, () => this.refuseDoor());
+    this.spaces.changeToFurnished(
+      { part: REPTILE_HALL, furnished: () => this.hall !== null, build: () => this.furnishIfLoaded() },
+      inside,
+      () => this.refuseDoor(),
+    );
   }
 
   /**

@@ -253,8 +253,9 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * Fetches the interior and builds it. The door calls this behind its iris;
-   * anything else that wants the hotel furnished (a check, a test) may too.
+   * Fetches the interior and builds it — for a check or a test that wants the
+   * hotel furnished. The door does not come through here: it fetches at once
+   * and builds behind its shut iris ({@link changeIn}).
    */
   furnish(): Promise<void> {
     if (this.interior) return Promise.resolve();
@@ -295,8 +296,7 @@ export class Hotel implements GameSystem {
    */
   private changeIn(midpoint: (interior: HotelInterior) => void, onFailed: () => void = () => this.refuseDoor()): void {
     this.spaces.changeToFurnished(
-      () => this.interior !== null,
-      () => this.furnish(),
+      { part: HOTEL_INTERIOR, furnished: () => this.interior !== null, build: () => this.furnishIfLoaded() },
       () => {
         if (this.interior) midpoint(this.interior);
       },

@@ -77,6 +77,8 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/input/wheel-zoom.test.ts',
     'test/adaptiveResolution.test.ts',
     'test/lazy/lazyRooms.test.ts',
+    // The castle's door on a real `Building` over the checked-in park: ~4 s.
+    'test/lazy/castleDoor.test.ts',
     'test/lazy/hotelKitSplit.test.ts',
     'test/parkChangingSwitches.test.ts',
     'test/parkSolveBounded.test.ts',

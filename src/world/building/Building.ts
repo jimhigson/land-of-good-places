@@ -1705,9 +1705,10 @@ export class Building implements GameSystem {
   }
 
   /**
-   * Fetches the interior's furnishings and builds them, if nobody has. The
-   * door and `/castle` do this behind their iris; anything else that wants the
-   * castle furnished can ask directly.
+   * Fetches the interior's furnishings and builds them, if nobody has — for a
+   * check or a test that wants the castle furnished without walking in. The
+   * door and `/castle` do not come through here: they fetch at once and build
+   * behind their shut iris ({@link changeToInterior}).
    */
   furnish(): Promise<void> {
     if (this.castle) return Promise.resolve();
@@ -1727,12 +1728,17 @@ export class Building implements GameSystem {
   }
 
   /**
-   * Into the castle, fetching and building its furnishings behind the iris
-   * first if they are not here yet. If they cannot be fetched she stays where
-   * she was, and the door says why ({@link refuseDoor}).
+   * Into the castle: its chunk fetched now if it is not here yet, its
+   * furnishings built behind the shut iris (`SpaceManager.changeToFurnished`),
+   * and only then is she stood in it. If the chunk cannot be fetched she stays
+   * where she was, and the door says why ({@link refuseDoor}).
    */
   private changeToInterior(midpoint: () => void): void {
-    this.spaces.changeToFurnished(() => this.castle !== null, () => this.furnish(), midpoint, () => this.refuseDoor());
+    this.spaces.changeToFurnished(
+      { part: CASTLE_INTERIOR, furnished: () => this.castle !== null, build: () => this.furnishIfLoaded() },
+      midpoint,
+      () => this.refuseDoor(),
+    );
   }
 
   /**
