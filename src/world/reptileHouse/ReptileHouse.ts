@@ -26,6 +26,7 @@ import { JUMP_APEX_HEIGHT } from '../../entities/Player';
 import { SnakeSegmentPool } from '../../art/models/snake';
 import {
   createReptileHouseExterior,
+  reptileHouseLipThickness,
   reptileHouseLipsReach,
   reptileHouseLowDiscs,
   reptileHousePlinthTop,
@@ -132,15 +133,28 @@ const REPTILE_PREFETCH_RADIUS = 18;
 /** What she is told when the hall could not be fetched — the room is fine, it just is not here yet. */
 const DOOR_REFUSED_LINE = 'The snakes are still waking up — try again in a moment!';
 /**
- * Where that line hangs: over the doormat, out in front of the mouth, at
- * this height in metres. Hung in the doorway itself it was half hidden by the
- * mouth's own arch (QA's frame of the first try); hung over her head at 2.6 m
- * it still landed inside the arch on screen, where the pink rim cut its top
- * corners off ("he snakes are sti", issue #757) and the pill covered her. So
- * its tail now sits clear above the arch's crown — the clear bore plus the
- * rim's thickness — and it is drawn over the scenery as well (`doorBubble`).
+ * How far above the top of the mouth's lip the door's line hangs its tail, in
+ * metres: a little air between the pink rim and the pill. See
+ * {@link reptileDoorLineHeight}.
  */
-const REPTILE_DOOR_LINE_HEIGHT = REPTILE_ARCH_HEIGHT + 0.9;
+const REPTILE_DOOR_LINE_CLEARANCE = 0.2;
+
+/**
+ * Where that line hangs: over the doormat, out in front of the mouth, at this
+ * height in building-local metres. Hung in the doorway itself it was half
+ * hidden by the mouth's own arch (QA's frame of the first try); hung over her
+ * head at 2.6 m it still landed inside the arch on screen, where the pink rim
+ * cut its top corners off ("he snakes are sti", issue #757) and the pill
+ * covered her. So its tail now sits just over the top of the mouth's lip —
+ * the plinth she stands on, the arch's clear bore above it, then the lip
+ * itself, every one measured off the mesh by its owner, plus
+ * {@link REPTILE_DOOR_LINE_CLEARANCE} — and it is drawn over the scenery as
+ * well (`doorBubble`). A function, not a constant: the measurements read the
+ * house's kit, which is only loaded once the house is built.
+ */
+function reptileDoorLineHeight(): number {
+  return reptileHousePlinthTop() + REPTILE_ARCH_HEIGHT + reptileHouseLipThickness() + REPTILE_DOOR_LINE_CLEARANCE;
+}
 /** How far past the door band she must step before a refused door will try again, in metres. */
 const DOOR_STEP_AWAY = 1.5;
 
@@ -829,7 +843,7 @@ export class ReptileHouse implements GameSystem {
     const root = this.deps.plot ? this.parkRoot : this.forecourtRoot;
     if (this.doorBubble.sprite.parent !== root) root.add(this.doorBubble.sprite);
     this.lastSaid = DOOR_REFUSED_LINE;
-    this.doorBubble.anchorAt(door.x - this.frame.x, REPTILE_DOOR_LINE_HEIGHT, door.z - this.frame.z);
+    this.doorBubble.anchorAt(door.x - this.frame.x, reptileDoorLineHeight(), door.z - this.frame.z);
     this.doorBubble.setText(DOOR_REFUSED_LINE);
     this.doorBubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
   }
