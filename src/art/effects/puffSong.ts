@@ -1,4 +1,5 @@
 import { CanvasTexture, Color, Group, SRGBColorSpace, Sprite, SpriteMaterial } from 'three';
+import { audioContext } from '../../core/audio';
 import { ART } from '../style/artPalette';
 import { hexToCss, PALETTE, Rng } from '../style/bridge';
 
@@ -7,10 +8,10 @@ import { hexToCss, PALETTE, Rng } from '../style/bridge';
  * a little pool of musical-note sprites that float up while it plays, and the
  * timer that decides when the next song happens.
  *
- * Kept entirely self-contained (own tiny `AudioContext`, own canvas texture,
- * own pool) rather than reaching into `src/ui/chime.ts`, because this file is
- * owned end-to-end by one asset and must not create merge conflicts with
- * whatever the sound-effects system looks like once build step 9 lands.
+ * Kept self-contained (own canvas texture, own pool) rather than reaching into
+ * `src/ui/chime.ts`, because this file is owned end-to-end by one asset. The
+ * one thing it shares is the park's `AudioContext` (`core/audio.ts`): its
+ * first song used to *construct* a private one mid-frame, a 133–168 ms hitch.
  *
  * `pets.ts` and `hats.ts` both drive this from their own `update()` — a song
  * is exactly the kind of autonomous idle behaviour (like the jiggle) that the
@@ -23,25 +24,8 @@ import { hexToCss, PALETTE, Rng } from '../style/bridge';
 /** A cheerful pentatonic run — any of these notes sound nice next to any other. */
 const PENTATONIC = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66];
 
-let context: AudioContext | null = null;
-
-function ensureContext(): AudioContext | null {
-  if (context) {
-    if (context.state === 'suspended') void context.resume();
-    return context;
-  }
-  const Ctor = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  try {
-    context = new Ctor();
-  } catch {
-    return null;
-  }
-  return context;
-}
-
 function singNote(frequency: number, at: number, duration: number, gain: number): void {
-  const ctx = ensureContext();
+  const ctx = audioContext();
   if (!ctx) return;
   const start = ctx.currentTime + at;
 
