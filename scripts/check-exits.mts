@@ -1776,6 +1776,8 @@ const NOT_DRIVEN: Readonly<Record<string, string>> = {
     'the climb bailing out because its tree vanished mid-climb — defensive, unreachable in a built park; endRide through the rule like every other',
   'src/world/building/Building.ts: player.endRide({ #2':
     "the helter-skelter's own landing — no trigger in this build starts a non-giant slide (`startRide` is only called for the ginormous slide)",
+  'src/world/hotel/Hotel.ts: player.teleportTo(this.entranceX, this.surfaces.sample(this.entranceX, this.entranceZ, 3), this.entranceZ, this.facadeYaw);':
+    "a save inside the hotel restored before its interior loaded — only when main.ts's preload of it failed; every headless build has the interior up front (eagerInteriors), so she is never restored into an unbuilt room here",
   'src/world/hotel/interior.ts: player.teleportTo(BREAKFAST.originX, 0, BREAKFAST.originZ, 0);':
     '/hotel-breakfast with every Floor 1 chair taken — guests take 3 of its 14 chairs, so the link always seats her (driven via the chairs)',
   'src/world/hotel/interior.ts: player.endRide(stood);':
