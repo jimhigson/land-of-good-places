@@ -159,18 +159,15 @@ export function parkStampOf(layout, sourceHash) {
 }
 
 /**
- * **The park file a client is given for `seed`**, as text: the checked-in
- * file, stamped with the bundle's `version` (the boot refuses any other) and
- * with its `digest` ({@link parkStampOf}). Throws, with what to do, when the
- * park is missing or is not the file the manifest records — a served park is
- * never a guess, and nothing is ever solved to fill the gap.
+ * **Seed `seed`'s checked-in park, read whole and checked against its manifest
+ * line**: the bytes, their sha, the parsed file and the line. Throws, with what
+ * to do, when the park is missing or is not the file the manifest records — a
+ * park that is used is never a guess, and nothing is solved to fill the gap.
  * @param {string} root
  * @param {number} seed
- * @param {string} version
- * @param {string} [sourceHash] this tree's `parkSourceHash`, when the caller already has it
- * @returns {string}
+ * @returns {{ entry: import('../../src/world/prebuilt/parkFileName.ts').CheckedInPark, path: string, sha: string, park: Record<string, unknown> }}
  */
-export function servedParkText(root, seed, version, sourceHash) {
+export function checkedInPark(root, seed) {
   const manifest = readParksManifest(root);
   if (!manifest) {
     throw new Error(`no ${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST}: the solved parks are checked in, and this tree has none. ${restoreInstruction(seed)}`);
@@ -191,7 +188,7 @@ export function servedParkText(root, seed, version, sourceHash) {
   if (sha !== entry.file) {
     throw new Error(
       `${PREBUILT_PARKS_OUT}/${seed}.json is not the file ${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST} records ` +
-        `(sha256 ${sha.slice(0, 12)}, manifest says ${String(entry.file).slice(0, 12)}): the two are out of step. ${restoreInstruction(seed)}`,
+        `(sha256 ${sha.slice(0, 12)}, the manifest says ${String(entry.file).slice(0, 12)}): the two are out of step. ${restoreInstruction(seed)}`,
     );
   }
   const park = JSON.parse(bytes.toString('utf8'));
@@ -199,6 +196,27 @@ export function servedParkText(root, seed, version, sourceHash) {
     throw new Error(
       `${PREBUILT_PARKS_OUT}/${seed}.json says seed ${park.seed}, format ${park.format}, restart ${park.restart}; ` +
         `expected seed ${seed}, format ${PARK_FILE_FORMAT}, restart ${entry.restart}. ${restoreInstruction(seed)}`,
+    );
+  }
+  return { entry, path, sha, park };
+}
+
+/**
+ * **The park file a client is given for `seed`**, as text: the checked-in
+ * file ({@link checkedInPark}), stamped with the bundle's `version` (the boot
+ * refuses any other) and with its `digest` ({@link parkStampOf}).
+ * @param {string} root
+ * @param {number} seed
+ * @param {string} version
+ * @param {string} [sourceHash] this tree's `parkSourceHash`, when the caller already has it
+ * @returns {string}
+ */
+export function servedParkText(root, seed, version, sourceHash) {
+  const { entry, park } = checkedInPark(root, seed);
+  if (!entry.layout) {
+    throw new Error(
+      `park ${seed}'s manifest line has no placement digest — it was never validated. Run \`LGP_SEEDS=${seed} pnpm run build:parks\`, ` +
+        'which validates it and stamps the line (no solve unless this source rejects it).',
     );
   }
   return JSON.stringify({ ...park, build: version, digest: parkStampOf(entry.layout, sourceHash ?? parkSourceHash(root)) });

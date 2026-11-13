@@ -51,6 +51,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { AttemptVerdict } from '../park-attempt.mts';
+import { PREBUILT_PARKS_OUT, SUPPORTED_PARK_SEEDS } from '../../src/world/prebuilt/parkFileName.ts';
 import { parkSourceHash } from './park-source-hash.mjs';
 import { builtRestartOf } from './builtParks.mts';
 
@@ -95,19 +96,27 @@ export interface AcceptedPark {
  * `parkFile`, the attempt is the park hydrated from that file
  * (`LGP_PARK_FILE`, `park-attempt.mts`) — what `build:parks` asks of every
  * file it ships; the file must be `seed` at `restart`.
+ *
+ * `solveBacked: false` says the file is a **checked-in park being validated**,
+ * with no solve of this source behind it, and that none may be started to
+ * judge it (`LGP_PARK_FILE_UNSOLVED`): the attempt asks every measure a file
+ * can be asked and names the ones only a solve can (`askedOfASolveOnly`).
+ * The measures themselves are the same list, from the same owner.
  */
 export async function attemptInFreshProcess(
   seed: number,
   restart: number,
   parkFile?: string,
   signal?: AbortSignal,
+  options: { readonly solveBacked?: boolean } = {},
 ): Promise<AttemptVerdict> {
-  const { LGP_PARK_FILE: _inherited, ...rest } = process.env;
+  const { LGP_PARK_FILE: _inherited, LGP_PARK_FILE_UNSOLVED: _inheritedToo, ...rest } = process.env;
   const env = {
     ...rest,
     LGP_SEED: String(seed),
     LGP_PARK_RESTART: String(restart),
     ...(parkFile ? { LGP_PARK_FILE: parkFile } : {}),
+    ...(parkFile && options.solveBacked === false ? { LGP_PARK_FILE_UNSOLVED: '1' } : {}),
   };
   let out = '';
   let err = '';
@@ -339,12 +348,16 @@ function verdictFile(seed: number, sourceHash: string): string {
  * `src/world/parkRestart.ts` asks (and `test/setupDeterministicMath.ts` does
  * the same for vitest).
  *
- * There is no committed table to go stale: the answer is the acceptance loop's
- * verdict at this exact source ({@link acceptanceSourceHash}), read from the
- * cache, or taken now by running the loop for this seed (`accept-parks.mts`,
- * in a child, its log on stderr so a script's own stdout stays its own).
- * Jim, 2 October 2026, on the hand-run re-record this replaces: "that should
- * be done by a script, no?"
+ * **The answer is the checked-in park's** — `parks/manifest.json`, the restart
+ * its file was solved at (`builtParks.mts`). It is never searched for here: a
+ * game seed with no checked-in park **throws**, saying how to get one
+ * ({@link noCheckedInPark}). Before 13 November 2026 a miss ran the whole
+ * acceptance loop on the spot, silently, in whatever process had asked — which
+ * is how opening the game after a render-only edit became a 12-30 minute solve.
+ *
+ * A seed outside the game's sixteen has no checked-in park to read, so tooling
+ * that explores one still gets the loop's verdict at this source
+ * ({@link acceptanceSourceHash}), cached under `.cache/lgp-accepted/`.
  */
 /**
  * The switches the generator reads (`src/`) that change **what park it builds**.
@@ -372,6 +385,18 @@ export const PARK_CHANGING_SWITCHES: readonly string[] = [
   'LGP_DISABLE_INTERCONNECTS',
 ];
 
+/**
+ * What to say when a game seed has no checked-in park: nothing solves one
+ * unasked, so the error is the instruction.
+ */
+export function noCheckedInPark(seed: number): string {
+  return (
+    `accepted park: seed ${seed} has no checked-in park (${PREBUILT_PARKS_OUT}/manifest.json has no line for it). The solved parks are ` +
+    `tracked in git and nothing solves one unasked: restore them (\`git checkout origin/main -- ${PREBUILT_PARKS_OUT}/\`), or — only if you ` +
+    `really are changing park geometry — run \`LGP_SEEDS=${seed} pnpm run build:parks\` and commit the result.`
+  );
+}
+
 export function acceptedRestartSync(seed: number): number {
   const altered = PARK_CHANGING_SWITCHES.filter((key) => process.env[key] !== undefined && process.env[key] !== '');
   if (altered.length > 0) {
@@ -381,10 +406,10 @@ export function acceptedRestartSync(seed: number): number {
     );
     return 0;
   }
-  // What build:parks found for this exact source, first: the restart the
-  // shipped file carries (`builtParks.mts`).
+  // The checked-in park's restart (`builtParks.mts`).
   const built = builtRestartOf(REPO, seed);
   if (built !== null) return built;
+  if (SUPPORTED_PARK_SEEDS.includes(seed)) throw new Error(noCheckedInPark(seed));
   const sourceHash = acceptanceSourceHash();
   const file = verdictFile(seed, sourceHash);
   if (!existsSync(file)) {
@@ -416,47 +441,51 @@ export function acceptedRestartSync(seed: number): number {
 export interface AcceptanceMetadata {
   readonly restart: number;
   readonly attempts: number;
-  readonly sourceHash: string;
   readonly log: readonly {
     readonly restart: number;
     readonly accepted: boolean;
     readonly forcedBy: readonly { readonly measure: string; readonly count: number; readonly first: string }[];
     readonly backtracking: RestartRecord['backtracking'];
-    readonly wallMs: number;
     readonly notAsked: RestartRecord['notAsked'];
   }[];
 }
 
-export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): AcceptanceMetadata {
+/**
+ * Nothing about *when* or *under what source*: the park file is checked in,
+ * and solving the same park twice must write the same bytes
+ * (`checked-in-parks.mjs`'s `checkedInParkText`). The source it was solved
+ * under is the manifest's `solvedUnder`; how long each attempt took is in
+ * `build:parks`' own output.
+ */
+export function acceptanceMetadata(accepted: AcceptedPark): AcceptanceMetadata {
   return {
     restart: accepted.restart,
     attempts: accepted.attempts.length,
-    sourceHash,
     log: accepted.attempts.map((a) => ({
       restart: a.restart,
       accepted: a.accepted,
       forcedBy: a.forcedBy,
       backtracking: a.backtracking,
-      wallMs: a.wallMs,
       notAsked: a.notAsked,
     })),
   };
 }
 
 /**
- * **Which restart of `seed` is its park**: the acceptance loop's verdict at
- * this source, cached, or taken now. What `check:park` and `test:procgen`
- * measure. (There used to be a committed table, `acceptedRestarts.ts`, filled
- * by hand with `accept:parks --write`; every generator change made it stale
- * until somebody re-ran it, and merges waited on that.)
+ * **Which restart of `seed` is its park**: the checked-in park's
+ * (`parks/manifest.json`). What `check:park` and `test:procgen` measure. A
+ * game seed with none throws ({@link noCheckedInPark}) rather than search for
+ * one; only a seed outside the game's sixteen falls back to the acceptance
+ * loop's verdict at this source.
  */
 export async function acceptedRestartOf(
   seed: number,
 ): Promise<{ readonly restart: number; readonly how: string; readonly log: readonly string[] }> {
   const built = builtRestartOf(REPO, seed);
   if (built !== null) {
-    return { restart: built, how: 'build:parks found it at this source (.parks/manifest.json)', log: [] };
+    return { restart: built, how: `the checked-in park's restart (${PREBUILT_PARKS_OUT}/manifest.json)`, log: [] };
   }
+  if (SUPPORTED_PARK_SEEDS.includes(seed)) throw new Error(noCheckedInPark(seed));
   const accepted = await acceptParkCached(seed);
   return {
     restart: accepted.restart,

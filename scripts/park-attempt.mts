@@ -183,9 +183,11 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
         LAYOUT_TRACE.length > 0 ? LAYOUT_TRACE : (offeredParkFile()?.measures.layoutTrace ?? []),
       );
       // A false refusal is the rung's instrument being wrong: a void, never a restart.
-      // Proving one costs a second build, so it is asked only when the rung fired.
+      // Proving one costs a second build, so it is asked only when the rung fired —
+      // and it is a solve, so never of a checked-in file under validation (`unsolved`).
+      if (counts.rungFired > 0 && unsolved) askedOfASolveOnly.push('check:every-seed-builds (the layout rung\'s false-refusal proof)');
       const falseRefusal =
-        counts.rungFired > 0 ? falseRefusalProblem(seed, await falseRefusalsOf(seed, restart)) : null;
+        counts.rungFired > 0 && !unsolved ? falseRefusalProblem(seed, await falseRefusalsOf(seed, restart)) : null;
       // **Not "built well".** How many times the layout reached decision zero
       // is how hard the search worked, not a property of the park: decision
       // zero is a rung of the backtracking ladder, used as designed. Judging
@@ -323,9 +325,35 @@ export interface AttemptVerdict {
   readonly stageCpuMs: readonly number[];
   /** The park file this attempt hydrated (`LGP_PARK_FILE`), or null for a fresh solve. */
   readonly parkFile: string | null;
+  /**
+   * The placement digest of the park this attempt built
+   * (`scripts/lib/parkLayoutDigest.mts`), taken straight after the build —
+   * before any measure moves anything. Null when the build threw.
+   */
+  readonly layout: string | null;
+  /**
+   * Measures that only a solve can be asked, **not asked of this attempt**
+   * because it was told its file has no solve behind it
+   * (`LGP_PARK_FILE_UNSOLVED`, set by `validate:parks`). Empty for a fresh
+   * solve and for `build:parks`' own file attempts, which ask everything.
+   */
+  readonly askedOfASolveOnly: readonly string[];
 }
 
 const parkFile = process.env['LGP_PARK_FILE'] || null;
+/**
+ * **`LGP_PARK_FILE_UNSOLVED=1`: this file is a checked-in park being validated,
+ * and nothing may be solved to judge it** (`validate:parks`,
+ * `scripts/lib/parkFiles.mts`). Every measure a *file* can be asked is asked,
+ * exactly as below. The ones that need a live search — the stalls builder's
+ * `accommodate` (`SEARCHES_THE_WORLD_PHASE`), and the layout rung's
+ * false-refusal proof, which is a second solve — are **not asked**, and the
+ * verdict names them (`askedOfASolveOnly`) so no log reads as though they
+ * passed. They are asked when the park is solved (`build:parks`), and
+ * `check:stall-accommodate` asks the canonical seed in the check chain.
+ */
+const unsolved = parkFile !== null && process.env['LGP_PARK_FILE_UNSOLVED'] === '1';
+const askedOfASolveOnly: string[] = [];
 const seed = Number(process.env['LGP_SEED'] ?? NaN);
 // A file names its own restart (and the register hook refused a contradicting LGP_PARK_RESTART).
 const restart = parkFile
@@ -410,6 +438,9 @@ const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats |
 // reads as null stats (the accessors return null), and an import that fails is
 // a broken instrument that must be loud — a swallowing catch here once hid a
 // moved module and filed `backtracking: null` for every attempt (found on #705).
+// And the placement digest, for the same reason: it is of the attempt's own
+// park as built, before a measure or a second World commits another claim.
+const layout = facts ? (await (await import('./lib/parkLayoutDigest.mts')).digestBuiltPark(facts.headless.world)).layout : null;
 // From procgen/: the solvers moved out of the game (#705).
 const { parkSolveStats } = await import('../procgen/world/planSolver.ts');
 const { worldSolveStats } = await import('../procgen/world/worldPhaseSolver.ts');
@@ -534,8 +565,9 @@ if (facts) {
         // On a park hydrated from its file (#705) there is no world-phase
         // search in this process for these to drive, so each runs in its own
         // process, which solves this seed and restart — the park the file was
-        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS).
-        ...(parkFile
+        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS). Not under
+        // `unsolved`: a checked-in file has no solve to be proved equal to.
+        ...(parkFile && !unsolved
           ? [...SEARCHES_THE_WORLD_PHASE]
               .filter((name) => STAGE_TWO_SIMS.has(name))
               .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
@@ -548,7 +580,7 @@ if (facts) {
         ...ACCEPTANCE_SIM_MEASURES.filter(
           ([name]) => !STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
         ).map(simCheck),
-        ...(parkFile
+        ...(parkFile && !unsolved
           ? [...SEARCHES_THE_WORLD_PHASE]
               .filter((name) => !STAGE_TWO_SIMS.has(name))
               .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
@@ -557,6 +589,7 @@ if (facts) {
       ],
     },
   ];
+  if (unsolved) askedOfASolveOnly.push(...SEARCHES_THE_WORLD_PHASE);
   const result = await runStages(stages);
   failures.push(...result.failures);
   broken ??= result.broken;
@@ -567,6 +600,12 @@ if (facts) {
   checksCpu = result.cpuMs.checks;
   findingsCpu = result.cpuMs.findings;
   if (notAsked) process.stderr.write(`park-attempt: ${describeNotAsked(notAsked)}\n`);
+  if (unsolved) {
+    process.stderr.write(
+      `park-attempt: seed ${seed} is a checked-in file with no solve behind it, so ${askedOfASolveOnly.length} measure(s) that need a ` +
+        `live search were NOT asked: ${askedOfASolveOnly.join(', ') || '(none)'}\n`,
+    );
+  }
 }
 
 const verdict: AttemptVerdict = {
@@ -588,6 +627,8 @@ const verdict: AttemptVerdict = {
   stageCpuMs,
   backtracking,
   parkFile,
+  layout,
+  askedOfASolveOnly,
 };
 process.stdout.write(`park-attempt: ${JSON.stringify(verdict)}\n`);
 // Handles the build left open (timers in the World) must not keep the process alive.
