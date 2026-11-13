@@ -67,3 +67,9 @@ Parks are source-hash gated: rebuild with `LGP_SEEDS=5 LGP_RESTART_LANES=2 pnpm 
 - PR body source: /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/pr756-body.md (outside the worktree).
 - NEXT: when #752 (check:render-budget) merges, merge main here, lower its BUDGETS draw/tri ceilings
   for the spaces the crowd touches, prove the check, push.
+
+## #752 merged in (34f9d8df); render-budget ceilings lowered (9f7e7a4b)
+- New BUDGETS = max(Metal x2, SwiftShader x1), seed 5: park 569/1,470,630; library 257/464,190;
+  reptile 371/473,082; castle 332/185,674; hotel 272/154,488; rail race 2154/2,341,524.
+- Proved: green exit 0 at 9f7e7a4b; red exit 1 with main's InstancedCrowd (park 3,664,324 > 1,617,694).
+- Remaining: CI green on the pushed head.
