@@ -69,7 +69,9 @@ import { acceptedRestartOf } from './lib/acceptedPark.mts';
 /**
  * **Which restart of the park to measure: the accepted one** — the root
  * loop's verdict at this source, cached or taken now
- * (`scripts/lib/acceptedPark.mts`), unless `LGP_PARK_RESTART` pins one. The seed and the restart are read once, at module load, by every
+ * (`scripts/lib/acceptedPark.mts`), unless `LGP_PARK_RESTART` pins one, or
+ * `LGP_PARK_FILE` names a park file (then it is that file's restart, and nothing
+ * is searched). The seed and the restart are read once, at module load, by every
  * generator, so the park's modules are imported only after both are set.
  */
 if (process.env['LGP_PARK_RESTART'] === undefined) {
