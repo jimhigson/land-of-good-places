@@ -57,7 +57,12 @@ const SEARCH_SCRIPTS = new Set([
   'park-identity.mts',
   'scatter-digest.mts',
   'check-every-seed-builds.mts',
-  // Drives the world phase's stalls builder (`accommodate`), which only a search has.
+  // The one place the stalls builder a world-phase *search* drove is measured
+  // (on the canonical seed, in the check chain). Every acceptance attempt and
+  // every validation of a checked-in park asks the same measure of the
+  // hydrated park, over a builder resumed from its registry
+  // (`stallBuilder.ts`' `resumedStallBuilder`), so this solve is coverage of
+  // the search's builder, not the only way the measure is asked.
   'check-stall-accommodate.mts',
   'measure-tree-scatter.mts',
   'measure-bush-space.mts',
