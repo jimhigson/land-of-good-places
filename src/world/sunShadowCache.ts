@@ -154,6 +154,30 @@ export interface SunShadowStats {
   lastReason: string;
 }
 
+/**
+ * What {@link SunShadowCache.audit} found: the map the cache produced this
+ * frame against the map three.js's own pass draws from the same light pose,
+ * texel by texel. A correct cache differs in **zero** texels — the composite is
+ * the nearer of two depths that one full pass would also have drawn, and the
+ * blur is three's — so any non-zero count is a caster the survey missed.
+ */
+export interface SunShadowAudit {
+  /** What the cache did this frame: redrew the cache, drew movers over it, or kept last frame's map. */
+  readonly frame: 'static' | 'composite' | 'skipped';
+  /** Texels compared (the whole map). */
+  readonly texels: number;
+  /** Texels whose blurred moments differ at all. */
+  readonly differing: number;
+  /** Largest difference in the first moment (light-space depth, 0..1). */
+  readonly maxDepthDiff: number;
+  /** Texels where the reference was drawn at all (depth < 1): proves the comparison saw a map. */
+  readonly drawnTexels: number;
+  /** Bounding box of the differing texels, `[minX, minY, maxX, maxY]`, or null. */
+  readonly box: readonly [number, number, number, number] | null;
+  readonly movers: number;
+  readonly staticMeshes: number;
+}
+
 /** An interleaved attribute keeps its version on its buffer. */
 function positionVersion(geometry: BufferGeometry): number {
   const attribute = geometry.attributes['position'];
@@ -201,6 +225,11 @@ export class SunShadowCache {
   private readonly proxy = new Object3D();
   private readonly sentinel: Mesh;
   private readonly sentinelDepth: ShaderMaterial;
+
+  /** Audits asked for and not yet run; each is answered on the next frame the sun is drawn. See {@link audit}. */
+  private readonly auditsPending: ((result: SunShadowAudit) => void)[] = [];
+  /** Where an audit draws three's own map. Made on the first audit, never otherwise. */
+  private auditTarget: WebGLRenderTarget | null = null;
 
   private readonly statsValue: SunShadowStats = {
     frames: 0,
@@ -350,6 +379,96 @@ export class SunShadowCache {
       this.statsValue.lastMovers = 0;
     }
     this.statsValue.lastDraws = info.calls - callsBefore;
+    if (this.auditsPending.length > 0) {
+      this.runAudit(renderer, original, camera, drew ? 'static' : this.movers.length > 0 ? 'composite' : 'skipped');
+    }
+  }
+
+  /**
+   * **Checks the cache against three.js itself**, on the next frame the sun is
+   * drawn: after the cache has produced its map, three's own pass draws the
+   * whole map again from the same light pose into a target of its own, and the
+   * two are compared texel by texel. Resolves with what it found.
+   *
+   * For checks and harnesses (`window.game` on the dev server); nothing in the
+   * game calls it, and until something does it costs nothing — not even the
+   * target, which is made on the first audit. An audit frame is slow: it draws
+   * the sun's map twice and reads two maps back.
+   */
+  audit(): Promise<SunShadowAudit> {
+    return new Promise((resolve) => this.auditsPending.push(resolve));
+  }
+
+  private runAudit(renderer: WebGLRenderer, original: ShadowRender, camera: Camera, frame: SunShadowAudit['frame']): void {
+    const shadow = this.light.shadow;
+    const map = shadow.map;
+    if (map === null) return;
+    const width = map.width;
+    const height = map.height;
+    if (!this.auditTarget || this.auditTarget.width !== width || this.auditTarget.height !== height) {
+      this.auditTarget?.depthTexture?.dispose();
+      this.auditTarget?.dispose();
+      this.auditTarget = this.vsmTarget(width, height, 'sunShadowCache.audit');
+    }
+    // Three's WebGL renderer makes the sun's map a WebGLRenderTarget; the type
+    // says only RenderTarget because the light is shared with WebGPU.
+    const cached = this.readMoments(renderer, map as WebGLRenderTarget);
+    shadow.map = this.auditTarget;
+    shadow.needsUpdate = true;
+    try {
+      original([this.light], this.scene, camera);
+    } finally {
+      shadow.map = map;
+      shadow.needsUpdate = false;
+    }
+    const reference = this.readMoments(renderer, this.auditTarget);
+    let differing = 0;
+    let drawnTexels = 0;
+    let maxDepthDiff = 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0, n = width * height; i < n; i++) {
+      const r = reference[i * 4]!;
+      if (r < 1) drawnTexels++;
+      const depthDiff = Math.abs(cached[i * 4]! - r);
+      if (depthDiff === 0 && cached[i * 4 + 1] === reference[i * 4 + 1]) continue;
+      differing++;
+      if (depthDiff > maxDepthDiff) maxDepthDiff = depthDiff;
+      const x = i % width;
+      const y = (i - x) / width;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    const result: SunShadowAudit = {
+      frame,
+      texels: width * height,
+      differing,
+      maxDepthDiff,
+      drawnTexels,
+      box: differing > 0 ? [minX, minY, maxX, maxY] : null,
+      movers: this.movers.length,
+      staticMeshes: this.staticCount,
+    };
+    const waiting = this.auditsPending.splice(0);
+    for (const resolve of waiting) resolve(result);
+  }
+
+  /** A VSM map's colour (the blurred moments), read back as RGBA floats. */
+  private readMoments(renderer: WebGLRenderer, target: WebGLRenderTarget): Float32Array {
+    const gl = renderer.getContext() as WebGL2RenderingContext;
+    const previous = renderer.getRenderTarget();
+    const face = renderer.getActiveCubeFace();
+    const level = renderer.getActiveMipmapLevel();
+    const out = new Float32Array(target.width * target.height * 4);
+    renderer.setRenderTarget(target);
+    // RGBA/FLOAT is the read every float colour buffer accepts in WebGL 2.
+    gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, out);
+    renderer.setRenderTarget(previous, face, level);
+    return out;
   }
 
   private updateFrustum(): void {
@@ -518,23 +637,7 @@ export class SunShadowCache {
     if (this.staticTarget && this.staticTarget.width === width && this.staticTarget.height === height) return this.staticTarget;
     this.staticTarget?.depthTexture?.dispose();
     this.staticTarget?.dispose();
-    // The same shape three gives a VSM map (WebGLShadowMap), so the pass
-    // draws into it exactly as it would into the real one.
-    const target = new WebGLRenderTarget(width, height, {
-      format: RGFormat,
-      type: HalfFloatType,
-      minFilter: LinearFilter,
-      magFilter: LinearFilter,
-      generateMipmaps: false,
-    });
-    target.texture.name = 'sunShadowCache.static';
-    const depth = new DepthTexture(width, height, FloatType);
-    depth.name = 'sunShadowCache.staticDepth';
-    depth.format = DepthFormat;
-    depth.compareFunction = null;
-    depth.minFilter = NearestFilter;
-    depth.magFilter = NearestFilter;
-    target.depthTexture = depth;
+    const target = this.vsmTarget(width, height, 'sunShadowCache.static');
     this.staticTarget = target;
     // The kept copy: only its depth matters; the colour is the smallest three allows.
     this.keepTarget?.depthTexture?.dispose();
@@ -551,6 +654,30 @@ export class SunShadowCache {
     this.renderer?.initRenderTarget(keep);
     this.keepTarget = keep;
     this.sentinelDepth.uniforms['staticDepth']!.value = keepDepth;
+    return target;
+  }
+
+  /**
+   * The same shape three gives a VSM map (`WebGLShadowMap`): half-float
+   * moments plus a float depth texture the blur reads. So three's pass draws
+   * into it exactly as it would into the real one.
+   */
+  private vsmTarget(width: number, height: number, name: string): WebGLRenderTarget {
+    const target = new WebGLRenderTarget(width, height, {
+      format: RGFormat,
+      type: HalfFloatType,
+      minFilter: LinearFilter,
+      magFilter: LinearFilter,
+      generateMipmaps: false,
+    });
+    target.texture.name = name;
+    const depth = new DepthTexture(width, height, FloatType);
+    depth.name = `${name}Depth`;
+    depth.format = DepthFormat;
+    depth.compareFunction = null;
+    depth.minFilter = NearestFilter;
+    depth.magFilter = NearestFilter;
+    target.depthTexture = depth;
     return target;
   }
 

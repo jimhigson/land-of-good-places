@@ -27,7 +27,7 @@ import { angleDelta, clamp, clamp01, lerp, smoothstep, TAU } from '../core/mathU
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Sky } from './Sky';
 import { gameStore } from '../state';
-import { SunShadowCache, sunShadowCacheRequested, type SunShadowStats } from './sunShadowCache';
+import { SunShadowCache, sunShadowCacheRequested, type SunShadowAudit, type SunShadowStats } from './sunShadowCache';
 
 /** How far she walks from the sun's shadow frustum's centre before it follows her (m). See `followPlayer`. */
 export const SHADOW_RECENTRE_DISTANCE = 2;
@@ -616,6 +616,20 @@ export class DayNight implements GameSystem {
   /** What the shadow cache did on the last frame and in total; for `?perf=1` and checks. */
   shadowStats(): Readonly<SunShadowStats> {
     return this.shadowCache.stats();
+  }
+
+  /** Whether {@link SunShadowCache} draws the sun's map in this game (`?shadowCache=0` says no). */
+  get shadowCacheEnabled(): boolean {
+    return this.shadowCacheOn;
+  }
+
+  /**
+   * The cache's map against three's own pass, on the next frame the sun is
+   * drawn — for checks. See {@link SunShadowCache.audit}.
+   */
+  auditShadowCache(): Promise<SunShadowAudit> {
+    if (!this.shadowCacheOn) return Promise.reject(new Error('the sun shadow cache is off in this game (?shadowCache=0)'));
+    return this.shadowCache.audit();
   }
 
   update(context: FrameContext): void {
