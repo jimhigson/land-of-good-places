@@ -427,13 +427,13 @@ export class InstancedCrowd {
       const inside = sphereSide(frustum, cullSphere);
       if (view) {
         const c = cullSphere.center;
-        const level =
+        // Off screen she is kept only for her shadow: no pixels at all.
+        const level = nextLodLevel(
+          this.level[m]!,
           inside === -1
-            ? LOD_LOW
-            : nextLodLevel(
-                this.level[m]!,
-                projectedDiameterPx(view.viewProjection, view.pixelsPerUnitAtW1, c.x, c.y, c.z, cullSphere.radius),
-              );
+            ? 0
+            : projectedDiameterPx(view.viewProjection, view.pixelsPerUnitAtW1, c.x, c.y, c.z, cullSphere.radius),
+        );
         if (level !== this.level[m]) {
           this.level[m] = level;
           levelChanged = true;

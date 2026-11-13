@@ -72,8 +72,26 @@ export function projectedDiameterPx(
   return (2 * radius * pixelsPerUnitAtW1) / w;
 }
 
+/**
+ * `?lod=off` on any URL draws everything at full detail — the same build with
+ * the far level never chosen, so the two can be compared at one seed and one
+ * spot (counts, and a screenshot of each). A URL a developer types, in the
+ * spirit of `?perf=1`; a headless check has no `location` and is never off.
+ */
+let lodEnabled = !(typeof location !== 'undefined' && new URLSearchParams(location.search).get('lod') === 'off');
+
+/**
+ * Turns the far level off, or back on, for everything from the next draw —
+ * what `?lod=off` sets at boot, for a harness that wants both from one frozen
+ * frame. Nothing in the game calls it.
+ */
+export function setLodEnabled(enabled: boolean): void {
+  lodEnabled = enabled;
+}
+
 /** The level an instance drawn `px` wide should use, given the one it has. */
 export function nextLodLevel(current: number, px: number): number {
+  if (!lodEnabled) return LOD_FULL;
   if (px > LOD_FULL_ABOVE_PX) return LOD_FULL;
   if (px < LOD_LOW_BELOW_PX) return LOD_LOW;
   return current;
