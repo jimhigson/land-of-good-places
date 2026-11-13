@@ -14,6 +14,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { buildDoorFrame, doorFramePostWidth, type DoorFrame } from '../../art/models/doorFrames';
 import { lazyArrayView } from '../../boot/lazyView';
 import {
   BUILDING_FLOOR_COUNT,
@@ -170,6 +171,13 @@ export class BuildingShell {
 
   readonly kind: ShellKind;
 
+  /**
+   * **The doorway frame round the ground floor's way out** (Jim, 11 Nov 2026),
+   * in the ground floor's own metres — stone, under the castle's ceiling. Its
+   * solids are `Building`'s to register, beside the walls. Null on the facade.
+   */
+  readonly exitFrame: DoorFrame | null = null;
+
   constructor(kind: ShellKind = 'interior') {
     this.kind = kind;
     const plan = planFor(kind);
@@ -225,7 +233,12 @@ export class BuildingShell {
     }
 
     const ground = this.floorGroups[0];
-    if (ground) buildInteriorPorch(plan, ground);
+    if (ground) {
+      buildInteriorPorch(plan, ground);
+      const frame = buildDoorFrame('castle', { minX: plan.doorMinX, maxX: plan.doorMaxX, z: plan.halfZ, floorY: 0 });
+      ground.add(frame.group);
+      this.exitFrame = frame;
+    }
   }
 }
 
@@ -289,6 +302,16 @@ function buildDeck(plan: ShellPlan, deck: number): Mesh {
 
 // ------------------------------------------------------------------- walls
 
+/**
+ * The front door's gap as the wall is **drawn**: on the interior, widened by
+ * the doorway frame's post each side (the frame fills it); on the facade, the
+ * door itself.
+ */
+function framedDoorGap(plan: ShellPlan): [number, number] {
+  const post = plan.holes ? doorFramePostWidth('castle') : 0;
+  return [plan.doorMinX - post, plan.doorMaxX + post];
+}
+
 /** Plan rectangles for one storey's walls, doorways left out. */
 function wallShapes(plan: ShellPlan, deck: number): Shape[] {
   const shapes: Shape[] = [];
@@ -298,9 +321,11 @@ function wallShapes(plan: ShellPlan, deck: number): Shape[] {
   // North face: never interrupted.
   shapes.push(planRect(-ox, ox, -oz, -plan.halfZ + HALF_WALL));
 
-  // South face: the front door downstairs.
+  // South face: the front door downstairs — drawn back by the doorway
+  // frame's posts on the interior, which stand where the wall's ends were
+  // (`doorFrames.ts`). The collider is `Building`'s, and is not moved.
   const southGaps: [number, number][] = [];
-  if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
+  if (deck === 0) southGaps.push(framedDoorGap(plan));
   for (const [start, end] of segmentsMinusGaps(-ox, ox, southGaps)) {
     shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
   }
@@ -417,7 +442,7 @@ function buildWindows(plan: ShellPlan, deck: number): InstancedMesh[] {
   const oz = outerZ(plan);
 
   const southGaps: [number, number][] = [];
-  if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
+  if (deck === 0) southGaps.push(framedDoorGap(plan));
 
   for (const x of spread(plan.halfX, 3.4)) {
     slots.push({ x, z: -oz - outward, yaw: 0 });
@@ -1721,6 +1746,17 @@ function buildEntranceSteps(): InstancedMesh {
 }
 
 /**
+ * The interior porch roof's centre height and thickness. Exported for the
+ * doorway frame (`art/blend/doorframes_build.py` reads both): from the game's
+ * camera this roof hides everything at the door lower than its top, so the
+ * castle frame's gatehouse top is built to stand clear of it.
+ */
+export const INTERIOR_PORCH_ROOF_Y = 3.05;
+export const INTERIOR_PORCH_ROOF_THICKNESS = 0.32;
+/** How much of the porch roof is drawn: a tint, so the door shows through it. */
+export const INTERIOR_PORCH_ROOF_OPACITY = 0.28;
+
+/**
  * The way back out of the interior: a little porch outside its own south door,
  * with a sign so a child knows which way home is.
  */
@@ -1736,10 +1772,21 @@ function buildInteriorPorch(plan: ShellPlan, parent: Group): void {
   mat.position.y = -0.06;
   porch.add(mat);
 
-  const roof = castAndReceive(
-    new Mesh(new BoxGeometry(9, 0.32, 4.2), softMaterial(PALETTE.markerPink, 0.7)),
-  );
-  roof.position.y = 3.05;
+  // **See-through** (QA on #743): from the game's camera this roof stands
+  // between the room and its own front door, and hid the doorway — frame and
+  // all — so a child inside could not find the way out. Drawn as tinted
+  // glass, it still says "porch" and the door shows through it. No shadow:
+  // a pane this pale casting a solid one would darken the doorway it is
+  // there to show.
+  const roofMaterial = softMaterial(PALETTE.markerPink, 0.7);
+  roofMaterial.transparent = true;
+  roofMaterial.opacity = INTERIOR_PORCH_ROOF_OPACITY;
+  roofMaterial.depthWrite = false;
+  const roof = new Mesh(new BoxGeometry(9, INTERIOR_PORCH_ROOF_THICKNESS, 4.2), roofMaterial);
+  roof.castShadow = false;
+  roof.receiveShadow = false;
+  roof.name = 'interior-porch-roof';
+  roof.position.y = INTERIOR_PORCH_ROOF_Y;
   porch.add(roof);
 
   const posts = new InstancedMesh(

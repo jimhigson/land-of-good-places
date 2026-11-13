@@ -456,6 +456,20 @@ export function insideInterior(localX: number, localZ: number, margin = 0): bool
 // ------------------------------------------------------------------ doors
 
 /** The way out of the interior, on the +Z (south) face of the ground floor. */
+/**
+ * **Where she lands coming in through the castle's front door**, in the
+ * ground floor's own metres: across X, and how far in from the south wall's
+ * line. One owner — `Building`'s door, its `/castle` deep link and
+ * `check:castle-floors` all ask it.
+ *
+ * It was (0, 6.5 m in): straight in, which from the fixed camera put the
+ * doorway behind her and down to the left — half off a phone's screen (QA on
+ * #743). A step to the west and nearer the door brings the doorway, frame
+ * and all, into frame on both screens as she arrives.
+ */
+export const CASTLE_DOOR_ARRIVAL_X = -1.5;
+export const CASTLE_DOOR_ARRIVAL_IN = 4.5;
+
 export const INTERIOR_DOOR_MIN_X = -3.2;
 export const INTERIOR_DOOR_MAX_X = 3.2;
 

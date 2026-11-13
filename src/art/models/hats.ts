@@ -19,7 +19,7 @@ import {
 import { PALETTE, Rng, TAU } from '../style/bridge';
 import { ART } from '../style/artPalette';
 import { visiblePoints, visibleTop } from '../style/measure';
-import { addOutline, decal, inkTint, markShared, solid, toonMaterial } from '../style/materials';
+import { addOutline, decal, inkTint, markShared, showMap, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { css, FACE_FILL_INSET, paintFaceOnFill, type FacePaintOptions } from '../style/faces';
 import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
@@ -1005,16 +1005,14 @@ function createPuffHat(): AssetHandle {
         const song = playPuffMelody(rng, 0.8);
         singing = true;
         singRemaining = song.duration;
-        faceMaterial.map = singingFace;
-        faceMaterial.needsUpdate = true;
+        showMap(faceMaterial, singingFace);
         notes.burst(0, mouthY, mouthZ, song.noteCount);
       }
       if (singing) {
         singRemaining -= dt;
         if (singRemaining <= 0) {
           singing = false;
-          faceMaterial.map = neutralFace;
-          faceMaterial.needsUpdate = true;
+          showMap(faceMaterial, neutralFace);
         }
       }
       notes.update(dt);

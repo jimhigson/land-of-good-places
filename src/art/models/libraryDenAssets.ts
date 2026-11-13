@@ -5,7 +5,8 @@ import { markShared, toonMaterial } from '../style/materials';
 import { dropHiddenOutlineFaces } from '../style/outlineHiddenFaces';
 import { visibleBounds } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
-import { dressGlbPart, type LampHandle, type PartStyle } from './libraryAssets';
+import { dressGlbPart, type PartStyle } from './libraryAssets';
+import { type LampHandle } from './libraryRoomAssets';
 import {
   LIBRARY_DEN_LANTERN_NODES,
   LIBRARY_DEN_ROOM_NODES,
