@@ -177,6 +177,7 @@ for (const command of commands) {
       CHECK_BOOK_READER_URL: BASE,
       CHECK_MENU_REACH_URL: BASE,
       CHECK_RENDER_BUDGET_URL: BASE,
+      CHECK_STATIC_FREEZE_URL: BASE,
     },
   });
   if (result.status !== 0) {
