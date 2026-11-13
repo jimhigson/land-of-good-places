@@ -61,6 +61,22 @@ function defaultTimeoutMs(): number | null {
  */
 export const LAZY_PART_RETRY_AFTER_MS = 4_000;
 
+/** Fetches started by any part and not yet settled — see {@link lazyPartsFetching}. */
+let fetching = 0;
+
+/**
+ * **How many lazy parts are on their way right now**, across every part.
+ *
+ * `?clock=` (`core/checkClock.ts`) does not step the world while this is
+ * non-zero: a part lands when the disk says, and a world that ran on
+ * underneath would be at a different moment on every machine when it did.
+ * Counted from the start of a fetch to its settling, success or failure, so a
+ * part that fails cannot hold the clock for ever.
+ */
+export function lazyPartsFetching(): number {
+  return fetching;
+}
+
 /** How a `LazyPart` is built. */
 export interface LazyPartOptions<T> {
   /**
@@ -146,12 +162,15 @@ export class LazyPart<T> {
       const started: Promise<T> = Promise.resolve().then(fetchIt);
       fetch = started;
       this.inflight = started;
+      fetching += 1;
       started.then(
         (value) => {
+          fetching -= 1;
           this.value = value;
           if (this.inflight === started) this.inflight = null;
         },
         () => {
+          fetching -= 1;
           if (this.inflight === started) this.inflight = null;
         },
       );
