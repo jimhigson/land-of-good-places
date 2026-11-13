@@ -118,6 +118,7 @@ import {
   type LocalPoint,
 } from '../src/world/reptileHouse/layout.ts';
 import { REPTILE_LIGHT_POOL_COUNT, REPTILE_POINT_LIGHT_BUDGET } from '../src/world/reptileHouse/lighting.ts';
+import { buildDoorFrame, registerDoorFrameSolids, type DoorFramePartRange } from '../src/art/models/doorFrames.ts';
 import { LIGHT_POOLS_MESH_NAME } from '../src/world/reptileHouse/lightPools.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
@@ -227,6 +228,30 @@ function insideShape(shape: ExhibitShape, p: LocalPoint, slack = 0.01): boolean 
 
 function shapeCentre(shape: ExhibitShape): LocalPoint {
   return shape.kind === 'disc' ? shape.centre : { x: (shape.a.x + shape.b.x) / 2, z: (shape.a.z + shape.b.z) / 2 };
+}
+
+/**
+ * **A baked doorway frame's parts, each as the mesh it was before the bake** —
+ * `null` for any other mesh. `doorFrames.ts`'s `bakeFrame` merges every post,
+ * moss, lintel tile and crest of a frame into one body mesh and lists where
+ * each part's vertices sit in `userData.doorFrameParts`. That mesh's own box
+ * spans post to post, so the middle of it is the open doorway under the lintel
+ * — the one place in the frame nothing may stand. Each part's box is read off
+ * its own vertices through the mesh's world matrix, as `check:hotel`'s
+ * `wallBoxesOf` does.
+ */
+function doorFramePartBoxes(mesh: Mesh): { name: string; box: Box3 }[] | null {
+  const ranges = mesh.userData['doorFrameParts'] as readonly DoorFramePartRange[] | undefined;
+  if (!ranges) return null;
+  const position = mesh.geometry.getAttribute('position');
+  const vertex = new Vector3();
+  return ranges.map((range) => {
+    const box = new Box3();
+    for (let i = range.start; i < range.start + range.count; i += 1) {
+      box.expandByPoint(vertex.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
+    }
+    return { name: range.side === undefined ? range.name : `${range.name}#${range.side}`, box };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -723,6 +748,8 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
   let checked = 0;
   let naked = 0;
   let instances = 0;
+  let framePartsSeen = 0;
+  let framePartsInReach = 0;
   const box = new Box3();
   const instance = new Matrix4();
   const world = new Matrix4();
@@ -736,19 +763,55 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
     }
     return name;
   };
+  /** Whether a drawn box is a tall solid a child on the hall floor can meet: not a sliver, not overhead. */
+  const counts = (drawn: Box3): boolean => {
+    const height = drawn.max.y - drawn.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
+    if (height < 0.6 || !Number.isFinite(height)) return false;
+    return drawn.min.y <= TALLEST_CHILD_HEIGHT; // flat-ok: the same prop box in the flat reptile hall (floor y 0, off the sphere); TALLEST_CHILD_HEIGHT over that floor
+  };
+  /** No collider at the drawn box's middle in plan. */
+  const bareIn = (world: CollisionWorld, drawn: Box3): boolean =>
+    world.isClearCircle((drawn.min.x + drawn.max.x) / 2, (drawn.min.z + drawn.max.z) / 2, 0.1);
   const probeBox = (name: string): void => {
-    const height = box.max.y - box.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
-    if (height < 0.6 || !Number.isFinite(height)) return;
-    if (box.min.y > TALLEST_CHILD_HEIGHT) return; // flat-ok: the same prop box in the flat reptile hall (floor y 0, off the sphere); TALLEST_CHILD_HEIGHT over that floor
+    if (!counts(box)) return;
     if (walkThrough.some(([prefix]) => name.includes(prefix))) return;
     checked += 1;
-    const cx = (box.min.x + box.max.x) / 2;
-    const cz = (box.min.z + box.max.z) / 2;
-    if (collision.isClearCircle(cx, cz, 0.1)) {
+    if (bareIn(collision, box)) {
       naked += 1;
+      const height = box.max.y - box.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
+      const cx = (box.min.x + box.max.x) / 2;
+      const cz = (box.min.z + box.max.z) / 2;
       if (naked <= 8) say(false, `${name} (${height.toFixed(2)} m tall) has no collider at (${(cx - OX).toFixed(2)}, ${(cz - OZ).toFixed(2)})`);
     }
   };
+
+  // CONTROL — the doorway frame measured part by part can say no. The hall's
+  // own frame built again round the same opening, in a world with nothing
+  // registered, must have bare parts; with its own solids registered, none.
+  // In the hall the south wall's collider also runs under both posts, so
+  // taking only the frame's boxes out there leaves every part's middle solid
+  // (check:doorframes §3 marches at the posts and sees that sliver); this is
+  // the frame with no collider of any kind under it.
+  {
+    const exit = house.exitDoorFrame;
+    const alone = buildDoorFrame(exit.frame.style, exit.frame.opening);
+    alone.group.position.set(exit.originX, exit.originY, exit.originZ);
+    alone.group.updateWorldMatrix(true, true);
+    const parts: { name: string; box: Box3 }[] = [];
+    alone.group.traverse((object) => {
+      if (object instanceof Mesh) parts.push(...(doorFramePartBoxes(object) ?? []));
+    });
+    const measured = parts.filter((part) => counts(part.box));
+    const empty = new CollisionWorld();
+    const bareAlone = measured.filter((part) => bareIn(empty, part.box)).length;
+    registerDoorFrameSolids(empty, alone, exit.originX, exit.originZ, exit.originY);
+    const bareWithSolids = measured.filter((part) => bareIn(empty, part.box)).length;
+    say(
+      measured.length > 0 && bareAlone === measured.length && bareWithSolids === 0,
+      `CONTROL: a ${exit.frame.style} doorway frame, part by part — ${measured.length} parts in reach, ${bareAlone} bare with no collider, ${bareWithSolids} with its own solids`,
+    );
+  }
+
   house.hallRoot.updateWorldMatrix(true, true);
   house.hallRoot.traverse((object) => {
     if (!(object instanceof Mesh) || !object.visible) return;
@@ -769,9 +832,28 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
       return;
     }
     if (!object.castShadow) return;
+    // A doorway frame is one baked mesh whose box spans post to post: its
+    // middle is the open way out, under the lintel. Measured whole it read
+    // "doorframe-reptile (4.21 m tall) has no collider at (6.00, 18.20)" —
+    // the doorway itself. Each part is measured as the mesh it was.
+    const frameParts = doorFramePartBoxes(object);
+    if (frameParts) {
+      for (const part of frameParts) {
+        box.copy(part.box);
+        framePartsSeen += 1;
+        if (counts(box)) framePartsInReach += 1;
+        probeBox(`${pathOf(object)}[${part.name}]`);
+      }
+      return;
+    }
     box.setFromObject(object);
     probeBox(pathOf(object));
   });
+  note(
+    framePartsSeen > 0
+      ? `doorway frame measured part by part: ${framePartsSeen} parts, ${framePartsInReach} tall and in a child's reach, the rest overhead or slivers`
+      : 'no baked doorway frame met under the hall root — nothing was measured part by part',
+  );
   say(naked === 0, `${checked} tall drawn solids checked (${instances} plant instances among them), ${naked} with no collider`);
   note(`walk-through list: ${walkThrough.map(([prefix, why]) => `${prefix} (${why})`).join('; ')}; soft species: ${softSpecies.join(', ')}`);
 }
