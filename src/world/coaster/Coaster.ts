@@ -36,7 +36,17 @@ import { PALETTE } from '../../core/palette';
 import { placeOnSphere, planetRadiusAt, terrainHeight, yAtRadius } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { Player, RideHolder } from '../../entities/Player';
+import type { CompanionSeat, Player, RideHolder } from '../../entities/Player';
+
+/** How far down from the seat mount her feet are, along the cart's own up, metres. */
+const RIDER_DROP = 0.55;
+/**
+ * **How far behind her in the tub her companion rides**, metres: the cart is
+ * `CART_BODY_LENGTH` (2.2 m) long and she sits in its middle, so this puts its
+ * feet in the back half, behind her, inside the cart.
+ */
+const COMPANION_BACK = 0.7;
+const COMPANION_AT = /* @__PURE__ */ new Vector3();
 import type { ParkTrain } from '../train';
 
 /**
@@ -283,12 +293,25 @@ export class Coaster implements GameSystem {
   private readonly holder: RideHolder = {
     holding: 'the coaster',
     letGo: () => this.arrive(),
-    // No room beside her: she fills the tub, which is no wider than she is
-    // (`CART_BODY_WIDTH`), and nothing may ride outside the swept envelope the
-    // track's clearances are proved against (`CART_ENVELOPE`). Her companion
-    // rides in her backpack with the rest.
-    companion: 'in her backpack',
+    // Her companion rides in the back of the tub behind her
+    // ({@link COMPANION_BACK}) — inside the cart, so inside the swept envelope
+    // the track's clearances are proved against (`CART_ENVELOPE`): she fills
+    // its width, and nothing may ride outside it.
+    companion: { beside: (seat) => this.companionSeat(seat) },
   };
+
+  /** Her companion's place in the back of the tub this frame: her floor, {@link COMPANION_BACK} behind her, turned as the cart is. */
+  private companionSeat(seat: CompanionSeat): boolean {
+    if (!this.riding) return false;
+    this.cart.updateMatrixWorld();
+    this.cart.localToWorld(COMPANION_AT.set(0, CART_SEAT_HEIGHT - RIDER_DROP, -COMPANION_BACK));
+    seat.x = COMPANION_AT.x;
+    seat.y = COMPANION_AT.y;
+    seat.z = COMPANION_AT.z;
+    seat.facing = this.cartYaw;
+    seat.turn.copy(this.cart.quaternion);
+    return true;
+  }
 
   /** The stall's interact press lands here instead of opening the 2D game. */
   requestBoard(): boolean {
@@ -375,7 +398,7 @@ export class Coaster implements GameSystem {
       // leant about the sphere at her own seat, so on every climb she sat bolt
       // upright in a tub pitched up to 28° under her.
       this.player.setRideFrame(
-        seat.addScaledVector(down, -0.55),
+        seat.addScaledVector(down, -RIDER_DROP),
         this.cart.quaternion,
         this.cartYaw,
       );
