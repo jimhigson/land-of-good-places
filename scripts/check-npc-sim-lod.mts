@@ -22,8 +22,10 @@
  *    this file's own frustum, not by asking the code under test.
  * 4. **Banked time is the same time.** Two real `NpcCharacter`s on the park's
  *    real ground walk the same circuit for 20 simulated seconds, one stepped
- *    every frame and one on the throttle's schedule, and finish within
- *    {@link DRIFT_ALLOWED} of each other.
+ *    every frame and one on the throttle's schedule. Along a straight they
+ *    must stay together; what the throttle is allowed to cost is one frame's
+ *    walk for each decision made a frame late (see {@link driftAllowedAfter}),
+ *    and nothing else.
  *
  * Mutations, each of which must turn it red:
  *
@@ -238,13 +240,35 @@ if (onScreenThrottled > 0) {
 }
 
 // ------------------------------------------------- banked time is the same time
-const DRIFT_ALLOWED = 0.1;
 const SECONDS = 20;
+/**
+ * **How far apart the two walkers may be after `turns` corners**, in metres.
+ *
+ * Not a tolerance picked to pass — the throttle's own arithmetic. A throttled
+ * child decides only on her steer frames, so she can turn a corner up to
+ * `SIM_LOD_STEER_EVERY - 1` frames after the every-frame walker did, and a
+ * corner turned late is a corner cut less: each one puts her up to one frame's
+ * walk (`stride`) further behind along the route. The one extra stride is the
+ * start from rest, where one long step and two short ones integrate the
+ * acceleration half a stride apart. Banked time that was *dropped* costs a
+ * stride every skipped frame instead, corner or no corner, and blows through
+ * this within a second (`--mutate=drop-banked`).
+ *
+ * Measured on seed 5 at the spawn (-1.6, 51.6), 13 Nov 2026: 2.0 cm before
+ * the first corner and constant along every straight, then about +4.2 cm (one
+ * stride; the longest measured is 4.25 cm) at each late corner — 28.0 cm at
+ * worst after 8 corners and 50.1 m, against 38.3 cm allowed by then.
+ */
+function driftAllowedAfter(turns: number, stride: number): number {
+  return (turns * (SIM_LOD_STEER_EVERY - 1) + 1) * stride;
+}
 
 /** Walks a fixed circuit, corner to corner. No dice, no clock: where it is depends only on how far it has walked. */
 class CircuitDriver implements CharacterDriver {
   readonly name = 'circuit';
   private next = 1;
+  /** Corners turned so far — each is one decision a throttled walker may take late. */
+  turns = 0;
   private readonly corners: readonly (readonly [number, number])[];
   constructor(corners: readonly (readonly [number, number])[]) {
     this.corners = corners;
@@ -253,6 +277,7 @@ class CircuitDriver implements CharacterDriver {
     let [x, z] = this.corners[this.next]!;
     if (Math.hypot(x - context.position.x, z - context.position.z) < 0.5) {
       this.next = (this.next + 1) % this.corners.length;
+      this.turns += 1;
       [x, z] = this.corners[this.next]!;
     }
     const dx = x - context.position.x;
@@ -281,18 +306,23 @@ const circuit: (readonly [number, number])[] = [
   [at.x + R, at.z + R],
   [at.x - R, at.z + R],
 ];
-function walker(): NpcCharacter {
+function walker(driver: CircuitDriver): NpcCharacter {
   const start = circuit[0]!;
-  const character = new NpcCharacter(stubAvatar(), new CircuitDriver(circuit), world.collision, start[0], start[1], 0, 'walker');
+  const character = new NpcCharacter(stubAvatar(), driver, world.collision, start[0], start[1], 0, 'walker');
   character.groundSampler = park.sample;
   character.settle(at.y + 1);
   return character;
 }
-const everyFrame = walker();
-const banked = walker();
+const everyFrameDriver = new CircuitDriver(circuit);
+const everyFrame = walker(everyFrameDriver);
+const banked = walker(new CircuitDriver(circuit));
 const lod = new NpcSimLod();
 let walked = 0;
 let worstDrift = 0;
+/** The longest single frame's walk of the every-frame walker — measured, not copied from her speed. */
+let stride = 0;
+/** Drift on each frame the banked walker owes no time, with the corners the every-frame walker had turned by then. */
+const drifts: { readonly second: number; readonly turns: number; readonly drift: number }[] = [];
 const last = new Vector3().copy(everyFrame.position);
 const steps = Math.round(SECONDS / DT);
 for (let i = 0; i < steps; i += 1) {
@@ -303,22 +333,34 @@ for (let i = 0; i < steps; i += 1) {
   if (plan !== 0) {
     realUpdate.call(banked, mutation === 'drop-banked' ? DT : lod.stepDt, elapsed, zero, false, 0, false, (plan & SIM_POSE) !== 0);
   }
-  walked += Math.hypot(everyFrame.position.x - last.x, everyFrame.position.z - last.z);
+  const stepped = Math.hypot(everyFrame.position.x - last.x, everyFrame.position.z - last.z);
+  walked += stepped;
+  if (stepped > stride) stride = stepped;
   last.copy(everyFrame.position);
   // Compared on the frames the banked walker has no time owing.
   if (plan !== 0) {
     const drift = Math.hypot(everyFrame.position.x - banked.position.x, everyFrame.position.z - banked.position.z);
     if (drift > worstDrift) worstDrift = drift;
+    drifts.push({ second: elapsed, turns: everyFrameDriver.turns, drift });
   }
 }
 const finalDrift = Math.hypot(everyFrame.position.x - banked.position.x, everyFrame.position.z - banked.position.z);
 if (walked < SECONDS * 2) {
   failures.push(`the every-frame walker covered only ${walked.toFixed(2)} m in ${SECONDS} s — the circuit is blocked and the drift measured nothing`);
 }
-if (!(finalDrift <= DRIFT_ALLOWED) || !(worstDrift <= DRIFT_ALLOWED)) {
+const turns = everyFrameDriver.turns;
+if (turns < 4) {
+  failures.push(`the every-frame walker turned only ${turns} corners in ${SECONDS} s — fewer than one lap, so late decisions were barely measured`);
+}
+if (drifts.length === 0 || !(stride > 0)) {
+  failures.push(`the banked walker was compared on ${drifts.length} frames with a ${stride} m stride — the drift measured nothing`);
+}
+const over = drifts.find((d) => !(d.drift <= driftAllowedAfter(d.turns, stride)));
+if (over) {
   failures.push(
-    `after ${SECONDS} s and ${walked.toFixed(1)} m the throttled walker is ${(finalDrift * 100).toFixed(1)} cm from the every-frame one ` +
-      `(worst ${(worstDrift * 100).toFixed(1)} cm); allowed ${DRIFT_ALLOWED * 100} cm`,
+    `at ${over.second.toFixed(2)} s, ${over.turns} corners in, the throttled walker is ${(over.drift * 100).toFixed(1)} cm from the every-frame one; ` +
+      `allowed ${(driftAllowedAfter(over.turns, stride) * 100).toFixed(1)} cm (one ${(stride * 100).toFixed(2)} cm stride a late corner, plus one). ` +
+      `After ${SECONDS} s and ${walked.toFixed(1)} m it is ${(finalDrift * 100).toFixed(1)} cm off, ${(worstDrift * 100).toFixed(1)} cm at worst`,
   );
 }
 
@@ -329,7 +371,8 @@ process.stderr.write(
     `  throttle on:  ${per(after.updates)} updates, ${per(after.posed)} poses, ${per(after.commits)} kid commits ` +
     `(${per(after.everyFrame)} every-frame children, ${per(throttled)} throttled; peak ${after.peak} throttled poses in one frame)\n` +
     `  on screen: ${onScreenChecks} child-frames checked, ${onScreenThrottled} not stepped\n` +
-    `  banked time: ${walked.toFixed(1)} m walked in ${SECONDS} s; throttled walker ${(finalDrift * 100).toFixed(1)} cm off at the end, ${(worstDrift * 100).toFixed(1)} cm at worst\n` +
+    `  banked time: ${walked.toFixed(1)} m and ${turns} corners walked in ${SECONDS} s; throttled walker ${(finalDrift * 100).toFixed(1)} cm off at the end, ` +
+    `${(worstDrift * 100).toFixed(1)} cm at worst, ${(driftAllowedAfter(turns, stride) * 100).toFixed(1)} cm allowed by then (${(stride * 100).toFixed(2)} cm stride)\n` +
     `  not covered: the wander driver's own decisions (they draw dice per step, so two runs diverge by design), interiors, and ride or debug cameras.\n`,
 );
 
