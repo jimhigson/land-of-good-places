@@ -7,7 +7,7 @@ import { isDrawn } from '../../core/drawn';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_SLAB, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
-import { bandContains, type PortalBand } from '../tapSpacing';
+import { bandContains, distanceToBand, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
 import {
   CASTLE_FLOORS,
@@ -82,9 +82,10 @@ const FEAST_DISH_REACH = 0.5;
 
 /**
  * How near the front door she must be for the interior's chunk to be fetched
- * ahead of it, in metres — the Reptile House's figure. Only fetched, not
- * built: walking up costs nothing, and the door then builds it behind its iris
- * without waiting on the network.
+ * ahead of it, in metres from the door's own band (`castleEntranceBand`, the
+ * one owner of where the door is) — the Reptile House's figure. Only fetched,
+ * not built: walking up costs nothing, and the door then builds it behind its
+ * iris without waiting on the network.
  */
 const CASTLE_PREFETCH_RADIUS = 18;
 
@@ -1433,7 +1434,7 @@ export class Building implements GameSystem {
     if (
       !this.castle &&
       !this.inside &&
-      Math.hypot(player.position.x - facadeX(1.5), player.position.z - facadeZ(BUILDING_HALF_Z + 1.4)) < CASTLE_PREFETCH_RADIUS
+      distanceToBand(castleEntranceBand(), player.position.x, player.position.z) < CASTLE_PREFETCH_RADIUS
     ) {
       CASTLE_INTERIOR.load().catch(() => {
         // The door asks again, and says so if it still cannot.
@@ -1774,11 +1775,12 @@ export class Building implements GameSystem {
    */
   private refuseDoor(): void {
     this.doorRefused = true;
-    const x = facadeX(1.5);
-    const z = facadeZ(BUILDING_HALF_Z + 1.4);
-    const y = this.surfaces.sample(x, z, castleWorldY(1.5, 1, BUILDING_HALF_Z + 1.4));
+    // Over the doorway she is standing in: the door's own band, not a second
+    // idea of where the door is.
+    const band = castleEntranceBand();
+    const y = this.surfaces.sample(band.centreX, band.centreZ, band.y + 1);
     if (this.doorBubble.sprite.parent !== this.parkRoot) this.parkRoot.add(this.doorBubble.sprite);
-    this.doorBubble.anchorAt(x, y + DOOR_LINE_HEIGHT, z);
+    this.doorBubble.anchorAt(band.centreX, y + DOOR_LINE_HEIGHT, band.centreZ);
     this.doorBubble.setText(DOOR_REFUSED_LINE);
     this.doorBubbleFor = 1.6 + DOOR_REFUSED_LINE.length * 0.07;
   }
