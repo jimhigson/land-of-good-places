@@ -16,7 +16,10 @@ import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
 /** Where the screening woodland starts, beyond the edge. Was 71.5 against a 60 m wall. */
 const TREELINE_OUTSET_INNER = 11.5;
 import { PALETTE } from '../core/palette';
-import { TiledInstances } from '../core/tiledInstances';
+import { COARSE_TILE_SIZE_M, TiledInstances } from '../core/tiledInstances';
+
+/** Cheap scatter gets the coarse tile: see {@link COARSE_TILE_SIZE_M} for the measurement. */
+const COARSE = { tileSize: COARSE_TILE_SIZE_M } as const;
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
@@ -662,9 +665,9 @@ function buildFoliage(
   // `TiledInstances` re-groups the very same instances into ground tiles that
   // three culls one by one; an instance keeps the index it has here, and
   // `locate` hands back the tile mesh and row that now hold it.
-  const trunkMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-trunks', FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunks, true));
+  const trunkMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-trunks', FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunks, true), COARSE);
   const canopyMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-canopies', FOLIAGE_GEOMETRY.round, foliageMaterial(0.85), roundCanopies, true));
-  const coneMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-cones', FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), coneCanopies, true));
+  const coneMesh = TiledInstances.fromInstancedMesh(makeInstanced('tree-cones', FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), coneCanopies, true), COARSE);
   const bushMesh = TiledInstances.fromInstancedMesh(makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true));
   group.add(trunkMesh.group, canopyMesh.group, coneMesh.group, bushMesh.group);
 
@@ -839,8 +842,8 @@ function buildTreeline(): Group {
   // and adding it would only cost fill rate.
   group.add(
     // Tiled for frustum culling (perf step 10, `core/tiledInstances.ts`): the band rings the whole park.
-    TiledInstances.fromInstancedMesh(makeInstanced('treeline-trunks', trunkGeometry, foliageMaterial(0.95), trunks, false)).group,
-    TiledInstances.fromInstancedMesh(makeInstanced('treeline-canopies', canopyGeometry, foliageMaterial(0.9), canopies, false)).group,
+    TiledInstances.fromInstancedMesh(makeInstanced('treeline-trunks', trunkGeometry, foliageMaterial(0.95), trunks, false), COARSE).group,
+    TiledInstances.fromInstancedMesh(makeInstanced('treeline-canopies', canopyGeometry, foliageMaterial(0.9), canopies, false), COARSE).group,
   );
 
   return group;
@@ -1375,8 +1378,8 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
 
   group.add(
     // Tiled for frustum culling (perf step 10, `core/tiledInstances.ts`): one mesh spanned every wall in the park.
-    TiledInstances.fromInstancedMesh(makeInstanced('wall-collars', new SphereGeometry(0.13, 12, 9), copingMaterial, collars, false)).group,
-    TiledInstances.fromInstancedMesh(makeInstanced('wall-finials', new SphereGeometry(0.19, 14, 11), finialMaterial, finials, true)).group,
+    TiledInstances.fromInstancedMesh(makeInstanced('wall-collars', new SphereGeometry(0.13, 12, 9), copingMaterial, collars, false), COARSE).group,
+    TiledInstances.fromInstancedMesh(makeInstanced('wall-finials', new SphereGeometry(0.19, 14, 11), finialMaterial, finials, true), COARSE).group,
   );
 
   return group;

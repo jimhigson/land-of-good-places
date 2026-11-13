@@ -52,6 +52,17 @@ import { Box3, Color as ThreeColor, Group, InstancedMesh, Matrix4, Sphere, Vecto
  */
 export const DEFAULT_TILE_SIZE_M = 24;
 
+/**
+ * For scatter whose instances are **cheap** (a trunk, a wall finial, the
+ * treeline): a tile is a draw call, and the ride cameras look right across the
+ * park, where every tile is on screen. Measured on seed 5 with everything at
+ * 24 m: the park view kept its 248 draws and lost 275 k triangles, but the Rail
+ * Race went 1,917 → 2,116 draws for 14 k triangles. So only the meshes that
+ * carry the triangles (bushes 169 k off-screen in the park view, fairy bulbs
+ * 55 k, tree canopies 19 k) get the fine tile; the rest get this one.
+ */
+export const COARSE_TILE_SIZE_M = 48;
+
 const scratchSphere = new Sphere();
 const scratchBox = new Box3();
 const scratchMatrix = new Matrix4();
