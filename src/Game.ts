@@ -1155,12 +1155,20 @@ export class Game {
       const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
       this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
+        const start = performance.now();
         probe.begin();
         this.tick(tick);
         probe.end();
+        this.engine.frameTimed(start, performance.now() - start);
       });
     } else {
-      this.loop = new Loop((tick) => this.tick(tick));
+      // Timed for the adaptive resolution (120 fps plan, step 17): two clock
+      // reads a frame, and `Engine.frameTimed` decides the next frame's DPR.
+      this.loop = new Loop((tick) => {
+        const start = performance.now();
+        this.tick(tick);
+        this.engine.frameTimed(start, performance.now() - start);
+      });
     }
   }
 
@@ -1178,6 +1186,7 @@ export class Game {
       gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
+      adaptiveResolution: this.engine.adaptiveResolution?.state() ?? 'off (?adaptiveDpr=0)',
       canvas: [gl.drawingBufferWidth, gl.drawingBufferHeight],
       viewport: [window.innerWidth, window.innerHeight],
       hardwareConcurrency: navigator.hardwareConcurrency,

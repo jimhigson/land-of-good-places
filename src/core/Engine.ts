@@ -8,6 +8,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { FOG_FAR, FOG_NEAR } from './constants';
+import { AdaptiveResolution, adaptiveResolutionRequested } from './adaptiveResolution';
 import { pixelRatioCap } from './device';
 import { PALETTE } from './palette';
 
@@ -29,6 +30,14 @@ export class Engine {
   private widthValue = 1;
   private heightValue = 1;
 
+  /**
+   * Steps the pixel ratio down when GPU-bound frames persist and back up when
+   * they stop (120 fps plan, step 17; `core/adaptiveResolution.ts`). `null`
+   * under `?adaptiveDpr=0`, which pins the ratio at the screen's cap for A/B
+   * measurement.
+   */
+  readonly adaptiveResolution: AdaptiveResolution | null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
@@ -38,6 +47,7 @@ export class Engine {
       alpha: false,
       powerPreference: 'high-performance',
     });
+    this.adaptiveResolution = adaptiveResolutionRequested() ? new AdaptiveResolution(pixelRatioCap()) : null;
     this.renderer.setPixelRatio(pixelRatioCap());
     // **The single biggest cause of mid-play stutter, and it is not our code.**
     // three.js checks every newly-linked shader program for errors the first
@@ -101,6 +111,21 @@ export class Engine {
     return () => this.resizeCallbacks.delete(callback);
   }
 
+  /**
+   * One frame's timing, for the adaptive resolution: `start` is
+   * `performance.now()` when the frame began, `cpu` its main-thread ms. Called
+   * by the game loop after the frame's last render call, so a change applies
+   * from the next frame and never mid-frame.
+   */
+  frameTimed(start: number, cpu: number): void {
+    const adaptive = this.adaptiveResolution;
+    if (!adaptive) return;
+    const ratio = adaptive.frame(start, cpu);
+    // `setPixelRatio` resizes the drawing buffer (three calls `setSize`), so
+    // only on a change — the controller's hysteresis keeps those rare.
+    if (ratio !== this.renderer.getPixelRatio()) this.renderer.setPixelRatio(ratio);
+  }
+
   dispose(): void {
     this.resizeObserver.disconnect();
     window.removeEventListener('resize', this.handleResize);
@@ -115,7 +140,10 @@ export class Engine {
 
     this.widthValue = width;
     this.heightValue = height;
-    this.renderer.setPixelRatio(pixelRatioCap());
+    // The screen's cap can change on a resize (a window dragged to another
+    // monitor); the controller restarts from the top of the new ladder.
+    this.adaptiveResolution?.setCap(pixelRatioCap());
+    this.renderer.setPixelRatio(this.adaptiveResolution?.pixelRatio ?? pixelRatioCap());
     this.renderer.setSize(width, height, false);
     for (const callback of this.resizeCallbacks) callback(width, height);
   };

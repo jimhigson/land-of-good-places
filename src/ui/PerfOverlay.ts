@@ -95,7 +95,7 @@ export class PerfOverlay {
   private redraw(): void {
     const s = this.probe.summary(WINDOW_FRAMES);
     const context = this.probe.describe();
-    this.text.textContent = formatSummary(s, String(context['space'] ?? '?'));
+    this.text.textContent = formatSummary(s, String(context['space'] ?? '?'), formatPixelRatio(context));
     // Green under budget, amber when CPU alone is over it, red when frames are being missed.
     this.element.style.color =
       s.missedVsync > 0.02 ? '#ff9a9a' : s.cpuP50 > FRAME_BUDGET_MS ? '#ffd27a' : '#e8ffe8';
@@ -136,8 +136,23 @@ const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
 const count = (n: number): string =>
   n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e4 ? `${(n / 1e3).toFixed(0)} k` : String(n);
 
+/**
+ * The pixel-ratio line: what the frame is drawn at, and whether the adaptive
+ * resolution (120 fps plan, step 17; `core/adaptiveResolution.ts`) has stepped
+ * it down from the screen's cap — `dpr 1.50 of 2 (adaptive, 2 changes)`.
+ */
+export function formatPixelRatio(context: Record<string, unknown>): string {
+  const ratio = Number(context['pixelRatio'] ?? NaN);
+  const adaptive = context['adaptiveResolution'];
+  if (adaptive && typeof adaptive === 'object') {
+    const a = adaptive as { cap: number; changes: number; periodMs: number };
+    return `dpr ${ratio.toFixed(2)} of ${a.cap} (adaptive, ${a.changes} change${a.changes === 1 ? '' : 's'}, vsync ${a.periodMs.toFixed(1)} ms)`;
+  }
+  return `dpr ${ratio.toFixed(2)} (fixed: ?adaptiveDpr=0)`;
+}
+
 /** The overlay's text. Exported so its wording is checked without a DOM. */
-export function formatSummary(s: PerfSummary, space: string): string {
+export function formatSummary(s: PerfSummary, space: string, pixelRatio = ''): string {
   const heap =
     s.heapChurnMBps !== null && s.heapMB !== null
       ? `heap  ${s.heapMB.toFixed(0)} MB  +${s.heapChurnMBps.toFixed(1)} MB/s`
@@ -149,5 +164,6 @@ export function formatSummary(s: PerfSummary, space: string): string {
     `missed 120Hz ${pct(s.missedVsync)}  >16.7 ${pct(s.over16)}`,
     `draws ${count(s.drawsMax)}  tris ${count(s.trisMax)} (max)`,
     heap,
+    ...(pixelRatio ? [pixelRatio] : []),
   ].join('\n');
 }
