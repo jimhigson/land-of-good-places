@@ -113,7 +113,7 @@ The manager decides whether a label is drawn. It does not decide what the
 scenery may do to a drawn one. A sprite label is a camera-facing quad at its
 speaker's head, and by default its material is **depth-tested**, like
 everything else in the world: furniture nearer the camera than the quad cuts
-it. Every label in the inventory keeps that default except the two below.
+it. Every label in the inventory keeps that default except the ones below.
 
 Who decides it: a `SpeechBubble`'s material is its own, so a speaker asks for
 the bubble's `overScenery` option and nothing reaches through `sprite.material`
@@ -124,6 +124,7 @@ that sprite's material.
 |---|---|---|
 | The owl librarian's bubble | `SpeechBubble`'s `overScenery`, asked for by `world/library/LibraryOwl.ts` | She reads story time from the big armchair, which is backed onto the bookcase wall. Her bubble's quad, facing the camera from over the chair, reaches back into the wall cases, and depth-tested it lost its right side behind them ("A day in the pa…", headless Chrome, 23 Oct 2026). `check:library`'s STORY measures it from her cushion's camera: 6 of 45 points of the painted bubble stand behind `library.books.2`, so it fails if the bubble is depth-tested. |
 | The Library's creatures' bubble (the baby dragon's, the cat's) | `SpeechBubble`'s `overScenery`, asked for by `world/library/Library.ts` | The dragon speaks from the secret den's corner, behind the faded west wall and the lintel. Depth-tested, its bubble lost both rounded ends at 390x844 and half its text to the wall once she stepped back out of the den ("I lov…", headless Chrome on PR #739's preview, 11 Nov 2026). Seen fixed on the next preview; no check measures it yet. |
+| The Reptile House door's "still waking up" bubble | `SpeechBubble`'s `overScenery`, asked for by `world/reptileHouse/ReptileHouse.ts` (its own `doorBubble`; the hall's bubble stays depth-tested) | Said over the doormat when the hall's chunk could not be fetched. Its camera-facing quad stands just in front of Sunny's mouth, and the arch's pink rim, nearer the camera than the quad's top corners, cut them off: "he snakes are sti" (live `f3e0b6b8`, issue #757). No check measures it yet. |
 | The dodgems' giggles ("hee hee!", "bonk!") | `minigames/dodgems/giggles.ts`, which builds the sprites its `SpriteLabel`s wrap | Built that way with the dodgems (48bf4bcc, 26 July 2026); no reason is recorded. |
 
 Turning it on for another speaker changes how that speaker's bubble looks: it
