@@ -44,8 +44,29 @@
  * `text.slice(node.start, node.end)` is exactly the node's source. This repo's
  * comments are full of em-dashes, so that was measured, not assumed.
  */
+import { createRequire } from 'node:module';
 import { parseAst } from 'rolldown/parseAst';
 import type { ESTree } from 'rolldown/utils';
+
+/**
+ * **One parser, not two.** The `rolldown` pin in `package.json` must be the
+ * rolldown Vite itself resolves, or these checks read the code with a different
+ * oxc from the one that builds the game. That is two definitions of one number,
+ * so it is checked here rather than promised in a comment: a Vite bump that
+ * forgets the pin fails every one of the six checks, with the fix in the message.
+ * Proved 14 November 2026 by leaving the pin at 1.2.6 under Vite 8.3.8:
+ * `check:pow-operator` exit 1, "package.json pins rolldown 1.2.6, but Vite
+ * resolves rolldown 1.2.19. Set "rolldown": "1.2.19" …"; pin restored, exit 0.
+ */
+const require = createRequire(import.meta.url);
+const ours = (require('rolldown/package.json') as { version: string }).version;
+const vites = (createRequire(require.resolve('vite/package.json'))('rolldown/package.json') as { version: string }).version;
+if (ours !== vites) {
+  throw new Error(
+    `scripts/ts-ast.mts: package.json pins rolldown ${ours}, but Vite resolves rolldown ${vites}. ` +
+      `Set "rolldown": "${vites}" in devDependencies and run pnpm install, so the checks parse with the parser that builds the game.`,
+  );
+}
 
 export type Node = ESTree.Node;
 export type Program = ESTree.Program;
