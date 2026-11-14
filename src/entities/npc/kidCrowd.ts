@@ -12,7 +12,7 @@ import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
 import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { visibleTop } from '../../art/style/measure';
-import { toonMaterial } from '../../art/style/materials';
+import { cloneMaterial, toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import type { Expression } from '../../art/style/faces';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
@@ -328,15 +328,18 @@ export class KidCrowd {
     const faceMaterials: Material[] = [];
     if (faceMesh) {
       const base = faceMesh.material as MeshToonMaterial;
+      // `cloneMaterial`, not `base.clone()`: the face owns its expression
+      // canvases through `userData`, and a plain clone PNG-encodes every one
+      // of them, every time, for nothing (see `cloneMaterial`).
       for (const expression of FACE_ORDER) {
-        const clone = base.clone();
+        const clone = cloneMaterial(base);
         clone.map = faceMaps.get(expression) ?? base.map;
         faceMaterials.push(clone);
       }
       // Each extra eye variant appended in turn, at `variantIndex * EYE_VARIANT_OFFSET`.
       for (const maps of variantFaceMaps) {
         for (const expression of FACE_ORDER) {
-          const clone = base.clone();
+          const clone = cloneMaterial(base);
           clone.map = maps.get(expression) ?? base.map;
           faceMaterials.push(clone);
         }

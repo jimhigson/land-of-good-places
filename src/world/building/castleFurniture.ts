@@ -32,7 +32,7 @@ import {
   type FeastProp,
 } from '../../art/models/castleAssets';
 import { castleFloorMaterial } from './castleFabric';
-import type { KeepOut } from './dressing';
+import { keepOutsFor, type KeepOut } from './dressing';
 
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
 
@@ -875,6 +875,30 @@ export function greatHallFootprint(deck: number): readonly KeepOut[] {
     });
   }
   return discs;
+}
+
+/**
+ * **Where a scattered prop may not land** — {@link keepOutsFor} plus whatever
+ * furniture is already standing on this floor.
+ *
+ * The two are different questions and the difference matters. `keepOutsFor` is
+ * *where a child has to be able to stand*, and `check:castle` fails any prop
+ * that lands in one — so the great hall's banquet cannot go in it, because the
+ * banquet's own tables and benches are inside the banquet. But a brazier
+ * choosing a spot at random very much does need to know the tables are there:
+ * with the hall filled (#449) two of the four landed inside benches, measured
+ * in the running game.
+ *
+ * So: things that are *placed* ask `keepOutsFor`, and things that **scatter**
+ * ask this. One extra call at each of the two scatter sites, and no list is
+ * kept in step with another by hand.
+ *
+ * Here rather than in `dressing.ts`, beside {@link greatHallFootprint}: the
+ * footprint is measured off the castle kit, which is the interior's lazy chunk
+ * (`castleInterior.ts`), and `dressing.ts` is in the boot.
+ */
+export function scatterKeepOutsFor(deck: number): KeepOut[] {
+  return [...keepOutsFor(deck), ...greatHallFootprint(deck)];
 }
 
 /**
