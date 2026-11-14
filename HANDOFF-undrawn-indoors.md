@@ -1,66 +1,67 @@
 # HANDOFF — undrawn-indoors (120 fps plan, step 3 + the rest of step 2)
 
-Branch `perf/undrawn-indoors` from `origin/main` (34f20970; main had not moved at 17:00). Worktree
-`.claude/worktrees/undrawn-indoors`. Dev port 6011. No PR: a later stage opens it. Merge `origin/main` with
-`git -c rerere.enabled=false merge origin/main` before handing over.
+Branch `perf/undrawn-indoors`. Worktree `.claude/worktrees/undrawn-indoors`. Dev port 6011. No PR: a later stage opens
+it. Merge `origin/main` with `git -c rerere.enabled=false merge origin/main` before handing over.
+`$SP` = `/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/63860b08-4a9b-4597-b7cf-7b1677887a9f/scratchpad`.
 
 ## What is done (pushed)
-- **The park is a space.** `World.parkRoot` holds every park group but the crowd's (`npcs.group` stays in the graph: mall
-  shoppers + every resident's name pill/bubble hang under it). Registered with `DrawnSpaces` as `'garden'`; its `visible`
-  is written once a frame at the top of `World.update` from `spaceAt(player) === garden`. Live game: detached indoors.
+- **The park is a space — of its own roots.** Every park group but the crowd's is registered with `DrawnSpaces` as a
+  `garden` root (`World.parkRoots`), in the scene order main always had. `World.update` says once a frame
+  `drawnSpaces.showSpace('garden', spaceAt(player) === garden)`; `DrawnSpaces.showSpace` hides a space whole, over its
+  roots' owners' own `visible` (fireflies by day, lamp posts behind the keychain view, the ferris wheel's clouds). Live
+  game: the park is out of the graph indoors. `World.parkDrawn` = the garden space shown (NOT any group's drawn-ness:
+  the ferris wheel is a park updater and must run above its own clouds).
+  - **Why not one `the-park` root over the groups** (the first engineer's shape, up to db4346ba): it renamed every
+    garden mesh's scene path, which `check:coplanar`'s ratchet and every checked-in park's acceptance are keyed by.
+    `LGP_SEEDS=5 pnpm run validate:parks -- --fresh` on e9a2e727: `seed 5 REJECTED by check:coplanar x17: NEW:
+    garden|the-park/entrance/welcome-sign/<Mesh:BoxGeometry>|the-park/entrance/welcome-sign/<Mesh:PlaneGeometry>`
+    (2656 s). CI's parks + coplanar workflows would have gone red on all 16 seeds. Fixed in 96cfe195.
 - **Park updaters gated** in `World.update` on `parkDrawn`. `Fountain.wade` (her speed/mood) runs everywhere. Train +
   `carryPassengers` gated on `npcs.crowdLiveAt` (garden + castle mall).
 - **Crowd**: `NpcSystem.crowdLiveAt(x,z)`; not live -> garden kids `elsewhere`; visit timers paused; frozen kids not
   committed; pets of frozen owners still; `TreeClimbing` skips held kids.
 - **Hotel** `HotelInterior.update` = suite lock + `isDrawn` gate + `animate`. **Grown-up**, **Sunny's exterior**,
   **ball pit** (`settling || isDrawn`) gated.
-- **`check:undrawn-still`** in shard 4 (chain-coverage ok); red proof in its header.
+- **`check:undrawn-still`** in shard 4 (chain-coverage ok). Control 4 now watches `world.parkRoots`.
 
-## Measurements (seed 5, standing still, M4 Pro, other agents loading the Mac ~8-10)
-`docs/perf/undrawn-indoors/{measure,table,profile}.mjs`; alternating builds (before-A, after-A, before-B, after-B).
-cpu p50 ms x1, before -> after: library 3.0,3.5 -> 1.6,1.7; reptile 3.7,3.8 -> 2.3,2.8; mall 3.6,4.0 -> 2.3,2.3; great
-hall 5.7,5.4 -> 3.7,3.7; roof 3.4,3.4 -> 1.5,1.9; hotel 4.4,6.2 -> 4.4,4.9 (noisy; profile says 572 -> 425 ms/s main
-thread, World.update 123 -> 29); park 3.8,4.6 -> 4.6,4.9 (noise: park profile before/after identical, 558 vs 577 ms/s,
-same functions). x4: library 14.5,17.6 -> 7.1,8.0; reptile 17.8,21.5 -> 14.9,14.2; mall 17.7,18.6 -> 14.1,14.6; hall
-25.9,24.0 -> 27.4*,16.7; roof 15.4,17.4 -> 13.7,8.3; hotel 20.6,25.9 -> 13.3,17.1; park 18.2,17.2 -> 22.5*,21.9
-(* = my checks were running in parallel). Focused re-run of park/hotel/hall planned (`$SP/ab2.sh`).
+## Save indoors — answered (14 Nov), not a race
+- `bootstrap.ts` awaits the park file before `main.ts` loads, so `parkStamp()` is set when `continueGame` reads it:
+  every probe save carried `place.park` (e.g. `4ff194ce74f0ec5f`).
+- The probe's profile is made by `/spawn`, which never marks `arrivedByBus` (only `ArrivalSequence` does). A continue
+  of such a save plays the cat-bus arrival (`arrivalIsDue()`), which takes her to the gate whatever `save.place` says.
+  Same on both builds (`save-indoors.mjs`, READ_MS=0):
+  - main 27e570b3, arrivedByBus false: `arrival: true`, at (-0.1, -9, 61.5) by the gate. Branch e9a2e727: same,
+    (-0.5, -11.7, 70.5).
+  - main, save marked arrived (`ARRIVED=1`, every real player's save): restored to the lobby (-600, 0, 636.2),
+    out through the door to the park. Branch: identical — lobby (-600, 0, 636.2), park detached and not drawn, out
+    through the door to (37.4, -2.9, -8) with the park attached and drawn. Screenshots `$SP/u2/save-*`.
+- Finding for others (not fixed here, a developer-path quirk): `arrivalSpawn.ts`'s "a restored save always wins …
+  `arrivedByBus` would be true on that save anyway" is false for a profile made by any deep link. Repro: fresh
+  profile, `/spawn`, walk into the hotel, wait 10 s, open `/`, press "keep playing" → the bus arrival plays.
 
-## Proofs in a browser (scratch, headless Chrome for Testing 1234, real GPU)
-- Park unseen from every room: B vs C (park groups hidden) differs only by camera-breath edge shimmer, same as A vs B;
-  no park silhouette in any diff mask (`park-unseen.mjs`).
-- Coming back (`come-back.mjs`, hotel, 20 s inside): before build — train ran 41 -> 110 m unseen, all 27 children moved;
-  after — park detached in the lobby, train 42.29 -> 42.29 during the stay and on to 51.57 2.5 s after return, 3 of 27
-  moved (the lobby's guests), worst single-frame step back 0.112 m (before 0.118), closest pair 1.57 m (before 1.74).
+## Measurements
+First engineer (13 Nov, load ~8-10), cpu p50 ms x1 before -> after: library 3.0,3.5 -> 1.6,1.7; reptile 3.7,3.8 ->
+2.3,2.8; mall 3.6,4.0 -> 2.3,2.3; great hall 5.7,5.4 -> 3.7,3.7; roof 3.4,3.4 -> 1.5,1.9; hotel 4.4,6.2 -> 4.4,4.9;
+park 3.8,4.6 -> 4.6,4.9 (park noise; profile identical). x4 in the git history of this file.
+14 Nov: **the Mac is not quiet** — a Virtualization VM (not ours) at ~860 % CPU, load 50-230, display asleep (headless
+Chrome at 60 Hz, `CVDisplayLinkCreateWithCGDisplay failed`). Wall-clock pairs were garbage (hotel after 2.9 -> 15 ms
+between rounds); thread time (`thread-time.mjs`, trace `tdur`) tracks wall time here (E-cores / contention), so it does
+not escape the load either. Method now: interleaved pairs through one port (`$SP/u2/twin-serve.mjs`, before.localhost /
+after.localhost on 6011), min and median per build (`thread-table.mjs`), load on every sample.
+
+## Proofs in a browser (first engineer, before the roots change)
+- Park unseen from every room (`park-unseen.mjs`); coming back after 20 s in the hotel plausible (`come-back.mjs`).
 
 ## Findings for others
 - Detaching the park removes its 3 visible lights from the gather indoors -> a room's light state is DayNight + its own
   lights only. first-entry-warmup: compile a room against that, not against the park's lights.
-- main is RED on shard 11 (check:served-cull-audit at 34f20970): hotel `hotel.disco.motes` stale bound (1 of 40) and
-  sky cruiser off-screen tris 346614 > 256463. Not caused here.
 - Not gated, deliberately: `CastleFire.update` (two emissive intensities a deck, pure function of the clock);
   `World.interactZones` still lists park zones indoors (the park map's taps read them).
 
-## Checks run locally on 065b0e3c (each exit code read directly, all 0)
-tsc --noEmit, typecheck:test, check:undrawn-still (+ --mutate exit 1), chain-coverage, hotel, library, reptile-house,
-castle, castle-floors, hall-solid, npc-sim-lod, jitter, labels, exits, speech-bubbles, space-night, statue-occlusion,
-park-map, tap-dash, nav-spaces, npc-presence (not in chain), park, solids, solids-park (795 s), served-render-budget,
-served-cull-audit (green here; red on main's CI at 34f20970 — flaky), served-static-freeze, served-deep-links,
-served-book-reader. render-budget census: library scene graph 883 objects in / park 'garden/the-park' out.
-
-## State (resumed 14 Nov, second engineer)
-- **Merged origin/main 27e570b3** (#777) as e9a2e727: one conflict, `BallPit.ts` (both sides added a method in one
-  spot — kept `settling` and main's `settleNow`). Game.ts merged clean. tsc 0.
-- Builds for the A/B: `$SP/u2/dist-before` (27e570b3) and `$SP/u2/dist-after` (e9a2e727); base worktree
-  `.claude/worktrees/undrawn-indoors-base` (detached, remove when done).
-- **The Mac is NOT quiet**: a Virtualization VM (not ours) runs at ~860 % CPU, load average 50-230 all night, the display
-  asleep (headless Chrome falls back to 60 Hz: `CVDisplayLinkCreateWithCGDisplay failed`). Wall-clock A/B (`ab3.sh`)
-  gave garbage pairs (hotel after 2.9 -> 15 ms between rounds). Thread time (`thread-time.mjs`, trace `tdur`) tracks wall
-  time here (E-core scheduling / contention, not descheduling), so it does not escape the load either. Plan: many
-  interleaved pairs per scene through one port (`$SP/u2/twin-serve.mjs`: before.localhost / after.localhost on 6011),
-  min and median, with the load recorded on every sample.
-- **save-indoors, probable cause (not a race)**: `bootstrap.ts` awaits the park file before `main.ts` loads, so
-  `parkStamp()` cannot be null in `continueGame`. The probe's profile is made by `/spawn`, which never marks
-  `arrivedByBus`; a continue then plays the cat-bus arrival (`arrivalIsDue()`), which seats her in the bus at the
-  gate whatever `save.place` says (`arrivalSpawn.ts`'s "a restored save always wins" assumes arrivedByBus is true on
-  any save with a place). Probe now has `ARRIVED=1` (marks the save arrived before the reload) to test a real
-  player's save; running on both builds.
+## State
+- Merged origin/main 27e570b3 (#777) as e9a2e727 (BallPit.ts: kept `settling` and main's `settleNow`). Main had not
+  moved at 10:00 14 Nov.
+- Running on 96cfe195: `check:undrawn-still` green + `--mutate` (`$SP/u2/undrawn-*.log`), `LGP_SEEDS=5 validate:parks
+  --fresh` (`$SP/u2/validate-5-roots.log`). Then: re-prove the header transcript of check:undrawn-still, rebuild
+  dist-after, A/B, the full `check` + `test:procgen` + `check:coplanar`.
+- Base worktree `.claude/worktrees/undrawn-indoors-base` (detached at 27e570b3) — remove when done.
