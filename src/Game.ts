@@ -1237,15 +1237,27 @@ export class Game {
     this.engine.beginFrame(this.transitions.wiping, spaceAt(x, z));
   }
 
+  /**
+   * The GPU's name, asked of the driver once. `getParameter` is a synchronous
+   * round trip to the GPU process: asked on every overlay redraw it waited
+   * behind whatever the GPU process was busy with — 25–46 ms a time, measured
+   * while programs were linking — so `?perf=1` was putting hitches into the
+   * frames it was measuring.
+   */
+  private gpuName: string | null = null;
+
   /** What the perf overlay's JSON says about where and on what it was measured. */
   private perfContext(): Record<string, unknown> {
     const renderer = this.engine.renderer;
     const gl = renderer.getContext();
-    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    if (this.gpuName === null) {
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      this.gpuName = String(debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    }
     return {
       space: spaceAt(this.player.position.x, this.player.position.z),
       riding: this.player.riding,
-      gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+      gpu: this.gpuName,
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
       adaptiveResolution: this.engine.adaptiveResolution.state(),
