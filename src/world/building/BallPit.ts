@@ -241,6 +241,14 @@ export class BallPit {
   }
 
   /**
+   * Still settling the freshly-spawned pile (see `WARMUP_SECONDS`) — work that
+   * has to finish wherever she is, so the pit is never seen settling.
+   */
+  get settling(): boolean {
+    return this.warmupSubstepsRemaining > 0;
+  }
+
+  /**
    * **Pays off the whole settling warm-up now**, without the per-frame budget.
    * For `?clock=` only (`core/checkClock.ts`): a check that audits one moment
    * cannot have the pile half-fallen on a slow machine and settled on a fast

@@ -5,6 +5,7 @@ import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import type { ShopStand } from '../building/shops/Shops';
 import { SpaceManager } from '../SpaceManager';
+import { isDrawn } from '../../core/drawn';
 import { bandWalkedThrough, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt, type SpaceId } from '../spaces';
@@ -578,7 +579,10 @@ export class ReptileHouse implements GameSystem {
       else this.doorBubble.updateScreenSize(this.deps.camera);
     }
 
-    if (this.onForecourt || this.deps.plot) {
+    // Sunny, out in the park (or on the forecourt): only while she is drawn —
+    // the head's sway and the tongue's wag are functions of the clock and the
+    // tickle, so the first frame back is already right.
+    if ((this.onForecourt || this.deps.plot) && isDrawn(this.exterior.root)) {
       this.exterior.setNight(this.deps.nightFactor());
       // The head is the door now, so it only ever tilts a few hundredths of
       // a radian — the lips stay on the jambs' colliders — and the tongue,
