@@ -1228,12 +1228,14 @@ function rideInThenPlay(
           // **The completion signal, and there is only one.** A park object in
           // hand — not a timer that hopes to match how long one takes to build.
           director.noteParkReady();
-          // The spaces she is not in are out of the graph (`DrawnSpaces`), so
-          // the warm-up is handed them: it compiles what it always compiled.
-          const spaces = handOverGame.world.drawnSpaces;
-          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera, () =>
-            spaces.detachedRoots(),
-          );
+          // **The park, and only the park.** Every room is compiled behind its
+          // own door's iris, against its own lights, the first time she goes in
+          // (`core/viewWarmup.ts`): compiled here, against the park's, it was a
+          // program no room ever draws with — a room hides the sun's rig
+          // (`DayNight.setIndoors`) and the park's own lamps leave the graph
+          // with the park (`World.update`), and the light counts are part of
+          // every program's key.
+          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
           skip.show();
         })
         // **Without this the ride has no bottom.** The generation-failure path
