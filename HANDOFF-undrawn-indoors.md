@@ -71,8 +71,22 @@ Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout
   3.7,3.8 -> 2.3,2.8; mall 3.6,4.0 -> 2.3,2.3; great hall 5.7,5.4 -> 3.7,3.7; roof 3.4,3.4 -> 1.5,1.9; hotel 4.4,6.2 ->
   4.4,4.9; park 3.8,4.6 -> 4.6,4.9 — the same direction; this table supersedes it.
 
-## Proofs in a browser (first engineer, before the roots change)
-- Park unseen from every room (`park-unseen.mjs`); coming back after 20 s in the hotel plausible (`come-back.mjs`).
+## Proofs in a browser (headless Chrome for Testing 1234, real GPU, dev servers on 6011, seed 5)
+- First engineer, before the roots change: park unseen from every room (`park-unseen.mjs`, pixel diffs).
+- **Coming back** (`come-back.mjs`, hotel door at (-7.28, -41.42), 20 s inside), on the roots head (f32a89bd):
+  park roots in the graph in the lobby 0 of 16; train 42.97 -> 42.97 m during the stay, on to 52.34 m 2.5 s after
+  she is back; 3 of 27 children moved while she was in (the lobby's guests); worst single-frame step back 0.111 m;
+  24 of 27 moving within 2 s; closest pair 1.80 m before, 1.59 m back. **Main** (27e570b3), same run: train 54.64 ->
+  110.56 m unseen, all 27 children moved, worst step 0.119 m, closest pair 1.60 m. The screenshots at the door are the
+  same picture (`$SP/u2/comeback-{before,after}/3-park-after.png`): the difference is where the train and the
+  children are elsewhere in the park — on main the park moved on while she was in; here it waited for her.
+- **Ferris wheel through the clouds** (`ferris-clouds.mjs`, `/ferris`): branch — park hidden at 17.0 s (15 of 16
+  roots out of the graph; the lamp posts' own per-frame `visible` write keeps them in, exactly as on main, where
+  `World.update` rewrites them after the ride hides them), back at 79.2 s, ride over at 98.3 s, `parkDrawn` true
+  throughout (the ride is a park updater), no page errors. Main: hidden 17.1 s, back 78.8 s, over 98.0 s.
+- **Save made indoors, roots head**: saved in the lobby with the park 0/16 in the graph, "keep playing" pressed at
+  once (`ARRIVED=1`) -> restored to (-600, 0, 636.2) in the lobby, 0/16; out through the door -> (74.5, -13.4, 1.7),
+  15/16 in the graph (the fireflies sleep by day), park drawn.
 
 ## Findings for others
 - Detaching the park removes its 3 visible lights from the gather indoors -> a room's light state is DayNight + its own
@@ -83,7 +97,9 @@ Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout
 ## State
 - Merged origin/main 27e570b3 (#777) as e9a2e727 (BallPit.ts: kept `settling` and main's `settleNow`). Main had not
   moved at 10:00 14 Nov.
-- Running on 96cfe195: `check:undrawn-still` green + `--mutate` (`$SP/u2/undrawn-*.log`), `LGP_SEEDS=5 validate:parks
-  --fresh` (`$SP/u2/validate-5-roots.log`). Then: re-prove the header transcript of check:undrawn-still, rebuild
-  dist-after, A/B, the full `check` + `test:procgen` + `check:coplanar`.
+- On 96cfe195 (the roots change): `check:undrawn-still` exit 0, `--mutate` exit 1 (transcript in its header);
+  `LGP_SEEDS=5 pnpm run validate:parks -- --fresh` exit 0: `seed 5 accepted in 442 s — restart 1, 134 measures,
+  placement f06f4b4bedd6032e`.
+- Running on f32a89bd: the full `pnpm run check` (`$SP/u2/check-full.log`) and `pnpm run test:procgen`
+  (`$SP/u2/procgen.log`). Then `check:npc-presence`, `check:coplanar`.
 - Base worktree `.claude/worktrees/undrawn-indoors-base` (detached at 27e570b3) — remove when done.
