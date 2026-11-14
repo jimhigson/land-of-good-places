@@ -58,8 +58,10 @@
  * this check would have flagged its own explanation.
  *
  * The tree comes from `scripts/ts-ast.mts` (oxc through rolldown). It came
- * from TypeScript's compiler API until TypeScript 7, which has none; the port
- * reports exactly what that version reported, down to the baseline keys.
+ * from TypeScript's compiler API until TypeScript 7, which has none. On every
+ * file in the repo the port reports exactly what that version reported, down
+ * to the baseline keys (all 937 files, measured 14 November 2026). The inputs
+ * where the two differ are listed at the end of this comment.
  *
  * ## The escape hatch, and why it is counted out loud
  *
@@ -90,6 +92,28 @@
  * And with the `unchain` taken out of `yAccessOf`, the run stops at
  * `ARMING FAILURE  rule Y_DIFFERENCE did not fire on its own fixture: const h
  * = rail?.y - under.y;`, exit 1: the optional chain is armed on every run.
+ *
+ * ## Where it differs from the TypeScript-API version, on purpose
+ *
+ * Measured against that version (TypeScript 5.9.3) on synthetic probes. None
+ * of these shapes occurs in the repo.
+ *
+ * - **Refused:** `mesh?.rotation.x = -Math.PI / 2`. TypeScript's API parsed it
+ *   and the old check reported a FLAT_DISC; oxc throws PARSE_ERROR ("Cannot
+ *   assign to this expression"), because an optional chain is not an
+ *   assignment target in JavaScript. `tsc` rejects it too (TS2779), and so
+ *   does Vite's own transform, so it cannot be in a file that builds; if it
+ *   were, this check would stop loudly rather than skip it. The object-rest
+ *   shapes in {@link assignmentOf} also throw here, and Vite refuses them too.
+ *   A default on the rest element itself, `[...[a] = []] = arr`, throws here
+ *   as well; `tsc` refuses it as TS1186.
+ * - **Reported where the old version was blind:** a parenthesised target,
+ *   `(mesh.rotation.x) = -Math.PI / 2` (FLAT_DISC) or `(yy) = a.y` (a laundered
+ *   y). oxc drops the parentheses round an assignment target even with
+ *   `preserveParens`, so the left side reads `mesh.rotation.x`; TypeScript kept
+ *   a ParenthesizedExpression there, which neither `/\.rotation\.x$/` nor the
+ *   Identifier test matched. Both are the mistake this check exists to catch,
+ *   so the port keeps them.
  */
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -306,6 +330,20 @@ function memberName(node: Node): string | undefined {
  * `({ k: a = b.y } = o)`). ESTree spells that default AssignmentPattern, as it
  * does a declaration's or a parameter's default, which TypeScript did not
  * spell `=`; and `({ a = b.y } = o)` was a shorthand property there.
+ *
+ * **A rest element is part of the target too.** `[...[a = b.y]] = arr` was a
+ * spread of an array literal holding a binary `=` in TypeScript's tree; here
+ * it is RestElement > ArrayPattern > AssignmentPattern. The first oxc port
+ * stopped walking at the RestElement and dropped both shapes the #779 review
+ * probed, `[...[m.rotation.x = -Math.PI / 2]] = arr` (FLAT_DISC) and
+ * `[...[yy = a.y]] = arr` laundering a y (Y_DIFFERENCE); both are fixtures in
+ * {@link ARMING} now. An object pattern's rest can never hold a default: after
+ * an object's `...` an assignment allows only a name or a property access, so
+ * `({ ...[a = b.y] } = o)` and `({ ...{ k: a = b.y } } = o)` do not parse
+ * ("Invalid rest element target"). This check throws on them rather than
+ * skipping them, and V8 and the bundler refuse them too, so neither can be in
+ * a file that runs. (`tsc` accepts the second, measured, so it is not the
+ * guard here.)
  */
 function assignmentOf(node: Node, ancestors: readonly Node[]): { readonly left: Node; readonly right: Node } | undefined {
   if (node.type === 'AssignmentExpression') return node.operator === '=' ? node : undefined;
@@ -320,7 +358,8 @@ function assignmentOf(node: Node, ancestors: readonly Node[]): { readonly left: 
       at.type === 'ArrayPattern' ||
       at.type === 'ObjectPattern' ||
       (at.type === 'Property' && !at.shorthand) ||
-      (at.type === 'AssignmentPattern' && at.left === child);
+      (at.type === 'AssignmentPattern' && at.left === child) ||
+      (at.type === 'RestElement' && at.argument === child);
     if (!insideTarget) return undefined;
     child = at;
   }
@@ -584,6 +623,12 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
       'lowest = Math.min(lowest, proxy.getWorldPosition(s).y);\n' +
       'const d = headY - lowest;',
   },
+  // Laundered through a default under an array rest element, which
+  // `namesHoldingY` only sees if `assignmentOf` walks through the RestElement.
+  {
+    rule: 'Y_DIFFERENCE',
+    source: 'let yy;\n[...[yy = a.y]] = arr;\nconst d = yy - b.y;',
+  },
   { rule: 'Y_OVER_GROUND', source: 'const h = p.y - terrainHeight(p.x, p.z);' },
   { rule: 'Y_THRESHOLD', source: 'if (character.position.y < -2) fall();' },
   // The laundered form, the same hole `Y_DIFFERENCE` had above. Without this
@@ -594,6 +639,10 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
     source: 'const yy = a.position.y;\nif (yy < -2) fall();',
   },
   { rule: 'FLAT_DISC', source: 'disc.rotation.x = -Math.PI / 2;' },
+  // A default under an array rest element: TypeScript's tree spelled it a
+  // binary `=`, ESTree an AssignmentPattern under a RestElement, which the
+  // first oxc port did not walk through. See `assignmentOf`.
+  { rule: 'FLAT_DISC', source: '[...[disc.rotation.x = -Math.PI / 2]] = parts;' },
   { rule: 'FLAT_DISC', source: 'geometry.rotateX(Math.PI / 2);' },
   { rule: 'AXIS_ALIGNED_BOX', source: 'const soffit = new Box3().setFromObject(deck).min.y;' },
   {
