@@ -1,5 +1,6 @@
 import type { WebGLRenderer } from 'three';
 import type { Engine } from '../core/Engine';
+import type { ViewWarmup } from '../core/viewWarmup';
 import type { InputSystem } from '../core/input';
 import { PALETTE } from '../core/palette';
 import { Transition } from './Transition';
@@ -98,6 +99,15 @@ export class MiniGameHost {
   private gameElapsed = 0;
   private holdPrevious = false;
   private lastResultValue: MiniGameResult | null = null;
+  /**
+   * What the shut curtain waits for before it opens on a game — `Game`'s
+   * `RevealHold` (`core/viewWarmup.ts`): the game's first frame warm, its
+   * programs linked and textures up, and drawn once behind the curtain. Null
+   * until the game sets it, and then the curtain opens at once as it always did.
+   */
+  private holdOpen: (() => Promise<void>) | null = null;
+  /** True while the shut curtain waits on {@link holdOpen}: the game is built and drawn, but not yet played. */
+  private revealing = false;
 
   constructor(options: MiniGameHostOptions) {
     this.engine = options.engine;
@@ -126,6 +136,21 @@ export class MiniGameHost {
     return this.phase === 'in' || this.phase === 'loading' || this.phase === 'play' || this.phase === 'out';
   }
 
+  /** Sets {@link holdOpen}. Once, by `Game`. */
+  setHoldOpen(hold: () => Promise<void>): void {
+    this.holdOpen = hold;
+  }
+
+  /**
+   * The game on screen, for a warm-up behind the shut curtain
+   * (`core/viewWarmup.ts`): everything in its little world, shown yet or not —
+   * the whole of it is a few metres across and all of it is drawn soon.
+   */
+  warm(warmup: ViewWarmup): void {
+    const game = this.game;
+    if (game) warmup.add(game.scene, game.camera, 'whole');
+  }
+
   /** True while the mini-game is what the screen is showing, not the park. */
   get hidesPark(): boolean {
     return this.phase === 'play' || this.phase === 'out';
@@ -134,6 +159,11 @@ export class MiniGameHost {
   /** True from the first frame of the entrance to the last of the return. */
   get active(): boolean {
     return this.phase !== 'idle';
+  }
+
+  /** True while the curtain covers the whole screen — for `?perf=1`'s context. */
+  get curtainShut(): boolean {
+    return this.phase !== 'idle' && this.transition.covered;
   }
 
   /** What the last visit ended with. Handy for the debug overlay and tests. */
@@ -162,6 +192,7 @@ export class MiniGameHost {
    */
   abandon(): void {
     if (this.phase === 'idle') return;
+    this.revealing = false;
     this.game?.dispose();
     this.game = null;
     this.forgetLoad();
@@ -201,6 +232,9 @@ export class MiniGameHost {
 
       case 'play':
         this.transition.update(dt);
+        // Not played while the shut curtain waits for its first frame to be
+        // warm: she has not seen it yet, and a countdown would run on unseen.
+        if (this.revealing) return;
         this.updateGame(dt);
         if (this.pendingResult) this.leave();
         return;
@@ -368,7 +402,23 @@ export class MiniGameHost {
     this.overlay.setShown(true);
     this.overlay.setHeld(false);
     this.phase = 'play';
-    this.transition.play('opening');
+    // **Shut until the game's first frame is warm** (`core/viewWarmup.ts`).
+    // Opened at once, the first frame of the opening was the one that linked
+    // the game's programs and uploaded its textures — 9 to 12 links, a 78–84 ms
+    // frame on the shipped build — so the curtain sat still and then jumped.
+    const held = this.holdOpen?.();
+    if (!held) {
+      this.transition.play('opening');
+      return;
+    }
+    this.revealing = true;
+    const open = (): void => {
+      // Put away or replaced while it was held: nothing of this visit to open.
+      if (this.game !== game || this.phase !== 'play') return;
+      this.revealing = false;
+      this.transition.play('opening');
+    };
+    held.then(open, open);
   }
 
   /** Drops an in-flight or landed-but-unused game load. */
@@ -413,6 +463,7 @@ export class MiniGameHost {
   /** Curtain shut again: put the game away and reveal the park. */
   private finishLeaving(): void {
     const result = this.pendingResult;
+    this.revealing = false;
     this.game?.dispose();
     this.game = null;
     this.overlay.setShown(false);

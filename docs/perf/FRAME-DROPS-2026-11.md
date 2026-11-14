@@ -336,6 +336,49 @@ with **~70 k triangles** (crowd 1.67 M tris / 24 kids, the face patches alone
   shadows) — prototype behind a URL flag and show him.
 - **Check.** Shadow-pass draws per frame (GL probe counts framebuffer binds and
   draws per pass) ≤ budget; shadow re-renders per second ≤ N.
+- **Outcome, 13 Nov 2026 (`perf/shadow-cache-default`): the cache is built,
+  exact, and left OFF** (`?shadowCache=1` turns it on). Measured on a
+  production build after the other eleven packages had landed, seed 5, M4 Pro,
+  harness [`shadow-cache-2026-11-harness/`](shadow-cache-2026-11-harness/):
+  - **Its map is exact.** `SunShadowCache.audit()` draws three's own full pass
+    from the same light pose and compares the two maps texel by texel: 0
+    differing in every audit — park at morning, noon and sunset, walking, the
+    Rail Race at speed, ferris, Sky Cruiser, slide, cat bus, park train,
+    library and reptile house round trips (24 consecutive frames from the
+    door), 20 kinds of one-off static change. Not audited: the roof-garden
+    trampoline (its space did not take the harness's teleport). Controls: a blinded
+    survey gives 59–96 k differing texels, movers dropped 106–113 k. The audit
+    found one real hole (a swapped position attribute or index went unseen:
+    85,885 stale texels), now closed.
+  - **It is not invisible.** The light moves in steps; on a sun step the Rail
+    Race ring's shadow (rails 9.5 m up) jumps ~2 px at 1280×720 — the criterion
+    allows 0.6 % of a caster's height, 5.7 cm here — six times a second at noon and
+    up to every frame near sunrise and sunset (`steps.mjs`: a step changes
+    ~16 k pixels by > 8 levels where three's continuous light changes ~2 k a
+    frame). Taller casters jump further. Steps small enough to hide on the
+    park's tall casters (1 texel at 15 m) redraw the cache on **54 % of sunlit
+    frames** over a 150 s day (33 % at today's 5 m / 3 cm). Re-centring is
+    fine: no worse than three's own light following her (`recentre.mjs`).
+  - **It is not a clear win.** The per-frame survey that keeps it exact costs
+    ~0.4 ms on the M4 Pro (so ~1.6 ms at 4× throttle) and a redraw frame pays
+    it on top of a full pass. Shadow-pass CPU, cache off → on, clean pairs
+    only: standing mean 0.76–1.04 → 0.64–0.81 ms, p99 1.1–1.5 → 1.4–1.9 ms;
+    walking mean 0.82–0.88 → 0.63–0.67; Rail
+    Race 0.53–0.55 → 0.57–0.61 (worse); phone stand-in mean 4.3–4.8 → 3.6–4.1,
+    **p99 6.0–6.5 → 7.9–8.6 ms**. Whole-frame CPU means moved within run-to-run
+    noise. What it does cut is GPU work: shadow-pass triangles 0.46 M → 0.13 M
+    a frame standing (all triangles 1.00 M → 0.69 M).
+  - **Why the estimate above was wrong:** "map not re-rendered" removed the
+    pass outright; a cache that stays exact cannot, because the sun crosses the
+    sky in 150 s (`DAY_LENGTH_SECONDS`), so the map must be redrawn often, and
+    deciding what changed costs nearly what drawing it did.
+  - **For Jim:** (a) keep it off (recommended); (b) accept visible stepping on
+    tall shadows for the GPU triangles, a phone-tier question for step 20 once
+    real-phone numbers exist; (c) a slower sun changes the sums — at 600 s,
+    hiding the steps needs a redraw on 31 % of sunlit frames instead of 54 %.
+  - Found on the way: the `?perf=1` overlay asked for the GPU's name four times
+    a second, a synchronous GPU-process round trip that stalled the frames it
+    measured (~10 ms a call with the cache's passes queued); it now asks once.
 
 ### 8. The rainbow outline pass and post-processing
 
@@ -439,6 +482,17 @@ samples, unminified build):
 - **Risk.** Low. **Jim sees it?** No.
 - **Check.** `gpu:frame-time` (real GPU): 0 program links after hand-over
   when entering each space.
+- **Done, 14 Nov 2026 (`perf/first-entry-warmup`) — not as planned above.**
+  Rooms are not compiled behind the bus: a room hides the sun's rig and, since
+  #781, takes the park's lamps out of the graph, and light counts are in every
+  program's key, so a room compiled against the park's lights is a program it
+  never draws with. Instead every cover — the iris of a door, a lift or a
+  boarding, a curtain game's curtain, a deep-link boot — holds until the view
+  behind it is warm (`core/viewWarmup.ts`'s `RevealHold`): programs linked in
+  parallel, textures uploaded, drawn once under the cover. Rooms are built
+  behind the shut iris (`SpaceManager.changeToFurnished`), and rides build and
+  light their cars at the cut. The check is `gpu:first-entry`: no link waited
+  for and no frame over 100 ms where she can see, on every first entry.
 
 ### 15. Texture compression (KTX2) and atlases (step 21)
 
@@ -521,6 +575,11 @@ the deep-link worst case) and from the earlier runs:
 - **Check.** The `gpu:frame-time` boot run: 0 frames over 100 ms after the
   park is revealed, 0 program links after warm-up, and `new AudioContext`
   never called from inside a rAF callback (counted by the probe).
+- **First frame and texture uploads done, 14 Nov 2026** (`perf/first-entry-warmup`,
+  with item 14): a boot with no bus ride holds its first frames until the view
+  is warm, then compiles the rest of the park a slice a frame
+  (`Game.warmTheRestInBackground`); textures go up with the programs, behind
+  the cover. The NPC route plans (step 1b) and the first sound are not this.
 
 ---
 

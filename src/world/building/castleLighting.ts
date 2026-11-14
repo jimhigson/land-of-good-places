@@ -36,7 +36,8 @@ import {
   onPlate,
   TOP_DECK,
 } from './layout';
-import { keepOutsFor, scatterKeepOutsFor } from './dressing';
+import { keepOutsFor } from './dressing';
+import { scatterKeepOutsFor } from './castleFurniture';
 
 /**
  * **Fire in the castle** (issues #363 and #376).

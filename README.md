@@ -8,7 +8,7 @@ You can't lose and you can't die. You just explore the park, ride the rides
 cute things that follow you around in a little parade. Unless the grown-ups
 turn on **Mayhem mode**…
 
-Built with [Vite](https://vite.dev) 8.1, [three.js](https://threejs.org) and
+Built with [Vite](https://vite.dev) 8.3, [three.js](https://threejs.org) and
 TypeScript. See [GAME_DESIGN.md](./GAME_DESIGN.md) for the full design.
 
 ## Running it

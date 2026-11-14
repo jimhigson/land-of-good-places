@@ -408,6 +408,16 @@ not typecheck. `check` is the one that has an opinion.
 TypeScript is strict with `exactOptionalPropertyTypes: true`: optional
 properties must be **omitted**, never assigned `undefined`.
 
+**TypeScript is 7.1, the native compiler, and the only TypeScript here**
+(14 November 2026; `tsc --noEmit` went from ~8 s to ~1.3 s). It has no
+JavaScript API: `import ts from 'typescript'` gets you `{ version }` and
+nothing else. So the six checks that read code as a syntax tree
+(`check:pow-operator`, `check:one-audio-context`, `check:flat-primitives`,
+`check:cycle-tdz`, `check:procgen-boundary`, `check:client-no-solver`) parse
+with oxc, through rolldown, the copy Vite already installs; `scripts/ts-ast.mts`
+owns that, and says where its tree differs from TypeScript's. `rolldown` is
+pinned to the exact version Vite resolves: move the pin when Vite moves.
+
 ### Use current runtimes; never an old-version-only flag
 
 The checks and `scripts/*.mts` run **straight on Node** — no bundler, no

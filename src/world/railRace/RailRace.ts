@@ -378,7 +378,12 @@ export class RailRace implements GameSystem {
 
   /** Named `rideView` to match every other ride in `World`. */
   rideView: RaceCamera | null = null;
-  onRideChange: ((riding: boolean) => void) | null = null;
+  /**
+   * `Game`'s boarding wipe. `cut`, on the way on, is what must change only
+   * once the iris is shut — `Game` runs it at the wipe's midpoint; with
+   * nobody listening it is run at once.
+   */
+  onRideChange: ((riding: boolean, cut?: () => void) => void) | null = null;
   /** The race's on-screen framing. Wired by `Game` to `ui/RaceHud.ts`. */
   onRaceMoment: ((moment: RaceMoment) => void) | null = null;
   /**
@@ -631,7 +636,23 @@ export class RailRace implements GameSystem {
     // rivals — reset in arrive() so she is her normal size again once she is
     // walking around the park.
     this.player.model.root.scale.setScalar(RIDE_SCALE);
-    this.onRideChange?.(true);
+    // Headlamps on for the race, and only for the race. They are real
+    // `SpotLight`s (Jim, 1 August 2026) and the park has no other dynamic
+    // lights at all, so four idling carts must not leave eight of them burning
+    // in every material in the park — see `cart.ts`'s `HEADLAMP_RANGE`.
+    //
+    // **At the cut, behind the shut iris — not at the press.** Eight more
+    // lights is a new light count, and the light count is part of every
+    // material's program: switched on here, every frame of the closing iris
+    // drew the park with them and linked its programs one by one — 15 at the
+    // press, a 127 ms frame she watched (measured on the shipped build). At
+    // the cut nobody sees the frame that asks for them, and the iris holds
+    // shut until they are linked (`core/viewWarmup.ts`).
+    const lampsOn = (): void => {
+      for (const cart of this.carts) cart.cart.setHeadlamps(true);
+    };
+    if (this.onRideChange) this.onRideChange(true, lampsOn);
+    else lampsOn();
 
     // Everybody back to the line. Nothing moves until she picks a level and
     // the countdown runs out — a race that has already started when the
@@ -641,11 +662,6 @@ export class RailRace implements GameSystem {
       const fresh = riderOnGrid(cart.rider.lane, this.raceRing.route.scale);
       Object.assign(cart.rider, fresh);
     }
-    // Headlamps on for the race, and only for the race. They are real
-    // `SpotLight`s (Jim, 1 August 2026) and the park has no other dynamic
-    // lights at all, so four idling carts must not leave eight of them burning
-    // in every material in the park — see `cart.ts`'s `HEADLAMP_RANGE`.
-    for (const cart of this.carts) cart.cart.setHeadlamps(true);
     this.phase = 'levelSelect';
     this.raceTime = 0;
     this.finishedCount = 0;

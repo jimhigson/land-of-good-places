@@ -1,10 +1,11 @@
-import { Group, Vector3, type Object3D } from 'three';
+import { Group, Sphere, Vector3, type Object3D } from 'three';
 import type { PlacedDoorFrame } from '../../art/models/doorFrames';
 import { clearsTop, type CollisionWorld, type WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import type { ShopStand } from '../building/shops/Shops';
 import { SpaceManager } from '../SpaceManager';
+import { isDrawn } from '../../core/drawn';
 import { bandWalkedThrough, type PortalBand } from '../tapSpacing';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt, type SpaceId } from '../spaces';
@@ -73,10 +74,27 @@ import {
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_HOUSE_PLAY_RADIUS,
   REPTILE_SHELL_RADIUS,
+  REPTILE_BANYAN_HEIGHT,
+  REPTILE_HALF_X,
+  REPTILE_HALF_Z,
   TORTOISE_RIDE_STAND,
   EXHIBIT_PLACEMENTS,
   type LocalPoint,
 } from './layout';
+
+/**
+ * **Where every snake in the hall's two pools lives, for good** — the floor
+ * plate, up to the top of the banyan the grove snakes hang in (the tallest
+ * thing in the hall), with a metre to spare for a body against a wall. The
+ * pools' bound (`SnakeSegmentPool.holdWithin`), in the hall's own space:
+ * three cached one on its first cull and the slithering left it behind
+ * (`check:cull-audit`'s stale-bound clause). Every snake here is an exhibit
+ * of this hall, so nothing in the pools can leave it.
+ */
+const HALL_SNAKES_BOUND = new Sphere(
+  new Vector3(0, REPTILE_BANYAN_HEIGHT / 2, 0),
+  Math.hypot(REPTILE_HALF_X, REPTILE_HALF_Z, REPTILE_BANYAN_HEIGHT / 2) + 1,
+);
 
 /**
  * **The Reptile House** — Jim, 2 October 2026: *"a new building which is a
@@ -254,6 +272,8 @@ export class ReptileHouse implements GameSystem {
     this.hallRoot.add(this.bubble.sprite);
     const adults = new SnakeSegmentPool(this.hallRoot, 260, 'reptile-adults');
     const babies = new SnakeSegmentPool(this.hallRoot, 200, 'reptile-babies');
+    adults.holdWithin(HALL_SNAKES_BOUND);
+    babies.holdWithin(HALL_SNAKES_BOUND);
     this.hallContext = {
       root: this.hallRoot,
       atlas,
@@ -559,7 +579,10 @@ export class ReptileHouse implements GameSystem {
       else this.doorBubble.updateScreenSize(this.deps.camera);
     }
 
-    if (this.onForecourt || this.deps.plot) {
+    // Sunny, out in the park (or on the forecourt): only while she is drawn —
+    // the head's sway and the tongue's wag are functions of the clock and the
+    // tickle, so the first frame back is already right.
+    if ((this.onForecourt || this.deps.plot) && isDrawn(this.exterior.root)) {
       this.exterior.setNight(this.deps.nightFactor());
       // The head is the door now, so it only ever tilts a few hundredths of
       // a radian — the lips stay on the jambs' colliders — and the tongue,

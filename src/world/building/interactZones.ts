@@ -6,7 +6,7 @@ import {
   type ZoneAction,
 } from '../interact';
 import type { FeastProp } from '../../art/models/castleAssets';
-import { CASTLE_GREAT_HALL_DECK, greatHallSeats, SIT_PICK_RADIUS } from './castleFurniture';
+import type { GreatHallSeat } from './castleFurniture';
 import { SLIDE_PLAN } from '../slide/plan';
 import {
   BUILDING_BASE_Y,
@@ -80,6 +80,15 @@ export interface BuildingZoneState {
   /** Open shop unit `unitId`'s purchase panel. */
   openShop(unitId: string): void;
 
+  /**
+   * Every place at the banquet (`castleFurniture.ts`'s `greatHallSeats`) —
+   * handed in, because the seating plan is measured off the castle kit, which
+   * is the interior's lazy chunk (`castleInterior.ts`). Empty until the
+   * interior is furnished, when she cannot be in the hall to sit anyway.
+   */
+  readonly banquetSeats: readonly GreatHallSeat[];
+  /** How close a tap must land to a blank place to mean it (`SIT_PICK_RADIUS`). */
+  readonly banquetSeatPickRadius: number;
   /**
    * Which blank place at the banquet she is sitting in, or `null` — the same
    * mechanism the hotel's `seatedAt` is, and for the same reason: it is what
@@ -244,7 +253,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
   // offers nothing, which is the same mechanism the hotel's `chair.taken` is:
   // a chip that appears and then refuses teaches a six-year-old that chips
   // sometimes lie.
-  greatHallSeats(CASTLE_GREAT_HALL_DECK).forEach((seat, index) => {
+  state.banquetSeats.forEach((seat, index) => {
     if (!seat.free) return;
     zones.push({
       id: `banquet-seat-${index}`,
@@ -254,7 +263,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       // table rather than the flagstones under the bench.
       y: BUILDING_BASE_Y + 1,
       z: floorZ(CASTLE_HALL, seat.z),
-      pickRadius: SIT_PICK_RADIUS,
+      pickRadius: state.banquetSeatPickRadius,
       // The seating plan's own stand spot — measured out past the bench plank
       // it belongs to, rather than a fixed distance guessed here. See
       // `castleFurniture.ts`'s `SIT_STAND_BACK`.

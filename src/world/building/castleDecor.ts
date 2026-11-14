@@ -30,9 +30,9 @@ import {
 import { softMaterial } from './parts';
 import { BEAM_UNDERSIDE, BEAM_WIDTH, CASTLE_CEILING_CLEAR } from './castleFabric';
 import { CASTLE_HEARTH, castleTorchAnchors, type WallAnchor } from './castleLighting';
-import { DECK_ROUNDEL, deckIsFurnished, keepOutsFor, scatterKeepOutsFor } from './dressing';
+import { DECK_ROUNDEL, deckIsFurnished, keepOutsFor } from './dressing';
 import { buildBurrows, buildRoofMeadow } from './roofMeadow';
-import { dressGreatHall, isTapestryBay, type CastleDecorSolid } from './castleFurniture';
+import { dressGreatHall, isTapestryBay, scatterKeepOutsFor, type CastleDecorSolid } from './castleFurniture';
 import {
   HALL_DECK,
   insideInterior,

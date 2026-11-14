@@ -7,6 +7,7 @@ import {
   Matrix4,
   Mesh,
   Quaternion,
+  Sphere,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -124,6 +125,10 @@ export class BallPit {
    *  converted to pit-local. Computed once: the anchor never moves. */
   private readonly groundWorldY: number;
   private lastAwake = -1; // -1 = "never stepped yet", forces the first step to run.
+  /** The balls' bound, in the mesh's own space — centred on the floor, sized by {@link fitBound}. */
+  private readonly bound = new Sphere(new Vector3(0, REST_Y, 0), 0);
+  /** How far one ball's drawn sphere reaches from its centre, as three bounds it. */
+  private readonly ballReach: number;
   /** Sub-steps still owed to the settling warm-up — see `WARMUP_SECONDS`
    *  above. Paid off within a per-frame budget from `update()` rather than all
    *  at once in the constructor. */
@@ -186,6 +191,11 @@ export class BallPit {
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = true;
     this.group.add(this.mesh);
+    // Ours, not three's — see `fitBound`.
+    const ball = this.mesh.geometry;
+    ball.computeBoundingSphere();
+    this.ballReach = ball.boundingSphere!.center.length() + ball.boundingSphere!.radius;
+    this.mesh.boundingSphere = this.bound;
 
     this.sim = new BallPitSimulation(
       BALL_PIT_COUNT,
@@ -228,6 +238,29 @@ export class BallPit {
       SPLASH_UP_STRENGTH * strength,
     );
     this.lastAwake = this.sim.count; // wake the fast-path check below immediately
+  }
+
+  /**
+   * Still settling the freshly-spawned pile (see `WARMUP_SECONDS`) — work that
+   * has to finish wherever she is, so the pit is never seen settling.
+   */
+  get settling(): boolean {
+    return this.warmupSubstepsRemaining > 0;
+  }
+
+  /**
+   * **Pays off the whole settling warm-up now**, without the per-frame budget.
+   * For `?clock=` only (`core/checkClock.ts`): a check that audits one moment
+   * cannot have the pile half-fallen on a slow machine and settled on a fast
+   * one, and spread over frames by milliseconds it would be. The pile reached
+   * is the same either way — {@link WARMUP_FRAME_BUDGET_MS}'s note: the
+   * sub-steps, their order and their count do not depend on how many land in
+   * each frame. A no-op once the warm-up is paid.
+   */
+  settleNow(): void {
+    if (this.warmupSubstepsRemaining <= 0) return;
+    this.warmupSubstepsRemaining -= this.sim.settle(this.warmupSubstepsRemaining, Number.POSITIVE_INFINITY);
+    this.writeDirtyMatrices();
   }
 
   update(dt: number, elapsed: number): void {
@@ -285,6 +318,30 @@ export class BallPit {
   private writeAllMatrices(): void {
     for (let i = 0; i < this.sim.count; i += 1) this.writeMatrix(i);
     this.mesh.instanceMatrix.needsUpdate = true;
+    this.fitBound();
+  }
+
+  /**
+   * **The sphere three culls the balls by, kept true as they move.** three
+   * works out an instanced mesh's bound on its first cull and never looks
+   * again, and a pile that splashes when she lands off the slide threw balls
+   * 0.4 m past the one it had cached for the settled pile — the whole pit was
+   * then free to be culled with balls on screen (`check:cull-audit`'s
+   * stale-bound sweep). So the pit owns its bound: a sphere on the floor's
+   * centre reaching the furthest ball, re-measured — one pass over the drawn
+   * positions, no allocation — only on a frame a ball was redrawn, which is
+   * none at all once the pile sleeps.
+   */
+  private fitBound(): void {
+    const { drawX, drawY, drawZ } = this.sim;
+    let furthest = 0;
+    for (let i = 0; i < this.sim.count; i += 1) {
+      const x = drawX[i] ?? 0;
+      const y = (drawY[i] ?? REST_Y) - REST_Y;
+      const z = drawZ[i] ?? 0;
+      furthest = Math.max(furthest, x * x + y * y + z * z);
+    }
+    this.bound.radius = Math.sqrt(furthest) + this.ballReach;
   }
 
   /** Only balls whose *drawn* position moved this frame get a matrix rewrite
@@ -298,7 +355,10 @@ export class BallPit {
       this.writeMatrix(i);
       changed = true;
     }
-    if (changed) this.mesh.instanceMatrix.needsUpdate = true;
+    if (changed) {
+      this.mesh.instanceMatrix.needsUpdate = true;
+      this.fitBound();
+    }
   }
 
   /** Draws ball `i` where the simulation says to draw it this frame — its

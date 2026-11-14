@@ -131,9 +131,11 @@ export interface LiftRideDeps {
   /**
    * **The portal.** Teleport the player to `floor`'s lift alcove behind a
    * closed iris, rebinding the play bounds and swapping which floor is
-   * visible. `Building` owns all of that; this file only asks.
+   * visible. `Building` owns all of that; this file only asks. `arrived` is
+   * called there, behind the iris, once she is on `floor` — and not at all if
+   * the lift has let her go by then.
    */
-  travelTo(floor: CastleFloor): void;
+  travelTo(floor: CastleFloor, arrived: () => void): void;
   /** Stops any tap-to-move walk in progress before the character boards. */
   cancelWalk(): void;
   player(): Player | null;
@@ -354,9 +356,16 @@ export class LiftRide implements LiftPanelSource {
         if (this.phaseT >= TRAVEL_SECONDS && !this.travelled) {
           this.travelled = true;
           // The portal fires: iris, teleport, new play bounds, the destination
-          // floor made visible. Alighting begins on the far side of it.
-          this.deps.travelTo(this.to);
-          this.beginAlight(this.to);
+          // floor made visible. Alighting begins on the far side of it — **at
+          // the iris's midpoint, not now**: begun here, the step posed her on
+          // the destination floor from the next frame, while the iris had
+          // barely begun to close, so the new floor (and, for the roof garden,
+          // the sun's whole rig) was drawn and linked in frames she could see:
+          // 8 + 8 links, a 37–404 ms frame, and the roof through a wide-open
+          // iris on the first frame it was drawn (measured on the shipped
+          // build). She waits in the car meanwhile, as she has been.
+          const to = this.to;
+          this.deps.travelTo(to, () => this.beginAlight(to));
         }
         return;
       }
@@ -420,13 +429,15 @@ export class LiftRide implements LiftPanelSource {
    * Stepping out into the room, on the floor she pressed for.
    *
    * **Every point comes from `floor`, not from `player.position`** — and that
-   * is not a style choice, it is the whole correctness of the manoeuvre.
-   * {@link travelTo} runs behind a closed iris, so the teleport has *not
-   * happened yet* when this is called on the very next line: she is still
-   * standing in the alcove of the floor she left. Reading her position here
-   * made the glide interpolate from the old floor's alcove to the new one's —
-   * **three hundred metres across open nothing**, with her visibly sliding
-   * through the void between two castles for half a second.
+   * is not a style choice, it is the whole correctness of the manoeuvre. This
+   * used to be called on the line after {@link travelTo}, before its iris had
+   * closed, when she was still standing in the alcove of the floor she left:
+   * reading her position here made the glide interpolate from the old floor's
+   * alcove to the new one's — **three hundred metres across open nothing**,
+   * with her visibly sliding through the void between two castles for half a
+   * second. It is called behind the iris now (`travelTo`'s `arrived`), where
+   * she has just been posed in the new alcove, and still reads nothing of
+   * where she was.
    *
    * Every check was green: the arrival is correct, the space is correct, and
    * the validator asserts where she *ends up*, not the path she takes to get

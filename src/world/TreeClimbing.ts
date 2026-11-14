@@ -475,6 +475,9 @@ export class TreeClimbing implements GameSystem {
     for (const character of this.npcs.all) {
       const driver = character.driver;
       if (!(driver instanceof WanderDriver)) continue;
+      // Held still with the rest of the crowd while she is somewhere it is not
+      // (`NpcSystem.crowdLiveAt`): up her tree, exactly as she was.
+      if (this.npcs.isHeldStill(character)) continue;
 
       const shouldClimb = driver.climbing;
       const isClimbing = character.climbing;

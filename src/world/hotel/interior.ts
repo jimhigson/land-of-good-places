@@ -13,6 +13,7 @@ import {
   Vector3,
 } from 'three';
 import { glbCanvasTexture } from '../../art/style/glb';
+import { isDrawn } from '../../core/drawn';
 import { lineSeconds } from '../../ui/speechTiming';
 import { LiftAlcove } from '../lift/LiftAlcove';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
@@ -2060,6 +2061,28 @@ export class HotelInterior {
   // ---------------------------------------------------------------- frame
 
   update(context: FrameContext): void {
+    // The key turning in the lock. Before the player-null return, so a
+    // headless world (check:hotel) can watch the door open too — and before
+    // the drawn gate below, because it is the collision world's, not a picture.
+    if (this.suiteLock && saveFlags.hasHotelKey()) {
+      this.collision.removeWall(this.suiteLock);
+      this.suiteLock = null;
+    }
+    // **Nothing else while the hotel is not drawn** (120 fps plan, step 3):
+    // she is in the park or another building, and every line of
+    // {@link animate} is a room nobody can see — the statue's turntable, the
+    // disco balls, the shopkeepers, the children at breakfast, the lift and
+    // the doors. `check:undrawn-still` counted 5,384 changes to them in ten
+    // seconds of the garden before this gate.
+    if (!isDrawn(this.hotelRoot)) return;
+    this.animate(context);
+  }
+
+  /**
+   * The hotel's frame, while it is drawn — see {@link update}. Public only so
+   * `check:undrawn-still --mutate` can put back the shape before the gate.
+   */
+  animate(context: FrameContext): void {
     const { dt, elapsed, input } = context;
     // `this.spaces` is stepped by `Hotel`, which shares it with the front door.
     this.updateOverhangCutaway(context);
@@ -2073,13 +2096,6 @@ export class HotelInterior {
     // a second opinion about where a pet is on 23 Aug 2026 — see
     // {@link sendPetsToBed}.
     this.updateNapGlyphs(elapsed);
-
-    // The key turning in the lock. Before the player-null return, so a
-    // headless world (check:hotel) can watch the door open too.
-    if (this.suiteLock && saveFlags.hasHotelKey()) {
-      this.collision.removeWall(this.suiteLock);
-      this.suiteLock = null;
-    }
 
     this.lift.update(dt);
     // After the lift, so the leaves answer to this frame's phase rather than
@@ -2421,7 +2437,7 @@ export class HotelInterior {
   }
 
   /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
-  travelTo(room: HotelRoom): void {
+  travelTo(room: HotelRoom, arrived: () => void): void {
     // `hop`, not `changeTo` — no `isChanging` flag and no `cancelWalk`, which
     // is what this always did. See `SpaceManager.hop` for why the difference
     // is preserved rather than tidied here.
@@ -2441,6 +2457,8 @@ export class HotelInterior {
         player.setRidePose(x, 0, z, Math.PI / 2);
       }
       this.boundTo(room);
+      // …and only now does she step out, on this side of the iris.
+      arrived();
     });
   }
 

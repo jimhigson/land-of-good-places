@@ -155,14 +155,99 @@ export function nextLodLevel(current: number, share: number): number {
   return current;
 }
 
-/** Far levels already derived, per source geometry and then per tolerance and texturing. */
-const lowCache = new WeakMap<BufferGeometry, Map<string, BufferGeometry>>();
+/**
+ * Far levels already derived, per source geometry and then per tolerance and
+ * texturing — `null` where the source is its own far level. Two geometries of
+ * the same content share one of these maps ({@link twinLevels}), which is why
+ * "no second level" is `null` rather than the source: each twin must get its
+ * own source back, never the other's.
+ */
+const lowCache = new WeakMap<BufferGeometry, Map<string, BufferGeometry | null>>();
+
+/**
+ * Every geometry a far level has been asked of, by {@link shapeKey} — so that
+ * a second geometry of **the same content** shares the first one's far levels
+ * instead of simplifying again.
+ *
+ * Content, not identity, because the same drawing is often built twice: the
+ * great hall's banquet builds its own crowd prototype (`KidCrowd`), part for
+ * part the same as the park crowd's — 30 of its 44 parts separate geometries
+ * with byte-identical arrays — and simplifying them again was 59 ms of the
+ * castle interior's 105 ms build, measured in Chromium on the frame the iris
+ * closes on her first walk in (#759). Held weakly: a geometry nobody draws
+ * any more is not kept alive by having once been simplified.
+ */
+const seenByShape = new Map<string, WeakRef<BufferGeometry>[]>();
+
+/**
+ * Which geometries could be twins: vertex count, index count and attribute
+ * names. Only narrows the search — {@link sameContent} decides. `null` for a
+ * geometry this does not try to match (morph targets or interleaved
+ * attributes), which then simply keeps its own far levels.
+ */
+function shapeKey(geometry: BufferGeometry): string | null {
+  for (const targets of Object.values(geometry.morphAttributes)) {
+    if ((targets?.length ?? 0) > 0) return null;
+  }
+  const names = Object.keys(geometry.attributes).sort();
+  for (const name of names) {
+    if ('isInterleavedBufferAttribute' in (geometry.attributes[name] as BufferAttribute | InterleavedBufferAttribute)) return null;
+  }
+  const vertices = geometry.getAttribute('position')?.count ?? 0;
+  return `${vertices}|${geometry.index?.count ?? -1}|${names.join(',')}`;
+}
+
+/** Element for element the same arrays, of the same type. */
+function sameArray(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a.constructor !== b.constructor || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * True when `a` and `b` draw exactly the same thing — every attribute (whose
+ * names {@link shapeKey} has already matched), the index and the draw range —
+ * so a far level derived from one is, exactly, the far level of the other.
+ */
+function sameContent(a: BufferGeometry, b: BufferGeometry): boolean {
+  for (const name of Object.keys(a.attributes)) {
+    const x = a.attributes[name] as BufferAttribute;
+    const y = b.attributes[name] as BufferAttribute;
+    if (x.itemSize !== y.itemSize || x.normalized !== y.normalized || !sameArray(x.array, y.array)) return false;
+  }
+  if (a.index && b.index && !sameArray(a.index.array, b.index.array)) return false;
+  return a.drawRange.start === b.drawRange.start && a.drawRange.count === b.drawRange.count;
+}
+
+/**
+ * The far levels of a geometry already seen with the same content as
+ * `source`, or `null` if there is none — in which case `source` is
+ * remembered as the one later twins share with.
+ */
+function twinLevels(source: BufferGeometry): Map<string, BufferGeometry | null> | null {
+  const key = shapeKey(source);
+  if (key === null) return null;
+  let seen = seenByShape.get(key);
+  if (!seen) seenByShape.set(key, (seen = []));
+  for (let i = seen.length - 1; i >= 0; i -= 1) {
+    const twin = seen[i]!.deref();
+    if (!twin) {
+      seen.splice(i, 1);
+      continue;
+    }
+    const levels = lowCache.get(twin);
+    if (levels && sameContent(twin, source)) return levels;
+  }
+  seen.push(new WeakRef(source));
+  return null;
+}
 
 /**
  * The cheaper drawing of `source` that stays within `tolerance` of it — in
  * the geometry's own units, so a caller drawing it scaled divides the world
- * tolerance by that scale. Computed once per geometry and tolerance, and
- * shared by everything drawing it.
+ * tolerance by that scale. Computed once per content and tolerance, and
+ * shared by everything drawing it — including a different geometry object
+ * of the same content ({@link seenByShape}).
  *
  * `textured` says whether anything drawn with it reads its UVs. Where nothing
  * does (a part tinted by `instanceColor` and lit by a ramp), a UV seam is not
@@ -173,20 +258,23 @@ const lowCache = new WeakMap<BufferGeometry, Map<string, BufferGeometry>>();
  * a caller can always draw what it gets back, and compares with `===` to
  * learn there is no second level.
  *
+ * Like any cache of derived geometry, it takes a geometry's content as fixed
+ * once a far level has been asked of it.
+ *
  * **For single-material draws only**: the far level has no `groups`, so a mesh
  * drawn with a material array must not use it.
  */
 export function lowDetailGeometry(source: BufferGeometry, tolerance: number, textured = true): BufferGeometry {
   let levels = lowCache.get(source);
-  if (!levels) lowCache.set(source, (levels = new Map()));
+  if (!levels) lowCache.set(source, (levels = twinLevels(source) ?? new Map()));
   const key = `${tolerance}:${textured ? 1 : 0}`;
   const cached = levels.get(key);
-  if (cached) return cached;
+  if (cached !== undefined) return cached ?? source;
   const triangles = triangleCount(source);
   const simplified = triangles < LOD_MIN_TRIANGLES ? null : simplifyWithin(source, tolerance, textured);
-  const low = simplified && triangleCount(simplified) <= triangles * (1 - LOD_MIN_SAVING) ? simplified : source;
+  const low = simplified && triangleCount(simplified) <= triangles * (1 - LOD_MIN_SAVING) ? simplified : null;
   levels.set(key, low);
-  return low;
+  return low ?? source;
 }
 
 /** Triangles a geometry draws. */
@@ -257,8 +345,9 @@ const FLIP_COS = 0.2;
  *
  * Linear-ish in practice (a heap of candidate collapses); the crowd child's
  * forty thousand triangles took 114–133 ms at load on an M4 Pro at load
- * average 12, once per crowd (the banquet's crowd builds its own prototype,
- * so it pays again).
+ * average 12. Once per session, not once per crowd: the banquet's crowd
+ * builds its own prototype, and {@link lowDetailGeometry} hands it the park
+ * crowd's far levels because its parts have the same content.
  *
  * Returns `null` if the geometry cannot be simplified at all.
  */
