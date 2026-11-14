@@ -1,49 +1,52 @@
 # HANDOFF — first-entry warm-up (perf/first-entry-warmup)
 
 Plan items 14 (step 8, shader precompile for every space) and 19 (step 9, load
-hitches), `docs/perf/FRAME-DROPS-2026-11.md`. Worktree
-`.claude/worktrees/first-entry-warmup`, my port **6021** (preview or dev, one
-at a time, killed by PID). No PR: a later stage opens it.
+hitches), `docs/perf/FRAME-DROPS-2026-11.md`. Resumed 14 Nov by a second
+engineer; worktree `.claude/worktrees/first-entry-warmup-r2` (local branch
+`perf/first-entry-warmup-r2`, pushed to `origin perf/first-entry-warmup`;
+the first engineer's worktree `.claude/worktrees/first-entry-warmup` still
+holds their two uncommitted files, committed here as d7dd433e — leave it).
 
-## Measured causes (baseline = main 34f20970, minified build, M4 Pro, Chrome for Testing 1234 headless/Metal, 1440×900@2, seed 5)
+Process (Jim, 14 Nov): no QA, no reviewer; I verify in a browser, open the PR,
+CI runs. Coordinator: perf PRs merge on green CI + my own browser proof (no
+preview for Jim). #759 (lazy castle) is held to land with this; the key proof
+is "with #759 merged locally, the castle's build runs with the iris shut".
 
-Harness lives in the session scratchpad (`measure.mjs`, `summarise.mjs`,
-`tracetop.mjs`, a copy of the plan's `probe.js` renamed to `window.__glp` so it
-does not clash with `?perf=1`). Frames are classified by the iris state
-(MutationObserver on `.iris[data-closed]`).
-
-| entry | worst visible frame | links on visible frames | cause (trace) |
-|---|---|---|---|
-| library door (`/library-door` + W) | 118.6 ms closing, 45 ms opening | 13 | `furnishLibraryRoom` built **in the door frame** (131 ms, before the iris moves) + 10 links on the opening frame |
-| reptile door (`/reptile-house-door` + W) | 111.8 ms opening | 15 | 13 links (111 ms CPU) on the opening frame; hall build 34 ms in the door frame; then `ExhibitCamera.advanceWarm` 25–53 ms frames for ~0.8 s |
-| rail race (E at stand 89.72,17.49) | 127 ms at the press, 97 ms opening | 32 | headlamps (8 SpotLights) switched on **at the press** → every park material relinks during the closing iris; 10 links + 16 tex at opening |
-| ferris (E at -40.67,-40.85) | 108.6 ms closing | 40 | gondola/show built and shown at the press; 16 links while closing |
-| sky cruiser (E at 35.69,-26.62) | 56 ms opening | 8 | 6 links + 12 tex on the opening frame |
-| deep links (/castle, /hotel, /library, /reptile-house…) | 54–135 ms visible; 210–270 ms first frame | 3–40 | first frame links ~31 programs + 16 textures (40 MB); interior links on the iris-opening frame |
-| NPC route plans | ~40 ms frames | 0 | `NavGrid.findRoute` A* — **not mine** (perf/nav-resumable) |
-
-Program keys include the light counts for every material, and every interior
-turns the sun's rig off (`DayNight.setIndoors`) — so nothing warmed against the
-park's lights is ever the program an interior draws with.
-
-## Design (committed)
-- `src/core/viewWarmup.ts`: `drawnBy` (three's cull, no draw), `ViewWarmup`
-  (compile the culled view in one `compile` call via an `ObjectList`, poll
-  `isReady()` = KHR_parallel_shader_compile, upload textures ≤6 ms/frame),
-  `RevealHold` (phases collect → wait → behind → settle; request(why) promise).
+## Design (what is on the branch)
+- `src/core/viewWarmup.ts`: `drawnBy`, `ViewWarmup` (compile the view in one
+  `compile`, poll `isReady()` = KHR_parallel_shader_compile, upload textures
+  ≤ 6 ms/frame; `add(scene, camera, 'whole')` for a curtain game's world),
+  `RevealHold` (collect → wait → behind → settle; `request(why)`).
+- Covers that hold: the iris (`Transitions.setHoldOpen`), the curtain
+  (`MiniGameHost.setHoldOpen`, game not played while held), the boot
+  (`Game.holdFirstFrames`, no-bus boots). `?clock=` waits on a hold.
 - `Transitions.irisWipe`: `ready` may be a function, called once the iris is
-  shut; after the midpoint the iris waits for `setHoldOpen`'s promise.
-- `SpaceManager.changeToFurnished`: `furnish()` called once the iris is shut
-  (generic — covers the lazy castle when it lands; lazy-castle's HANDOFF lists
-  the same fix as "Next", so that branch should drop it when it merges main).
-- `Game.render` → `revealHold.frame(collect, draw)`; crowd cull moved before
-  the hold; `holdFirstFrames()` for boots with no bus; background
-  `ShaderWarmup` after such a boot (`warmTheRestInBackground`).
-- `main.ts finishLaunch`: no-bus boots hold the first frames, HUD and splash
-  revealed when warm.
+  really shut (`whenShut`, polls the eye's width).
+- `SpaceManager.changeToFurnished`: `furnish()` called once shut — the generic
+  hook every lazy room uses (library, reptile house, hotel, and #759's castle).
+- Rides: rail race lamps on at the cut; ferris car + show **built** at the cut
+  (visit serial guards a cancel before the cut); `Game.rideCamera` reads the
+  camera after the cut.
+- Shader warm-ups (bus, no-bus background) compile the park only: rooms were
+  compiled against the park's lights, never used (light counts are in every
+  program key; rooms hide the sun rig, #781 detaches the park's lamps).
+- Exhibit solver: `isClearCircle` asked once per (bearing, distance), not per
+  height — same candidates chosen (transcript diff vs main, with a main-vs-main
+  control showing the same noise lines).
+- `gpu:first-entry` (`scripts/check-first-entry.mts` + `first-entry-probe.js`):
+  the instrument, GPU-only, named in `check:chain-coverage`'s GPU_ONLY.
+
+## Measurements (M4 Pro, Chrome for Testing 1234 headless/Metal + WebKit 2336, seed 5, 1280×800@2, load 25–80 from a VM; harness in scratchpad `fe-warmup/`)
+Lazy castle A/B (main d2ebb4c1 + lazy-castle vs branch + lazy-castle, 4 runs each):
+- WebKit: main+lc build freeze 80–89 ms with iris 0.54–0.61 of the diagonal
+  open, 2/4 runs drew the new room through an open iris (32 px, 916 px); worst
+  visible 80–102 ms. Branch+lc: freeze 83–105 ms with iris shut 4/4, worst
+  visible 19–34 ms, first new-room frame shut 4/4.
+- Chromium: main+lc 59–63 ms at 0.20–0.32 open (3/4), worst visible 61–71;
+  branch+lc 66–69 ms shut 4/4, worst visible 10.3 ms 4/4.
+- Cost: close→open 331–351 ms (main) → 474–595 ms (branch) on that first entry.
 
 ## Next
-- [ ] build + measure every scenario after; rides' press-time changes (rail race lamps, ferris build) → move to the cut
-- [ ] exhibit camera warm frames (reptile) — decide
-- [ ] check (served, counts) + GPU frame mode + control; prove red
-- [ ] 4× throttle numbers
+- [ ] Chromium batch main vs branch (cr-r2), WebKit doors/rides, screenshot pairs
+- [ ] prove gpu:first-entry red on main's build, green on branch
+- [ ] check:exits, check:render-budget, lazy tests; PR
