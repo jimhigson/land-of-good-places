@@ -110,6 +110,8 @@ const KNOWN_ORPHANS: Record<string, string> = {};
  */
 const GPU_ONLY: Record<string, string> = {
   'gpu:frame-time': 'asserts the frame-time tail on a real GPU (was check:frame-time, orphaned since #246)',
+  'gpu:first-entry':
+    'asserts every first entry and first ride links nothing and freezes nothing she can see, on a real GPU (120 fps plan steps 8 and 9)',
   'gpu:arrival-starts':
     'asserts a cold boot hands over control under a 6x CPU throttle on a real GPU (was check:arrival-starts, orphaned since #264)',
 };
