@@ -1241,17 +1241,32 @@ export function* solveExhibitShotSteps(
   for (const swing of EYE_SWINGS) {
     const bearing = behind + (swing * Math.PI) / 180;
     for (const back of EYE_BACKS) {
+      /**
+       * Whether the floor under this bearing and distance is open — the same
+       * answer at every height, so asked once rather than once a height:
+       * `isClearCircle` walks every collider in the park, and asked for all
+       * 840 eyes it was most of the frame an exhibit's warm-up took on her
+       * first walk into the hall (a 63 ms frame, 33 ms of it here, measured on
+       * the shipped build). Asked lazily, at the first height that gets this
+       * far, so every eye still meets the tests in the order it always did —
+       * and asked again after a pause, when the world may have moved on.
+       */
+      let floorClear: boolean | null = null;
       for (const height of EYE_HEIGHTS) {
         // A step at a time: each eye is framed through a lens or three, and there are hundreds.
         built += 1;
-        if (stepwise && built % CANDIDATES_PER_STEP === 0) yield;
+        if (stepwise && built % CANDIDATES_PER_STEP === 0) {
+          yield;
+          floorClear = null;
+        }
         const out = start + back;
         const eye = new Vector3(origin.x + Math.sin(bearing) * out, room.floorY + height, origin.z + Math.cos(bearing) * out);
         if (!insideHall(eye, room)) {
           if (report) report.outside += 1;
           continue;
         }
-        if (!world.collision.isClearCircle(eye.x, eye.z, EYE_FLOOR_CLEAR)) {
+        floorClear ??= world.collision.isClearCircle(eye.x, eye.z, EYE_FLOOR_CLEAR);
+        if (!floorClear) {
           if (report) report.overSolid += 1;
           continue;
         }
