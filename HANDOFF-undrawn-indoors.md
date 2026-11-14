@@ -39,15 +39,37 @@ it. Merge `origin/main` with `git -c rerere.enabled=false merge origin/main` bef
   `arrivedByBus` would be true on that save anyway" is false for a profile made by any deep link. Repro: fresh
   profile, `/spawn`, walk into the hotel, wait 10 s, open `/`, press "keep playing" → the bus arrival plays.
 
-## Measurements
-First engineer (13 Nov, load ~8-10), cpu p50 ms x1 before -> after: library 3.0,3.5 -> 1.6,1.7; reptile 3.7,3.8 ->
-2.3,2.8; mall 3.6,4.0 -> 2.3,2.3; great hall 5.7,5.4 -> 3.7,3.7; roof 3.4,3.4 -> 1.5,1.9; hotel 4.4,6.2 -> 4.4,4.9;
-park 3.8,4.6 -> 4.6,4.9 (park noise; profile identical). x4 in the git history of this file.
-14 Nov: **the Mac is not quiet** — a Virtualization VM (not ours) at ~860 % CPU, load 50-230, display asleep (headless
-Chrome at 60 Hz, `CVDisplayLinkCreateWithCGDisplay failed`). Wall-clock pairs were garbage (hotel after 2.9 -> 15 ms
-between rounds); thread time (`thread-time.mjs`, trace `tdur`) tracks wall time here (E-cores / contention), so it does
-not escape the load either. Method now: interleaved pairs through one port (`$SP/u2/twin-serve.mjs`, before.localhost /
-after.localhost on 6011), min and median per build (`thread-table.mjs`), load on every sample.
+## Measurements — the A/B (14 Nov, 11:20-11:54, M4 Pro, seed 5, standing still, 1440x900 @ DPR 2)
+before = main 27e570b3, after = this branch a590d977 (= 96cfe195's code). Main-thread **thread** time of the
+animation frame (Chrome trace `FireAnimationFrame` `tdur`) per frame, `thread-time.mjs`, a fresh browser per sample,
+before/after interleaved and the order flipped each round; min / median of n pairs; `thread-table.mjs`.
+Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout (a VM not ours).
+
+| scene | space | n | before min / med | after min / med | game cpu p50 (min) | tris |
+|---|---|---|---|---|---|---|
+| park | garden | 8 | 3.18 / 3.78 | 3.52 / 3.84 | 3.1 → 3.5 | 1.19 M → 1.20 M |
+| hotel lobby | hotel.lobby | 4 | 3.48 / 3.55 | **1.74 / 1.81** | 3.5 → 1.6 | 164 k → 116 k |
+| great hall | castle.hall | 4 | 4.70 / 4.83 | **2.95 / 3.08** | 4.7 → 3.0 | 1.18 M → 1.12 M |
+| library | library | 3 | 2.20 / 2.25 | **1.19 / 1.26** | 2.1 → 1.0 | 489 k → 441 k |
+| reptile house | reptileHouse | 3 | 2.87 / 2.90 | **1.66 / 1.67** | 2.8 → 1.4 | 488 k → 440 k |
+| castle mall | castle.mall | 3 | 2.86 / 3.23 | **1.65 / 1.70** | 2.8 → 1.5 | 193 k → 132 k |
+| castle roof | castle.roof | 3 | 2.41 / 2.46 | **1.24 / 1.28** | 2.3 → 1.0 | 292 k → 237 k |
+
+- **Every room ~1-1.75 ms a frame cheaper (36-49 %)**; the park at parity (pairs within ±0.36 ms either way, as it
+  must be: in the garden every gate is open).
+- **Control on the instrument** (`results/tt-control.jsonl`): a 2 ms busy loop added to every animation frame of both
+  builds reads 5.51-5.99 ms in the park against medians 3.78/3.84 without — +1.7 to +2.2 ms seen of 2 ms added — while
+  the game's own cpu p50 (which times only `tick`) stays at 3.5-3.9: the instrument sees main-thread work, the probe
+  is not fooled by a foreign callback.
+- **Why a fresh browser per sample**: the first run (one browser, a context per sample, `$SP/u2/tt-focus.jsonl`)
+  read the park after-build 5.25/5.66/6.12 ms in the three rounds where it followed a before-build context in the same
+  browser, 4.29/3.77 when it came first, while before read 4.06-4.47 every time — gone with a browser per sample.
+- Not measured here: the x4 stand-in (CDP throttling suspends the thread, so thread time cannot see it, and wall
+  time was swamped by the VM). The first engineer's x4 wall-clock rows (13 Nov, load 8-10) are in this file's git
+  history; the stand-in is ~4x the desktop figure.
+- First engineer's wall-clock (13 Nov, load ~8-10), cpu p50 x1 before -> after: library 3.0,3.5 -> 1.6,1.7; reptile
+  3.7,3.8 -> 2.3,2.8; mall 3.6,4.0 -> 2.3,2.3; great hall 5.7,5.4 -> 3.7,3.7; roof 3.4,3.4 -> 1.5,1.9; hotel 4.4,6.2 ->
+  4.4,4.9; park 3.8,4.6 -> 4.6,4.9 — the same direction; this table supersedes it.
 
 ## Proofs in a browser (first engineer, before the roots change)
 - Park unseen from every room (`park-unseen.mjs`); coming back after 20 s in the hotel plausible (`come-back.mjs`).
