@@ -33,13 +33,21 @@ const CHROME = `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1234/c
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const r2 = (v) => Math.round(v * 100) / 100;
 
-const browser = await chromium.launch({
+const launch = () => chromium.launch({
   executablePath: CHROME,
   headless: true,
   args: ['--mute-audio', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
 });
+// FRESH_BROWSER=1: a browser of its own for every measurement, so nothing the
+// last page left in the GPU process or the caches can land on the next one.
+const FRESH_BROWSER = process.env.FRESH_BROWSER === '1';
+let browser = await launch();
 
 async function measure(label, base, name) {
+  if (FRESH_BROWSER) {
+    await browser.close();
+    browser = await launch();
+  }
   const path = SCENES[name];
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, serviceWorkers: 'block' });
   const page = await context.newPage();
