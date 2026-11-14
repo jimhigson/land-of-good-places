@@ -551,6 +551,10 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
   { rule: 'HARD_UP', source: 'const up = new Vector3(0, 1, 0);' },
   { rule: 'HARD_UP', source: 'up.set(0, -1, 0);' },
   { rule: 'Y_DIFFERENCE', source: 'const h = rail.y - under.y;' },
+  // An optional chain. TypeScript's tree flagged `rail?.y` on the access
+  // itself; ESTree wraps it in a ChainExpression, and a rule that forgets to
+  // look through the wrapper goes quiet on exactly this. See `ts-ast.mts`.
+  { rule: 'Y_DIFFERENCE', source: 'const h = rail?.y - under.y;' },
   // The laundered form, which slipped past the first version of this rule and
   // let a real chain-failing bug through. See `namesHoldingY`.
   {
