@@ -41,8 +41,7 @@ import {
 } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import type { NavGrid } from './world/NavGrid';
-import { playerNavGrid } from './world/playerLattice';
-import { GARDEN_PLAY_BOUNDARY } from './world/boundary';
+import { layHerLatticeNow, playerNavGrid } from './world/playerLattice';
 import { RouteScheduler } from './world/routeScheduler';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
@@ -1931,15 +1930,12 @@ export class Game {
    *
    * When she starts in a room (a save restored into the hotel, the Reptile
    * House or the library, or a deep link into one), the garden's lattice is
-   * laid first. Laying hers after it puts the garden's on the shelf
-   * (`NavGrid.layNow`), so her first way out does not wait seconds for the
-   * park to be laid either.
+   * laid too, and kept on the shelf for her first way out. See
+   * `layHerLatticeNow`, which `check:nav-warm` also asks.
    */
   layNavigationNow(): void {
     const sample = this.player.groundSampler;
-    if (!sample) return;
-    if (this.world.collision.playBounds !== GARDEN_PLAY_BOUNDARY) this.navGrid.layNow(sample, GARDEN_PLAY_BOUNDARY);
-    this.navGrid.layNow(sample);
+    if (sample) layHerLatticeNow(this.navGrid, this.world.collision, sample);
   }
 
   /**
