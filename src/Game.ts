@@ -955,15 +955,19 @@ export class Game {
     // `cut` is the ride's own part of the swap — whatever it must not change
     // until the iris is shut (a ride's new lights, its car and sky show), run
     // first thing at the midpoint so the view the iris holds for is complete.
+    // `camera` may be asked for at the midpoint rather than handed over at
+    // the press — a ride whose car `cut` builds (the ferris wheel) has no
+    // camera until then.
     const rideCamera = (
-      camera: import('three').PerspectiveCamera | null,
+      camera: import('three').PerspectiveCamera | null | (() => import('three').PerspectiveCamera | null),
       playerStaysVisible = false,
       cut?: () => void,
     ) => {
       this.transitions.irisWipe(() => {
         cut?.();
-        this.cameraOverride = camera;
-        this.player.group.visible = camera === null || playerStaysVisible;
+        const view = typeof camera === 'function' ? camera() : camera;
+        this.cameraOverride = view;
+        this.player.group.visible = view === null || playerStaysVisible;
       });
     };
     this.world.train.onRideChange = (riding) =>
@@ -1019,7 +1023,7 @@ export class Game {
     this.world.ferrisWheel.touch = isTouchDevice();
     this.world.ferrisWheel.onRideChange = (riding, cut) => {
       if (riding) {
-        rideCamera(this.world.ferrisWheel.rideView?.camera ?? null, false, cut);
+        rideCamera(() => this.world.ferrisWheel.rideView?.camera ?? null, false, cut);
         return;
       }
       // Getting *off* needs the teardown to happen at the wipe's midpoint,
@@ -2348,8 +2352,9 @@ export class Game {
    */
   warmTheRestInBackground(): void {
     if (this.backgroundWarmup) return;
-    const spaces = this.world.drawnSpaces;
-    this.backgroundWarmup = new ShaderWarmup(this.engine.renderer, this.engine.scene, this.camera.camera, () => spaces.detachedRoots());
+    // The park only, as on the bus: a room is warmed behind its own iris,
+    // against its own lights (`ShaderWarmup`'s note).
+    this.backgroundWarmup = new ShaderWarmup(this.engine.renderer, this.engine.scene, this.camera.camera);
   }
 
   private advanceBackgroundWarmup(): void {

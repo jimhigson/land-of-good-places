@@ -240,6 +240,8 @@ export class FerrisWheelRide implements GameSystem {
   private gondola: Gondola | null = null;
   /** True while the first boarding waits for the sky show's chunk. */
   private fetchingShow = false;
+  /** Boardings so far — so a cut that comes after its visit has ended builds nothing (`requestBoard`). */
+  private visits = 0;
   private clouds: CloudBand | null = null;
   private space: SpaceShow | null = null;
   private sparks: Sparks | null = null;
@@ -454,41 +456,49 @@ export class FerrisWheelRide implements GameSystem {
       return true;
     }
     this.riding = true;
-    // Fresh every visit — see `build`. Before `onRideChange`, which reads
-    // `rideView.camera` the moment it fires.
-    this.build();
     this.clock = 0;
     this.rate = 1;
     this.cardTime = -1;
     this.waves = 0;
-    // **Shown at the cut, behind the shut iris — not at the press.** Built
-    // above, but put on screen here, the car, the clouds and the sky show were
-    // drawn by every frame of the closing iris: sixteen new programs linked
-    // there one at a time, a 105 ms frame she watched (measured on the
-    // shipped build). At the cut nobody sees the frame that asks for them,
-    // and the iris holds shut until they are linked (`core/viewWarmup.ts`).
-    const showRide = (): void => {
+    // **Built and shown at the cut, behind the shut iris — not at the press.**
+    // Fresh every visit (see `build`), and the build is the car, five friends
+    // and a sky: 52 ms of geometry, measured on the shipped build, which ran
+    // in the press's own frame — the last one she saw before the iris began
+    // to close. Shown there too, the car, the clouds and the sky show were
+    // drawn by every frame of the closing iris and linked sixteen programs
+    // one at a time, a 105 ms frame she watched. At the cut nobody sees the
+    // frame either costs, and the iris holds shut until the view it built is
+    // warm (`core/viewWarmup.ts`). `Game` reads `rideView.camera` once this
+    // has run, at the same midpoint. Until then `update` has no car to move,
+    // and asks after every part of it.
+    //
+    // A visit she has already left by the time the iris shuts (a "let me out"
+    // in the first quarter-second) builds nothing: `leave` has said `end` to
+    // the HUD, and a car built now would outlive the teardown that already ran.
+    const visit = ++this.visits;
+    const cut = (): void => {
+      if (!this.riding || visit !== this.visits) return;
+      this.build();
       this.group.visible = true;
       this.world.setParkWheelVisible(false);
       // Another place entirely, and never meant to be seen from this one.
       this.world.setElsewhereVisible(false);
+      this.rideView?.board();
+      this.buildCues();
+      this.onMoment?.({ kind: 'start' });
+      this.onMoment?.({
+        kind: 'shout',
+        text:
+          (this.gondola?.passengerCount ?? 0) > 0
+            ? 'Everybody in! Up we go!'
+            : 'All aboard! Up we go!',
+        seconds: 2.6,
+      });
     };
 
     this.player.beginRide(this.holder);
-    if (this.onRideChange) this.onRideChange(true, showRide);
-    else showRide();
-    this.rideView?.board();
-
-    this.buildCues();
-    this.onMoment?.({ kind: 'start' });
-    this.onMoment?.({
-      kind: 'shout',
-      text:
-        (this.gondola?.passengerCount ?? 0) > 0
-          ? 'Everybody in! Up we go!'
-          : 'All aboard! Up we go!',
-      seconds: 2.6,
-    });
+    if (this.onRideChange) this.onRideChange(true, cut);
+    else cut();
     window.addEventListener('pointerdown', this.onPointerDown, true);
     return true;
   }
