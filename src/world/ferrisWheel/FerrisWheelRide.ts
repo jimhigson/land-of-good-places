@@ -310,14 +310,14 @@ export class FerrisWheelRide implements GameSystem {
    * same work — and the park gets the memory back when nobody is riding, which
    * on a phone is most of the time.
    */
-  private build(): void {
+  private build(companion: string | null): void {
     const kit = FERRIS_SHOW.loaded;
     if (!kit) throw new Error('FerrisWheelRide: built before the sky show was loaded');
     const { createCloudBand, createSpaceShow, createAlienSaucer, createSpaceRipika, createSweetieNebula, createSpaceTurtles, createSparks } = kit;
     this.clouds = createCloudBand(this.boardX, this.boardZ);
     this.group.add(this.clouds.root);
 
-    this.gondola = createGondola(this.parade?.frontOfLine()?.uid ?? null);
+    this.gondola = createGondola(companion);
     liftFromGround(this.boardX, this.boardZ, FERRIS_CAR_LOW_Y, this.carPoint);
     this.gondola.root.position.copy(this.carPoint);
     tiltToSphere(
@@ -416,7 +416,8 @@ export class FerrisWheelRide implements GameSystem {
 
   /**
    * Her line, for the car to seat her companion from — the front of it
-   * (`Parade.frontOfLine`), asked as the car is built. Given by
+   * (`Parade.frontOfLine`), asked at the press, before `beginRide` puts the
+   * line in her backpack; the car is built at the cut. Given by
    * `World.attachParade`.
    */
   attachParade(parade: { frontOfLine(): { readonly uid: string } | null }): void {
@@ -476,9 +477,13 @@ export class FerrisWheelRide implements GameSystem {
     // in the first quarter-second) builds nothing: `leave` has said `end` to
     // the HUD, and a car built now would outlive the teardown that already ran.
     const visit = ++this.visits;
+    // Who sits in the car's chair is asked **now**, at the press: `beginRide`
+    // puts her whole line in her backpack, after which there is no front of
+    // it to ask (`check:exits`).
+    const companion = this.parade?.frontOfLine()?.uid ?? null;
     const cut = (): void => {
       if (!this.riding || visit !== this.visits) return;
-      this.build();
+      this.build(companion);
       this.group.visible = true;
       this.world.setParkWheelVisible(false);
       // Another place entirely, and never meant to be seen from this one.
