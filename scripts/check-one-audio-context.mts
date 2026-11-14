@@ -19,12 +19,20 @@
  * `core/audio.ts`. That covers `new AudioContext()`, `new window.AudioContext()`,
  * and `const Ctor = window.AudioContext ?? …; new Ctor()`, which is how every
  * one of the six was written. Type positions (`AudioContext | null`,
- * `typeof AudioContext` in a type) are fine. The scan reads the TypeScript
- * AST, so comments and strings never count.
+ * `typeof AudioContext` in a type) are fine. The scan reads the syntax tree,
+ * so comments and strings never count. (`scripts/ts-ast.mts` owns the parsing:
+ * oxc through rolldown, since TypeScript 7 has no JavaScript API.)
+ *
+ * One deliberate difference from the TypeScript-API version this replaced:
+ * TypeScript's tree files `class X extends AudioContext` and the instantiation
+ * expression `AudioContext<T>` under a type node (ExpressionWithTypeArguments),
+ * so that version never saw them. Both are value references, a subclass
+ * constructs the context all the same, and ESTree has them as plain
+ * expressions, so this one reports them. Neither occurs in `src/`.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import ts from 'typescript';
+import { forEachNode, lineIndex, parseTypeScript, type Node } from './ts-ast.mts';
 
 const ROOT = 'src';
 const OWNER = ['src', 'core', 'audio.ts'].join(sep);
@@ -40,11 +48,35 @@ const walk = (dir: string): void => {
 };
 walk(ROOT);
 
-/** True when `node` sits inside a type annotation, so it names a type and never runs. */
-const inType = (node: ts.Node): boolean => {
-  for (let at: ts.Node | undefined = node.parent; at; at = at.parent) {
-    if (ts.isTypeNode(at)) return true;
-    if (ts.isStatement(at) || ts.isSourceFile(at)) return false;
+/**
+ * The nodes that are types: TypeScript's `isTypeNode`, in ESTree's names. The
+ * heritage clauses (`implements I`, an interface's `extends I`) are types there
+ * too; a class's `extends X` is not, see the header.
+ */
+const TYPE_NODES = new Set([
+  'TSTypeAnnotation', 'TSTypeReference', 'TSTypeQuery', 'TSTypeLiteral', 'TSTypePredicate', 'TSFunctionType',
+  'TSConstructorType', 'TSArrayType', 'TSTupleType', 'TSOptionalType', 'TSRestType', 'TSUnionType',
+  'TSIntersectionType', 'TSConditionalType', 'TSInferType', 'TSParenthesizedType', 'TSThisType',
+  'TSTypeOperator', 'TSIndexedAccessType', 'TSMappedType', 'TSLiteralType', 'TSNamedTupleMember',
+  'TSTemplateLiteralType', 'TSImportType', 'TSClassImplements', 'TSInterfaceHeritage', 'TSAnyKeyword',
+  'TSUnknownKeyword', 'TSNumberKeyword', 'TSBigIntKeyword', 'TSObjectKeyword', 'TSBooleanKeyword',
+  'TSStringKeyword', 'TSSymbolKeyword', 'TSVoidKeyword', 'TSUndefinedKeyword', 'TSNullKeyword',
+  'TSNeverKeyword', 'TSIntrinsicKeyword', 'TSJSDocNullableType', 'TSJSDocNonNullableType', 'TSJSDocUnknownType',
+]);
+/** The declarations that are statements, besides every `*Statement`: TypeScript's `isStatement`. */
+const DECLARATION_STATEMENTS = new Set([
+  'VariableDeclaration', 'FunctionDeclaration', 'ClassDeclaration', 'TSInterfaceDeclaration',
+  'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSModuleDeclaration', 'ImportDeclaration',
+  'TSImportEqualsDeclaration', 'ExportNamedDeclaration', 'ExportDefaultDeclaration', 'ExportAllDeclaration',
+  'TSExportAssignment', 'TSNamespaceExportDeclaration',
+]);
+
+/** True when a node under these ancestors sits inside a type annotation, so it names a type and never runs. */
+const inType = (ancestors: readonly Node[]): boolean => {
+  for (let i = ancestors.length - 1; i >= 0; i -= 1) {
+    const at = ancestors[i]!.type;
+    if (TYPE_NODES.has(at)) return true;
+    if (at.endsWith('Statement') || DECLARATION_STATEMENTS.has(at) || at === 'Program') return false;
   }
   return false;
 };
@@ -54,27 +86,25 @@ let ownerRefs = 0;
 for (const file of files) {
   const text = readFileSync(file, 'utf8');
   if (!/AudioContext/.test(text)) continue;
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const lineOf = lineIndex(text);
   const isOwner = relative('.', file) === OWNER;
-  const visit = (node: ts.Node): void => {
+  forEachNode(parseTypeScript(file, text), (node, ancestors) => {
     // `AudioContext` as a bare identifier, or `.AudioContext` on anything (window, globalThis, a cast).
-    const name = ts.isIdentifier(node) ? node.text : null;
-    if (name && NAMES.has(name) && !inType(node)) {
-      const parent = node.parent;
+    const name = node.type === 'Identifier' ? node.name : null;
+    if (name && NAMES.has(name) && !inType(ancestors)) {
+      const parent = ancestors[ancestors.length - 1];
       // The `webkitAudioContext?:` key in an inline object type is a type, already caught by inType.
-      const isPropertyKey = parent && ts.isPropertySignature(parent) && parent.name === node;
+      const isPropertyKey = parent?.type === 'TSPropertySignature' && parent.key === node;
       if (!isPropertyKey) {
         if (isOwner) ownerRefs += 1;
         else {
-          const { line } = source.getLineAndCharacterOfPosition(node.getStart());
+          const line = lineOf(node.start);
           const statement = text.split('\n')[line]?.trim() ?? '';
           fouls.push(`${relative('.', file)}:${line + 1}: ${statement.slice(0, 110)}`);
         }
       }
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
+  });
 }
 
 if (fouls.length > 0) {
