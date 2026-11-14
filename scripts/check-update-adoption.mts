@@ -25,11 +25,12 @@
  * player, not a fresh incognito visit — reloads until the worker controls the
  * page, then the deploy lands and it reloads **once** more.
  *
- * Then it does the opposite experiment, because the cheap fix for the first
- * half is a `skipWaiting: true` that breaks the second: it touches the page (now
- * somebody is playing), deploys again, and proves the page does **not** swap
- * itself out from under her — the gate appears and waits for its button, which
- * then has to work too.
+ * Then it does the opposite experiment, because the obvious-looking fix for the
+ * first half, `skipWaiting: true`, would break the second (and, measured with
+ * one honest reload, does not even fix the first; see `PAGE`): it touches the
+ * page (now somebody is playing), deploys again, and proves the page does
+ * **not** swap itself out from under her — the gate appears and waits for its
+ * button, which then has to work too.
  *
  * The measurement is the same one the issue quotes: the `src` of the module
  * script the page is actually executing, read off the page.
@@ -301,10 +302,13 @@ async function main(): Promise<void> {
 
     // ---- and the other direction, which matters just as much.
     //
-    // The cheap way to make everything above go green is `skipWaiting: true` in
-    // the worker, and it would be **wrong**: it swaps the precache under a page
-    // that is playing, so the next lazy chunk the park generator asks for is
-    // already gone. The rule is "nobody has touched this page yet", so touch it,
+    // `skipWaiting: true` in the worker looks like the cheap way to make the
+    // reload above adopt the new build, and it would be **wrong**: it swaps the
+    // precache under a page that is playing, so the next lazy chunk the park
+    // generator asks for is already gone. (Nor does it make the reload above go
+    // green: measured 14 Nov 2026, visit 3 stays on the old build, because the
+    // reload's own navigation is answered by the old worker before the new one
+    // installs.) The rule is "nobody has touched this page yet", so touch it,
     // deploy again, and prove the page now *waits* — gate up, ride intact.
     //
     // **Only once the page can notice the touch.** Visit 3's wait ends the
