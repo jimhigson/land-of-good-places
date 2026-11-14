@@ -25,11 +25,12 @@
  * player, not a fresh incognito visit — reloads until the worker controls the
  * page, then the deploy lands and it reloads **once** more.
  *
- * Then it does the opposite experiment, because the cheap fix for the first
- * half is a `skipWaiting: true` that breaks the second: it touches the page (now
- * somebody is playing), deploys again, and proves the page does **not** swap
- * itself out from under her — the gate appears and waits for its button, which
- * then has to work too.
+ * Then it does the opposite experiment, because the obvious-looking fix for the
+ * first half, `skipWaiting: true`, would break the second (and, measured with
+ * one honest reload, does not even fix the first; see `PAGE`): it touches the
+ * page (now somebody is playing), deploys again, and proves the page does
+ * **not** swap itself out from under her — the gate appears and waits for its
+ * button, which then has to work too.
  *
  * The measurement is the same one the issue quotes: the `src` of the module
  * script the page is actually executing, read off the page.
@@ -56,12 +57,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { SUPPORTED_PARK_SEEDS } from '../src/world/prebuilt/parkFileName.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 
 const PORT = Number(process.env.PORT ?? 5482);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+/**
+ * **The page this check visits, with its park pinned.** The profile never makes
+ * a character, and a character-less page whose seed was *remembered* from an
+ * earlier visit forgets it and reloads itself (`startFresh` in `src/main.ts`,
+ * issue #426). So on a bare `/`, every reload this check makes is followed by a
+ * second one the page makes, at whatever moment the boot gets there. Measured
+ * 14 Nov 2026 on a production build: two main-frame navigations per reload on
+ * `/`, exactly one on `/?seed=0`. The second navigation is what failed this check
+ * at visit 2 ("page.evaluate: Execution context was destroyed") on a loaded Mac
+ * while CI passed, and it quietly made "one ordinary reload" two. A pinned seed
+ * is never remembered, so the only navigations now are this check's and the
+ * adoption's own.
+ */
+const PAGE = `${ORIGIN}/?seed=${SUPPORTED_PARK_SEEDS[0]}`;
 /**
  * How long the page gets, after the one reload, to be executing the new bundle.
  * Generous on purpose: the honest answer is "a couple of seconds", and a check
@@ -235,7 +251,7 @@ async function main(): Promise<void> {
   let failure: Error | null = null;
   try {
     // ---- a returning player: two visits on the old build, worker installed.
-    await page.goto(ORIGIN, { waitUntil: 'load' });
+    await page.goto(PAGE, { waitUntil: 'load' });
     await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
     const visit1 = await read(page);
     trace.push(line('visit 1 (old build, SW installs)', visit1));
@@ -286,10 +302,13 @@ async function main(): Promise<void> {
 
     // ---- and the other direction, which matters just as much.
     //
-    // The cheap way to make everything above go green is `skipWaiting: true` in
-    // the worker, and it would be **wrong**: it swaps the precache under a page
-    // that is playing, so the next lazy chunk the park generator asks for is
-    // already gone. The rule is "nobody has touched this page yet", so touch it,
+    // `skipWaiting: true` in the worker looks like the cheap way to make the
+    // reload above adopt the new build, and it would be **wrong**: it swaps the
+    // precache under a page that is playing, so the next lazy chunk the park
+    // generator asks for is already gone. (Nor does it make the reload above go
+    // green: measured 14 Nov 2026, visit 3 stays on the old build, because the
+    // reload's own navigation is answered by the old worker before the new one
+    // installs.) The rule is "nobody has touched this page yet", so touch it,
     // deploy again, and prove the page now *waits* — gate up, ride intact.
     //
     // **Only once the page can notice the touch.** Visit 3's wait ends the
