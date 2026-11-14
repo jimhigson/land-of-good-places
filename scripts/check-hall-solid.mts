@@ -16,7 +16,7 @@ import {
   greatHallPetPlaces,
   greatHallSolids,
 } from '../src/world/building/castleFurniture.ts';
-import { registerHallCollision } from '../src/world/building/Building.ts';
+import { registerHallCollision } from '../src/world/building/castleInterior.ts';
 
 /**
  * **The banquet is solid, and she can still walk to a place and sit down.**

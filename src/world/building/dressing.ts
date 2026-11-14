@@ -24,6 +24,7 @@ import {
   roofTurretSpots,
   SHOP_SCALE_XZ,
   SHOP_UNITS,
+  HALL_DECK,
   MALL_DECK,
   TOILET_DECK,
   TOILET_ROOM,
@@ -33,7 +34,6 @@ import {
   shopLocalToBuilding,
   type ShopUnitDefinition,
 } from './layout';
-import { CASTLE_GREAT_HALL_DECK, greatHallFootprint } from './castleFurniture';
 import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
 
 /**
@@ -146,7 +146,10 @@ export interface KeepOut {
  * dozen children standing on it. One question, one answer, asked by both.
  */
 export function deckIsFurnished(deck: number): boolean {
-  return deck === CASTLE_GREAT_HALL_DECK;
+  // `HALL_DECK`, not `castleFurniture.ts`'s `CASTLE_GREAT_HALL_DECK` (which is
+  // this same constant): this file is in the boot, and that one is the castle
+  // interior's lazy chunk (`castleInterior.ts`), measured off its kit.
+  return deck === HALL_DECK;
 }
 
 export function dressDeck(deck: number, floor: Group): void {
@@ -606,26 +609,6 @@ export function keepOutsFor(deck: number): KeepOut[] {
   }
 
   return blocked;
-}
-
-/**
- * **Where a scattered prop may not land** — {@link keepOutsFor} plus whatever
- * furniture is already standing on this floor.
- *
- * The two are different questions and the difference matters. `keepOutsFor` is
- * *where a child has to be able to stand*, and `check:castle` fails any prop
- * that lands in one — so the great hall's banquet cannot go in it, because the
- * banquet's own tables and benches are inside the banquet. But a brazier
- * choosing a spot at random very much does need to know the tables are there:
- * with the hall filled (#449) two of the four landed inside benches, measured
- * in the running game.
- *
- * So: things that are *placed* ask `keepOutsFor`, and things that **scatter**
- * ask this. One extra call at each of the two scatter sites, and no list is
- * kept in step with another by hand.
- */
-export function scatterKeepOutsFor(deck: number): KeepOut[] {
-  return [...keepOutsFor(deck), ...greatHallFootprint(deck)];
 }
 
 /**

@@ -647,6 +647,26 @@ function auditInPage(oversizedRadius: number): Audit[] {
         if (!TargetCtor && o.isLight && o.shadow && o.shadow.map) TargetCtor = o.shadow.map.constructor;
       });
     }
+    // **No shadow map anywhere yet** — a deep link that starts inside a room
+    // whose lights cast none (the hotel, the library, the reptile house) never
+    // draws the park now: the boot's first frames are held until the room is
+    // warm (`core/viewWarmup.ts`), so the sun's map has never been made. Make
+    // it, once, by drawing the frame with the sun's key light on; nothing of
+    // that frame is measured (control 1 was read above, control 2 draws into
+    // its own target).
+    if (!TargetCtor) {
+      const key = game.world.dayNight.keyLight;
+      const wasVisible = key.visible;
+      key.visible = true;
+      renderer.shadowMap.needsUpdate = true;
+      try {
+        renderer.render(scene, camera);
+      } finally {
+        key.visible = wasVisible;
+        renderer.shadowMap.needsUpdate = false;
+      }
+      TargetCtor = key.shadow.map?.constructor ?? null;
+    }
     // Record what three really hands to the GPU, so a failed control names the
     // objects the walk got wrong instead of two numbers that differ.
     const reallyDrawn = new Set<Any>();

@@ -222,7 +222,12 @@ export class FerrisWheelRide implements GameSystem {
   readonly group = new Group();
 
   rideView: RideCamera | null = null;
-  onRideChange: ((riding: boolean) => void) | null = null;
+  /**
+   * `Game`'s boarding wipe. `cut`, on the way on, is what must change only
+   * once the iris is shut — `Game` runs it at the wipe's midpoint; with
+   * nobody listening it is run at once.
+   */
+  onRideChange: ((riding: boolean, cut?: () => void) => void) | null = null;
   onMoment: ((moment: FerrisMoment) => void) | null = null;
   /** True on a touch device — only changes which words the cues use. */
   touch = false;
@@ -235,6 +240,8 @@ export class FerrisWheelRide implements GameSystem {
   private gondola: Gondola | null = null;
   /** True while the first boarding waits for the sky show's chunk. */
   private fetchingShow = false;
+  /** Boardings so far — so a cut that comes after its visit has ended builds nothing (`requestBoard`). */
+  private visits = 0;
   private clouds: CloudBand | null = null;
   private space: SpaceShow | null = null;
   private sparks: Sparks | null = null;
@@ -303,14 +310,14 @@ export class FerrisWheelRide implements GameSystem {
    * same work — and the park gets the memory back when nobody is riding, which
    * on a phone is most of the time.
    */
-  private build(): void {
+  private build(companion: string | null): void {
     const kit = FERRIS_SHOW.loaded;
     if (!kit) throw new Error('FerrisWheelRide: built before the sky show was loaded');
     const { createCloudBand, createSpaceShow, createAlienSaucer, createSpaceRipika, createSweetieNebula, createSpaceTurtles, createSparks } = kit;
     this.clouds = createCloudBand(this.boardX, this.boardZ);
     this.group.add(this.clouds.root);
 
-    this.gondola = createGondola(this.parade?.frontOfLine()?.uid ?? null);
+    this.gondola = createGondola(companion);
     liftFromGround(this.boardX, this.boardZ, FERRIS_CAR_LOW_Y, this.carPoint);
     this.gondola.root.position.copy(this.carPoint);
     tiltToSphere(
@@ -409,7 +416,8 @@ export class FerrisWheelRide implements GameSystem {
 
   /**
    * Her line, for the car to seat her companion from — the front of it
-   * (`Parade.frontOfLine`), asked as the car is built. Given by
+   * (`Parade.frontOfLine`), asked at the press, before `beginRide` puts the
+   * line in her backpack; the car is built at the cut. Given by
    * `World.attachParade`.
    */
   attachParade(parade: { frontOfLine(): { readonly uid: string } | null }): void {
@@ -449,32 +457,53 @@ export class FerrisWheelRide implements GameSystem {
       return true;
     }
     this.riding = true;
-    // Fresh every visit — see `build`. Before `onRideChange`, which reads
-    // `rideView.camera` the moment it fires.
-    this.build();
     this.clock = 0;
     this.rate = 1;
     this.cardTime = -1;
     this.waves = 0;
-    this.group.visible = true;
-    this.world.setParkWheelVisible(false);
-    // Another place entirely, and never meant to be seen from this one.
-    this.world.setElsewhereVisible(false);
+    // **Built and shown at the cut, behind the shut iris — not at the press.**
+    // Fresh every visit (see `build`), and the build is the car, five friends
+    // and a sky: 52 ms of geometry, measured on the shipped build, which ran
+    // in the press's own frame — the last one she saw before the iris began
+    // to close. Shown there too, the car, the clouds and the sky show were
+    // drawn by every frame of the closing iris and linked sixteen programs
+    // one at a time, a 105 ms frame she watched. At the cut nobody sees the
+    // frame either costs, and the iris holds shut until the view it built is
+    // warm (`core/viewWarmup.ts`). `Game` reads `rideView.camera` once this
+    // has run, at the same midpoint. Until then `update` has no car to move,
+    // and asks after every part of it.
+    //
+    // A visit she has already left by the time the iris shuts (a "let me out"
+    // in the first quarter-second) builds nothing: `leave` has said `end` to
+    // the HUD, and a car built now would outlive the teardown that already ran.
+    const visit = ++this.visits;
+    // Who sits in the car's chair is asked **now**, at the press: `beginRide`
+    // puts her whole line in her backpack, after which there is no front of
+    // it to ask (`check:exits`).
+    const companion = this.parade?.frontOfLine()?.uid ?? null;
+    const cut = (): void => {
+      if (!this.riding || visit !== this.visits) return;
+      this.build(companion);
+      this.group.visible = true;
+      this.world.setParkWheelVisible(false);
+      // Another place entirely, and never meant to be seen from this one.
+      this.world.setElsewhereVisible(false);
+      this.rideView?.board();
+      this.buildCues();
+      this.onMoment?.({ kind: 'start' });
+      this.onMoment?.({
+        kind: 'shout',
+        text:
+          (this.gondola?.passengerCount ?? 0) > 0
+            ? 'Everybody in! Up we go!'
+            : 'All aboard! Up we go!',
+        seconds: 2.6,
+      });
+    };
 
     this.player.beginRide(this.holder);
-    this.onRideChange?.(true);
-    this.rideView?.board();
-
-    this.buildCues();
-    this.onMoment?.({ kind: 'start' });
-    this.onMoment?.({
-      kind: 'shout',
-      text:
-        (this.gondola?.passengerCount ?? 0) > 0
-          ? 'Everybody in! Up we go!'
-          : 'All aboard! Up we go!',
-      seconds: 2.6,
-    });
+    if (this.onRideChange) this.onRideChange(true, cut);
+    else cut();
     window.addEventListener('pointerdown', this.onPointerDown, true);
     return true;
   }

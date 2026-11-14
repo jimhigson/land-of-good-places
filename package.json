@@ -165,6 +165,7 @@
     "check:walking": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-walking.mts",
     "with-dev-server": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/with-dev-server.mts",
     "gpu:frame-time": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts",
+    "gpu:first-entry": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-first-entry.mts",
     "check:park-map": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-map.mts",
     "check:hud-during-rides": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hud-during-rides.mts",
     "qa:hud-during-rides": "node --no-warnings scripts/qa-hud-during-rides.mjs",

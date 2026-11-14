@@ -1,4 +1,5 @@
 import {
+  BufferAttribute,
   BufferGeometry,
   Group,
   Matrix4,
@@ -266,7 +267,7 @@ class HighlightSlot {
   private key: string | null = null;
 
   constructor(material: MeshBasicMaterial, ringGeometry: RingGeometry, ringMaterial: MeshBasicMaterial) {
-    this.shell = decal(new Mesh(new BufferGeometry(), material));
+    this.shell = decal(new Mesh(emptyShell(), material));
     this.shell.visible = false;
     this.shell.renderOrder = 3;
     // The shell carries a *copy* of its target's world matrix rather than being
@@ -312,6 +313,22 @@ class HighlightSlot {
     // Whatever geometry the shell is holding is a cached shell owned by
     // `Highlights`, and so are both materials. Nothing here is ours to free.
   }
+}
+
+/**
+ * The shell a slot holds before its first highlight: nothing in it, but **with
+ * a position attribute, as every real shell has**. Whether a geometry has one
+ * is part of the program three.js builds for it (`hasPositionAttribute`), so a
+ * bare `new BufferGeometry()` here compiled a program no shell ever draws
+ * with — and the warm-up behind a cover (`core/viewWarmup.ts`), which compiles
+ * the highlight before she can walk up to anything, linked the wrong one: the
+ * first highlight in every new room was a link on a frame she saw (16–23 ms,
+ * measured after the library's first walk-in).
+ */
+function emptyShell(): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(0), 3));
+  return geometry;
 }
 
 /** The largest axis scale in a matrix — how much it will fatten a pushed shell. */

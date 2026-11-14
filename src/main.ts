@@ -1228,12 +1228,14 @@ function rideInThenPlay(
           // **The completion signal, and there is only one.** A park object in
           // hand — not a timer that hopes to match how long one takes to build.
           director.noteParkReady();
-          // The spaces she is not in are out of the graph (`DrawnSpaces`), so
-          // the warm-up is handed them: it compiles what it always compiled.
-          const spaces = handOverGame.world.drawnSpaces;
-          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera, () =>
-            spaces.detachedRoots(),
-          );
+          // **The park, and only the park.** Every room is compiled behind its
+          // own door's iris, against its own lights, the first time she goes in
+          // (`core/viewWarmup.ts`): compiled here, against the park's, it was a
+          // program no room ever draws with — a room hides the sun's rig
+          // (`DayNight.setIndoors`) and the park's own lamps leave the graph
+          // with the park (`World.update`), and the light counts are part of
+          // every program's key.
+          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
           skip.show();
         })
         // **Without this the ride has no bottom.** The generation-failure path
@@ -1324,14 +1326,33 @@ async function finishLaunch(
       part.load().catch((error: unknown) => console.error(`Land of Good Places: ${part.name} failed to load`, error)),
     ),
   ]);
-  // Whether the cat bus brought her: its ride laid her route lattice already
-  // (`rideInThenPlay`), and a boot without one lays it below.
-  const cameByBus = handOverGame !== null;
+  // Built behind the bus — and its programs compiled there (`ShaderWarmup`),
+  // and her route lattice laid there — or built just now, with nothing
+  // compiled or laid at all.
+  const rodeIn = handOverGame !== null;
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
+  // **No bus, so no warm-up yet: the first frames are held back until the
+  // view she starts in is warm** (`core/viewWarmup.ts`). A continued save or
+  // a deep link used to link thirty-odd programs and upload forty megabytes
+  // of textures in its first frame — 174 ms on the M4 Pro — with forty-odd
+  // more over the next few. Held, the canvas keeps nothing drawn for those
+  // few frames, and the HUD waits with it, so the park and its buttons still
+  // arrive together, just without the stall.
+  const firstFramesWarm = rodeIn ? Promise.resolve() : game.holdFirstFrames();
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
   // park's, and the park is what is about to be on screen.
-  uiRoot.style.visibility = '';
+  if (rodeIn) uiRoot.style.visibility = '';
+  else {
+    uiRoot.style.visibility = 'hidden';
+    void firstFramesWarm.then(() => {
+      uiRoot.style.visibility = '';
+      // …and then everything else, behind her, a slice a frame — what the
+      // bus ride would have compiled, so the first walk to the far side of
+      // the park links nothing either.
+      game.warmTheRestInBackground();
+    });
+  }
 
   // **Nothing stands in front of the arrival.** `WhatsNew` opens itself from
   // `Game`'s constructor when there is unseen content, and it pauses the park
@@ -1496,17 +1517,21 @@ async function finishLaunch(
   // the 4× phone stand-in, and until it was done every tap walked straight at
   // the spot instead of routing round things. Here it is one task inside the
   // boot, after she has been put where she starts (the deep-link arms above
-  // move her) and before the first frame. The bus ride lays it behind the bus
-  // a slice a frame and is left exactly as it was. See
+  // move her) and before the first frame. That is before the held frames
+  // above draw anything, so nothing on screen waits on it. The bus ride lays
+  // it behind the bus a slice a frame and is left exactly as it was. See
   // `Game.layNavigationNow`.
-  if (!cameByBus) game.layNavigationNow();
+  if (!rodeIn) game.layNavigationNow();
 
   // Unmissable red "DEV" watermark — never present in a production build.
   DevBadge.mountIfDev(uiRoot);
 
-  // Give the first frame a moment to land before revealing the park.
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => splash?.classList.add('hidden'));
+  // Give the first frame a moment to land before revealing the park — the
+  // first *warm* frame, on a boot with no bus (`holdFirstFrames` above).
+  void firstFramesWarm.then(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => splash?.classList.add('hidden'));
+    });
   });
 
   // Handy for poking at the world from the browser console during development.
