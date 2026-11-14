@@ -1431,9 +1431,13 @@ export class Building implements GameSystem {
 
     // **Fetch the interior's chunk on approach** — only fetch, not build; the
     // door builds it behind its iris. Entering is still what furnishes it.
+    // Asked only until the chunk is here: after that (the rest of the session,
+    // for a child who walks past and never goes in) the door's band is not
+    // rebuilt every frame for a fetch that has nothing left to do.
     if (
       !this.castle &&
       !this.inside &&
+      CASTLE_INTERIOR.loaded === null &&
       distanceToBand(castleEntranceBand(), player.position.x, player.position.z) < CASTLE_PREFETCH_RADIUS
     ) {
       CASTLE_INTERIOR.load().catch(() => {
