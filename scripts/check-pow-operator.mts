@@ -16,14 +16,29 @@
  *
  * So under the directories that decide a park, any `**` (or `**=`) whose
  * exponent is not the literal `2` fails here, with its file and line. Write
- * `Math.pow(x, y)` instead. The scan reads the TypeScript AST, not text, so a
- * `**` in a comment or a string is not one.
+ * `Math.pow(x, y)` instead. The scan reads the syntax tree, not text, so a
+ * `**` in a comment or a string is not one. (`scripts/ts-ast.mts` owns the
+ * parsing: oxc through rolldown, since TypeScript 7 has no JavaScript API.)
  *
  * Raised by the #706 review: "nothing guards future uses".
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending three lines to `src/core/constants.ts`, then 1491 lines long:
+ *
+ *     export const __PROBE_POW = 2 ** 3;
+ *     export let __probePow = 1; __probePow **= 2;
+ *     export const __PROBE_POW_PAREN = 3 ** (2);
+ *
+ * Exit 1, and output identical to the TypeScript-API version's on the same input:
+ *
+ *     check:pow-operator FAILED — 3 use(s) of `**` with an exponent other than the literal 2 under …
+ *       src/core/constants.ts:1493: 2 ** 3
+ *       src/core/constants.ts:1494: __probePow **= 2
+ *       src/core/constants.ts:1495: 3 ** (2)
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import ts from 'typescript';
+import { forEachNode, lineIndex, parseTypeScript, textOf } from './ts-ast.mts';
 
 /** Where a park is decided. Rendering-only code (art, ui, minigames) is not. */
 const ROOTS = ['src/world', 'src/boot', 'src/core', 'src/entities'];
@@ -42,23 +57,20 @@ const fouls: string[] = [];
 let squares = 0;
 for (const file of files) {
   const text = readFileSync(file, 'utf8');
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  const visit = (node: ts.Node): void => {
-    if (ts.isBinaryExpression(node)) {
-      const op = node.operatorToken.kind;
-      if (op === ts.SyntaxKind.AsteriskAsteriskToken || op === ts.SyntaxKind.AsteriskAsteriskEqualsToken) {
-        const right = node.right;
-        const exactSquare = op === ts.SyntaxKind.AsteriskAsteriskToken && ts.isNumericLiteral(right) && right.text === '2';
-        if (exactSquare) squares += 1;
-        else {
-          const { line } = source.getLineAndCharacterOfPosition(node.getStart());
-          fouls.push(`${relative('.', file)}:${line + 1}: ${node.getText().slice(0, 100)}`);
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
+  const lineOf = lineIndex(text);
+  forEachNode(parseTypeScript(file, text), (node) => {
+    // `x ** y` is a BinaryExpression and `x **= y` an AssignmentExpression.
+    const pow =
+      (node.type === 'BinaryExpression' && node.operator === '**') ||
+      (node.type === 'AssignmentExpression' && node.operator === '**=');
+    if (!pow) return;
+    // The literal 2 however it is spelt (`2`, `2.0`, `0x2`), as TypeScript's
+    // `text === '2'` was. A parenthesised `(2)` is not a literal, and still fails.
+    const right = node.right;
+    const exactSquare = node.operator === '**' && right.type === 'Literal' && right.value === 2;
+    if (exactSquare) squares += 1;
+    else fouls.push(`${relative('.', file)}:${lineOf(node.start) + 1}: ${textOf(text, node).slice(0, 100)}`);
+  });
 }
 
 if (fouls.length > 0) {

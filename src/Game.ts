@@ -59,22 +59,8 @@ import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from './world/spaces';
 import { PerfProbe, perfRequested } from './core/perfProbe';
 import { RevealHold, type ViewWarmup } from './core/viewWarmup';
 import { ShaderWarmup } from './boot/shaderWarmup';
-
-/**
- * Milliseconds a frame of play may give the background shader warm-up
- * (`Game.warmTheRestInBackground`). Whole slices only, as on the bus, so this
- * decides how many are started, not how long one takes; small, because unlike
- * the bus ride these are frames she is playing in.
- */
-const BACKGROUND_WARMUP_BUDGET_MS = 2;
-
-/**
- * Metres round her that a cover's warm-up compiles whether or not this
- * frame's camera sees them (`core/viewWarmup.ts`'s `drawnBy`). Every room is
- * its own plate, hundreds of metres from the next, and none is wider than
- * this from wherever she can stand in it, so it is the room she is in.
- */
-const WARM_NEAR_RADIUS = 70;
+import { CheckClock, checkClockRequested } from './core/checkClock';
+import { lazyPartsFetching } from './world/LazyPart';
 import { freezeParkStatics } from './world/parkStatics';
 import { PerfOverlay } from './ui/PerfOverlay';
 import { localToWorld } from './world/spaceOrigins';
@@ -100,6 +86,22 @@ import { OwlLensFade } from './world/library/owlLensFade';
 import { LIBRARY_PLAYER_SEATS } from './world/library/layout';
 import { cullCrowdsFor } from './entities/npc/InstancedCrowd';
 import { noteNpcViewCamera } from './entities/npc/simLod';
+
+/**
+ * Milliseconds a frame of play may give the background shader warm-up
+ * (`Game.warmTheRestInBackground`). Whole slices only, as on the bus, so this
+ * decides how many are started, not how long one takes; small, because unlike
+ * the bus ride these are frames she is playing in.
+ */
+const BACKGROUND_WARMUP_BUDGET_MS = 2;
+
+/**
+ * Metres round her that a cover's warm-up compiles whether or not this
+ * frame's camera sees them (`core/viewWarmup.ts`'s `drawnBy`). Every room is
+ * its own plate, hundreds of metres from the next, and none is wider than
+ * this from wherever she can stand in it, so it is the room she is in.
+ */
+const WARM_NEAR_RADIUS = 70;
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -1203,24 +1205,63 @@ export class Game {
     // `?perf=1` — the frame counted and shown (120 fps plan, step 0; see
     // `core/perfProbe.ts`). Without the flag the loop calls `tick` directly,
     // exactly as it always has: nothing is constructed, nothing is wrapped.
+    //
+    // `?clock=<seconds>` — the world at one moment, the same on every machine
+    // (`core/checkClock.ts`, `check:cull-audit`). Without the flag the frame is
+    // `tick` exactly as it always was.
+    const clockStopAt = checkClockRequested();
+    this.checkClock = clockStopAt === null ? null : new CheckClock(clockStopAt);
+    const frame = this.checkClock ? (tick: LoopTick) => this.checkClockFrame(tick) : (tick: LoopTick) => this.tick(tick);
     if (perfRequested()) {
       const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
       this.perfOverlay = new PerfOverlay(probe);
       this.loop = new Loop((tick) => {
         this.beginEngineFrame();
         probe.begin();
-        this.tick(tick);
+        frame(tick);
         probe.end();
         this.engine.endFrame();
       });
     } else {
       this.loop = new Loop((tick) => {
         this.beginEngineFrame();
-        this.tick(tick);
+        frame(tick);
         this.engine.endFrame();
       });
     }
   }
+
+  /** `?clock=` — the world's time, held and stepped (`core/checkClock.ts`); `null` without the flag. */
+  private readonly checkClock: CheckClock | null;
+
+  /**
+   * One display frame under `?clock=`: the world stepped as far as it may go,
+   * then drawn held. The clock does not step while anything the world waits
+   * on runs on the wall clock — an iris (its midpoint is a `setTimeout`) or a
+   * lazy part on its way — and a warm-up spread over frames by a millisecond
+   * budget is finished outright, which reaches the same pile.
+   */
+  private checkClockFrame(tick: LoopTick): void {
+    this.checkClock?.frame(
+      () => {
+        this.world.building.ballPit.settleNow();
+        if (this.transitions.wiping) return 'iris';
+        if (lazyPartsFetching() > 0) return 'lazy part';
+        // A cover held for its warm-up (`core/viewWarmup.ts`) swallows the
+        // draw, and it lets go when the GPU process says its programs are
+        // linked — wall-clock time. The world waits for it, so it is drawn
+        // as it stands once the cover is let go, as after any other wait.
+        if (this.revealHold.holding) return 'warm-up';
+        return null;
+      },
+      // Each step a frame of its own, numbered as one: what is memoised per
+      // frame (`currentZones`) must not carry from one step to the next.
+      (dt, draw) => this.tick({ ...tick, dt, frame: (this.checkClockTicks += 1) }, draw),
+    );
+  }
+
+  /** Ticks run under `?clock=`, steps and drawn frames alike — each one's frame number. */
+  private checkClockTicks = 0;
 
   /** The `?perf=1` overlay, when the URL asked for it. */
   private perfOverlay: PerfOverlay | null = null;
@@ -1238,26 +1279,29 @@ export class Game {
   }
 
   /**
-   * The GPU's name, asked of the driver once. `getParameter` is a synchronous
-   * round trip to the GPU process: asked on every overlay redraw it waited
-   * behind whatever the GPU process was busy with — 25–46 ms a time, measured
-   * while programs were linking — so `?perf=1` was putting hitches into the
-   * frames it was measuring.
+   * The GPU's name, asked for once. `gl.getParameter` for it is a synchronous
+   * round trip to Chrome's GPU process, which waits behind whatever the GPU
+   * has queued: asked on every overlay redraw (4 a second) it stalled the very
+   * frames the overlay was measuring — 0.5 ms a call in the park, ~10 ms with
+   * the sun shadow cache's extra passes queued (41.8 ms/s of `getParameter`
+   * in a profile), enough to report 1–7 % missed 120 Hz frames that a probe
+   * without the overlay did not see (0.2 %).
    */
-  private gpuName: string | null = null;
+  private perfGpuName: unknown = null;
 
   /** What the perf overlay's JSON says about where and on what it was measured. */
   private perfContext(): Record<string, unknown> {
     const renderer = this.engine.renderer;
     const gl = renderer.getContext();
-    if (this.gpuName === null) {
+    if (this.perfGpuName === null) {
       const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-      this.gpuName = String(debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+      this.perfGpuName = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
     }
     return {
       space: spaceAt(this.player.position.x, this.player.position.z),
       riding: this.player.riding,
-      gpu: this.gpuName,
+      clock: this.checkClock?.state() ?? null,
+      gpu: this.perfGpuName,
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
       adaptiveResolution: this.engine.adaptiveResolution.state(),
@@ -1896,7 +1940,11 @@ export class Game {
     return sampler ? this.navGrid.warm(sampler, NAV_WARM_BUDGET_MS) : false;
   }
 
-  private tick(tick: LoopTick): void {
+  /**
+   * One frame of the game. `draw` is false only for a `?clock=` step
+   * (`core/checkClock.ts`), which runs everything but the draw itself.
+   */
+  private tick(tick: LoopTick, draw = true): void {
     this.input.update();
     this.warmNavigation();
 
@@ -2272,6 +2320,12 @@ export class Game {
     (this.cameraOverride ?? this.camera.camera).getWorldPosition(this.drawnEye);
     const owl = this.world.library.owlIfFurnished;
     if (owl && !this.owlFade) this.owlFade = new OwlLensFade(owl);
+    if (!draw) {
+      // A `?clock=` step draws nothing, but the simulation still hears what
+      // the draw would have told it about the camera.
+      if (!this.miniGames.hidesPark) this.noteView();
+      return;
+    }
     this.owlFade?.apply(this.drawnEye);
     this.render();
     this.owlFade?.restore();
@@ -2311,6 +2365,24 @@ export class Game {
     if (this.revealHold.holding) return;
     if (spaceAt(this.player.position.x, this.player.position.z) !== SPACE_GARDEN) return;
     warmup.advance(BACKGROUND_WARMUP_BUDGET_MS);
+  }
+
+  /**
+   * What drawing the park tells the simulation about the camera, before the
+   * draw: only the children this camera can see are drawn (step 4 of
+   * docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`) — the same call picks
+   * each child's level of detail by how much of the picture she fills (step 16;
+   * `core/instancedLod.ts`) — and the children it
+   * cannot see are simulated in fewer, longer steps (step 11;
+   * `entities/npc/simLod.ts`, `check:npc-sim-lod`) — same camera, after the
+   * cull has brought its world matrix up to date. Its own method so a
+   * `?clock=` step, which draws nothing, tells it too.
+   */
+  private noteView(): PerspectiveCamera {
+    const camera = this.cameraOverride ?? this.camera.camera;
+    cullCrowdsFor(this.engine.scene, camera);
+    noteNpcViewCamera(camera);
+    return camera;
   }
 
   private updateHud(tick: LoopTick): void {
@@ -2367,19 +2439,9 @@ export class Game {
    */
   private render(): void {
     const parkDrawn = !this.miniGames.hidesPark;
-    const camera = this.cameraOverride ?? this.camera.camera;
-    if (parkDrawn) {
-      // Only the children this camera can see are drawn (step 4 of
-      // docs/perf/FRAME-DROPS-2026-11.md; `check:crowd-cull`).
-      // The same call picks each child's level of detail by how much of the
-      // picture she fills (step 16; `core/instancedLod.ts`). Before the hold,
-      // so a warm-up collects exactly the crowd the draw would draw.
-      cullCrowdsFor(this.engine.scene, camera);
-      // …and the children it cannot see are simulated in fewer, longer steps
-      // (step 11; `entities/npc/simLod.ts`, `check:npc-sim-lod`). Same camera,
-      // after the cull has brought its world matrix up to date.
-      noteNpcViewCamera(camera);
-    }
+    // The crowd is culled for this camera before the hold, so a warm-up
+    // collects exactly the crowd the draw would draw (`noteView`).
+    const camera = parkDrawn ? this.noteView() : (this.cameraOverride ?? this.camera.camera);
     this.revealHold.frame(parkDrawn ? (warmup) => this.warmPasses(warmup, camera) : null, () => this.draw(camera));
   }
 

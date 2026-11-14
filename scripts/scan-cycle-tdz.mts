@@ -70,10 +70,34 @@
  *    evaluation*, which is the whole question here. Control E was written
  *    expecting a 9, got an 8, and that gap was this bug rather than the
  *    mutation failing to bite.
+ *
+ * ## Parsed with oxc
+ *
+ * The tree comes from `scripts/ts-ast.mts` (oxc through rolldown), since
+ * TypeScript 7 has no JavaScript API. The port keeps the TypeScript-API
+ * version's answers exactly, including two that follow from the shape of
+ * TypeScript's tree rather than from evaluation order: an object literal's
+ * `get`/`set` body is walked (TypeScript had no function node under an
+ * accessor), and `import {} from './x'` binds nothing and so adds no edge,
+ * like an import whose every name is `type`.
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending `export const __PROBE_TDZ: number = MIN_RAMP_RUN + 1;` to
+ * `src/world/train/bridgeFit.ts` (140 lines), which imports `MIN_RAMP_RUN`
+ * from `./bridgeFootprint` inside the same cycle. The annotation is there on
+ * purpose: oxc's span for an annotated name includes `: number`, and the site
+ * must still be keyed on the bare name. `--check` exits 1, output identical to
+ * the TypeScript-API version's:
+ *
+ *     6 module-scope initialiser(s) reading a binding from their own cycle:
+ *       …
+ *       src/world/train/bridgeFit.ts:142  __PROBE_TDZ <- MIN_RAMP_RUN  [src/world/train/bridgeFootprint.ts]
+ *     check:cycle-tdz FAILED — 1 problem(s):
+ *       - NEW module-scope read inside an import cycle: src/world/train/bridgeFit.ts::__PROBE_TDZ at line 142 reads MIN_RAMP_RUN from src/world/train/bridgeFootprint.ts. …
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import ts from 'typescript';
+import { bindingText, childrenOf, lineIndex, parseTypeScript, type Node, type Program } from './ts-ast.mts';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const srcRoot = join(repoRoot, 'src');
@@ -108,7 +132,8 @@ const resolveSpecifier = (from: string, spec: string): string | undefined => {
 
 interface Parsed {
   readonly file: string;
-  readonly source: ts.SourceFile;
+  readonly text: string;
+  readonly program: Program;
   /** target file -> local names imported from it, value imports only. */
   readonly valueImports: Map<string, Map<string, string>>;
   /** every target file, including type-only (needed for nothing but reporting). */
@@ -117,24 +142,25 @@ interface Parsed {
 
 const parsed = new Map<string, Parsed>();
 for (const file of allFiles) {
-  const source = ts.createSourceFile(
-    file,
-    readFileSync(file, 'utf8'),
-    ts.ScriptTarget.ESNext,
-    true,
-  );
+  const text = readFileSync(file, 'utf8');
+  const program = parseTypeScript(file, text);
   const valueImports = new Map<string, Map<string, string>>();
   const edges = new Set<string>();
-  for (const statement of source.statements) {
+  for (const statement of program.body) {
     // `export { X } from './y'` is a value edge exactly as an import is — the
     // re-exporting module still has to be evaluated, and its own imports walked
     // first. Missing these shrank the strongly-connected components and hid
     // `railRace/track.ts`'s `RAIL_GAUGE` (84 such edges across `src/`).
-    if (ts.isExportDeclaration(statement)) {
-      if (statement.isTypeOnly) continue;
-      const specifier = statement.moduleSpecifier;
-      if (specifier === undefined || !ts.isStringLiteral(specifier)) continue;
-      const target = resolveSpecifier(file, specifier.text);
+    // (`export const …` is an ExportNamedDeclaration too, with a declaration
+    // and no source; it is a module-scope constant, read further down.)
+    if (
+      statement.type === 'ExportAllDeclaration' ||
+      (statement.type === 'ExportNamedDeclaration' && statement.declaration === null)
+    ) {
+      if (statement.exportKind === 'type') continue;
+      const specifier = statement.source;
+      if (specifier === null) continue;
+      const target = resolveSpecifier(file, specifier.value);
       if (target === undefined) continue;
       edges.add(target);
       // The re-exported names are not read by this module, so they cannot be
@@ -142,36 +168,32 @@ for (const file of allFiles) {
       if (!valueImports.has(target)) valueImports.set(target, new Map());
       continue;
     }
-    if (!ts.isImportDeclaration(statement)) continue;
-    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    const target = resolveSpecifier(file, statement.moduleSpecifier.text);
+    if (statement.type !== 'ImportDeclaration') continue;
+    const target = resolveSpecifier(file, statement.source.value);
     if (target === undefined) continue;
     edges.add(target);
-    const clause = statement.importClause;
     // A bare `import './x'` binds no names but still **forces evaluation**, so
     // it is an evaluation-order edge and belongs in the graph. Dropping it hid
     // a cycle; found by a control that pulled `track.ts` into the cycle with
-    // exactly such an import and watched the scan stay quiet.
-    if (clause === undefined) {
+    // exactly such an import and watched the scan stay quiet. (Bare means no
+    // `from`: `import {} from './x'` also has no specifiers, and is not bare.)
+    if (statement.specifiers.length === 0 && !/\bfrom\s*$/.test(text.slice(statement.start, statement.source.start))) {
       if (!valueImports.has(target)) valueImports.set(target, new Map());
       continue;
     }
-    if (clause.isTypeOnly) continue;
+    if (statement.importKind === 'type') continue;
     const names = valueImports.get(target) ?? new Map<string, string>();
-    if (clause.name !== undefined) names.set(clause.name.text, 'default');
-    const bindings = clause.namedBindings;
-    if (bindings !== undefined && ts.isNamedImports(bindings)) {
-      for (const element of bindings.elements) {
-        if (element.isTypeOnly) continue;
-        names.set(element.name.text, (element.propertyName ?? element.name).text);
+    for (const specifier of statement.specifiers) {
+      if (specifier.type === 'ImportDefaultSpecifier') names.set(specifier.local.name, 'default');
+      else if (specifier.type === 'ImportNamespaceSpecifier') names.set(specifier.local.name, '*');
+      else if (specifier.importKind !== 'type') {
+        const imported = specifier.imported;
+        names.set(specifier.local.name, imported.type === 'Identifier' ? imported.name : String(imported.value));
       }
-    }
-    if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
-      names.set(bindings.name.text, '*');
     }
     if (names.size > 0) valueImports.set(target, new Map([...(valueImports.get(target) ?? []), ...names]));
   }
-  parsed.set(file, { file, source, valueImports, edges });
+  parsed.set(file, { file, text, program, valueImports, edges });
 }
 
 /** Tarjan, over the value-import graph — a type-only edge is erased and cannot cycle. */
@@ -235,7 +257,7 @@ interface Finding {
 
 const findings: Finding[] = [];
 
-for (const { file, source, valueImports } of parsed.values()) {
+for (const { file, text, program, valueImports } of parsed.values()) {
   const component = componentOf.get(file);
   if (component === undefined || !cyclic.has(component)) continue;
 
@@ -246,54 +268,72 @@ for (const { file, source, valueImports } of parsed.values()) {
     for (const local of names.keys()) risky.set(local, target);
   }
   if (risky.size === 0) continue;
+  const lineOf = lineIndex(text);
 
-  for (const statement of source.statements) {
-    if (!ts.isVariableStatement(statement)) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      const initializer = declaration.initializer;
-      if (initializer === undefined) continue;
+  for (const statement of program.body) {
+    // `const X = …` and `export const X = …` alike.
+    const declarations =
+      statement.type === 'VariableDeclaration'
+        ? statement
+        : statement.type === 'ExportNamedDeclaration' && statement.declaration?.type === 'VariableDeclaration'
+          ? statement.declaration
+          : undefined;
+    if (declarations === undefined) continue;
+    for (const declaration of declarations.declarations) {
+      const initializer = declaration.init;
+      if (initializer === null) continue;
       // A function or class *body* does not run at module scope; only the
       // expression that produces the value does. So arrow/function/class
       // initialisers are safe however much they mention a cyclic binding.
       if (
-        ts.isArrowFunction(initializer) ||
-        ts.isFunctionExpression(initializer) ||
-        ts.isClassExpression(initializer)
+        initializer.type === 'ArrowFunctionExpression' ||
+        initializer.type === 'FunctionExpression' ||
+        initializer.type === 'ClassExpression'
       ) {
         continue;
       }
       const reads = new Set<string>();
       const owners = new Set<string>();
-      const visit = (node: ts.Node): void => {
+      const visit = (node: Node): void => {
         if (
-          ts.isArrowFunction(node) ||
-          ts.isFunctionExpression(node) ||
-          ts.isClassExpression(node) ||
-          ts.isMethodDeclaration(node)
+          node.type === 'ArrowFunctionExpression' ||
+          node.type === 'FunctionExpression' ||
+          node.type === 'ClassExpression' ||
+          node.type === 'MethodDefinition' ||
+          // An object literal's method, `{ m() {} }`, name and all.
+          (node.type === 'Property' && node.method)
         ) {
           return;
         }
-        if (ts.isPropertyAccessExpression(node)) {
-          // `a.b` reads `a` only.
-          visit(node.expression);
+        if (node.type === 'Property' && (node.kind === 'get' || node.kind === 'set')) {
+          // TypeScript's tree had no function node under an accessor, so the
+          // scan this replaced walked accessor bodies. Kept, so that nothing it
+          // reported goes quiet.
+          visit(node.key);
+          for (const child of childrenOf(node.value)) visit(child as Node);
           return;
         }
-        if (ts.isIdentifier(node)) {
-          const owner = risky.get(node.text);
+        if (node.type === 'MemberExpression' && !node.computed) {
+          // `a.b` reads `a` only.
+          visit(node.object);
+          return;
+        }
+        if (node.type === 'Identifier') {
+          const owner = risky.get(node.name);
           if (owner !== undefined) {
-            reads.add(node.text);
+            reads.add(node.name);
             owners.add(owner);
           }
           return;
         }
-        ts.forEachChild(node, visit);
+        for (const child of childrenOf(node)) visit(child as Node);
       };
       visit(initializer);
       if (reads.size === 0) continue;
       findings.push({
         file,
-        line: source.getLineAndCharacterOfPosition(declaration.getStart(source)).line + 1,
-        name: declaration.name.getText(source),
+        line: lineOf(declaration.start) + 1,
+        name: bindingText(text, declaration.id),
         reads: [...reads].sort(),
         from: [...owners].map((o) => relative(repoRoot, o)).sort(),
       });
