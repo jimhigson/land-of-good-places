@@ -1,5 +1,5 @@
 // The pixel proof that nothing of the park is seen from inside any room — the
-// condition for taking it out of the scene graph there (World.parkRoot).
+// condition for taking it out of the scene graph there (World.parkRoots).
 //
 //   node docs/perf/undrawn-indoors/park-unseen.mjs <base> <outDir>
 //
@@ -10,9 +10,9 @@
 // contributed. If the park is unseen, the two are the same size.
 //
 // Works on either side of the change: before it, the park's groups hang off
-// the scene and are hidden by `visible`; after it, they hang under
-// `world.parkRoot`, which is already out of the graph indoors — hiding the
-// groups then changes nothing, which is the point.
+// the scene and are hidden by `visible`; after it, each is a `garden` root of
+// `DrawnSpaces`, already out of the graph indoors — hiding the groups then
+// changes nothing, which is the point.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 const require = createRequire(new URL('../../../package.json', import.meta.url));

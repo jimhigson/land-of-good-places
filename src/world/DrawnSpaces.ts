@@ -61,6 +61,8 @@ export class DrawnSpaces {
   private readonly scene: Object3D;
   private readonly entries: SpaceRoot[] = [];
   private detaching = false;
+  /** Spaces hidden whole by {@link showSpace}, by stem. Every space is shown until it is hidden. */
+  private readonly hiddenSpaces = new Set<string>();
 
   constructor(scene: Object3D) {
     this.scene = scene;
@@ -71,9 +73,10 @@ export class DrawnSpaces {
    * to `space`, and from here on their `visible` is their membership.
    *
    * `space` is the stem of the place's space id in `spaces.ts` (`castle`,
-   * `hotel`, `reptileHouse`, `library`). Nothing in the game branches on it;
-   * the guard (`check:render-budget`) uses it to say which roots may be in the
-   * graph in the space she is standing in.
+   * `hotel`, `reptileHouse`, `library`, and `garden` for each of the park's
+   * own groups). The guard (`check:render-budget`) uses it to say which roots
+   * may be in the graph in the space she is standing in, and
+   * {@link showSpace} to hide a space of several roots at once.
    */
   register(space: string, ...roots: Object3D[]): void {
     for (const root of roots) {
@@ -88,10 +91,13 @@ export class DrawnSpaces {
       // with an accessor on this one instance is what makes the owner's
       // existing writes the mechanism, rather than a call somebody has to
       // remember to make beside each of them.
+      //
+      // It reads back as what is drawn — the owner's word *and* its space
+      // shown ({@link showSpace}) — so `isDrawn` and the renderer agree.
       Object.defineProperty(root, 'visible', {
         configurable: true,
         enumerable: true,
-        get: () => entry.wanted,
+        get: () => entry.wanted && !this.hiddenSpaces.has(entry.space),
         set: (value: boolean) => {
           entry.wanted = value;
           this.place(entry);
@@ -99,6 +105,37 @@ export class DrawnSpaces {
       });
       this.place(entry);
     }
+  }
+
+  /**
+   * **Shows or hides a whole space at once**, over what its roots' owners say
+   * of them one by one: a root is drawn when its owner says so *and* its space
+   * is shown.
+   *
+   * For a space made of several roots whose owners already use `visible` for
+   * reasons of their own — **the park**: the fireflies hide by day, the lamp
+   * posts behind the keychain view, the whole park above the ferris wheel's
+   * clouds (`World.setParkVisible`). "She is not in the garden" cannot be
+   * written on any one of those roots without overwriting theirs, and it
+   * cannot be one root over all of them either: a new ancestor renames every
+   * park mesh's scene path, which is what `check:coplanar`'s ratchet keys and
+   * every park's acceptance are written against (a `the-park` root over the
+   * groups was tried: seed 5 was rejected, 17 seams "NEW" that were the old
+   * ones renamed). A space with one root, whose owner writes it, never needs
+   * this — `visible` alone says it.
+   *
+   * Cheap to call every frame: nothing moves unless the answer changed.
+   */
+  showSpace(space: string, shown: boolean): void {
+    if (shown === !this.hiddenSpaces.has(space)) return;
+    if (shown) this.hiddenSpaces.delete(space);
+    else this.hiddenSpaces.add(space);
+    for (const entry of this.entries) if (entry.space === space) this.place(entry);
+  }
+
+  /** Whether `space` is shown as a whole — see {@link showSpace}. */
+  isShown(space: string): boolean {
+    return !this.hiddenSpaces.has(space);
   }
 
   /**
@@ -151,7 +188,7 @@ export class DrawnSpaces {
 
   private place(entry: SpaceRoot): void {
     const { root } = entry;
-    const belongs = entry.wanted || !this.detaching;
+    const belongs = (entry.wanted && !this.hiddenSpaces.has(entry.space)) || !this.detaching;
     if (belongs) {
       if (root.parent === this.scene) return;
       this.scene.add(root);
@@ -168,7 +205,7 @@ export class DrawnSpaces {
 interface SpaceRoot {
   readonly space: string;
   readonly root: Object3D;
-  /** What the space's owner last wrote to `visible`. */
+  /** What the root's owner last wrote to `visible` — drawn only if its space is shown too. */
   wanted: boolean;
 }
 

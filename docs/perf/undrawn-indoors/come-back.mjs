@@ -37,7 +37,7 @@ try {
     window.__rec = rec;
     const kids = () => w.npcs.all.filter((c) => c.driver?.constructor?.name !== 'WaypointDriver');
     const sample = () => {
-      if (rec.on) rec.frames.push({ t: performance.now(), parkAttached: w.parkRoot ? w.parkRoot.parent !== null : w.player === undefined || true, train: w.train.distance, kids: kids().map((c) => [c.position.x, c.position.z]) });
+      if (rec.on) rec.frames.push({ t: performance.now(), parkAttached: w.parkRoots ? w.parkRoots.filter((r) => r.parent !== null).length : null, train: w.train.distance, kids: kids().map((c) => [c.position.x, c.position.z]) });
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -51,7 +51,7 @@ try {
   const entered = await page.evaluate(() => window.game.world.hotel.requestEnterLobby());
   await sleep(3000);
   await page.screenshot({ path: `${outDir}/2-lobby.png` });
-  const inside = await page.evaluate(() => ({ attached: window.game.world.parkRoot ? window.game.world.parkRoot.parent !== null : true, train: window.game.world.train.distance, kids: window.game.world.npcs.all.map((c) => [c.position.x, c.position.z]) }));
+  const inside = await page.evaluate(() => ({ attached: window.game.world.parkRoots ? window.game.world.parkRoots.filter((r) => r.parent !== null).length : null, train: window.game.world.train.distance, kids: window.game.world.npcs.all.map((c) => [c.position.x, c.position.z]) }));
   await sleep(Number(indoorS) * 1000);
   const stillInside = await page.evaluate(() => ({ train: window.game.world.train.distance, kids: window.game.world.npcs.all.map((c) => [c.position.x, c.position.z]) }));
   // Out through the lobby's own way out, behind its iris.

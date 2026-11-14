@@ -46,7 +46,7 @@ const where = (page) => page.evaluate(() => {
   const g = window.game; const w = g.world; const p = g.player.position;
   return {
     x: Number(p.x.toFixed(1)), y: Number(p.y.toFixed(1)), z: Number(p.z.toFixed(1)),
-    parkAttached: w.parkRoot ? w.parkRoot.parent !== null : null, parkDrawn: w.parkDrawn ?? null,
+    parkAttached: w.parkRoots ? `${w.parkRoots.filter((r) => r.parent !== null).length}/${w.parkRoots.length}` : null, parkDrawn: w.parkDrawn ?? null,
     hotelInside: w.hotel.playerIsInside, hotelFurnished: w.hotel.furnished, arrival: w.entrance.arrival !== null,
   };
 });

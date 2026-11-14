@@ -33,18 +33,20 @@
  * 2. **Every room**, walked into through its own door code and out again the
  *    way its door lets her out: the hotel lobby, the library, the Reptile
  *    House, the castle's mall, great hall and roof. In each, the park is
- *    undrawn too (`World.parkRoot`).
+ *    undrawn too (`World.parkRoots`, the park's groups, hidden whole by
+ *    `DrawnSpaces.showSpace`).
  *
  * Every frame, every object with an **invisible ancestor** — a space's root,
- * written `visible = false` by its owner (headless, a hidden space stays in the
- * one graph; `DrawnSpaces` only detaches in the live game) — is compared with
+ * written `visible = false` by its owner or hidden with its whole space
+ * (headless, a hidden space stays in the one graph; `DrawnSpaces` only
+ * detaches in the live game) — is compared with
  * itself a frame earlier: position, rotation, scale, and for an `InstancedMesh`
  * its instance buffer's `version`. An object appearing under a hidden ancestor
  * counts too. Each change is attributed to the named group it happened under,
  * so a red run says *what* is still running.
  *
  * **The crowd is measured separately**, because its group is never hidden:
- * it is everywhere the crowd is (`World.parkRoot`'s note). In a room the crowd
+ * it is everywhere the crowd is (`World.parkRoots`' note). In a room the crowd
  * never visits, its instance buffers must not be rewritten at all — every
  * child of it is held still (`NpcSystem.crowdLiveAt`).
  *
@@ -215,10 +217,13 @@ function hiddenSpace(object: Object3D): string {
   return found;
 }
 
-/** True when `object` sits under `root`, or under the group named `root`. */
-function under(object: Object3D, root: Object3D | string): boolean {
+/** What a control watches: a root, the group of that name, or any of several roots (the park's). */
+type Watched = Object3D | string | readonly Object3D[];
+
+/** True when `object` sits under `root`, under the group named `root`, or under any of the roots listed. */
+function under(object: Object3D, root: Watched): boolean {
   for (let o: Object3D | null = object; o; o = o.parent) {
-    if (typeof root === 'string' ? o.name === root : o === root) return true;
+    if (typeof root === 'string' ? o.name === root : Array.isArray(root) ? root.includes(o) : o === root) return true;
   }
   return false;
 }
@@ -240,7 +245,7 @@ interface Sweep {
  * snapshot is refreshed, drawn or not, so an object that has just become
  * undrawn is compared against where it really was.
  */
-function sweep(watch: Object3D | string | null = null, exempt: readonly Object3D[] = []): Sweep {
+function sweep(watch: Watched | null = null, exempt: readonly Object3D[] = []): Sweep {
   const changedUndrawn = new Map<string, number>();
   let changedWatched = 0;
   let changedExempt = 0;
@@ -473,11 +478,11 @@ let parkChanged = 0;
 let crowdBack = 0;
 for (let i = 0; i < CONTROL_FRAMES; i += 1) {
   step();
-  parkChanged += sweep(world.parkRoot).changedWatched;
+  parkChanged += sweep(world.parkRoots).changedWatched;
   if (crowdRewrites() > 0) crowdBack += 1;
 }
 console.log(
-  `control 4, back in the garden: ${parkChanged} changes under ${world.parkRoot.name} in ${CONTROL_FRAMES} frames, ` +
+  `control 4, back in the garden: ${parkChanged} changes under the park's ${world.parkRoots.length} groups in ${CONTROL_FRAMES} frames, ` +
     `the crowd rewritten on ${crowdBack}, the train moved ${(train.distance - trainBack).toFixed(2)} m`,
 );
 check(parkChanged > CONTROL_FRAMES, `back in the garden, only ${parkChanged} changes under the park in ${CONTROL_FRAMES} frames — the park did not come back, or this instrument cannot see it move`);
