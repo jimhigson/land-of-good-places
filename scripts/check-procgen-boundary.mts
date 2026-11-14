@@ -17,10 +17,13 @@
  * **Control, every run:** the detector is first run on a synthetic file with
  * one import of each kind into `procgen/`, and must find all four — so a green
  * run cannot mean a detector that finds nothing.
+ *
+ * The specifiers are read off the syntax tree (`scripts/ts-ast.mts`: oxc
+ * through rolldown, since TypeScript 7 has no JavaScript API).
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import ts from 'typescript';
+import { forEachNode, lineIndex, parseTypeScript, stringLikeValue, type Node } from './ts-ast.mts';
 
 const root = process.cwd();
 const procgen = join(root, 'procgen') + sep;
@@ -37,23 +40,26 @@ function filesUnder(dir: string): string[] {
 
 /** Every module specifier a file names: imports, re-exports, `import()` and `import('x').T` types. */
 function specifiers(file: string, text: string): { spec: string; line: number }[] {
-  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const lineOf = lineIndex(text);
   const out: { spec: string; line: number }[] = [];
-  const add = (node: ts.Node, spec: string): void => {
-    out.push({ spec, line: sf.getLineAndCharacterOfPosition(node.getStart()).line + 1 });
+  const add = (node: Node, spec: string): void => {
+    out.push({ spec, line: lineOf(node.start) + 1 });
   };
-  const visit = (node: ts.Node): void => {
-    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
-      add(node, node.moduleSpecifier.text);
-    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      const arg = node.arguments[0];
-      if (arg && ts.isStringLiteralLike(arg)) add(node, arg.text);
-    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
-      add(node, node.argument.literal.text);
+  forEachNode(parseTypeScript(file, text), (node) => {
+    // Imports of every kind, and re-exports: `export … from` / `export * from`.
+    if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') {
+      add(node, node.source.value);
+    } else if (node.type === 'ExportNamedDeclaration' && node.source !== null) {
+      add(node, node.source.value);
+    } else if (node.type === 'ImportExpression') {
+      // `import('x')`, or a backtick string with no `${}`.
+      const spec = stringLikeValue(node.source);
+      if (spec !== undefined) add(node, spec);
+    } else if (node.type === 'TSImportType') {
+      // `import('x').T` in a type.
+      add(node, node.source.value);
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
+  });
   return out;
 }
 

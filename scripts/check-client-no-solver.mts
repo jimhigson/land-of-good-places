@@ -19,12 +19,15 @@
  * (at least {@link MIN_SENTINELS}), and a string only the game's own hydration
  * path prints ({@link SEEN_CONTROL}) must be found in the bundle — proof the
  * search is reading the real build, not an empty directory.
+ *
+ * The literals are read off the syntax tree (`scripts/ts-ast.mts`: oxc through
+ * rolldown, since TypeScript 7 has no JavaScript API).
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import ts from 'typescript';
+import { forEachNode, parseTypeScript } from './ts-ast.mts';
 
 const root = process.cwd();
 /** Fewer than this and the instrument has stopped seeing `procgen/`. */
@@ -44,18 +47,17 @@ function filesUnder(dir: string, pattern: RegExp): string[] {
 
 /** Every string literal and template-literal text chunk in a file. */
 function strings(file: string): string[] {
-  const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const out: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) out.push(node.text);
-    else if (ts.isTemplateExpression(node)) {
-      out.push(node.head.text);
-      for (const span of node.templateSpans) out.push(span.literal.text);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
+  forEachNode(parseTypeScript(file, readFileSync(file, 'utf8')), (node) => {
+    // Module specifiers are not messages: skip imports and `export … from` /
+    // `export { … }`, but not `export const`, whose strings are the module's own.
+    if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') return false;
+    if (node.type === 'ExportNamedDeclaration' && node.declaration === null) return false;
+    if (node.type === 'Literal' && typeof node.value === 'string') out.push(node.value);
+    // Every text chunk of a template, `${}` or not. A template literal *type*
+    // with substitutions is a TSTemplateLiteralType, which was never collected.
+    else if (node.type === 'TemplateLiteral') for (const quasi of node.quasis) out.push(quasi.value.cooked ?? quasi.value.raw);
+  });
   return out;
 }
 
