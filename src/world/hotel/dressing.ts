@@ -14,6 +14,7 @@ import {
   RingGeometry,
   Shape,
   ShapeGeometry,
+  Sphere,
   SphereGeometry,
   SRGBColorSpace,
   Vector3,
@@ -1106,6 +1107,27 @@ export interface DiscoSparkle {
 /** Chips of light on the ball's surface, and specks drifting below it. */
 const SPARKLE_GLINTS = 90;
 const SPARKLE_MOTES = 40;
+/** A glint's size: this much when dark, up to {@link GLINT_FLARE} more at the top of its twinkle. */
+const GLINT_DIM = 0.25;
+const GLINT_FLARE = 1.5;
+/** A mote's size: this much at either end of its fall, up to {@link MOTE_FADE_IN} more in the middle. */
+const MOTE_FADED = 0.25;
+const MOTE_FADE_IN = 0.95;
+/** How far below the ball a mote has fallen by the end of its run. */
+const MOTE_FALL = 5.2;
+/** Where a glint sits, as a multiple of the ball's radius: just proud of the facets. */
+const GLINT_ORBIT = 1.015;
+
+/**
+ * How far one instance of `geometry` reaches from its own origin at scale 1:
+ * what three's per-instance sphere (`geometry.boundingSphere` through the
+ * instance matrix) can cover, with no rotation to rely on.
+ */
+function reachOf(geometry: SphereGeometry | OctahedronGeometry): number {
+  if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+  const sphere = geometry.boundingSphere!;
+  return sphere.center.length() + sphere.radius;
+}
 
 export function createDiscoSparkle(ballRadius: number, seed: number): DiscoSparkle {
   const rng = new Rng(seed);
@@ -1139,7 +1161,7 @@ export function createDiscoSparkle(ballRadius: number, seed: number): DiscoSpark
     // they bunch at the poles and the ball's equator looks bald.
     const theta = rng.range(0, TAU);
     const phi = Math.acos(1 - 2 * rng.unit());
-    const r = ballRadius * 1.015;
+    const r = ballRadius * GLINT_ORBIT;
     glintAt[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
     glintAt[i * 3 + 1] = Math.cos(phi) * r;
     glintAt[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r;
@@ -1180,13 +1202,26 @@ export function createDiscoSparkle(ballRadius: number, seed: number): DiscoSpark
   }
   if (motes.instanceColor) motes.instanceColor.needsUpdate = true;
 
+  // **Bounds that hold for good.** three caches an instanced mesh's bound the
+  // first time it culls it and never looks again, and both of these move
+  // every frame: on CI a mote drifted outside the bound cached for it a couple
+  // of seconds in, after which three was free to cull all forty while one was
+  // on screen (`check:cull-audit`'s stale-bound clause). So each is given the
+  // whole of where it can ever be, once, here — nothing a frame. A glint sits
+  // on the ball and only grows; a mote circles the ball's axis at its own
+  // radius and falls the length of `MOTE_FALL`.
+  glints.boundingSphere = new Sphere(new Vector3(), ballRadius * GLINT_ORBIT + (GLINT_DIM + GLINT_FLARE) * reachOf(glints.geometry));
+  const moteReach = (MOTE_FADED + MOTE_FADE_IN) * reachOf(motes.geometry);
+  motes.boundingSphere = new Sphere(
+    new Vector3(0, -MOTE_FALL / 2, 0),
+    Math.hypot(Math.max(...moteRadius) + moteReach, MOTE_FALL / 2 + moteReach),
+  );
+
   // Written over every frame, never replaced. See this function's header.
   const matrix = new Matrix4();
   const position = new Vector3();
   const quaternion = new Quaternion();
   const scale = new Vector3();
-  /** How far below the ball a mote has fallen by the end of its run. */
-  const FALL = 5.2;
 
   return {
     glints,
@@ -1198,7 +1233,7 @@ export function createDiscoSparkle(ballRadius: number, seed: number): DiscoSpark
         // looks like, where a gentle pulse reads as a row of fairy lights.
         const wave = Math.sin(elapsed * glintRate[i]! + glintPhase[i]!);
         const bright = wave > 0 ? wave * wave : 0;
-        const size = 0.25 + bright * 1.5;
+        const size = GLINT_DIM + bright * GLINT_FLARE;
         position.set(glintAt[i * 3]!, glintAt[i * 3 + 1]!, glintAt[i * 3 + 2]!);
         scale.setScalar(size);
         matrix.compose(position, quaternion, scale);
@@ -1213,12 +1248,12 @@ export function createDiscoSparkle(ballRadius: number, seed: number): DiscoSpark
         const angle = moteAngle[i]! + elapsed * moteSpin[i]!;
         position.set(
           Math.cos(angle) * moteRadius[i]!,
-          -t * FALL,
+          -t * MOTE_FALL,
           Math.sin(angle) * moteRadius[i]!,
         );
         // Fading in and out at both ends of the fall, so nothing pops.
         const fade = Math.min(1, Math.min(t, 1 - t) * 6);
-        scale.setScalar(0.25 + fade * 0.95);
+        scale.setScalar(MOTE_FADED + fade * MOTE_FADE_IN);
         matrix.compose(position, quaternion, scale);
         motes.setMatrixAt(i, matrix);
       }
