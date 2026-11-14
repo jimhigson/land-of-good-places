@@ -235,7 +235,7 @@ export class Hotel implements GameSystem {
     this.lift = new HotelLift({
       currentRoom: () => this.currentRoom(),
       atLiftDoors: (player) => this.atLiftDoors(player),
-      travelTo: (room) => this.interior?.travelTo(room),
+      travelTo: (room, arrived) => this.interior?.travelTo(room, arrived),
       cancelWalk: () => this.controls.cancelWalk(),
       player: () => this.player,
     });

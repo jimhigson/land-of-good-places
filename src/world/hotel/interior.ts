@@ -2437,7 +2437,7 @@ export class HotelInterior {
   }
 
   /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
-  travelTo(room: HotelRoom): void {
+  travelTo(room: HotelRoom, arrived: () => void): void {
     // `hop`, not `changeTo` — no `isChanging` flag and no `cancelWalk`, which
     // is what this always did. See `SpaceManager.hop` for why the difference
     // is preserved rather than tidied here.
@@ -2457,6 +2457,8 @@ export class HotelInterior {
         player.setRidePose(x, 0, z, Math.PI / 2);
       }
       this.boundTo(room);
+      // …and only now does she step out, on this side of the iris.
+      arrived();
     });
   }
 

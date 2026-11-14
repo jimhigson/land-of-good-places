@@ -835,7 +835,7 @@ export class Building implements GameSystem {
     // lift asks of `Hotel`.
     this.liftRide = new LiftRide({
       currentFloor: () => this.currentFloor(),
-      travelTo: (floor) => this.travelTo(floor),
+      travelTo: (floor, arrived) => this.travelTo(floor, arrived),
       cancelWalk: () => this.controls.cancelWalk(),
       player: () => this.player,
     });
@@ -1543,7 +1543,7 @@ export class Building implements GameSystem {
    * iris — posing her before it closed gave a visible cross-space camera whip
    * when the hotel first did this (reviewer finding 2 on PR #247).
    */
-  private travelTo(floor: CastleFloor): void {
+  private travelTo(floor: CastleFloor, arrived: () => void): void {
     this.spaces.hop(() => {
       const player = this.player;
       // Only while the lift still has her — see `Hotel.travelTo`, the same rule.
@@ -1561,6 +1561,8 @@ export class Building implements GameSystem {
       }
       this.showOnly(floor);
       this.boundTo(floor);
+      // …and only now does she step out, on this side of the iris.
+      arrived();
     });
   }
 

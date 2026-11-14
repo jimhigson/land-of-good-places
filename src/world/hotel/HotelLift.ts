@@ -36,8 +36,12 @@ export interface HotelLiftDeps {
   currentRoom(): HotelRoom | null;
   /** Is the player standing in this room's lift alcove reach? */
   atLiftDoors(player: Player): boolean;
-  /** Teleport the player to `room`'s lift alcove, behind the iris. */
-  travelTo(room: HotelRoom): void;
+  /**
+   * Teleport the player to `room`'s lift alcove, behind the iris; `arrived`
+   * is called there, once she is in it — and not at all if the lift has let
+   * her go by then.
+   */
+  travelTo(room: HotelRoom, arrived: () => void): void;
   cancelWalk(): void;
   player(): Player | null;
 }
@@ -246,9 +250,13 @@ export class HotelLift implements LiftPanelSource {
         if (this.phaseT >= TRAVEL_SECONDS && !this.travelled) {
           this.travelled = true;
           // The portal: iris, teleport, new play bounds — the hotel owns all
-          // of that; this only asks. Alighting starts when it lands.
-          this.deps.travelTo(this.to.room);
-          this.beginAlight(this.to.room);
+          // of that; this only asks. Alighting starts when it lands: at the
+          // iris's midpoint (`arrived`), not on this line, where the step
+          // posed her in the new room from the next frame while the iris had
+          // barely begun to close — the castle's lift did the same, and showed
+          // the roof garden through a wide-open iris (`liftRide.ts`).
+          const room = this.to.room;
+          this.deps.travelTo(room, () => this.beginAlight(room));
         }
         return;
       }
