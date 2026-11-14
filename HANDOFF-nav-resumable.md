@@ -1,5 +1,26 @@
 # HANDOFF — nav-resumable (120 fps plan, step 1b second half)
 
+## 14 Nov (second engineer) — state
+- Merged origin/main twice: 66bcd7f8 (TS 7.1, Vite 8.3.8), then d2ebb4c1 (#781, the crowd held still indoors;
+  one conflict in `NpcSystem.ts`, both methods kept). `scripts` = main's 213 + `check:nav-frame`, nothing lost
+  (parsed, `check` reaches 126 = main's 125 + 1). tsc 0, typecheck:test 0, nav-spaces/warm/frame 0 after merge 1.
+- Process (Jim, 14 Nov): no QA/reviewer; engineer verifies in a browser, opens the PR, CI runs; merges on green CI
+  plus the browser proof (no preview judging for "nothing seems different" perf work).
+- Browser instrument (scratch, `$SP/navlib.mjs`, `verify.mjs`, `interiors.mjs`, `compare.mjs`; $SP = this
+  session's scratchpad): Chrome for Testing headless on Metal (renderer string checked), real clicks/touch,
+  every NavGrid entry point timed per rAF interval, put-down windows apart. Main = worktree
+  `nav-resumable-baseline` (detached at origin/main) on 6132, branch on 6131 — kill by PID when done.
+- Measured on 66bcd7f8 merge (M4 Pro, load 30–75), main → branch, worst route-finding in one frame:
+  park taps 34.7 → 2.2 ms (far taps 32–33 → 2.0–2.2; routes IDENTICAL for every navigateTo, ≤5 mm for clicks);
+  first tap after boot 209–216 → 2.5 (route lands f90–101, she walks from f2); out of the castle, first tap
+  188 → 2.1 (shelf); crowd 60 s standing 36.5 → 2.6 (14 frames > 8.3 ms → 0), crowd moving 72% vs 72%,
+  3053 vs 3048 m walked; interiors (hotel, reptile, library, castle, castle-dash): all walk out by the doorway
+  tap at the same times on both builds.
+- Lazy castle (#759) measured merged with this branch (scratch worktree, removed): walking in = 1 sliced lattice
+  (her mall floor), 1 put-down window whole (3.5 ms), 1 patch of 0 cells (0.2 ms); out = unshelved + 0-cell
+  patch. No whole park rebuild. Nothing needs calling from the castle side.
+- Left: re-verify on the d2ebb4c1 merge, full `check` + `test:procgen`, PR.
+
 Branch `perf/nav-resumable`, worktree `.claude/worktrees/nav-resumable`, from origin/main 34f20970 (main had not
 moved at 17:00 13 Nov). Dev server: my own on 6031; a main baseline worktree `nav-resumable-baseline` on 6032 —
 both to be killed by PID and the baseline worktree removed when done. No PR (a later stage opens it).
