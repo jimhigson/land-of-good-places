@@ -45,10 +45,24 @@ Throwaway baseline worktree at main (TS 5.9.3): `.claude/worktrees/ts71-baseline
   .d.mts; TS parsed them as declarations by name): ts-ast.mts uses lang dts.
 - No `typescript` importers remain (git grep).
 
+- Red proofs pasted into all six headers (7724570a); optional-chain arming
+  fixture (02f5ffcd); CLAUDE.md Building note (8aec09df).
+- TS part verified: controls re-run on final setup; scripts object equal to
+  main; chain-coverage 0; fresh frozen install 0; build 0; shard-1 0 (1027 s);
+  test:procgen 0 (54 files, 2217/2217, 851 s). **Draft PR #779** opened.
+- Vite: 310a37e3 (vite 8.3.8, rolldown 1.2.19, README), d1ae4e35
+  (rolldownOptions rename: byte-identical build), 09be2908 (ts-ast.mts throws
+  if the rolldown pin != Vite's rolldown; proved red with pin 1.2.6).
+  Six AST checks + dumps re-proved identical on oxc 0.156. build 0,
+  boot-chunk 0 (boot 51 chunks 3802 KB vs main 49 / 3806 KB; ~340 KB moved
+  ui -> ripika chunk; 2 new small chunks chime, types). Warnings: only the
+  pre-existing native-config-loader one (needs allowImportingTsExtensions in
+  tsconfig.json to fix = policy, so listed not fixed).
+
 ## Next
-- Red proofs per check (mutation, output pasted into each header), then
-  CLAUDE.md note, controls re-run, chain-coverage, shard-1, build, open PR.
-- Then the Vite bump commits, then bundledDev (measure; keep only if a win).
+- Vite proofs still to run: update-adoption (PORT=own), served-deep-links,
+  shard-1, test:procgen, headless boots dev+preview (scratchpad/measure.mjs).
+- Then bundledDev (measure off vs on; keep only if a clear win).
 
 ## Port facts (oxc ESTree vs TypeScript's tree)
 - Offsets are UTF-16, safe to slice. parseAst defaults to lang js and
