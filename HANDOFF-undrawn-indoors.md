@@ -112,8 +112,13 @@ Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout
 - **Merged origin/main bb7e9c99 (#778, shadow cache measured and left off)** as fba4cec9: clean. The cache, when
   asked for (`?shadowCache=1`), walks `visible` the way three's pass does, so a park root out of the graph reads as
   "a cached caster disappeared" and redraws — right, and not exercised here (the cache is off by default).
-- **On the merged head fba4cec9 (code = 998ad283), each exit code read directly**: tsc 0, typecheck:test 0,
-  `check:shard-1` … `check:shard-12` each 0 (the whole `check` chain, run shard by shard), `check:npc-presence` 0,
-  `check:undrawn-still -- --mutate` 1 (expected; same totals as its header), `test:procgen` 0 (54 files, 2219 tests),
-  `pnpm run build` 0. Before the #778 merge, same src: `check:coplanar` 0, `LGP_SEEDS=5 validate:parks --fresh` 0.
+- On the merged head fba4cec9 (code = 998ad283): tsc 0, typecheck:test 0, shards 1-12 each 0, npc-presence 0,
+  undrawn-still --mutate 1 (expected), test:procgen 0 (2219 tests), build 0.
+- **Merged origin/main 66bcd7f8 (#779 TypeScript 7.1 + vite 8.3.8 + rolldown, #780)** as 26b68da9: clean;
+  `pnpm install --frozen-lockfile`. **On 26b68da9, each exit code read directly**: tsc (7.1.0-dev.20261006.1) 0,
+  typecheck:test 0, `check:shard-1` … `check:shard-12` each 0 (the whole `check` chain, shard by shard;
+  `$SP/u2/all-exits.txt`), `check:npc-presence` 0, `check:undrawn-still -- --mutate` 1 (expected, same totals as its
+  header), `test:procgen` 0 (54 files, 2219 tests), `pnpm run build` 0. On the same src before the tooling merges:
+  `check:coplanar` 0 (16 seeds), `LGP_SEEDS=5 validate:parks --fresh` 0. Main had not moved again at 17:13.
+- Shards 5 and 6 took 27 and 71 min on that run (a VM not ours at ~980 % CPU); 6 and 8 min the run before.
 - Base worktree removed. Port 6011: nothing of this item running on it. **Done; ready for a PR.**
