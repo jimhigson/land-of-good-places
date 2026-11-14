@@ -188,7 +188,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1200,
-    rollupOptions: {
+    // `rolldownOptions`, not the `rollupOptions` alias Vite 8 deprecates.
+    rolldownOptions: {
       output: {
         // **Modules run in the order the source imports them, whatever chunk
         // they land in.** `main.ts`'s first import installs the deterministic
