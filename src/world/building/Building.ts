@@ -302,9 +302,11 @@ export interface InteriorControls {
    * With `ready`, the iris **holds shut** until it settles before running
    * `midpoint` — a room whose furnishings are still being fetched
    * (`world/LazyPart.ts`) is never shown half-built, and the screen is the
-   * closed iris rather than a frozen frame.
+   * closed iris rather than a frozen frame. A function is called only once
+   * the iris is shut, so the work it starts is never on a frame she sees
+   * (`SpaceManager.changeToFurnished`).
    */
-  iris(midpoint: () => void, ready?: Promise<unknown>): void;
+  iris(midpoint: () => void, ready?: Promise<unknown> | (() => Promise<unknown>)): void;
   /** A soft blink. */
   flash(): void;
   /** Put the camera exactly on the player, with no travelling. */
@@ -833,7 +835,7 @@ export class Building implements GameSystem {
     // lift asks of `Hotel`.
     this.liftRide = new LiftRide({
       currentFloor: () => this.currentFloor(),
-      travelTo: (floor) => this.travelTo(floor),
+      travelTo: (floor, arrived) => this.travelTo(floor, arrived),
       cancelWalk: () => this.controls.cancelWalk(),
       player: () => this.player,
     });
@@ -1541,7 +1543,7 @@ export class Building implements GameSystem {
    * iris — posing her before it closed gave a visible cross-space camera whip
    * when the hotel first did this (reviewer finding 2 on PR #247).
    */
-  private travelTo(floor: CastleFloor): void {
+  private travelTo(floor: CastleFloor, arrived: () => void): void {
     this.spaces.hop(() => {
       const player = this.player;
       // Only while the lift still has her — see `Hotel.travelTo`, the same rule.
@@ -1559,6 +1561,8 @@ export class Building implements GameSystem {
       }
       this.showOnly(floor);
       this.boundTo(floor);
+      // …and only now does she step out, on this side of the iris.
+      arrived();
     });
   }
 

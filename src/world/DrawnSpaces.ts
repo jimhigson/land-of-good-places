@@ -153,11 +153,11 @@ export class DrawnSpaces {
   }
 
   /**
-   * Every registered root that is out of the graph right now.
-   *
-   * For the callers that have to reach a space nobody is in: the shader
-   * warm-up (`boot/shaderWarmup.ts`), which compiles every root behind the
-   * bus and can no longer find these by walking the scene.
+   * Every registered root that is out of the graph right now — for a caller
+   * that has to reach a space nobody is in (`check:render-budget`). Not the
+   * shader warm-up's: a room's programs are keyed on the room's own lights,
+   * so it is compiled behind its door's iris (`core/viewWarmup.ts`), never
+   * from here against the park's.
    */
   detachedRoots(): Object3D[] {
     return this.entries.filter((entry) => entry.root.parent !== this.scene).map((entry) => entry.root);

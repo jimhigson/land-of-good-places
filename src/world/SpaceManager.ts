@@ -127,7 +127,7 @@ export class SpaceManager {
    * far side of the iris. Being inside somewhere is a camera and a set of play
    * bounds as much as it is a position.
    */
-  changeTo(midpoint: () => void, ready?: Promise<unknown>): void {
+  changeTo(midpoint: () => void, ready?: Promise<unknown> | (() => Promise<unknown>)): void {
     this.changing = true;
     this.controls.cancelWalk();
     this.beforeChange();
@@ -143,14 +143,26 @@ export class SpaceManager {
    * {@link changeTo}, into a room whose furnishings may not be here yet
    * (`world/LazyPart.ts`): `furnished()` says whether they are, `furnish()`
    * fetches and builds them. Already furnished, it is exactly `changeTo`.
-   * Otherwise the fetch starts now, the iris closes over it and holds shut
-   * until the room is built, and only then is `midpoint` run — so she never
-   * stands in a shell whose solids have not arrived. If the fetch fails
-   * (offline on a first visit) `midpoint` is not run at all: she stays where
-   * she was, the iris opens on her there, and `onFailed` runs — the owner's
-   * cue to tell her, and to keep the door from firing again under her while
-   * she still stands in it (a failed door re-fired every cooldown was a
+   * Otherwise the iris closes, `furnish()` is called **once it is shut**, the
+   * iris holds shut until the room is built, and only then is `midpoint` run —
+   * so she never stands in a shell whose solids have not arrived. If the fetch
+   * fails (offline on a first visit) `midpoint` is not run at all: she stays
+   * where she was, the iris opens on her there, and `onFailed` runs — the
+   * owner's cue to tell her, and to keep the door from firing again under her
+   * while she still stands in it (a failed door re-fired every cooldown was a
    * screen flashing on a loop, QA on #749).
+   *
+   * **Why not at once, as it used to be.** Every room's chunk is prefetched
+   * while she walks up to its door, so by the doormat `furnish()`'s fetch is
+   * already settled and its build ran as a microtask *in the frame that asked
+   * for the iris* — a frame she is still looking at, before the iris has
+   * moved: 131 ms for the library's reading room and den, 34 ms for the
+   * Reptile House's hall, measured on the shipped build. Behind the shut iris
+   * it costs her nothing to see. (A door reached before its prefetch has
+   * landed fetches from the moment the iris is shut instead; every chunk is
+   * precached, so that is a disk read.) Generic on purpose: any lazy room
+   * entered through here — the castle's too, once it is one — is built behind
+   * its iris and then warmed there (`core/viewWarmup.ts`).
    */
   changeToFurnished(
     furnished: () => boolean,
@@ -162,10 +174,11 @@ export class SpaceManager {
       this.changeTo(midpoint);
       return;
     }
-    const ready = furnish().catch((error: unknown) => {
-      console.error('Land of Good Places: a room failed to load, so she stays where she is', error);
-      onFailed();
-    });
+    const ready = (): Promise<unknown> =>
+      furnish().catch((error: unknown) => {
+        console.error('Land of Good Places: a room failed to load, so she stays where she is', error);
+        onFailed();
+      });
     this.changeTo(() => {
       if (furnished()) midpoint();
     }, ready);

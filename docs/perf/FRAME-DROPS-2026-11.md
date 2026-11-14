@@ -482,6 +482,17 @@ samples, unminified build):
 - **Risk.** Low. **Jim sees it?** No.
 - **Check.** `gpu:frame-time` (real GPU): 0 program links after hand-over
   when entering each space.
+- **Done, 14 Nov 2026 (`perf/first-entry-warmup`) — not as planned above.**
+  Rooms are not compiled behind the bus: a room hides the sun's rig and, since
+  #781, takes the park's lamps out of the graph, and light counts are in every
+  program's key, so a room compiled against the park's lights is a program it
+  never draws with. Instead every cover — the iris of a door, a lift or a
+  boarding, a curtain game's curtain, a deep-link boot — holds until the view
+  behind it is warm (`core/viewWarmup.ts`'s `RevealHold`): programs linked in
+  parallel, textures uploaded, drawn once under the cover. Rooms are built
+  behind the shut iris (`SpaceManager.changeToFurnished`), and rides build and
+  light their cars at the cut. The check is `gpu:first-entry`: no link waited
+  for and no frame over 100 ms where she can see, on every first entry.
 
 ### 15. Texture compression (KTX2) and atlases (step 21)
 
@@ -564,6 +575,11 @@ the deep-link worst case) and from the earlier runs:
 - **Check.** The `gpu:frame-time` boot run: 0 frames over 100 ms after the
   park is revealed, 0 program links after warm-up, and `new AudioContext`
   never called from inside a rAF callback (counted by the probe).
+- **First frame and texture uploads done, 14 Nov 2026** (`perf/first-entry-warmup`,
+  with item 14): a boot with no bus ride holds its first frames until the view
+  is warm, then compiles the rest of the park a slice a frame
+  (`Game.warmTheRestInBackground`); textures go up with the programs, behind
+  the cover. The NPC route plans (step 1b) and the first sound are not this.
 
 ---
 

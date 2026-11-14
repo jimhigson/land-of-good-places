@@ -132,12 +132,15 @@ describe('a save restored inside the Reptile House hall before its floor is load
   it('waits at the door, and is taken in only once the floor is solid', async () => {
     expect(REPTILE_HALL.loaded, 'control: the hall must not be loaded at the start, or this measures nothing').toBeNull();
 
-    // The iris as the game runs it: the midpoint waits for `ready`.
+    // The iris as the game runs it: the midpoint waits for `ready` — and a
+    // `ready` that is a function is only called once the iris is shut
+    // (`Transitions.irisWipe`), which here is at once.
     const wipes: Promise<void>[] = [];
     const controls: InteriorControls = {
       cancelWalk: () => {},
       iris: (midpoint, ready) => {
-        wipes.push((ready ?? Promise.resolve()).then(() => midpoint()));
+        const waitFor = typeof ready === 'function' ? ready() : (ready ?? Promise.resolve());
+        wipes.push(waitFor.then(() => midpoint()));
       },
       flash: () => {},
       snapCamera: () => {},
