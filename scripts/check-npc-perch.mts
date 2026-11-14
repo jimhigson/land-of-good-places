@@ -352,7 +352,9 @@ function perchHeadY(character: NpcCharacter, tree: ClimbableTreeSeed, bearing: n
 
   const climbing = new TreeClimbing(
     {} as unknown as Player,
-    { all: [character] } as unknown as typeof npcs,
+    // A crowd of one, living — she is in the garden, where nobody is held
+    // still (`NpcSystem.isHeldStill`, which `TreeClimbing` asks of every child).
+    { all: [character], isHeldStill: () => false } as unknown as typeof npcs,
     { setPrompt: () => {} } as unknown as Hud,
     trees,
   );

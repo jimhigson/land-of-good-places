@@ -1396,7 +1396,11 @@ export class Building implements GameSystem {
     this.updateLiftAlcoves();
     this.trampoline.update(dt);
     this.toilets.update(dt, elapsed, this.toiletOccupied());
-    this.ballPit.update(dt, elapsed);
+    // The pit is the park's: stepped while it is drawn, or while its pile is
+    // still settling from the spawn (which must be over before she can ever
+    // see it, wherever she starts). Measured in the hotel lobby before this:
+    // 4.7 ms of every second on a pile of balls six hundred metres away.
+    if (this.ballPit.settling || isDrawn(this.ballPit.group)) this.ballPit.update(dt, elapsed);
     // Deliberately above the `!player` return: the fire burns whether or not
     // anybody is standing in the room, which is also what makes it screenshot.
     this.castleFire.update(elapsed);
@@ -1450,7 +1454,10 @@ export class Building implements GameSystem {
     // `entities/Player.ts`.
     player.flyCeiling = this.inside ? INDOOR_FLY_CEILING : PARK_FLY_CEILING;
 
-    this.grownUp.update(dt, elapsed, this.grownUpComing);
+    // Breathing and blinking, nothing she could arrive in the middle of: only
+    // while the grown-up is drawn (`check:undrawn-still` found it posed in
+    // every space, the park included, 494 changes in four seconds).
+    if (isDrawn(this.grownUp.root)) this.grownUp.update(dt, elapsed, this.grownUpComing);
     this.shops.update(dt, elapsed);
     this.updateVisibleFloor(player);
   }

@@ -176,6 +176,31 @@ export class World implements GameSystem {
   /** Every group that makes up the park itself. See {@link setParkVisible}. */
   private readonly parkGroups: readonly Object3D[];
   /**
+   * **The park, as a space** (120 fps plan, steps 2 and 3): every park group
+   * but the crowd's, each registered with {@link drawnSpaces} as a root of the
+   * `garden` space. The space is shown while she is in the garden and taken
+   * out of the scene graph while she is anywhere else — see {@link update},
+   * which says so from where she stands, and {@link parkDrawn}.
+   *
+   * **Each group its own root, not one root over them.** Every group stays a
+   * child of the scene, exactly where it always was, so no park mesh's scene
+   * path changes: those paths are what `check:coplanar`'s ratchet and every
+   * checked-in park's acceptance are keyed by, and a `the-park` group over
+   * them (this branch's first shape) renamed all of them — `validate:parks`
+   * rejected seed 5 for it. And their owners keep `visible` for their own
+   * reasons (the fireflies by day, the lamp posts behind the keychain view,
+   * the ferris wheel's clouds), which is why the space is hidden whole
+   * (`DrawnSpaces.showSpace`) rather than written on each group.
+   *
+   * The crowd's group is **not** one of them, because the crowd is not only
+   * the park's: children of the crowd go shopping in the castle's mall, and
+   * every child's name pill and speech bubble — the hotel's guests' and the
+   * library children's included — hangs under that one group. It stays in the
+   * graph everywhere, as it always has; the crowd's own culling
+   * (`cullCrowdsFor`) already draws only the children the camera can see.
+   */
+  readonly parkRoots: readonly Object3D[];
+  /**
    * Which spaces are in the graph the renderer walks — the one owner
    * (`DrawnSpaces.ts`, 120 fps plan steps 2 and 3). Every root that is not the
    * park is registered with it in the constructor.
@@ -563,11 +588,6 @@ export class World implements GameSystem {
       this.railRace.group,
       this.entrance.group,
     ];
-    // The building is bigger on the inside: its interior is its own place, six
-    // hundred metres from the park rather than inside the plot the facade
-    // stands on. Deliberately **not** one of the park groups above — it is not
-    // the park, and {@link setElsewhereVisible} is what hides it.
-    scene.add(...this.parkGroups, this.ferrisWheel.group);
     // **Each of these is a space of its own, and is in the graph only while it
     // is drawn** (120 fps plan, step 2). Registered rather than `scene.add`ed:
     // from here on the `visible` its owner already writes on the way in and
@@ -576,11 +596,32 @@ export class World implements GameSystem {
     // so a headless `World` (every Node check) is one graph, as it always was.
     //
     // The labels are the stems `spaces.ts` gives each place's space id
-    // (`castle.`, `hotel.`, `reptileHouse…`, `library`), which is what lets
-    // `check:render-budget` ask, in every space, that nothing registered under
-    // another stem is in the graph. A space added later registers its root on
-    // this list and is covered by that check without anything else being told.
+    // (`garden`, `castle.`, `hotel.`, `reptileHouse…`, `library`), which is
+    // what lets `check:render-budget` ask, in every space, that nothing
+    // registered under another stem is in the graph. A space added later
+    // registers its root on this list and is covered by that check without
+    // anything else being told.
     this.drawnSpaces = new DrawnSpaces(scene);
+    // The park first, each group a `garden` root of its own (see
+    // {@link parkRoots}) — all but the crowd's, which is everywhere the crowd
+    // is — added in the order the scene always had them, so a headless park
+    // is the graph it always was, path for path and mesh for mesh.
+    //
+    // The building is bigger on the inside: its interior is its own place, six
+    // hundred metres from the park rather than inside the plot the facade
+    // stands on. Deliberately **not** one of the park groups above — it is not
+    // the park, and {@link setElsewhereVisible} is what hides it.
+    const parkRoots: Object3D[] = [];
+    for (const group of this.parkGroups) {
+      if (group === this.npcs.group) {
+        scene.add(group);
+        continue;
+      }
+      this.drawnSpaces.register(SPACE_GARDEN, group);
+      parkRoots.push(group);
+    }
+    this.parkRoots = parkRoots;
+    scene.add(this.ferrisWheel.group);
     this.drawnSpaces.register('castle', this.building.interiorRoot);
     this.drawnSpaces.register('hotel', this.hotel.hotelRoot);
     this.drawnSpaces.register('reptileHouse', this.reptileHouse.hallRoot, this.reptileHouse.forecourtRoot);
@@ -589,6 +630,24 @@ export class World implements GameSystem {
     // positions onto its model's root); the Library shows and hides them with
     // the room, so they come and go with it here too.
     this.drawnSpaces.register('library', this.library.roomRoot, this.library.kidsRoot);
+  }
+
+  /**
+   * **Is the park drawn?** — she is in the garden, so the park's space is
+   * shown and its groups are in the graph the renderer walks. What every park
+   * updater in {@link update} is gated on: the fountain's ripples, the fairy
+   * lights, the rides, the flowers — none of them is worth a frame while she
+   * is in a room the park cannot be seen from. It is written once a frame by
+   * {@link update}, from {@link spaceAt}, and read from `DrawnSpaces`, which
+   * takes the park out of the graph on the same word.
+   *
+   * The space, not any one group: a group can be out of the picture while she
+   * is in the garden — the fireflies by day, everything above the ferris
+   * wheel's clouds — and the park's clock does not stop for that. Above the
+   * clouds it must not: the wheel she is riding is one of the park's updaters.
+   */
+  get parkDrawn(): boolean {
+    return this.drawnSpaces.isShown(SPACE_GARDEN);
   }
 
   /**
@@ -635,9 +694,13 @@ export class World implements GameSystem {
    * part of.
    *
    * The change happens **inside the cloud**, which is the whole reason the band
-   * is there, so nothing is ever seen to vanish. Visibility only: nothing is
-   * disposed, nothing stops updating, and the park is exactly as she left it
-   * when the clouds part again on the way down.
+   * is there, so nothing is ever seen to vanish. Nothing is disposed and
+   * nothing stops updating — her space is still the garden, which is what
+   * {@link parkDrawn} asks — so the park is where it should be when the clouds
+   * part again on the way down. In the live game the hidden groups are out of
+   * the scene graph meanwhile (each is a `garden` root of `DrawnSpaces`, whose
+   * `visible` is membership), and back in it, matrices current, the moment
+   * this shows them.
    */
   setParkVisible(visible: boolean): void {
     for (const group of this.parkGroups) group.visible = visible;
@@ -685,6 +748,12 @@ export class World implements GameSystem {
   }
 
   update(context: FrameContext): void {
+    // **The park is drawn while she is in the garden, and only then** — the
+    // one statement of it, from `spaceAt`, the one owner of which space a
+    // point is in. First, so every gate below reads this frame's answer. A
+    // door changes her space behind a closed iris, so the frame this lags one
+    // by (a door crossed later in this same update) is never seen.
+    this.drawnSpaces.showSpace(SPACE_GARDEN, spaceAt(context.playerPosition.x, context.playerPosition.z) === SPACE_GARDEN);
     // Read before `building.update()` runs this frame, so it is a frame behind
     // — invisible in practice, since every doorway crossing already happens
     // behind a closed iris (see `world/SpaceManager.ts`).
@@ -713,12 +782,36 @@ export class World implements GameSystem {
 
     this.train.nightFactor = night;
 
-    this.fountain.update(context);
-    this.fairyLights.update(context);
-    this.lampPosts.update(context);
-    this.treeLights.update(context);
-    this.fireflies.update(context);
-    this.anchorPlots.update(context);
+    // **Nothing of the park is updated while it is not drawn** (120 fps plan,
+    // step 3) — its water, its lights, its rides, its flowers, its gate. She
+    // is in a room six hundred metres away; the park stands exactly as she
+    // left it and carries on from there the frame she is back, behind the
+    // door's iris. What it shows on that frame is right without a catch-up:
+    // the ripples, twinkles and turning wheels are functions of the clock,
+    // which never stopped (`DayNight`, above), and what is stepped rather
+    // than derived — a ride's cycle, the train on its loop, the crowd — is
+    // where it was, mid-cycle, which is a park she could have left a moment
+    // ago. Measured in the hotel lobby: the park's updaters were ~0.7 ms of a
+    // 4.7 ms frame on the M4 Pro (`docs/perf/undrawn-indoors/`).
+    //
+    // Two things are not the park's to stop. Wading writes her own speed and
+    // mood (`Fountain.wade`), and is asked wherever she is, so a teleport out
+    // of the water ("Next day", from the fountain) cannot leave her wading in
+    // her suite. And the crowd lives where it lives (`NpcSystem.crowdLiveAt`):
+    // the castle's mall as well as the garden, so the train its children ride
+    // and wait for keeps the crowd's hours, not the park's.
+    const parkDrawn = this.parkDrawn;
+    const crowdLive = this.npcs.crowdLiveAt(context.playerPosition.x, context.playerPosition.z);
+    if (parkDrawn) {
+      this.fountain.update(context);
+      this.fairyLights.update(context);
+      this.lampPosts.update(context);
+      this.treeLights.update(context);
+      this.fireflies.update(context);
+      this.anchorPlots.update(context);
+    } else {
+      this.fountain.wade(context.dt);
+    }
     this.building.update(context);
     this.hotel.update(context);
     this.reptileHouse.update(context);
@@ -728,25 +821,29 @@ export class World implements GameSystem {
     // who are aboard by writing their position, and their own movement code —
     // which runs inside `npcs.update` — is what commits it to the crowd's
     // instance buffer. The other way round they would ride a frame behind.
-    this.train.update(context);
-    this.coaster.update(context);
-    this.railRace.update(context);
-    this.ferrisWheel.update(context);
-    this.train.carryPassengers(this.npcs.riders);
+    if (crowdLive) this.train.update(context);
+    if (parkDrawn) {
+      this.coaster.update(context);
+      this.railRace.update(context);
+      this.ferrisWheel.update(context);
+    }
+    if (crowdLive) this.train.carryPassengers(this.npcs.riders);
 
     // The arrival runs **before** the children, for exactly the reason the
     // train does: it writes the position of eleven of them, and their own
     // update is what commits that to the crowd's instance buffer. After it,
     // every passenger would be drawn a frame behind the bus they are sitting
     // in — fine up a tree, very much not fine through a window.
-    this.entrance.update(context);
+    if (parkDrawn) this.entrance.update(context);
 
     this.npcs.update(context);
-    this.stalls.update(context);
-    this.facePaintStall.update(context);
-    this.keychainShop.update(context);
-    this.flowers.update(context);
-    this.dodgems.update(context);
+    if (parkDrawn) {
+      this.stalls.update(context);
+      this.facePaintStall.update(context);
+      this.keychainShop.update(context);
+      this.flowers.update(context);
+      this.dodgems.update(context);
+    }
 
     // The keychain rack's pop-up screen (`KeychainShop.buildViewBackdrop`)
     // only ever hides the world *behind* the cart — it cannot hide anything
