@@ -85,6 +85,17 @@ stream; not this branch's. `$SP/film/decks-before-after.png`.
 tsc 0 (TS 5.9, then 7.1); typecheck:test 0; check:seed-coverage 0; check:boot-chunk 0; check:hall-solid 0;
 check:benches 0; check:castle 0 (117 diners, 130 figures, hearth); check:nav-spaces 0; check:crowd-cull 0;
 check:render-budget 0; `LGP_SEEDS=5 validate:parks` 0 (accepted, 312 s); lazy tests 11/11.
-CI run 43604860347 on f053417f: success — all 12 check shards, 6 procgen shards, 16 "Park N still accepted",
-coplanar, walk reach, PR preview. Local full `pnpm run check` + `test:procgen`: `$SP/full-check.log`,
-`$SP/procgen.log`.
+CI on f053417f (run 43604860347) and on 971ca898 (run 43608777914, 43 jobs success, the production
+Deploy skipped): all 12 check shards, 6 procgen shards, 16 "Park N still accepted", coplanar, walk reach,
+PR preview. **Local full `pnpm run check`** (on d30d41a2's code; `$SP/full-check.log`): shards 1–8 passed —
+every step exits 0, the chain stops at the first that does not — then stopped by me in shard 9: at machine
+load 115–180 (other agents and a VM) it ran ~4× slower than CI, and shards 9–12 are green on CI for this
+code (shard 10, `check:render-budget`, also run by hand above). **Local `test:procgen` not run**; its six CI
+shards are green on 971ca898, and the lazy tests it holds were run here (11/11).
+Head preview `https://pr-759-971ca89-land-of-good-places.blockstack.workers.dev`: Chromium walked in through
+the door (door frame 7.2 ms, swap covered); WebKit at load ~180 did not reach the door inside the
+harness's 15 s, so that engine is verified on f053417's preview (same code) only.
+
+## State at handover (14 Nov ~17:00)
+Done and pushed. All my servers stopped; scratch worktrees `lazy-castle-combo` and `lazy-castle-main`
+removed. Nothing left to do on the branch but QA and the merge order with perf/first-entry-warmup.
