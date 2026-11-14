@@ -43,9 +43,26 @@
  * And it prints, per scenario, the worst frame she could see and the worst
  * under the cover, so the numbers in a PR are this script's numbers.
  *
- * **Proven red before trusted green**, 14 Nov 2026, on `main` d2ebb4c1's
- * build (M4 Pro, Chrome for Testing 1234 headless on Metal, machine load
- * 30–60 from a VM): see the PR for #first-entry-warmup for the transcript.
+ * **Proven red before trusted green**, 14 Nov 2026 — M4 Pro, Chrome for
+ * Testing 1234 headless on Metal, 1280×800 @2, seed 5's checked-in park,
+ * machine load 32–38 from a VM. Against `main` d2ebb4c1's build
+ * (`FIRST_ENTRY_BASE` at a `vite preview` of it), exit 1, nine clauses:
+ *
+ * ```
+ *   - door-library: a 108 ms frame she could see, 914 ms in (limit 100 ms)
+ *   - door-hotel: a 102 ms frame she could see, 487 ms in (limit 100 ms)
+ *   - door-castle: links waited for made 1 frame(s) she could see longer than 33.4 ms — 13 link(s) in a 59 ms frame at 3577 ms
+ *   - ride-rail-race: links waited for made 2 frame(s) … — 15 link(s) in a 98 ms frame at 204 ms; 10 link(s) in a 72 ms frame at 489 ms
+ *   - ride-ferris: links waited for made 2 frame(s) … — 16 link(s) in a 89 ms frame at 300 ms; 9 link(s) in a 39 ms frame at 584 ms
+ *   - curtain-dodgems / curtain-water-fight / curtain-spooky-house: this build's ?perf=1 does not say whether a curtain is shut — it cannot be judged
+ *   - boot-castle: links waited for made 1 frame(s) … — 13 link(s) in a 56 ms frame at 2265 ms
+ * ```
+ *
+ * Against this branch's build (50efb4cc), exit 0, every scenario's worst
+ * frame she saw 9.5–46 ms but one outlier of 83 ms (the library, no link in
+ * it; 10 ms in each of three other runs). The freeze clause is a backstop at
+ * this load: main's room-built-in-the-door-frame freezes measured 97–114 ms,
+ * so read the printed numbers, not only the exit code.
  *
  * The spots are **seed 5's**. Parks are checked in and only a rejected seed is
  * re-solved, so they hold; if seed 5 is ever re-solved, a scenario fails with
