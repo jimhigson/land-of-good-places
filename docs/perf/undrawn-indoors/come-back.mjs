@@ -37,7 +37,8 @@ try {
     window.__rec = rec;
     const kids = () => w.npcs.all.filter((c) => c.driver?.constructor?.name !== 'WaypointDriver');
     const sample = () => {
-      if (rec.on) rec.frames.push({ t: performance.now(), parkAttached: w.parkRoots ? w.parkRoots.filter((r) => r.parent !== null).length : null, train: w.train.distance, kids: kids().map((c) => [c.position.x, c.position.z]) });
+      // Before the change the park is always in the graph; after it, any of its roots back in the graph is the park back.
+      if (rec.on) rec.frames.push({ t: performance.now(), parkAttached: w.parkRoots ? w.parkRoots.some((r) => r.parent !== null) : true, train: w.train.distance, kids: kids().map((c) => [c.position.x, c.position.z]) });
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
