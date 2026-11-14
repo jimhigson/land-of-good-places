@@ -749,6 +749,8 @@ export class Game {
       // self-contained game a child steps straight back out of, at the exact
       // doormat she stepped in from.
     });
+    // The curtain is a cover like the iris: shut until the game behind it is warm.
+    this.miniGames.setHoldOpen(() => this.revealHold.request('curtain'));
 
     // Shops: the join between the shop geometry, the purchase panel and the
     // store. Registered as a system so it updates after the world, which is
@@ -1305,6 +1307,10 @@ export class Game {
       space: spaceAt(this.player.position.x, this.player.position.z),
       riding: this.player.riding,
       clock: this.checkClock?.state() ?? null,
+      // Whether a cover hides the frame: a measurement of the frames she
+      // sees leaves out the ones under a shut curtain or iris.
+      curtainShut: this.miniGames.curtainShut,
+      holding: this.revealHold.holding,
       gpu: this.perfGpuName,
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
@@ -2447,7 +2453,8 @@ export class Game {
     // The crowd is culled for this camera before the hold, so a warm-up
     // collects exactly the crowd the draw would draw (`noteView`).
     const camera = parkDrawn ? this.noteView() : (this.cameraOverride ?? this.camera.camera);
-    this.revealHold.frame(parkDrawn ? (warmup) => this.warmPasses(warmup, camera) : null, () => this.draw(camera));
+    // A curtain game that hides the park is the view behind its own cover.
+    this.revealHold.frame(parkDrawn ? (warmup) => this.warmPasses(warmup, camera) : (warmup) => this.miniGames.warm(warmup), () => this.draw(camera));
   }
 
   /**

@@ -160,6 +160,16 @@ export function drawnBy(scene: Object3D, camera: Camera, reach?: WarmReach, frus
   return [...out];
 }
 
+/** Every drawable in `scene` on `camera`'s layers, shown or not. */
+function everythingIn(scene: Object3D, camera: Camera): Object3D[] {
+  const out: Object3D[] = [];
+  scene.traverse((object) => {
+    const o = object as Object3D & { isMesh?: boolean; isLine?: boolean; isPoints?: boolean; isSprite?: boolean };
+    if ((o.isMesh === true || o.isLine === true || o.isPoints === true || o.isSprite === true) && object.layers.test(camera.layers)) out.push(object);
+  });
+  return out;
+}
+
 /**
  * A list of objects that `WebGLRenderer.compile` can be handed as if it were a
  * subtree. `compile(scene, camera, targetScene)` gathers lights from
@@ -255,8 +265,10 @@ export class ViewWarmup {
    * Called once per pass the frame draws (`Game.warmPasses`): the park's,
    * and the ferris car's second pass on its own layer, whose lights differ.
    */
-  add(scene: Scene, camera: Camera, reach?: WarmReach): void {
-    const objects = drawnBy(scene, camera, reach);
+  add(scene: Scene, camera: Camera, reach?: WarmReach | 'whole'): void {
+    // `'whole'`: a little world of its own (a curtain game's), every part of
+    // which is drawn soon — all of it, shown or not.
+    const objects = reach === 'whole' ? everythingIn(scene, camera) : drawnBy(scene, camera, reach);
     const programsBefore = this.renderer.info.programs?.length ?? 0;
     const started = performance.now();
     const compiled = this.renderer.compile(new ObjectList(objects), camera, scene);
