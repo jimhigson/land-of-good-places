@@ -63,4 +63,62 @@ describe('DrawnSpaces', () => {
       { space: 'room', name: 'a-room', uuid: room.uuid, drawn: false, attached: false, objects: 2 },
     ]);
   });
+
+  /**
+   * `showSpace` — a space of several roots whose owners already use `visible`
+   * for themselves (the park: fireflies by day, lamp posts behind the keychain
+   * view). Hiding the space must take every root out without overwriting what
+   * any owner said, and showing it must put back exactly the ones their owners
+   * want — and each root stays a child of the scene, so no path changes.
+   *
+   * Proved red, 14 Nov 2026, on perf/undrawn-indoors (the graphs built below):
+   * with `place` ignoring the hidden space (`belongs = entry.wanted ||
+   * !this.detaching`), `1 failed | 3 passed` — "expected { Object (isObject3D,
+   * uuid, ...) } to be null", the lamps left in the graph; with the getter
+   * reading only the owner's word (`get: () => entry.wanted`), `2 failed | 2
+   * passed` — "reads what is drawn: expected true to be false" and the headless
+   * case's "expected true to be false".
+   */
+  it('hides a space of several roots whole, and keeps each owner\'s own word', () => {
+    const scene = new Scene();
+    const spaces = new DrawnSpaces(scene);
+    const lamps = new Group();
+    const flies = new Group();
+    const tree = new Mesh();
+    lamps.add(tree);
+    flies.visible = false; // its owner: daytime
+    spaces.register('garden', lamps, flies);
+    spaces.detachUndrawn();
+    expect(lamps.parent).toBe(scene);
+    expect(flies.parent, 'its owner hid it').toBe(null);
+
+    spaces.showSpace('garden', false); // she walks into a room
+    expect(spaces.isShown('garden')).toBe(false);
+    expect(lamps.parent).toBe(null);
+    expect(lamps.visible, 'reads what is drawn').toBe(false);
+    expect(isDrawn(tree)).toBe(false);
+
+    flies.visible = true; // night falls while she is in the room
+    expect(flies.parent, 'its owner may say so, but its space is hidden').toBe(null);
+
+    spaces.showSpace('garden', true); // back out
+    expect(lamps.parent).toBe(scene);
+    expect(flies.parent, 'what its owner said while she was away').toBe(scene);
+    expect(isDrawn(tree)).toBe(true);
+    expect(spaces.detachedRoots()).toEqual([]);
+  });
+
+  it('hides a space without detaching anything while nothing detaches — a headless check sees it hidden', () => {
+    const scene = new Scene();
+    const spaces = new DrawnSpaces(scene);
+    const lamps = new Group();
+    const tree = new Mesh();
+    lamps.add(tree);
+    spaces.register('garden', lamps);
+    spaces.showSpace('garden', false);
+    expect(lamps.parent, 'one graph, as every Node check has it').toBe(scene);
+    expect(isDrawn(tree)).toBe(false);
+    spaces.showSpace('garden', true);
+    expect(isDrawn(tree)).toBe(true);
+  });
 });

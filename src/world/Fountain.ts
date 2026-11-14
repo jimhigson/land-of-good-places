@@ -501,7 +501,7 @@ export class Fountain implements GameSystem {
 
   update({ dt, elapsed }: FrameContext): void {
     this.splashEffects.update(dt);
-    this.updateWading(dt);
+    this.wade(dt);
 
     // The statue turns on its plinth (Jim, 5 Aug). One line, because the asset
     // owns the behaviour and the rate — see `STATUE_TURN_SECONDS`. Nothing here
@@ -554,8 +554,15 @@ export class Fountain implements GameSystem {
    * frame order), so `player.position` and `player.isAirborne` are this
    * frame's settled values; what this writes back only takes effect next
    * frame, the same one-frame lag `hopClearance` already tolerates.
+   *
+   * **Public, and run wherever she is** — `World.update` calls it on its own
+   * while the park is not drawn, and {@link update} calls it while it is.
+   * It writes *her* speed and mood, so it is hers rather than the park's: a
+   * child taken out of the water by a teleport ("Next day") must not wade on
+   * at half speed through her hotel suite because the fountain stopped
+   * being asked.
    */
-  private updateWading(dt: number): void {
+  wade(dt: number): void {
     const player = this.player;
     if (!player) return;
 
