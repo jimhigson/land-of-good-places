@@ -1,93 +1,37 @@
-# Handoff: TypeScript 7.1 everywhere (and two follow-on Vite PRs)
+# Handoff: TypeScript 7.1 everywhere, Vite 8.3.8, bundled dev (not kept)
 
-Branch `tooling/typescript-7-1`, worktree `.claude/worktrees/ts71`.
-Throwaway baseline worktree at main (TS 5.9.3): `.claude/worktrees/ts71-baseline`
-(detached; remove when done). Scratch outputs: the session scratchpad.
+Branch `tooling/typescript-7-1`, **PR #779** (one PR for all three, per Jim:
+"yes, try it in the same branch as is doing the upgrades"). Not merged.
 
-## Plan as it stands (coordinator, 14 Nov, latest)
-**ONE branch (`tooling/typescript-7-1`), ONE PR, three revertible commit groups**
-(Jim: "yes, try it in the same branch as is doing the upgrades"). The numbered
-"PR 1/2/3" below are now commit groups on this branch, not separate PRs.
+## State: done, waiting on review and CI
+1. **TypeScript 7.1 only** (commits 567f7597..8aec09df). `"typescript":
+   "7.1.0-dev.20261006.1"`; no TS 6, no alias. The six compiler-API checks parse
+   with oxc via `scripts/ts-ast.mts` (rolldown's `parseAst`). Output proved
+   identical to main's TypeScript-API versions, printed and by internal dumps;
+   red proofs pasted into each header. Controls: 7.1 and 5.9.3 report the
+   same errors (TS2322 src/test, TS2375, TS1294 enum/param property).
+   Timing: 5.9.3 ~9.7 s / 700 MB, 7.1 ~1.2 s / 444 MB per project.
+2. **Vite 8.3.8** (310a37e3, d1ae4e35, 09be2908, 7c1af21e). rolldown pin 1.2.19
+   (= Vite's), guarded in ts-ast.mts (throws if they differ; proved red).
+   `rolldownOptions` rename is a byte-identical build. check:update-adoption
+   had a real race (character-less profile reloads itself on a remembered
+   seed: 2 navigations per reload on `/`, 1 on `/?seed=0`); fixed by pinning
+   the seed; 3/3 green, red with skipWaiting true.
+3. **bundledDev: measured, NOT on the branch.** Works for play (6 deep links,
+   parks middleware, lazy chunks, no SW, HMR = full reload ~2.6 s), but a page
+   cannot `import('/src/...')` under it, so check:served-static-freeze and
+   check:served-book-reader FAIL (measured) and check:served-walking uses the
+   same import. Gain: cold /spawn 3254 -> 2754 ms median, 477 -> 9 requests;
+   server start 547 = 547 ms; warm reload 2123 -> 2191 ms; served-deep-links
+   210 -> 216 s; served-cull-audit 68 -> 67 s. Not a clear win, breaks gated
+   checks, so not committed (trialled in a scratch worktree).
 
-1. **PR 1 (this branch):** TypeScript 7.1 is the ONLY TypeScript ("ok let's use
-   7.1 everywhere then"). `"typescript": "7.1.0-dev.20261006.1"`, no aliases,
-   no TS 6. The six scripts that used the compiler API are ported to oxc via
-   `rolldown/parseAst` (rolldown pinned 1.2.6 = vite 8.2.2's). Each port must
-   report the same findings as before on main (diff old vs new) and go red on a
-   deliberate break, red output pasted into its header. Finish with
-   `git grep -nE "5\.9|typescript6|typescript@"` clean bar historical notes.
-2. **PR 2 (branch cut from this one):** vite 8.2.2 -> latest (8.3.8 at 11:30),
-   rolldown pin -> the new vite's rolldown. Prove build, boot-chunk,
-   client-no-solver, precache limit, update-adoption, served-deep-links,
-   shard-1, headless boots on dev + preview. List deprecation warnings.
-3. **PR 3 (on PR 2's branch):** `experimental.bundledDev` in vite.config.ts.
-   Measure off vs on (cold start, requests, time-to-playable, served checks,
-   warm reload). Open the PR only if a clear win and nothing broke.
-   Report all three PRs together at the end.
-
-## Done
-- 567f7597: TS 7.1 via alias + TS 6 alias (superseded).
-- 4e1967b6: TS 7.1 under its real name, TS 6 gone, rolldown 1.2.6 added.
-  Lockfile vs main = exactly that (all 7 native binaries incl. linux-x64).
-- Controls on 7.1 (identical to 5.9.3, files restored): src TS2322, test
-  TS2322, exactOptionalPropertyTypes TS2375, enum TS1294 (src + test),
-  parameter property TS1294; exit 2 with error, exit 0 after restore.
-- Timing (load ~27): 5.9.3 9.91 s / 697 MB and 9.58 s / 703 MB;
-  7.1 1.37 s / 444 MB and 1.12 s / 443 MB (tsconfig / tsconfig.test).
-- Before-outputs of the six checks on main captured (scratchpad/before).
-- All six ported (c65b2bb9, 56a37f02, 0af61591, d3e45799) via scripts/ts-ast.mts.
-  Printed output byte-identical to main for five; flat-primitives differs only
-  in corpus size (937/949 vs 936/948: ts-ast.mts is a new file in scripts/).
-  Internal dumps (every match, every edge, every string) old vs new: all six
-  byte-identical. Regenerated flat baseline old == new byte-identical (the
-  committed one differs from both by 9 entries' order only: pre-existing).
-- First full oxc run threw on scripts/lib/*.d.mts (flat-primitives scans
-  .d.mts; TS parsed them as declarations by name): ts-ast.mts uses lang dts.
-- No `typescript` importers remain (git grep).
-
-- Red proofs pasted into all six headers (7724570a); optional-chain arming
-  fixture (02f5ffcd); CLAUDE.md Building note (8aec09df).
-- TS part verified: controls re-run on final setup; scripts object equal to
-  main; chain-coverage 0; fresh frozen install 0; build 0; shard-1 0 (1027 s);
-  test:procgen 0 (54 files, 2217/2217, 851 s). **Draft PR #779** opened.
-- Vite: 310a37e3 (vite 8.3.8, rolldown 1.2.19, README), d1ae4e35
-  (rolldownOptions rename: byte-identical build), 09be2908 (ts-ast.mts throws
-  if the rolldown pin != Vite's rolldown; proved red with pin 1.2.6).
-  Six AST checks + dumps re-proved identical on oxc 0.156. build 0,
-  boot-chunk 0 (boot 51 chunks 3802 KB vs main 49 / 3806 KB; ~340 KB moved
-  ui -> ripika chunk; 2 new small chunks chime, types). Warnings: only the
-  pre-existing native-config-loader one (needs allowImportingTsExtensions in
-  tsconfig.json to fix = policy, so listed not fixed).
-
-- Vite proofs: headless boots dev + preview of /spawn?pos=0,0&seed=5, /hotel,
-  /library, /castle?deck=0: all ready, 0 page/console errors, rendered (looked
-  at screenshots). served-deep-links 0 (232 s). shard-1 0 (432 s).
-  check:update-adoption FAILED locally once (visit 2, "Execution context was
-  destroyed"); CI passed it. Root cause: character-less profile + remembered
-  seed => startFresh() reloads itself; 2 navigations per reload on `/`, 1 on
-  `/?seed=0` (measured). Fixed in 7c1af21e (check visits /?seed=0); 3/3 green,
-  red with skipWaiting true.
-- bundledDev trial in scratch worktree `.claude/worktrees/ts71-bundled`
-  (config: `experimental: { bundledDev: process.env.BUNDLED_DEV === '1' }`).
-  So far ON works: 6 deep links 0 errors, hydrated, no SW/caches; /spawn 9
-  requests vs 477; lazy interiors are own chunks; no module defined in two
-  loaded chunks (registerGraph localCount); HMR: real edit => full reload,
-  new code runs, ~2.6 s, same as off; /parks/5.json identical across modes.
-
-## Next
-- test:procgen on the Vite head; then served checks off/on (deep-links,
-  static-freeze, dom-churn, cull-audit) with wall times; cold start /
-  time-to-playable / requests / warm reload, interleaved off/on samples.
-- Decide bundledDev; if kept: commit config + CLAUDE.md dev-server note.
-
-## Port facts (oxc ESTree vs TypeScript's tree)
-- Offsets are UTF-16, safe to slice. parseAst defaults to lang js and
-  preserveParens false: always pass lang ts + preserveParens true.
-- Optional chains get a ChainExpression wrapper TS has no node for: unwrap
-  wherever the TS code inspected a child's kind.
-- `=`, `**=` are AssignmentExpression, not BinaryExpression.
-- `export const` = ExportNamedDeclaration{declaration}; `export {..}` /
-  `export * from` are ExportNamedDeclaration{declaration:null} / ExportAllDeclaration.
-- An annotated binding identifier's span INCLUDES `: Type`: use `id.name`.
-- Shorthand `{ a }` gives key AND value nodes with one span: visit one.
-- Parse errors throw PARSE_ERROR (TS silently gave a partial tree).
+## Not done on purpose
+- The native-config-loader warning (5 extensionless imports) needs
+  `allowImportingTsExtensions` in tsconfig.json: a policy change for src/.
+- Node 26.5's `fetch` once threw an uncatchable `setTypeOfService EINVAL` in
+  my own harness; `scripts/with-dev-server.mts` polls with `fetch` too. Not
+  seen in a repo check; worth knowing if a served check ever dies that way.
+- check:cycle-tdz gives no edge to `import { type A } from './x'`, though
+  under verbatimModuleSyntax that import still evaluates `./x`. Kept as it was
+  (a port must not change findings); maybe worth its own ticket.
