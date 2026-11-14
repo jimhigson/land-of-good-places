@@ -56,12 +56,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { SUPPORTED_PARK_SEEDS } from '../src/world/prebuilt/parkFileName.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 
 const PORT = Number(process.env.PORT ?? 5482);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+/**
+ * **The page this check visits, with its park pinned.** The profile never makes
+ * a character, and a character-less page whose seed was *remembered* from an
+ * earlier visit forgets it and reloads itself (`startFresh` in `src/main.ts`,
+ * issue #426). So on a bare `/`, every reload this check makes is followed by a
+ * second one the page makes, at whatever moment the boot gets there. Measured
+ * 14 Nov 2026 on a production build: two main-frame navigations per reload on
+ * `/`, exactly one on `/?seed=0`. The second navigation is what failed this check
+ * at visit 2 ("page.evaluate: Execution context was destroyed") on a loaded Mac
+ * while CI passed, and it quietly made "one ordinary reload" two. A pinned seed
+ * is never remembered, so the only navigations now are this check's and the
+ * adoption's own.
+ */
+const PAGE = `${ORIGIN}/?seed=${SUPPORTED_PARK_SEEDS[0]}`;
 /**
  * How long the page gets, after the one reload, to be executing the new bundle.
  * Generous on purpose: the honest answer is "a couple of seconds", and a check
@@ -235,7 +250,7 @@ async function main(): Promise<void> {
   let failure: Error | null = null;
   try {
     // ---- a returning player: two visits on the old build, worker installed.
-    await page.goto(ORIGIN, { waitUntil: 'load' });
+    await page.goto(PAGE, { waitUntil: 'load' });
     await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
     const visit1 = await read(page);
     trace.push(line('visit 1 (old build, SW installs)', visit1));
