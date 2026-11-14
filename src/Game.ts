@@ -42,6 +42,7 @@ import {
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import type { NavGrid } from './world/NavGrid';
 import { playerNavGrid } from './world/playerLattice';
+import { GARDEN_PLAY_BOUNDARY } from './world/boundary';
 import { RouteScheduler } from './world/routeScheduler';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
@@ -1915,6 +1916,30 @@ export class Game {
     this.routes.beginFrame();
     this.routes.run();
     return this.routes.isWarm(this.navGrid);
+  }
+
+  /**
+   * **Her route lattice, laid whole before the first frame of a boot with no
+   * cat-bus ride to lay it behind.** That is a continued save, or a deep link
+   * that skips the bus. `main.ts`'s `finishLaunch` calls this once the park
+   * exists and she has been put where she starts, so the long task falls
+   * inside the boot, before anything is drawn. It never lands on a frame of
+   * play. Jim, 14 Nov 2026, on the 10 s after a continued-save boot when her
+   * taps were not routed: *"Fix the 10 s"*. The bus ride lays her lattice
+   * behind the bus a slice a frame (`warmNavigation`), and this is not
+   * called after one.
+   *
+   * When she starts in a room (a save restored into the hotel, the Reptile
+   * House or the library, or a deep link into one), the garden's lattice is
+   * laid first. Laying hers after it puts the garden's on the shelf
+   * (`NavGrid.layNow`), so her first way out does not wait seconds for the
+   * park to be laid either.
+   */
+  layNavigationNow(): void {
+    const sample = this.player.groundSampler;
+    if (!sample) return;
+    if (this.world.collision.playBounds !== GARDEN_PLAY_BOUNDARY) this.navGrid.layNow(sample, GARDEN_PLAY_BOUNDARY);
+    this.navGrid.layNow(sample);
   }
 
   /**

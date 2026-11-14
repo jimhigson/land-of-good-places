@@ -1196,13 +1196,38 @@ export class NavGrid {
   // ------------------------------------------------------------- the lattice
 
   /**
-   * Builds or rebuilds the lattice if the one in hand does not describe the
-   * space the walker is in. Returns false if there is no usable lattice at all.
+   * **Lays the lattice over `boundary` now, whole, in this one task.** This is for the
+   * one moment a long task costs a child nothing: a boot with no cat-bus ride
+   * to lay her lattice behind. That is a continued save or a deep link, and
+   * `main.ts`'s `finishLaunch` calls it through `Game.layNavigationNow`
+   * before the first frame is drawn. Everywhere else, the lattice is laid
+   * a slice a frame ({@link warm}).
+   *
+   * Without this, a no-bus boot laid her park lattice at 2 ms a frame
+   * from the first frame. That took about 1 s on an M4 Pro, and about 10 s
+   * on the 4× CPU phone stand-in, and until it was done her taps walked
+   * straight at the spot, unrouted.
+   *
+   * `boundary` defaults to the space she is in. Laying another space first,
+   * then hers, leaves the other one on the {@link shelf}. That is how a boot
+   * restored into a room has the garden's lattice waiting for the way out.
+   * Returns false when the boundary has no extent to lay a lattice over.
    */
-  private ensureLattice(sample: GroundSampler): boolean {
+  layNow(sample: GroundSampler, boundary?: ParkBoundary): boolean {
+    return this.ensureLattice(sample, boundary);
+  }
+
+  /**
+   * Builds or rebuilds the lattice if the one in hand does not describe the
+   * space the walker is in (or `boundary`, for {@link layNow}). Returns false
+   * if there is no usable lattice at all.
+   */
+  private ensureLattice(
+    sample: GroundSampler,
     // See {@link pinnedBoundary}: `null` means "wherever the player is", which
     // is what the player's own grid wants and what this has always done.
-    const boundary = this.pinnedBoundary ?? this.collision.playBounds;
+    boundary: ParkBoundary = this.pinnedBoundary ?? this.collision.playBounds,
+  ): boolean {
 
     // A build {@link warm} left part-laid: this asker cannot wait a frame, so
     // the rest of it is laid now — the remainder only, never a fresh start.
