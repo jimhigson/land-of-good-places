@@ -106,6 +106,13 @@ Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout
   that the first engineer's `isHeldStill` call never reached locally (it is not on the handoff's list of checks run).
   CI's shard 1 would have gone red. Fixed in 5381bf69 (the stub answers `isHeldStill: () => false`, a living crowd);
   `DrawnSpaces.showSpace` got unit tests in `test/store/drawn-spaces.test.ts`, proved red against two breaks.
-- Running: the rest of the chain from `check:crowd` on, each piece separately (`$SP/u2/run-rest.sh`, exits in
-  `$SP/u2/rest-exits.txt`). Everything in shard 1 before `check:crowd` passed on f32a89bd (same src).
-- Base worktree `.claude/worktrees/undrawn-indoors-base` (detached at 27e570b3) — remove when done.
+- On 5381bf69 / 6ccba45c: the rest of the chain from `check:crowd` on, each piece separately, every one exit 0
+  (`check:crowd`, speech-bubbles, procgen-boundary, hot-path-churn, shards 2-12); `check:coplanar` exit 0 — "186
+  same-facing coplanar seam(s) across 16 seed(s) and 10 space(s) … All of them are in the baseline; none is new."
+- **Merged origin/main bb7e9c99 (#778, shadow cache measured and left off)** as fba4cec9: clean. The cache, when
+  asked for (`?shadowCache=1`), walks `visible` the way three's pass does, so a park root out of the graph reads as
+  "a cached caster disappeared" and redraws — right, and not exercised here (the cache is off by default).
+- On fba4cec9: tsc 0, typecheck:test 0, `test:procgen` exit 0 (54 files, 2219 tests — the two new DrawnSpaces tests
+  among them), shard 1 exit 0; shards 2-12, `check:npc-presence` and `undrawn-still --mutate` running
+  (`$SP/u2/run-all.sh`, `$SP/u2/all-exits.txt`).
+- Base worktree removed. Port 6011: nothing of this item running on it.
