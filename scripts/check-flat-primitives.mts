@@ -57,6 +57,10 @@
  * dozens of times to explain why they are wrong, and a grep-based version of
  * this check would have flagged its own explanation.
  *
+ * The tree comes from `scripts/ts-ast.mts` (oxc through rolldown). It came
+ * from TypeScript's compiler API until TypeScript 7, which has none; the port
+ * reports exactly what that version reported, down to the baseline keys.
+ *
  * ## The escape hatch, and why it is counted out loud
  *
  * `// flat-ok: <reason>` on the offending line, or the line **immediately**
@@ -71,7 +75,7 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { forEachNode, lineIndex, parseTypeScript, textOf, unchain, type Node, type Program } from './ts-ast.mts';
 import { GARDEN_PLAY_RADIUS, GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { FLAT_PRIMITIVE_BASELINE } from './flat-primitives-baseline.mts';
@@ -209,26 +213,26 @@ function isOwner(file: string): boolean {
 // ---------------------------------------------------------------------------
 
 /** A numeric literal, with an optional leading minus. `0`, `1`, `-1`. */
-function numberOf(node: ts.Node): number | undefined {
-  if (ts.isNumericLiteral(node)) return Number(node.text);
-  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
-    const inner = numberOf(node.operand);
+function numberOf(node: Node): number | undefined {
+  if (node.type === 'Literal' && typeof node.value === 'number') return node.value;
+  if (node.type === 'UnaryExpression' && node.operator === '-') {
+    const inner = numberOf(node.argument);
     return inner === undefined ? undefined : -inner;
   }
   return undefined;
 }
 
 /** `(0, 1, 0)` or `(0, -1, 0)` — the vertical axis, written out by hand. */
-function isVerticalTriple(args: readonly ts.Expression[]): boolean {
+function isVerticalTriple(args: readonly Node[]): boolean {
   if (args.length !== 3) return false;
   const [x, y, z] = args.map(numberOf);
   return x === 0 && z === 0 && (y === 1 || y === -1);
 }
 
-/** Strip any leading unary minus. `Math.PI`, `-Math.PI` and `--x` all reduce. */
-function withoutSign(node: ts.Node): ts.Node {
+/** Strip any leading unary minus. `Math.PI`, `-Math.PI` and `- -x` all reduce. */
+function withoutSign(node: Node): Node {
   let n = node;
-  while (ts.isPrefixUnaryExpression(n) && n.operator === ts.SyntaxKind.MinusToken) n = n.operand;
+  while (n.type === 'UnaryExpression' && n.operator === '-') n = n.argument;
   return n;
 }
 
@@ -250,16 +254,58 @@ function withoutSign(node: ts.Node): ts.Node {
  * {@link selfTest} fires this exact expression as a fixture — so reintroducing
  * the bug now fails the build rather than going quiet.
  */
-function isPiOverTwo(node: ts.Node): boolean {
+function isPiOverTwo(node: Node, source: string): boolean {
   const n = withoutSign(node);
-  if (!ts.isBinaryExpression(n) || n.operatorToken.kind !== ts.SyntaxKind.SlashToken) return false;
+  if (n.type !== 'BinaryExpression' || n.operator !== '/') return false;
   const left = withoutSign(n.left);
-  return left.getText().replace(/\s/g, '') === 'Math.PI' && numberOf(n.right) === 2;
+  return textOf(source, left).replace(/\s/g, '') === 'Math.PI' && numberOf(n.right) === 2;
+}
+
+/** The `.y` access this expression is, if it is one: `a.y`, and `a?.y` too. */
+function yAccessOf(node: Node): { readonly object: Node } | undefined {
+  const n = unchain(node);
+  return n.type === 'MemberExpression' && !n.computed && n.property.type === 'Identifier' && n.property.name === 'y'
+    ? n
+    : undefined;
 }
 
 /** Does this expression end in `.y`? */
-function isYAccess(node: ts.Node): node is ts.PropertyAccessExpression {
-  return ts.isPropertyAccessExpression(node) && node.name.text === 'y';
+function isYAccess(node: Node): boolean {
+  return yAccessOf(node) !== undefined;
+}
+
+/** A non-computed member access by name: `obj.name`, `obj?.name`, never `obj.#name`. */
+function memberName(node: Node): string | undefined {
+  return node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier'
+    ? node.property.name
+    : undefined;
+}
+
+/**
+ * Everything TypeScript's tree spelled as a binary `=`: an assignment, and a
+ * default inside the target of a destructuring assignment (`[a = b.y] = arr`,
+ * `({ k: a = b.y } = o)`). ESTree spells that default AssignmentPattern, as it
+ * does a declaration's or a parameter's default, which TypeScript did not
+ * spell `=`; and `({ a = b.y } = o)` was a shorthand property there.
+ */
+function assignmentOf(node: Node, ancestors: readonly Node[]): { readonly left: Node; readonly right: Node } | undefined {
+  if (node.type === 'AssignmentExpression') return node.operator === '=' ? node : undefined;
+  if (node.type !== 'AssignmentPattern') return undefined;
+  let child: Node = node;
+  for (let i = ancestors.length - 1; i >= 0; i -= 1) {
+    const at = ancestors[i]!;
+    if (at.type === 'AssignmentExpression' || at.type === 'ForOfStatement' || at.type === 'ForInStatement') {
+      return at.left === child ? node : undefined;
+    }
+    const insideTarget =
+      at.type === 'ArrayPattern' ||
+      at.type === 'ObjectPattern' ||
+      (at.type === 'Property' && !at.shorthand) ||
+      (at.type === 'AssignmentPattern' && at.left === child);
+    if (!insideTarget) return undefined;
+    child = at;
+  }
+  return undefined;
 }
 
 /** Anything that names the ground: the right-hand side of the commonest repair. */
@@ -292,23 +338,21 @@ function normalise(text: string): string {
  * parameter is still invisible. That residue is announced on every run rather
  * than left for somebody to discover the way this one was.
  */
-function namesHoldingY(sf: ts.SourceFile): Set<string> {
+function namesHoldingY(program: Program): Set<string> {
   const names = new Set<string>();
 
   /** Does this expression carry a `y` — directly, or through a name, or through Math.min/max? */
-  const carriesY = (n: ts.Node): boolean => {
+  const carriesY = (n: Node): boolean => {
     if (isYAccess(n)) return true;
-    if (ts.isIdentifier(n)) return names.has(n.text);
+    if (n.type === 'Identifier') return names.has(n.name);
     // `Math.min(lowest, part.getWorldPosition(v).y)` — the real shape of the
     // running minimum that hid the bug this pass exists to catch.
-    if (
-      ts.isCallExpression(n) &&
-      ts.isPropertyAccessExpression(n.expression) &&
-      (n.expression.name.text === 'min' || n.expression.name.text === 'max')
-    ) {
-      return n.arguments.some(carriesY);
+    const call = unchain(n);
+    if (call.type === 'CallExpression') {
+      const method = memberName(call.callee);
+      if (method === 'min' || method === 'max') return call.arguments.some(carriesY);
     }
-    if (ts.isParenthesizedExpression(n)) return carriesY(n.expression);
+    if (n.type === 'ParenthesizedExpression') return carriesY(n.expression);
     return false;
   };
 
@@ -316,21 +360,15 @@ function namesHoldingY(sf: ts.SourceFile): Set<string> {
   // the declarations are not necessarily in dependency order.
   for (let pass = 0; pass < 8; pass += 1) {
     const before = names.size;
-    const visit = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-        if (carriesY(node.initializer)) names.add(node.name.text);
+    forEachNode(program, (node, ancestors) => {
+      if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init) {
+        if (carriesY(node.init)) names.add(node.id.name);
       }
-      if (
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        ts.isIdentifier(node.left) &&
-        carriesY(node.right)
-      ) {
-        names.add(node.left.text);
+      const assignment = assignmentOf(node, ancestors);
+      if (assignment && assignment.left.type === 'Identifier' && carriesY(assignment.right)) {
+        names.add(assignment.left.name);
       }
-      ts.forEachChild(node, visit);
-    };
-    visit(sf);
+    });
     if (names.size === before) break;
   }
   return names;
@@ -346,36 +384,37 @@ function namesHoldingY(sf: ts.SourceFile): Set<string> {
  * `HARD_UP`, but the *ray* is the thing that decides whether the train drives
  * through its own bridge, and it deserves to be named as such.
  */
-function namesHoldingVertical(sf: ts.SourceFile): Set<string> {
+function namesHoldingVertical(program: Program, source: string): Set<string> {
   const names = new Set<string>();
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-      const init = node.initializer;
-      if (ts.isNewExpression(init) && /Vector3$/.test(init.expression.getText(sf))) {
-        if (isVerticalTriple(init.arguments ?? [])) names.add(node.name.text);
+  forEachNode(program, (node) => {
+    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init) {
+      const init = node.init;
+      if (init.type === 'NewExpression' && /Vector3$/.test(textOf(source, init.callee))) {
+        if (isVerticalTriple(init.arguments)) names.add(node.id.name);
       }
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
+  });
   return names;
 }
 
 function scan(file: string, source: string): Finding[] {
-  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true);
+  const program = parseTypeScript(file, source);
+  const lineOf = lineIndex(source);
   const lines = source.split('\n');
   const found: Finding[] = [];
-  const yNames = namesHoldingY(sf);
+  const yNames = namesHoldingY(program);
     /** Names this file assigned a hard-coded vertical axis to. */
-  const verticalNames = namesHoldingVertical(sf);
+  const verticalNames = namesHoldingVertical(program, source);
   /** A `.y` access, or a name this file assigned one to. */
-  const holdsY = (n: ts.Node): boolean =>
-    isYAccess(n) || (ts.isIdentifier(n) && yNames.has(n.text));
-  const subjectOf = (n: ts.Node): string =>
-    isYAccess(n) ? normalise(n.expression.getText(sf)) : normalise(n.getText(sf));
+  const holdsY = (n: Node): boolean =>
+    isYAccess(n) || (n.type === 'Identifier' && yNames.has(n.name));
+  const subjectOf = (n: Node): string => {
+    const access = yAccessOf(n);
+    return access ? normalise(textOf(source, access.object)) : normalise(textOf(source, n));
+  };
 
-  const add = (node: ts.Node, rule: RuleId): void => {
-    const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
+  const add = (node: Node, rule: RuleId): void => {
+    const line = lineOf(node.start);
     // `// flat-ok:` on this line or the one **immediately** above. A reason is
     // mandatory — a bare `flat-ok` does not match, so the hatch cannot be used
     // wordlessly.
@@ -400,64 +439,62 @@ function scan(file: string, source: string): Finding[] {
       exemptions.push({ file, line: line + 1, rule });
       return;
     }
-    const text = normalise(node.getText(sf));
+    const text = normalise(textOf(source, node));
     found.push({ file, line: line + 1, rule, snippet: text.slice(0, 90), text });
   };
 
-  const visit = (node: ts.Node): void => {
+  forEachNode(program, (node, ancestors) => {
     // 1. HARD_UP — `new Vector3(0, 1, 0)`, `up.set(0, 1, 0)`, `.setFromAxisAngle`
-    if (ts.isNewExpression(node) && /Vector3$/.test(node.expression.getText(sf))) {
-      if (isVerticalTriple(node.arguments ?? [])) add(node, 'HARD_UP');
+    if (node.type === 'NewExpression' && /Vector3$/.test(textOf(source, node.callee))) {
+      if (isVerticalTriple(node.arguments)) add(node, 'HARD_UP');
     }
     // 7. VERTICAL_RAY — `new Raycaster(origin, up)`.
-    if (ts.isNewExpression(node) && /Raycaster$/.test(node.expression.getText(sf))) {
-      const dir = node.arguments?.[1];
-      if (dir && ts.isIdentifier(dir) && verticalNames.has(dir.text)) add(node, 'VERTICAL_RAY');
+    if (node.type === 'NewExpression' && /Raycaster$/.test(textOf(source, node.callee))) {
+      const dir = node.arguments[1];
+      if (dir && dir.type === 'Identifier' && verticalNames.has(dir.name)) add(node, 'VERTICAL_RAY');
     }
     // 6. AXIS_ALIGNED_BOX — `box.min.y` / `box.max.y`, the vertical extreme of
     //    an axis-aligned box round geometry that may be leaning.
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      node.name.text === 'y' &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      (node.expression.name.text === 'min' || node.expression.name.text === 'max')
-    ) {
-      add(node, 'AXIS_ALIGNED_BOX');
+    if (node.type === 'MemberExpression' && memberName(node) === 'y') {
+      const extreme = memberName(node.object);
+      if (extreme === 'min' || extreme === 'max') add(node, 'AXIS_ALIGNED_BOX');
     }
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const method = node.expression.name.text;
+    if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression') {
+      const callee = node.callee;
+      const method = memberName(callee);
       if ((method === 'set' || method === 'setFromAxisAngle') && isVerticalTriple(node.arguments.slice(0, 3))) {
         add(node, 'HARD_UP');
       }
       // 5. FLAT_DISC — `mesh.rotateX(-Math.PI / 2)`
-      if (method === 'rotateX' && node.arguments.length === 1 && isPiOverTwo(node.arguments[0]!)) {
+      if (method === 'rotateX' && node.arguments.length === 1 && isPiOverTwo(node.arguments[0]!, source)) {
         add(node, 'FLAT_DISC');
       }
       // 7. VERTICAL_RAY — `raycaster.set(origin, up)` with a vertical direction.
       if (method === 'set' && node.arguments.length === 2) {
-        const target = normalise(node.expression.expression.getText(sf));
+        const target = normalise(textOf(source, callee.object));
         const dir = node.arguments[1]!;
         if (
           /ray|caster/i.test(target) &&
-          ts.isIdentifier(dir) &&
-          verticalNames.has(dir.text)
+          dir.type === 'Identifier' &&
+          verticalNames.has(dir.name)
         ) {
           add(node, 'VERTICAL_RAY');
         }
       }
     }
 
-    if (ts.isBinaryExpression(node)) {
-      const op = node.operatorToken.kind;
+    // 5. FLAT_DISC — `mesh.rotation.x = -Math.PI / 2`
+    const assignment = assignmentOf(node, ancestors);
+    if (assignment && isPiOverTwo(assignment.right, source)) {
+      const lhs = normalise(textOf(source, assignment.left));
+      if (/\.rotation\.x$/.test(lhs)) add(node, 'FLAT_DISC');
+    }
 
-      // 5. FLAT_DISC — `mesh.rotation.x = -Math.PI / 2`
-      if (op === ts.SyntaxKind.EqualsToken && isPiOverTwo(node.right)) {
-        const lhs = normalise(node.left.getText(sf));
-        if (/\.rotation\.x$/.test(lhs)) add(node, 'FLAT_DISC');
-      }
+    if (node.type === 'BinaryExpression') {
+      const op = node.operator;
 
-      if (op === ts.SyntaxKind.MinusToken && holdsY(node.left)) {
-        const rightText = normalise(node.right.getText(sf));
+      if (op === '-' && holdsY(node.left)) {
+        const rightText = normalise(textOf(source, node.right));
         // 3. Y_OVER_GROUND — the single commonest repair in the inventory.
         if (GROUND.test(rightText)) add(node, 'Y_OVER_GROUND');
         // 2. Y_DIFFERENCE — two different columns differenced along +Y.
@@ -473,13 +510,7 @@ function scan(file: string, source: string): Finding[] {
       // mistake written in two statements. Y_DIFFERENCE and Y_OVER_GROUND have
       // followed names since they were written; this rule was the last one that
       // did not, and the hole was real — it hid two sites in scripts/.
-      const COMPARISON = [
-        ts.SyntaxKind.LessThanToken,
-        ts.SyntaxKind.LessThanEqualsToken,
-        ts.SyntaxKind.GreaterThanToken,
-        ts.SyntaxKind.GreaterThanEqualsToken,
-      ];
-      if (COMPARISON.includes(op)) {
+      if (op === '<' || op === '<=' || op === '>' || op === '>=') {
         const leftNum = numberOf(node.left);
         const rightNum = numberOf(node.right);
         // A literal on exactly one side, a `.y` on the other. `0` is exempt:
@@ -489,11 +520,8 @@ function scan(file: string, source: string): Finding[] {
         else if (holdsY(node.right) && leftNum !== undefined && leftNum !== 0) add(node, 'Y_THRESHOLD');
       }
     }
+  });
 
-    ts.forEachChild(node, visit);
-  };
-
-  visit(sf);
   return found;
 }
 

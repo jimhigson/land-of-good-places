@@ -57,9 +57,18 @@ export interface Spanned {
   readonly end: number;
 }
 
-/** Parse a `.ts`/`.mts`/`.tsx` file. Throws, naming the file, if it does not parse. */
+/**
+ * Parse a `.ts`/`.mts`/`.tsx` file. Throws, naming the file, if it does not parse.
+ *
+ * A declaration file (`.d.ts`, `.d.mts`, `.d.cts`) is parsed as one, where
+ * `export const X: T;` is legal, because TypeScript chose that from the file
+ * name too. `check:flat-primitives` skips `.d.ts` but has always scanned the
+ * three `scripts/lib/*.d.mts`; the first oxc run threw on them, which is how
+ * this line came to exist.
+ */
 export function parseTypeScript(file: string, text: string): Program {
-  return parseAst(text, { lang: file.endsWith('.tsx') ? 'tsx' : 'ts', preserveParens: true }, file);
+  const lang = /\.d\.[cm]?ts$/.test(file) ? 'dts' : file.endsWith('.tsx') ? 'tsx' : 'ts';
+  return parseAst(text, { lang, preserveParens: true }, file);
 }
 
 const isNode = (value: unknown): value is Spanned =>
