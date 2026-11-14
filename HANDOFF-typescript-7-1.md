@@ -59,10 +59,26 @@ Throwaway baseline worktree at main (TS 5.9.3): `.claude/worktrees/ts71-baseline
   pre-existing native-config-loader one (needs allowImportingTsExtensions in
   tsconfig.json to fix = policy, so listed not fixed).
 
+- Vite proofs: headless boots dev + preview of /spawn?pos=0,0&seed=5, /hotel,
+  /library, /castle?deck=0: all ready, 0 page/console errors, rendered (looked
+  at screenshots). served-deep-links 0 (232 s). shard-1 0 (432 s).
+  check:update-adoption FAILED locally once (visit 2, "Execution context was
+  destroyed"); CI passed it. Root cause: character-less profile + remembered
+  seed => startFresh() reloads itself; 2 navigations per reload on `/`, 1 on
+  `/?seed=0` (measured). Fixed in 7c1af21e (check visits /?seed=0); 3/3 green,
+  red with skipWaiting true.
+- bundledDev trial in scratch worktree `.claude/worktrees/ts71-bundled`
+  (config: `experimental: { bundledDev: process.env.BUNDLED_DEV === '1' }`).
+  So far ON works: 6 deep links 0 errors, hydrated, no SW/caches; /spawn 9
+  requests vs 477; lazy interiors are own chunks; no module defined in two
+  loaded chunks (registerGraph localCount); HMR: real edit => full reload,
+  new code runs, ~2.6 s, same as off; /parks/5.json identical across modes.
+
 ## Next
-- Vite proofs still to run: update-adoption (PORT=own), served-deep-links,
-  shard-1, test:procgen, headless boots dev+preview (scratchpad/measure.mjs).
-- Then bundledDev (measure off vs on; keep only if a clear win).
+- test:procgen on the Vite head; then served checks off/on (deep-links,
+  static-freeze, dom-churn, cull-audit) with wall times; cold start /
+  time-to-playable / requests / warm reload, interleaved off/on samples.
+- Decide bundledDev; if kept: commit config + CLAUDE.md dev-server note.
 
 ## Port facts (oxc ESTree vs TypeScript's tree)
 - Offsets are UTF-16, safe to slice. parseAst defaults to lang js and
