@@ -50,6 +50,14 @@ const where = (page) => page.evaluate(() => {
     hotelInside: w.hotel.playerIsInside, hotelFurnished: w.hotel.furnished, arrival: w.entrance.arrival !== null,
   };
 });
+// A screenshot is evidence, not the measurement: on a loaded Mac one can take
+// minutes, so it gets a long timeout and a failure is recorded, not thrown.
+const shots = [];
+const shot = (page, file) =>
+  page.screenshot({ path: `${outDir}/${file}`, timeout: 180_000 }).then(
+    () => shots.push(file),
+    (e) => shots.push(`${file}: ${String(e.message).split('\n')[0]}`),
+  );
 const savedFile = (page) => page.evaluate(() => {
   const raw = localStorage.getItem('lgp:save');
   if (!raw) return null;
@@ -68,7 +76,7 @@ try {
   const entered = await page.evaluate(() => window.game.world.hotel.requestEnterLobby());
   await sleep(12000); // two autosaves
   const savedFrom = await where(page);
-  await page.screenshot({ path: `${outDir}/1-lobby-before-reload.png` });
+  await shot(page, '1-lobby-before-reload.png');
   // Leave the page (its `pagehide` flush writes the last word), then read the
   // save from a same-origin page that runs nothing: a source file the dev
   // server sends as text (any page path would boot the game again).
@@ -91,13 +99,13 @@ try {
   await ready(page);
   await sleep(6000);
   const restored = await where(page);
-  await page.screenshot({ path: `${outDir}/2-restored.png` });
+  await shot(page, '2-restored.png');
   // Out through the lobby's own way out.
   const left = await page.evaluate(() => { const i = window.game.world.hotel.interior; if (!i || !window.game.world.hotel.playerIsInside) return false; i.spaces.changeTo(() => i.leaveToPark()); return true; });
   await sleep(3000);
   const outside = await where(page);
-  await page.screenshot({ path: `${outDir}/3-out-in-the-park.png` });
-  console.log(JSON.stringify({ base, READ_MS, ARRIVED, entered, savedFrom, save, restored, left, outside, errors }));
+  await shot(page, '3-out-in-the-park.png');
+  console.log(JSON.stringify({ base, READ_MS, ARRIVED, entered, savedFrom, save, restored, left, outside, errors, shots }));
 } finally {
   await context.close();
   fs.rmSync(profile, { recursive: true, force: true });
