@@ -112,7 +112,8 @@ Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout
 - **Merged origin/main bb7e9c99 (#778, shadow cache measured and left off)** as fba4cec9: clean. The cache, when
   asked for (`?shadowCache=1`), walks `visible` the way three's pass does, so a park root out of the graph reads as
   "a cached caster disappeared" and redraws — right, and not exercised here (the cache is off by default).
-- On fba4cec9: tsc 0, typecheck:test 0, `test:procgen` exit 0 (54 files, 2219 tests — the two new DrawnSpaces tests
-  among them), shard 1 exit 0; shards 2-12, `check:npc-presence` and `undrawn-still --mutate` running
-  (`$SP/u2/run-all.sh`, `$SP/u2/all-exits.txt`).
-- Base worktree removed. Port 6011: nothing of this item running on it.
+- **On the merged head fba4cec9 (code = 998ad283), each exit code read directly**: tsc 0, typecheck:test 0,
+  `check:shard-1` … `check:shard-12` each 0 (the whole `check` chain, run shard by shard), `check:npc-presence` 0,
+  `check:undrawn-still -- --mutate` 1 (expected; same totals as its header), `test:procgen` 0 (54 files, 2219 tests),
+  `pnpm run build` 0. Before the #778 merge, same src: `check:coplanar` 0, `LGP_SEEDS=5 validate:parks --fresh` 0.
+- Base worktree removed. Port 6011: nothing of this item running on it. **Done; ready for a PR.**
