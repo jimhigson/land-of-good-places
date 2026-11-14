@@ -4,7 +4,11 @@ Branch `tooling/typescript-7-1`, worktree `.claude/worktrees/ts71`.
 Throwaway baseline worktree at main (TS 5.9.3): `.claude/worktrees/ts71-baseline`
 (detached; remove when done). Scratch outputs: the session scratchpad.
 
-## Plan as it stands (coordinator, 14 Nov)
+## Plan as it stands (coordinator, 14 Nov, latest)
+**ONE branch (`tooling/typescript-7-1`), ONE PR, three revertible commit groups**
+(Jim: "yes, try it in the same branch as is doing the upgrades"). The numbered
+"PR 1/2/3" below are now commit groups on this branch, not separate PRs.
+
 1. **PR 1 (this branch):** TypeScript 7.1 is the ONLY TypeScript ("ok let's use
    7.1 everywhere then"). `"typescript": "7.1.0-dev.20261006.1"`, no aliases,
    no TS 6. The six scripts that used the compiler API are ported to oxc via
@@ -31,6 +35,20 @@ Throwaway baseline worktree at main (TS 5.9.3): `.claude/worktrees/ts71-baseline
 - Timing (load ~27): 5.9.3 9.91 s / 697 MB and 9.58 s / 703 MB;
   7.1 1.37 s / 444 MB and 1.12 s / 443 MB (tsconfig / tsconfig.test).
 - Before-outputs of the six checks on main captured (scratchpad/before).
+- All six ported (c65b2bb9, 56a37f02, 0af61591, d3e45799) via scripts/ts-ast.mts.
+  Printed output byte-identical to main for five; flat-primitives differs only
+  in corpus size (937/949 vs 936/948: ts-ast.mts is a new file in scripts/).
+  Internal dumps (every match, every edge, every string) old vs new: all six
+  byte-identical. Regenerated flat baseline old == new byte-identical (the
+  committed one differs from both by 9 entries' order only: pre-existing).
+- First full oxc run threw on scripts/lib/*.d.mts (flat-primitives scans
+  .d.mts; TS parsed them as declarations by name): ts-ast.mts uses lang dts.
+- No `typescript` importers remain (git grep).
+
+## Next
+- Red proofs per check (mutation, output pasted into each header), then
+  CLAUDE.md note, controls re-run, chain-coverage, shard-1, build, open PR.
+- Then the Vite bump commits, then bundledDev (measure; keep only if a win).
 
 ## Port facts (oxc ESTree vs TypeScript's tree)
 - Offsets are UTF-16, safe to slice. parseAst defaults to lang js and
