@@ -694,9 +694,13 @@ export class World implements GameSystem {
    * part of.
    *
    * The change happens **inside the cloud**, which is the whole reason the band
-   * is there, so nothing is ever seen to vanish. Visibility only: nothing is
-   * disposed, nothing stops updating, and the park is exactly as she left it
-   * when the clouds part again on the way down.
+   * is there, so nothing is ever seen to vanish. Nothing is disposed and
+   * nothing stops updating — her space is still the garden, which is what
+   * {@link parkDrawn} asks — so the park is where it should be when the clouds
+   * part again on the way down. In the live game the hidden groups are out of
+   * the scene graph meanwhile (each is a `garden` root of `DrawnSpaces`, whose
+   * `visible` is membership), and back in it, matrices current, the moment
+   * this shows them.
    */
   setParkVisible(visible: boolean): void {
     for (const group of this.parkGroups) group.visible = visible;
