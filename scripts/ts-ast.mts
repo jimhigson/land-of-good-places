@@ -21,6 +21,10 @@
  *   a ParenthesizedExpression, so `x ** (2)` is not the literal `x ** 2`.
  *   `parseAst` drops them by default, and defaults to `lang: 'js'` whatever
  *   the filename says, so {@link parseTypeScript} always passes both.
+ *   **Except round an assignment target**, where oxc drops them even so:
+ *   `(a.b) = c` has the MemberExpression `a.b` on its left, where TypeScript
+ *   had a ParenthesizedExpression. Nothing here absorbs that;
+ *   `check:flat-primitives` says what it changes there.
  * - **Optional chains get a wrapper.** ESTree puts `a?.y` inside a
  *   `ChainExpression`; TypeScript has no such node and flags the access itself.
  *   {@link unchain} looks through it wherever a check asks what kind of

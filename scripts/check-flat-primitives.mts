@@ -58,8 +58,10 @@
  * this check would have flagged its own explanation.
  *
  * The tree comes from `scripts/ts-ast.mts` (oxc through rolldown). It came
- * from TypeScript's compiler API until TypeScript 7, which has none; the port
- * reports exactly what that version reported, down to the baseline keys.
+ * from TypeScript's compiler API until TypeScript 7, which has none. On every
+ * file in the repo the port reports exactly what that version reported, down
+ * to the baseline keys (all 937 files, measured 14 November 2026). The inputs
+ * where the two differ are listed at the end of this comment.
  *
  * ## The escape hatch, and why it is counted out loud
  *
@@ -91,12 +93,27 @@
  * `ARMING FAILURE  rule Y_DIFFERENCE did not fire on its own fixture: const h
  * = rail?.y - under.y;`, exit 1: the optional chain is armed on every run.
  *
- * **One input the port refuses where the old version did not, on purpose:**
- * `mesh?.rotation.x = -Math.PI / 2`. TypeScript's API parsed it and the old
- * check reported a FLAT_DISC; oxc throws PARSE_ERROR ("Cannot assign to this
- * expression"), because an optional chain is not an assignment target in
- * JavaScript, and `tsc` rejects it too (TS2779). So it can never be in the
- * repo, and if it were, this check would stop loudly rather than skip it.
+ * ## Where it differs from the TypeScript-API version, on purpose
+ *
+ * Measured against that version (TypeScript 5.9.3) on synthetic probes. None
+ * of these shapes occurs in the repo.
+ *
+ * - **Refused:** `mesh?.rotation.x = -Math.PI / 2`. TypeScript's API parsed it
+ *   and the old check reported a FLAT_DISC; oxc throws PARSE_ERROR ("Cannot
+ *   assign to this expression"), because an optional chain is not an
+ *   assignment target in JavaScript. `tsc` rejects it too (TS2779), and so
+ *   does Vite's own transform, so it cannot be in a file that builds; if it
+ *   were, this check would stop loudly rather than skip it. The object-rest
+ *   shapes in {@link assignmentOf} also throw here, and Vite refuses them too.
+ *   A default on the rest element itself, `[...[a] = []] = arr`, throws here
+ *   as well; `tsc` refuses it as TS1186.
+ * - **Reported where the old version was blind:** a parenthesised target,
+ *   `(mesh.rotation.x) = -Math.PI / 2` (FLAT_DISC) or `(yy) = a.y` (a laundered
+ *   y). oxc drops the parentheses round an assignment target even with
+ *   `preserveParens`, so the left side reads `mesh.rotation.x`; TypeScript kept
+ *   a ParenthesizedExpression there, which neither `/\.rotation\.x$/` nor the
+ *   Identifier test matched. Both are the mistake this check exists to catch,
+ *   so the port keeps them.
  */
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
