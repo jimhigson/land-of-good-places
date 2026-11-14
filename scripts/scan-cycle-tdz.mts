@@ -80,6 +80,20 @@
  * `get`/`set` body is walked (TypeScript had no function node under an
  * accessor), and `import {} from './x'` binds nothing and so adds no edge,
  * like an import whose every name is `type`.
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending `export const __PROBE_TDZ: number = MIN_RAMP_RUN + 1;` to
+ * `src/world/train/bridgeFit.ts` (140 lines), which imports `MIN_RAMP_RUN`
+ * from `./bridgeFootprint` inside the same cycle. The annotation is there on
+ * purpose: oxc's span for an annotated name includes `: number`, and the site
+ * must still be keyed on the bare name. `--check` exits 1, output identical to
+ * the TypeScript-API version's:
+ *
+ *     6 module-scope initialiser(s) reading a binding from their own cycle:
+ *       …
+ *       src/world/train/bridgeFit.ts:142  __PROBE_TDZ <- MIN_RAMP_RUN  [src/world/train/bridgeFootprint.ts]
+ *     check:cycle-tdz FAILED — 1 problem(s):
+ *       - NEW module-scope read inside an import cycle: src/world/train/bridgeFit.ts::__PROBE_TDZ at line 142 reads MIN_RAMP_RUN from src/world/train/bridgeFootprint.ts. …
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';

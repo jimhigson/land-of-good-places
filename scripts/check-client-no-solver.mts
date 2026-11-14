@@ -22,6 +22,19 @@
  *
  * The literals are read off the syntax tree (`scripts/ts-ast.mts`: oxc through
  * rolldown, since TypeScript 7 has no JavaScript API).
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending `import '../procgen/world/boundaryRadii';` to `src/main.ts` (1524
+ * lines). Exit 1:
+ *
+ *     check:client-no-solver: 4 string(s) that exist only in procgen/ are in the client bundle — solver code shipped:
+ *       assets/main-ljji0tqB.js: "generateParkBoundary: no gentle outline for seed"
+ *       assets/main-ljji0tqB.js: "(best curvature radius"
+ *       assets/main-ljji0tqB.js: "with the gate pinned at"
+ *       assets/main-ljji0tqB.js: "m may be geometrically impossible."
+ *
+ * The TypeScript-API version reported the same four strings; only the chunk's
+ * hash differed, because the build bakes the commit into the bundle.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';

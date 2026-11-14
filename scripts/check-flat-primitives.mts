@@ -71,6 +71,25 @@
  * an object-local transform under an `Anchor`. The reason is mandatory and the
  * total is **printed on every run**, so the hatch cannot quietly become the
  * convention — the number going up is visible in the same place the coverage is.
+ *
+ * ## Proved red when it moved to oxc
+ *
+ * 14 November 2026, main at 27e570b3. Appended to `src/version-check.ts` (48
+ * lines), the second line being the optional-chain shape ESTree wraps:
+ *
+ *     export const __probeUp = new Vector3(0, 1, 0);
+ *     export const __probeRise = (a: { y: number } | undefined, b: { y: number }) => a?.y - b.y;
+ *
+ * Exit 1, with the same two findings the TypeScript-API version reported:
+ *
+ *     NEW FLAT PRIMITIVE  src/version-check.ts:50  [HARD_UP]
+ *       new Vector3(0, 1, 0)
+ *     NEW FLAT PRIMITIVE  src/version-check.ts:51  [Y_DIFFERENCE]
+ *       a?.y - b.y
+ *
+ * And with the `unchain` taken out of `yAccessOf`, the run stops at
+ * `ARMING FAILURE  rule Y_DIFFERENCE did not fire on its own fixture: const h
+ * = rail?.y - under.y;`, exit 1: the optional chain is armed on every run.
  */
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';

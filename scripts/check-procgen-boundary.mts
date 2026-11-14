@@ -20,6 +20,23 @@
  *
  * The specifiers are read off the syntax tree (`scripts/ts-ast.mts`: oxc
  * through rolldown, since TypeScript 7 has no JavaScript API).
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending one specifier of each other kind, including the `import('x').T`
+ * type the control does not cover, to `src/version-check.ts` (48 lines):
+ *
+ *     import type { BuiltDecision } from '../procgen/world/builtLog';
+ *     export const __probeLater = (): Promise<unknown> => import('../procgen/install');
+ *     export type ProbeLog = import('../procgen/world/builtLog').BuiltDecision;
+ *     export { recordBuilt } from '../procgen/world/builtLog';
+ *
+ * Exit 1, and output identical to the TypeScript-API version's on the same input:
+ *
+ *     check:procgen-boundary: 4 import(s) from src/ into procgen/ — the game must not carry the solver:
+ *       src/version-check.ts:50 imports '../procgen/world/builtLog'
+ *       src/version-check.ts:51 imports '../procgen/install'
+ *       src/version-check.ts:52 imports '../procgen/world/builtLog'
+ *       src/version-check.ts:53 imports '../procgen/world/builtLog'
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';

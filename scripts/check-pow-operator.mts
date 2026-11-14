@@ -21,6 +21,20 @@
  * parsing: oxc through rolldown, since TypeScript 7 has no JavaScript API.)
  *
  * Raised by the #706 review: "nothing guards future uses".
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending three lines to `src/core/constants.ts`, then 1491 lines long:
+ *
+ *     export const __PROBE_POW = 2 ** 3;
+ *     export let __probePow = 1; __probePow **= 2;
+ *     export const __PROBE_POW_PAREN = 3 ** (2);
+ *
+ * Exit 1, and output identical to the TypeScript-API version's on the same input:
+ *
+ *     check:pow-operator FAILED — 3 use(s) of `**` with an exponent other than the literal 2 under …
+ *       src/core/constants.ts:1493: 2 ** 3
+ *       src/core/constants.ts:1494: __probePow **= 2
+ *       src/core/constants.ts:1495: 3 ** (2)
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';

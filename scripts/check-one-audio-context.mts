@@ -29,6 +29,18 @@
  * so that version never saw them. Both are value references, a subclass
  * constructs the context all the same, and ESTree has them as plain
  * expressions, so this one reports them. Neither occurs in `src/`.
+ *
+ * **Proved red, 14 November 2026,** when it moved to oxc (main at 27e570b3), by
+ * appending one line to `src/version-check.ts`, then 48 lines long. First
+ * `export const __probeCtx = new AudioContext();`, exit 1, output identical to
+ * the TypeScript-API version's:
+ *
+ *     check:one-audio-context FAILED: 1 reference(s) to the AudioContext constructor outside src/core/audio.ts. …
+ *       src/version-check.ts:50: export const __probeCtx = new AudioContext();
+ *
+ * Then `export class ProbeCtx extends AudioContext {}`, the difference above:
+ * exit 1 here with `src/version-check.ts:50: export class ProbeCtx extends
+ * AudioContext {}`, where the TypeScript-API version exited 0.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
