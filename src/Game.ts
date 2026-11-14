@@ -1238,16 +1238,30 @@ export class Game {
     this.engine.beginFrame(this.transitions.wiping, spaceAt(x, z));
   }
 
+  /**
+   * The GPU's name, asked for once. `gl.getParameter` for it is a synchronous
+   * round trip to Chrome's GPU process, which waits behind whatever the GPU
+   * has queued: asked on every overlay redraw (4 a second) it stalled the very
+   * frames the overlay was measuring — 0.5 ms a call in the park, ~10 ms with
+   * the sun shadow cache's extra passes queued (41.8 ms/s of `getParameter`
+   * in a profile), enough to report 1–7 % missed 120 Hz frames that a probe
+   * without the overlay did not see (0.2 %).
+   */
+  private perfGpuName: unknown = null;
+
   /** What the perf overlay's JSON says about where and on what it was measured. */
   private perfContext(): Record<string, unknown> {
     const renderer = this.engine.renderer;
     const gl = renderer.getContext();
-    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    if (this.perfGpuName === null) {
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      this.perfGpuName = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    }
     return {
       space: spaceAt(this.player.position.x, this.player.position.z),
       riding: this.player.riding,
       clock: this.checkClock?.state() ?? null,
-      gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+      gpu: this.perfGpuName,
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
       adaptiveResolution: this.engine.adaptiveResolution.state(),
