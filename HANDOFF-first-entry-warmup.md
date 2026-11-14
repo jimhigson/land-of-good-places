@@ -46,7 +46,26 @@ Lazy castle A/B (main d2ebb4c1 + lazy-castle vs branch + lazy-castle, 4 runs eac
   branch+lc 66–69 ms shut 4/4, worst visible 10.3 ms 4/4.
 - Cost: close→open 331–351 ms (main) → 474–595 ms (branch) on that first entry.
 
+- Lifts (castle `LiftRide`, `HotelLift`): alighting began on the line after
+  `travelTo`, posing her on the new floor before the iris shut (roof garden:
+  sun rig on through an open iris, 8+8 links, 37–404 ms). `travelTo` now takes
+  `arrived`, run in the hop's midpoint. Roof hop 404/35 → 10/10 ms.
+- Ferris: the car's companion is read at the press (before `beginRide` stows
+  her line) — `check:exits` caught "it seats 0".
+- `check:cull-audit`'s pixel control borrowed its render-target class from an
+  existing shadow map; deep links into hotel/library/reptile no longer draw the
+  park first (boot hold), so none existed → control −1. The check now makes
+  the sun's map once when none exists.
+
+## Results (scratchpad `fe-warmup/`: cr-r2.jsonl, wk-r3.jsonl, lc-*.jsonl, lift-*.jsonl, shots-r3/)
+Chromium worst frame she saw, main → branch: castle 54→10, hotel 99→10,
+library 112→10, reptile 43→32, rail race 101→13, ferris 106→10, dodgems
+76→10, water fight 85→10, lift roof 404/35→10/10. WebKit: castle 146/131→30/24,
+hotel 153/155→23/35, library 740/168→38/25, ferris 1689/197→33/33, rail race
+198/211→56/52 (press: race HUD toDataURL, left). Pixel pairs 0 diff except
+dodgems 139 px (sparkles; game not played during the curtain hold).
+gpu:first-entry red on main (9 clauses), green on branch.
+
 ## Next
-- [ ] Chromium batch main vs branch (cr-r2), WebKit doors/rides, screenshot pairs
-- [ ] prove gpu:first-entry red on main's build, green on branch
-- [ ] check:exits, check:render-budget, lazy tests; PR
+- [ ] served checks green (cull-audit re-run after the control fix)
+- [ ] PR (body draft in scratchpad fe-warmup/pr-body.md), CI, preview URL
