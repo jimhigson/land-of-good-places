@@ -100,6 +100,12 @@ Raw samples: `docs/perf/undrawn-indoors/results/`. Load average 25-66 throughout
 - On 96cfe195 (the roots change): `check:undrawn-still` exit 0, `--mutate` exit 1 (transcript in its header);
   `LGP_SEEDS=5 pnpm run validate:parks -- --fresh` exit 0: `seed 5 accepted in 442 s — restart 1, 134 measures,
   placement f06f4b4bedd6032e`.
-- Running on f32a89bd: the full `pnpm run check` (`$SP/u2/check-full.log`) and `pnpm run test:procgen`
-  (`$SP/u2/procgen.log`). Then `check:npc-presence`, `check:coplanar`.
+- On f32a89bd: `pnpm run test:procgen` exit 0 (54 files, 2217 tests); `check:npc-presence` exit 0.
+- **The full `pnpm run check` died in shard 1 at `check:crowd` -> `check:npc-perch`**: `TypeError:
+  this.npcs.isHeldStill is not a function` — the check builds `TreeClimbing` over a stub crowd `{ all: [character] }`
+  that the first engineer's `isHeldStill` call never reached locally (it is not on the handoff's list of checks run).
+  CI's shard 1 would have gone red. Fixed in 5381bf69 (the stub answers `isHeldStill: () => false`, a living crowd);
+  `DrawnSpaces.showSpace` got unit tests in `test/store/drawn-spaces.test.ts`, proved red against two breaks.
+- Running: the rest of the chain from `check:crowd` on, each piece separately (`$SP/u2/run-rest.sh`, exits in
+  `$SP/u2/rest-exits.txt`). Everything in shard 1 before `check:crowd` passed on f32a89bd (same src).
 - Base worktree `.claude/worktrees/undrawn-indoors-base` (detached at 27e570b3) — remove when done.
