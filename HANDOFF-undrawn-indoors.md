@@ -47,8 +47,20 @@ park-map, tap-dash, nav-spaces, npc-presence (not in chain), park, solids, solid
 served-cull-audit (green here; red on main's CI at 34f20970 — flaky), served-static-freeze, served-deep-links,
 served-book-reader. render-budget census: library scene graph 883 objects in / park 'garden/the-park' out.
 
-## State
-- Focused A/B (park, hotel, great hall; 3 alternations) running: `$SP/ab2.sh`, `$SP/ab2-x{1,4}.jsonl`.
-- `save-indoors.mjs`: on BOTH builds the restore put her at the park spawn when "keep playing" was pressed the moment
-  it appeared (place.park stamp vs `parkStamp()` read in `continueGame` — likely the park file not offered yet: a race
-  on main, not this branch). Re-running with a 6 s read before the press.
+## State (resumed 14 Nov, second engineer)
+- **Merged origin/main 27e570b3** (#777) as e9a2e727: one conflict, `BallPit.ts` (both sides added a method in one
+  spot — kept `settling` and main's `settleNow`). Game.ts merged clean. tsc 0.
+- Builds for the A/B: `$SP/u2/dist-before` (27e570b3) and `$SP/u2/dist-after` (e9a2e727); base worktree
+  `.claude/worktrees/undrawn-indoors-base` (detached, remove when done).
+- **The Mac is NOT quiet**: a Virtualization VM (not ours) runs at ~860 % CPU, load average 50-230 all night, the display
+  asleep (headless Chrome falls back to 60 Hz: `CVDisplayLinkCreateWithCGDisplay failed`). Wall-clock A/B (`ab3.sh`)
+  gave garbage pairs (hotel after 2.9 -> 15 ms between rounds). Thread time (`thread-time.mjs`, trace `tdur`) tracks wall
+  time here (E-core scheduling / contention, not descheduling), so it does not escape the load either. Plan: many
+  interleaved pairs per scene through one port (`$SP/u2/twin-serve.mjs`: before.localhost / after.localhost on 6011),
+  min and median, with the load recorded on every sample.
+- **save-indoors, probable cause (not a race)**: `bootstrap.ts` awaits the park file before `main.ts` loads, so
+  `parkStamp()` cannot be null in `continueGame`. The probe's profile is made by `/spawn`, which never marks
+  `arrivedByBus`; a continue then plays the cat-bus arrival (`arrivalIsDue()`), which seats her in the bus at the
+  gate whatever `save.place` says (`arrivalSpawn.ts`'s "a restored save always wins" assumes arrivedByBus is true on
+  any save with a place). Probe now has `ARRIVED=1` (marks the save arrived before the reload) to test a real
+  player's save; running on both builds.
