@@ -80,35 +80,44 @@
  * animated every frame wherever she is.
  *
  * Proved against: seed 5 hydrated from its prebuilt file, `perf/undrawn-indoors`
- * at ce7f6f3d, she stands at the entrance spot (`ENTRANCE_PLAYER_X/Z`), 600
- * garden frames, 240 in each room, 13 Nov 2026. Green, then `--mutate` (exit 1):
+ * at 96cfe195 (the park as sixteen `garden` roots, each group its own), she
+ * stands at the entrance spot (`ENTRANCE_PLAYER_X/Z`), 600 garden frames, 240
+ * in each room, 14 Nov 2026. Green (exit 0), then `--mutate` (exit 1):
  *
  * ```
  * garden (garden), 600 frames, 6534 objects under a hidden ancestor: undrawn object-changes 0, on 0 of 600 frames
- * hotel lobby (hotel.lobby), 240 frames, 5723 objects under a hidden ancestor: undrawn object-changes 0, on 0 of 240 frames
+ * hotel lobby (hotel.lobby), 240 frames, 5707 objects under a hidden ancestor: undrawn object-changes 0, on 0 of 240 frames
  *   the crowd's buffers rewritten on 0 of 240 frames; the train still
  * … library, reptile house, castle great hall and roof the same; the mall:
  *   exempt in castle mall: the train, which the crowd living here rides — 5520 object-changes under it, the crowd rewritten on 240 of 240 frames
- * control 4, back in the garden: 10620 changes under the-park in 60 frames, the crowd rewritten on 60, the train moved 4.00 m
+ * control 4, back in the garden: 10620 changes under the park's 16 groups in 60 frames, the crowd rewritten on 60, the train moved 4.00 m
  *
  * --mutate:
  * garden: 43542 changes to objects in spaces that are not drawn, on 600 of 600 frames
  *       7200  the-big-building-inside: building-shell-floor-1 > great-hall-diners-1 > crowd:BufferGeometry
  *       2400  the-land-hotel-inside: the-land-hotel-inside > kid > body
  * hotel lobby: 58350 changes to objects that are not drawn, on 240 of 240 frames
- *       6000  the-park: fairy-lights > fairy-bulbs:tiles > fairy-bulbs
- *       5280  the-park: anchor-plots > anchor:dodgems > dodgems:ride
+ *       6000  fairy-lights: fairy-lights > fairy-bulbs:tiles > fairy-bulbs
+ *       5280  anchor-plots: anchor-plots > anchor:dodgems > dodgems:ride
  * hotel lobby: the crowd's instance buffers were rewritten on 240 of 240 frames
  * hotel lobby: the train moved from 44.32 to 60.32 m along its loop while nobody could see it
- * … and the same three for the library, the reptile house and the great hall;
- * castle mall: 52923 changes; castle roof: 52551 changes and the crowd rewritten.
+ * … and the same three for the library (60652 changes) and the reptile house (60338);
+ * castle great hall: 43539 changes, the crowd rewritten, the train moved 108.66 -> 110.56 m;
+ * castle mall: 52923 changes; castle roof: 52551 changes and the crowd rewritten (the
+ * train stood at a platform through those 240 frames, so only the crowd caught it there).
  * ```
+ *
+ * The first proof (ce7f6f3d, 13 Nov, the park under one `the-park` root) read
+ * the same totals; only the attribution of the park's changes moved, from
+ * `the-park: fairy-lights > …` to `fairy-lights: …`, and the lobby's count of
+ * objects under a hidden ancestor fell by the sixteen groups themselves (5723
+ * then, each group now the hidden root rather than under one).
  *
  * Two gates the mutation does not reach, because nothing outside the class can
  * call round them, were found by this instrument before they existed (same
  * seed and spot, the commit before ce7f6f3d): **Sunny's head in the park**,
  * 240 changes in every room's 240 frames under
- * `the-park: the-reptile-house-outside > reptileHouse.exterior > rh-head-pivot`,
+ * `the-reptile-house-outside > reptileHouse.exterior > rh-head-pivot`,
  * and **the castle's grown-up**, 1242 in the garden and 494 in every room
  * under `the-big-building-inside > grown-up`. Both read 0 with their gates.
  */
