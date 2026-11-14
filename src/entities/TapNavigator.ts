@@ -5,6 +5,7 @@ import type { TapPoint } from '../core/input/PointerControls';
 import type { IsoCamera } from '../core/IsoCamera';
 import { pickWalkablePoint } from '../world/pickWalkable';
 import { MAX_LEVEL_GAP, MAX_ROUTE_WAYPOINTS, type NavGrid } from '../world/NavGrid';
+import { ROUTE_PRIORITY, RouteRequest, type RouteScheduler } from '../world/routeScheduler';
 import { TapMarker } from '../art/models/tapMarker';
 import type { GroundSampler, Player } from './Player';
 import { PLAYER_MAX_SPEED } from '../core/constants';
@@ -46,6 +47,18 @@ import { DASH_RECOVER_SECONDS, dashBoost, dashBoostNow, dashSubsteps } from './t
  *   she gets there, exactly as it does under a thumb.
  * - **A route is planned once, per tap.** Following it costs one more distance
  *   check per frame than seeking did, and allocates nothing.
+ * - **She sets off the moment she is asked, before the route is found.** A far
+ *   tap's A\* used to run inside the tap's own frame — 33–35 ms on an M4 Pro,
+ *   four or five missed frames at 120 Hz — so in the game the route is asked
+ *   of a {@link RouteScheduler} that answers it a couple of milliseconds a
+ *   frame (step 1b of the 120 fps plan). Most taps are answered at the start
+ *   of the very next frame, before it steers her — the frame a tap always set
+ *   her off on. A long one takes a few frames, and for those frames she walks
+ *   straight at the place she tapped, exactly the seek this class used before
+ *   it could route, then turns onto the route the moment it lands — the same
+ *   route a synchronous plan would have given. She does not dash until it has:
+ *   a dash is judged on the route, and a straight line at sixty metres a
+ *   second is the one guess that could carry her somewhere wrong.
  *
  * When the tapped place cannot be reached at all, the walk still happens: she
  * goes to the closest reachable point and stops there, with the marker moved to
@@ -174,6 +187,12 @@ export class TapNavigator implements GameSystem {
   private routeLength = 0;
   private routeIndex = 0;
   private replansLeft = 0;
+  /**
+   * Her route, asked of {@link routes} and written into {@link route} when it
+   * is answered. While it is {@link RouteRequest.pending} the route is empty
+   * and she walks straight at the target — see the file comment.
+   */
+  private readonly request = new RouteRequest(ROUTE_PRIORITY.player, this.route);
 
   private active = false;
   private scripted: ScriptedWalk | null = null;
@@ -216,6 +235,12 @@ export class TapNavigator implements GameSystem {
    * on what the child can see and never on a floor the fade has removed.
    */
   private readonly visibleCeiling: () => number;
+  /**
+   * Who answers her routes a slice a frame — `Game`'s, so no frame spends more
+   * than its budget finding her way. `null` plans synchronously, exactly as
+   * this class always did: what a check driving the navigator on its own gets.
+   */
+  private readonly routes: RouteScheduler | null;
 
   constructor(
     player: Player,
@@ -229,12 +254,20 @@ export class TapNavigator implements GameSystem {
      * on what the child can see and never on a floor the fade has removed.
      */
     visibleCeiling: () => number = () => Infinity,
+    /** See {@link routes}. */
+    routes: RouteScheduler | null = null,
   ) {
     this.player = player;
     this.camera = camera;
     this.input = input;
     this.navGrid = navGrid;
     this.visibleCeiling = visibleCeiling;
+    this.routes = routes;
+  }
+
+  /** True while her route has been asked for and not yet answered. */
+  get routePending(): boolean {
+    return this.request.pending;
   }
 
   /** The tap marker's geometry. Add it to the scene once, at construction. */
@@ -320,6 +353,8 @@ export class TapNavigator implements GameSystem {
 
     this.routeLength = 0;
     this.routeIndex = 0;
+    // Whatever was being asked for the last destination is not wanted now.
+    this.forgetRoute();
     const sampler = this.player.groundSampler;
     if (!scripted && sampler) this.planRoute(sampler);
 
@@ -371,6 +406,7 @@ export class TapNavigator implements GameSystem {
     this.running = false;
     this.routeLength = 0;
     this.routeIndex = 0;
+    this.forgetRoute();
     this.endDash();
     this.abandonScripted();
     this.input.setNavigationSprint(false);
@@ -392,6 +428,10 @@ export class TapNavigator implements GameSystem {
       return;
     }
 
+    // Her route has been answered since the last frame: turn onto it here,
+    // from wherever the straight walk has got her to.
+    if (this.request.status === 'done') this.routeLanded();
+
     const distance = this.planarDistance();
 
     // Arrived means arrived **on the destination's level**: standing on the
@@ -399,9 +439,10 @@ export class TapNavigator implements GameSystem {
     // wrong, and calling that "arrived" is exactly the shipped bug where the
     // marker jumped to the child's own feet. An unrouted walk (no lattice —
     // the pre-routing fallback) keeps the old planar-only rule, because its
-    // target's level is wherever she already is.
+    // target's level is wherever she already is. A walk whose route has not
+    // been answered yet is a routed walk, so it is held to the level too.
     const levelGap = Math.abs(this.player.position.y - this.target.y);
-    if (distance <= ARRIVE_RADIUS && (this.routeLength === 0 || levelGap <= MAX_LEVEL_GAP)) {
+    if (distance <= ARRIVE_RADIUS && ((this.routeLength === 0 && !this.request.pending) || levelGap <= MAX_LEVEL_GAP)) {
       this.arrive();
       this.drawMarker(dt, elapsed, false);
       return;
@@ -496,43 +537,80 @@ export class TapNavigator implements GameSystem {
    *   child can see where her character is really going, and the interaction is
    *   dropped, because arriving somewhere else must never press the button on a
    *   thing she never reached.
+   *
+   * With a scheduler ({@link routes}) the question is asked, and taken at once
+   * if it is answered there and then (asked inside a frame, with budget left).
+   * Otherwise the route stays empty, so every method below steers straight at
+   * the target, until {@link update} finds it answered ({@link routeLanded}) —
+   * for a tap, which arrives between frames, usually the very next frame.
    */
   private planRoute(sampler: GroundSampler): void {
     this.routeIndex = 0;
-    this.routeLength = this.navGrid.findRoute(
-      this.player.position.x,
-      this.player.position.z,
-      this.player.position.y,
-      this.target.x,
-      this.target.z,
-      this.target.y,
-      sampler,
-      this.route,
-    );
-    if (this.routeLength === 0) return;
-    if (this.navGrid.lastRouteReachedGoal) {
+    this.routeLength = 0;
+    const { x, y, z } = this.player.position;
+    if (this.routes) {
+      this.routes.ask(this.request, this.navGrid, sampler, x, z, y, this.target.x, this.target.z, this.target.y);
+      if (this.request.status === 'done') {
+        this.request.status = 'idle';
+        this.takeRoute(this.request.count, this.request.reachedGoal, this.request.endY);
+      }
+      return;
+    }
+    const count = this.navGrid.findRoute(x, z, y, this.target.x, this.target.z, this.target.y, sampler, this.route);
+    this.takeRoute(count, this.navGrid.lastRouteReachedGoal, this.navGrid.lastRouteEndY);
+  }
+
+  /**
+   * A route has come back — `count` waypoints in {@link route}, whether they
+   * reach the target, and the height they end at: walk it, and move the
+   * destination when it ends somewhere else. The three outcomes are
+   * {@link planRoute}'s.
+   */
+  private takeRoute(count: number, reachedGoal: boolean, endY: number): void {
+    this.routeIndex = 0;
+    this.routeLength = count;
+    if (count === 0) return;
+    if (reachedGoal) {
       // Stand the destination on the level the route actually ends on — the
       // pick already put it there for a tap, and for a caller that passed a
       // guessed `y` (the park map passes the terrain's), this is what makes
       // the arrival check compare against the real floor.
-      this.target.y = this.navGrid.lastRouteEndY;
+      this.target.y = endY;
       return;
     }
 
-    const endX = this.route[(this.routeLength - 1) * 2] ?? this.target.x;
-    const endZ = this.route[(this.routeLength - 1) * 2 + 1] ?? this.target.z;
+    const endX = this.route[(count - 1) * 2] ?? this.target.x;
+    const endZ = this.route[(count - 1) * 2 + 1] ?? this.target.z;
     // A shortfall is only "the stand point beside the stall" when it is short
     // on the **same level**. Ending nearby on another level — the deck edge
     // above a tapped floor spot — is a genuinely different place, and the
     // destination honestly becomes where she can actually get to.
     if (
       Math.hypot(endX - this.target.x, endZ - this.target.z) <= SHORTFALL_TOLERANCE &&
-      Math.abs(this.navGrid.lastRouteEndY - this.target.y) <= MAX_LEVEL_GAP
+      Math.abs(endY - this.target.y) <= MAX_LEVEL_GAP
     ) {
       return;
     }
 
-    this.target.set(endX, this.navGrid.lastRouteEndY, endZ);
+    this.target.set(endX, endY, endZ);
+  }
+
+  /**
+   * Her route, asked for on an earlier frame, has been answered: take it, and
+   * start the leg and the journey's pace over from where she now stands. The
+   * dash is judged here, on the route, never on the straight walk before it.
+   */
+  private routeLanded(): void {
+    this.request.status = 'idle';
+    this.takeRoute(this.request.count, this.request.reachedGoal, this.request.endY);
+    this.beginLeg();
+    this.planDash(this.scripted !== null);
+  }
+
+  /** Forgets a route asked for and not yet answered — the walk it was for is over. */
+  private forgetRoute(): void {
+    if (this.routes) this.routes.cancel(this.request);
+    else this.request.status = 'idle';
   }
 
   /**
@@ -549,7 +627,8 @@ export class TapNavigator implements GameSystem {
     this.replansLeft -= 1;
     this.planRoute(sampler);
     this.beginLeg();
-    return this.routeLength > 0;
+    // Asked and not answered yet is a route on its way, not no route.
+    return this.routeLength > 0 || this.request.pending;
   }
 
   /** Starts the stuck timer over for whichever waypoint is now being walked to. */
@@ -605,17 +684,19 @@ export class TapNavigator implements GameSystem {
     this.active = false;
     this.routeLength = 0;
     this.routeIndex = 0;
+    this.forgetRoute();
     scripted?.onArrive();
   }
 
   /**
    * Judges the journey just planned: how fast it cruises (`dashBoost`) on the
    * length of the whole route from where she stands. A scripted walk never
-   * dashes — a stair ride's pace is the ride's.
+   * dashes — a stair ride's pace is the ride's — and nor does a walk whose
+   * route has not been answered yet: she walks until it has.
    */
   private planDash(scripted: boolean): void {
     this.recovering = 0;
-    this.cruiseBoost = scripted ? 1 : dashBoost(this.remainingRoute());
+    this.cruiseBoost = scripted || this.request.pending ? 1 : dashBoost(this.remainingRoute());
     this.boost = dashBoostNow(this.cruiseBoost, this.remainingRoute());
   }
 

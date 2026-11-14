@@ -38,6 +38,7 @@ import { characterModelAvatar, type NpcAvatar } from './npcAvatar';
 import { WaypointDriver, type Waypoint } from './waypointDriver';
 import { PoiGraph } from './poiGraph';
 import { JourneyPlanner } from './journey';
+import type { RouteScheduler } from '../../world/routeScheduler';
 import { castleAttractions, gardenAttractions, type Attraction } from './attractions';
 import type { LevelConnector } from '../../world/building/surfaces';
 import type { ShopStand } from '../../world/building/shops/Shops';
@@ -971,6 +972,16 @@ export class NpcSystem implements GameSystem {
       if (onTheTrain(character)) continue;
       yield { x: character.position.x, y: character.position.y, z: character.position.z, radius: NPC_RADIUS };
     }
+  }
+
+  /**
+   * Plan the children's routes through `routes` — a slice a frame, under the
+   * game's route budget, rather than each in one go inside its child's frame
+   * (step 1b of the 120 fps plan; see `journey.ts`). `Game` calls this once;
+   * a harness that never does keeps planning synchronously, as before.
+   */
+  useRouteScheduler(routes: RouteScheduler): void {
+    this.planner.useScheduler(routes);
   }
 
   /**

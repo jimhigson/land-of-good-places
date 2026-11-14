@@ -20,6 +20,7 @@ import { BackpackPeek } from './BackpackPeek';
 import { MAX_PARADE_VISIBLE } from './paradeCap';
 import { PetRoute } from './petRoute';
 import type { NavGrid } from '../../world/NavGrid';
+import type { RouteScheduler } from '../../world/routeScheduler';
 
 /**
  * The parade of cute things.
@@ -502,11 +503,22 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    * Interleaving is safe because it is sequential. `findRoute` leaves
    * `lastRouteReachedGoal` and `lastRouteEndY` behind it, and both readers —
    * `TapNavigator.planRoute` and this class — read them in the statement after
-   * their own call, never across somebody else's.
+   * their own call, never across somebody else's. In the game neither calls it
+   * at all: both ask `routes` (step 1b of the 120 fps plan), which answers each
+   * request on a search scratch of its own.
+   *
+   * `routes` is `Game`'s route scheduler: a companion's routes are then asked
+   * of it and answered a slice a frame, behind her own taps
+   * (`routeScheduler.ts`). Without one they are planned there and then, as
+   * before.
    */
-  setNavGrid(navGrid: NavGrid): void {
+  setNavGrid(navGrid: NavGrid, routes: RouteScheduler | null = null): void {
     this.navGrid = navGrid;
+    this.routeScheduler = routes;
   }
+
+  /** See {@link setNavGrid}. */
+  private routeScheduler: RouteScheduler | null = null;
 
   /**
    * **How the companions have been getting about**, for `check:hotel` to print.
@@ -1082,7 +1094,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     const body = member.root.position;
     const goalY = goal.y;
     if (
-      route.advance(navGrid, sampler, goal.x, goal.z, goalY, body.x, body.z, goalY, dt, goal)
+      route.advance(navGrid, sampler, goal.x, goal.z, goalY, body.x, body.z, goalY, dt, goal, this.routeScheduler)
     ) {
       // The waypoints are `x, z` only; the floor under one is the same
       // question the trail sample above asks, with the goal's own level as the
