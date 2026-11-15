@@ -271,6 +271,12 @@ interface SourceRecord {
   readonly sphere: readonly [number, number, number, number];
   /** Its triangles in the batch's index, as [first index, index count]. */
   readonly triangles: readonly [number, number];
+  /**
+   * Its `matrixAutoUpdate` and `matrixWorldAutoUpdate` before it was merged,
+   * given back with drawing ({@link setStaticBatchesDrawn}): a source of a
+   * cart has to follow the cart again the moment it draws itself.
+   */
+  readonly autoUpdate: readonly [boolean, boolean];
 }
 
 export interface BatchRecord {
@@ -554,12 +560,24 @@ function attributeVersions(geometry: BufferGeometry, names: readonly string[]): 
 
 /** Takes a source out of drawing: out of the graph, or off layer 0. */
 function stand(source: SourceRecord, drawnByBatch: boolean): void {
+  const mesh = source.mesh;
   if (drawnByBatch) {
-    source.mesh.layers.set(BATCHED_AWAY_LAYER);
-    if (source.detached) source.parent.remove(source.mesh);
+    mesh.layers.set(BATCHED_AWAY_LAYER);
+    if (source.detached) source.parent.remove(mesh);
+    // Nothing draws it now, so nothing needs its matrices re-derived every
+    // frame: they stay as baked, for the outline and `Selection`, which read
+    // them. A move is the audit's to catch, from the transforms.
+    mesh.matrixAutoUpdate = false;
+    mesh.matrixWorldAutoUpdate = false;
   } else {
-    source.mesh.layers.set(0);
-    if (source.detached && source.mesh.parent !== source.parent) source.parent.add(source.mesh);
+    mesh.layers.set(0);
+    if (source.detached && mesh.parent !== source.parent) source.parent.add(mesh);
+    // Drawing itself again, it must stand where it is now — a cart's hopper
+    // where the cart has got to, not where it was when it was baked.
+    mesh.matrixAutoUpdate = source.autoUpdate[0];
+    mesh.matrixWorldAutoUpdate = source.autoUpdate[1];
+    if (mesh.matrixAutoUpdate) mesh.updateMatrix();
+    mesh.updateMatrixWorld(true);
   }
 }
 
@@ -749,6 +767,7 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
         renderOrder: source.renderOrder,
         sphere: [scratchSphere.center.x, scratchSphere.center.y, scratchSphere.center.z, scratchSphere.radius],
         triangles: triangles[i] as [number, number],
+        autoUpdate: [source.matrixAutoUpdate, source.matrixWorldAutoUpdate],
       };
     });
     batch[BATCH] = {
@@ -762,11 +781,6 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
     group.add(batch);
     for (const record of records) {
       stand(record, true);
-      // Nothing draws it now, so nothing needs its matrices re-derived every
-      // frame: they stay as baked, for the outline and `Selection`, which read
-      // them. A move is the audit's to catch, from the transforms.
-      record.mesh.matrixAutoUpdate = false;
-      record.mesh.matrixWorldAutoUpdate = false;
       if (!record.detached) count.keptInGraph += 1;
     }
     count.merged += records.length;
