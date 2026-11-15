@@ -53,6 +53,20 @@ meaningful. Don't touch the shadow cache. Merge `fix/cull-audit-ci` if it lands.
   statue turntable, ferris wheel, trains (wheels rotate), stall flags. Fairy
   cables' material opacity changes at dusk (material shared, fine).
 
+## Resumed 14-15 Nov (process: verify yourself, open the PR, merge on green)
+
+- Merged origin/main bfdebfe6 (TS 7.1, Vite 8.3.8, checked-in parks, ?clock,
+  #778, #781 garden roots, #783 warm-up, #759 lazy castle) as 63a167e8. One
+  conflict (Game.ts imports), both kept. tsc green on the merge.
+- Main worktree for A/B: `.claude/worktrees/rsm-main` (detached at bfdebfe6).
+  Servers via scratchpad `rsm/srv.sh`: 6071 branch dev, 6072 main dev, 6073
+  branch preview, 6074 main preview. `srv.sh stopall` kills only those.
+- Rail Race at `?clock=2`, merged head: 1540 draws. Biggest remaining: race
+  carts+riders 305 (live), anchor-plot facades ~130 (one material per mesh),
+  park train 114 (moves; stations static), keychain cart 87 + face-paint 59
+  (outline targets as a whole), fountain 54 (statue turns), entrance 42,
+  stall leftovers ~50, stall flags 54 (live). Need < 1200.
+
 ## Next
 
 - Extend `check:static-freeze` with `auditBatched` (+ floor, red proof).
