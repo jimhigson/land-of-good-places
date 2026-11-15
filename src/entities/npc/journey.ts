@@ -1,4 +1,5 @@
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../../world/NavGrid';
+import { ROUTE_PRIORITY, RouteRequest, type RouteScheduler } from '../../world/routeScheduler';
 import { ARRIVE_RADIUS, WAYPOINT_RADIUS } from '../TapNavigator';
 import { PARK_BOUNDARY, type ParkBoundary } from '../../world/boundary';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -62,7 +63,17 @@ import { castlePortals, portalToward, type Portal } from './portals';
  * The planner therefore hands out a small number of plans per frame
  * ({@link PLANS_PER_FRAME}) and makes everybody else wait a frame or two, which
  * nobody can see: a child who has just arrived somewhere is standing still
- * looking at it anyway. `npm run check:solve-cost` is the guard on this.
+ * looking at it anyway.
+ *
+ * **And in the game a plan is not one task either** (step 1b of the 120 fps
+ * plan). Two plans a frame bounded how many searches a frame ran, not how long
+ * one took: a far plan was 37 ms on an M4 Pro, and the first plan on a castle
+ * floor built that floor's whole lattice inside it (55 ms). So once `Game` has
+ * handed the planner its `RouteScheduler` ({@link JourneyPlanner.useScheduler}),
+ * a plan is *asked* and answered a couple of milliseconds a frame, lattice and
+ * all, and {@link JourneyPlanner.plan} says "ask again next frame" until it is
+ * — the answer the frame budget always gave, so a waiting child does what one
+ * always did: stands where it arrived. `check:nav-frame` is the guard.
  */
 
 /**
@@ -212,6 +223,13 @@ export interface RoutePlanner {
     goalY: number,
     out: Float32Array,
   ): number;
+  /**
+   * A plan asked into `out` and not answered yet is no longer wanted — the
+   * child chose somewhere else, was stepped through a door, or was taken off
+   * by an activity. Optional: a planner that answers at once has nothing to
+   * forget.
+   */
+  forget?(out: Float32Array): void;
 }
 
 /**
@@ -222,6 +240,15 @@ export class JourneyPlanner implements RoutePlanner {
   private readonly grids = new Map<SpaceId, NavGrid | null>();
   private budget = PLANS_PER_FRAME;
   private readonly portals: Portal[];
+  /**
+   * Who answers the plans a slice a frame — `Game`'s, handed over through
+   * `NpcSystem.useRouteScheduler`. `null`, the default, plans each one there
+   * and then, exactly as before: what every Node check that steps the crowd
+   * gets.
+   */
+  private routes: RouteScheduler | null = null;
+  /** One question in flight per child, keyed by the route buffer it is answered into. */
+  private readonly requests = new WeakMap<Float32Array, RouteRequest>();
   /**
    * How many children are inside the castle right now — **counted**, not
    * booked.
@@ -289,6 +316,11 @@ export class JourneyPlanner implements RoutePlanner {
     this.budget = PLANS_PER_FRAME;
   }
 
+  /** Plan through `routes` from now on — see {@link routes}. */
+  useScheduler(routes: RouteScheduler): void {
+    this.routes = routes;
+  }
+
   /**
    * The grid for a space, built on first use.
    *
@@ -347,6 +379,12 @@ export class JourneyPlanner implements RoutePlanner {
    * route" and `-1` for "ask again next frame" — which the caller must not
    * confuse, because the first means choose somewhere else and the second
    * means wait.
+   *
+   * With a scheduler, `-1` also means "asked, and still being answered": the
+   * caller asks the same question again next frame and gets the answer once
+   * it has come. The question is the destination — a child jostled a few
+   * centimetres while it waits is still answered from where it asked, and a
+   * different destination asked into the same `out` replaces the old question.
    */
   plan(
     space: SpaceId,
@@ -358,11 +396,44 @@ export class JourneyPlanner implements RoutePlanner {
     goalY: number,
     out: Float32Array,
   ): number {
+    const routes = this.routes;
+    if (routes) {
+      const grid = this.gridFor(space);
+      let request = this.requests.get(out);
+      if (request) {
+        const same = grid !== null && request.asks(grid, goalX, goalZ, goalY);
+        if (request.status === 'done') {
+          request.status = 'idle';
+          if (same) return request.count;
+        } else if (request.status === 'queued') {
+          if (same) return -1;
+          routes.cancel(request);
+        }
+      }
+      if (this.budget <= 0) return -1;
+      if (!grid) return 0;
+      this.budget -= 1;
+      if (!request) {
+        request = new RouteRequest(ROUTE_PRIORITY.crowd, out);
+        this.requests.set(out, request);
+      }
+      routes.ask(request, grid, this.sample, startX, startZ, startY, goalX, goalZ, goalY);
+      if (request.status !== 'done') return -1;
+      request.status = 'idle';
+      return request.count;
+    }
     if (this.budget <= 0) return -1;
     const grid = this.gridFor(space);
     if (!grid) return 0;
     this.budget -= 1;
     return grid.findRoute(startX, startZ, startY, goalX, goalZ, goalY, this.sample, out);
+  }
+
+  forget(out: Float32Array): void {
+    const request = this.requests.get(out);
+    if (!request) return;
+    if (this.routes) this.routes.cancel(request);
+    else request.status = 'idle';
   }
 }
 
@@ -412,6 +483,12 @@ export class Journey {
   private announcement: string | null = null;
   private announceRemaining = 0;
 
+  /**
+   * The planner this child last asked — so a plan asked and not yet answered
+   * can be forgotten when the trip it was for is dropped ({@link forgetPlan}).
+   */
+  private plannedWith: RoutePlanner | null = null;
+
   private readonly rng: Rng;
 
   constructor(rng: Rng) {
@@ -438,6 +515,7 @@ export class Journey {
    * the child now actually is, in their new space.
    */
   portalTaken(): void {
+    this.forgetPlan();
     this.pendingPortal = null;
     this.via = null;
     this.planned = false;
@@ -462,6 +540,7 @@ export class Journey {
    * fail to plan a route to has told the player something untrue.
    */
   chooseDestination(space: SpaceId, planner: RoutePlanner): void {
+    this.forgetPlan();
     const options = planner.destinationsIn(space);
     if (options.length === 0) {
       this.goal = null;
@@ -494,12 +573,18 @@ export class Journey {
 
   /** Drops the current trip — an activity has taken the child somewhere else. */
   abandon(): void {
+    this.forgetPlan();
     this.goal = null;
     this.via = null;
     this.pendingPortal = null;
     this.planned = false;
     this.routeLength = 0;
     this.routeIndex = 0;
+  }
+
+  /** Tells the planner a plan asked into {@link route} and not yet answered is no longer wanted. */
+  private forgetPlan(): void {
+    if (!this.planned) this.plannedWith?.forget?.(this.route);
   }
 
   /**
@@ -547,6 +632,7 @@ export class Journey {
       : { x: goal.x, z: goal.z, y: goal.y };
 
     if (!this.planned) {
+      this.plannedWith = planner;
       const count = planner.plan(space, x, z, y, aim.x, aim.z, aim.y, this.route);
       // -1 is "the frame is out of budget": hold still and ask again. 0 is a
       // real answer — there is no route — so give up on this destination and

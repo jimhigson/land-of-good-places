@@ -1,4 +1,5 @@
-import { PLAYER_PUT_DOWN } from '../entities/Player';
+import { PLAYER_PUT_DOWN, type GroundSampler } from '../entities/Player';
+import { GARDEN_PLAY_BOUNDARY } from './boundary';
 import type { CollisionWorld } from './Collision';
 import { NavGrid } from './NavGrid';
 import type { LevelConnector } from './building/surfaces';
@@ -44,4 +45,22 @@ export function playerNavGrid(world: PlayerLatticeWorld): NavGrid {
     null,
     PLAYER_PUT_DOWN.standsOnSolids,
   );
+}
+
+/**
+ * **Her lattice ({@link playerNavGrid}), laid whole now: the boot with no
+ * cat-bus ride to lay it behind.** `Game.layNavigationNow` calls this, and
+ * `check:nav-warm` asks the same function.
+ *
+ * - She is laid the lattice of the space she is in.
+ * - When that is not the garden (a save restored into the hotel, the Reptile
+ *   House or the library, or a deep link into one), the garden's is laid
+ *   first. Laying hers after it puts the garden's on the grid's shelf
+ *   (`NavGrid.layNow`), so her first way out finds the park already laid.
+ *   Without that, the park would be laid a slice a frame while she walked
+ *   out, unrouted.
+ */
+export function layHerLatticeNow(grid: NavGrid, collision: CollisionWorld, sample: GroundSampler): void {
+  if (collision.playBounds !== GARDEN_PLAY_BOUNDARY) grid.layNow(sample, GARDEN_PLAY_BOUNDARY);
+  grid.layNow(sample);
 }

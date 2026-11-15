@@ -35,11 +35,22 @@
  * middle **while** it is being laid — the case the build's revision stamp
  * exists for. Slice count and the longest slice are reported on stderr, never
  * asserted: this machine's clock is not the player's.
+ *
+ * And the one place her lattice *is* laid whole on purpose: a boot with no bus
+ * ride (`layHerLatticeNow`, before the first frame of a continued save or a
+ * deep link). Restored into a room, it must lay the garden's lattice as well
+ * as the room's, so her first way out finds the park on the shelf, ready on
+ * the first frame and equal to a whole rebuild, instead of laying it a slice
+ * a frame while she walks out unrouted. Proved red on 14 Nov 2026 (seed 5
+ * restart 1) with the garden's lay taken out of `layHerLatticeNow`: see the
+ * PR (#782) for the transcript.
  */
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NAV_GRID_BUILDS, NAV_WARM_BUDGET_MS, NavGrid } from '../src/world/NavGrid.ts';
-import { playerNavGrid } from '../src/world/playerLattice.ts';
+import { layHerLatticeNow, playerNavGrid } from '../src/world/playerLattice.ts';
 import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
+import { CASTLE_MALL } from '../src/world/building/floors.ts';
+import { castleFloorBounds } from '../src/world/building/floorBounds.ts';
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
@@ -109,6 +120,35 @@ lay('her own lattice, 40 colliders dropped in the park after the third slice', p
 say(dropped.length === 40, `CONTROL: the mid-build colliders were really dropped (${dropped.length} of 40) — otherwise the clause above asserts nothing`);
 for (const id of dropped) collision.removeCircle(id);
 NAV_GRID_BUILDS.reachScale = 1;
+
+// **A boot with no bus ride, restored into a room** (`layHerLatticeNow`, which
+// `Game.layNavigationNow` runs before the first frame of a continued save or a
+// deep link). Her lattice is laid whole at boot: that is the point, since a
+// long task there costs nothing. The garden's lattice must be laid with it,
+// left on the shelf behind the room's, so that on her first way out the park
+// comes down ready on the first frame instead of being laid a slice a frame
+// while she walks out unrouted (about 10 s on the 4× phone stand-in, measured
+// 14 Nov 2026). The garden's must also equal a whole rebuild.
+{
+  const grid = playerNavGrid(world);
+  collision.setPlayBounds(castleFloorBounds(CASTLE_MALL));
+  const before = { full: NAV_GRID_BUILDS.full, unshelved: NAV_GRID_BUILDS.unshelved, mismatches: NAV_GRID_BUILDS.mismatches.length };
+  layHerLatticeNow(grid, collision, sample);
+  const wholeAtBoot = NAV_GRID_BUILDS.full - before.full;
+  // Her first way out: the first frame's warm, at the game's own budget.
+  collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
+  const readyAtOnce = grid.warm(sample, NAV_WARM_BUDGET_MS);
+  const cameDown = NAV_GRID_BUILDS.unshelved - before.unshelved;
+  const laidAgain = NAV_GRID_BUILDS.full - before.full - wholeAtBoot;
+  (grid as unknown as { verifyAgainstWhole(boundary: unknown, sample: unknown): void }).verifyAgainstWhole(GARDEN_PLAY_BOUNDARY, sample);
+  const differs = NAV_GRID_BUILDS.mismatches.slice(before.mismatches);
+  say(wholeAtBoot === 2, `a boot restored into a room laid ${wholeAtBoot} lattice(s) whole before the first frame — must be 2, the room's and the garden's`);
+  say(
+    readyAtOnce && cameDown === 1 && laidAgain === 0 && differs.length === 0,
+    `…and on her first way out the garden's came off the shelf ${cameDown} time(s), ready on the first frame: ${readyAtOnce}, laid again ${laidAgain} time(s), ` +
+      `equal to a whole rebuild: ${differs.length === 0}` + (differs.length ? ` (${differs.slice(0, 2).join(' | ')})` : ''),
+  );
+}
 NAV_GRID_BUILDS.verify = false;
 
 if (failures > 0) {
