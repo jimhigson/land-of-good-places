@@ -42,7 +42,8 @@
  *    (it fades), and a grid over the whole park, each stood on and walked a
  *    step from, **by day and by night** — the clock pinned at each stop — and
  *    through **dusk** and **dawn** with the clock running, where the park's
- *    lights switch;
+ *    lights switch; and opens the keychain shop's view, which glides the park
+ *    camera in with no cover and hides the lamp posts from its shot;
  * 4. asserts that nothing was made and nothing first used, and that she
  *    never left the park (a door would be a room's warm-up, behind its own
  *    iris — `gpu:first-entry`'s question, not this one).
@@ -310,6 +311,17 @@ async function tour(page: Page, phases: readonly string[]): Promise<{ stops: num
         await clock(phase === 'day' ? DAY_CLOCK : NIGHT_CLOCK);
         const [x, z] = where[i]!;
         await standAt(x, z, i);
+      }
+      // The keychain shop's view hides the lamp posts from its shot; at night
+      // it once took their lights out of the park with them (`LampPosts.
+      // setHiddenBehindView`). Its view glides in with no cover, so open it.
+      await clock(phase === 'day' ? DAY_CLOCK : NIGHT_CLOCK);
+      const opened = await page.evaluate(() => (window as unknown as { game: any }).game.world.keychainShop.requestOpen() === true);
+      if (opened) {
+        await sleep(1500);
+        await page.evaluate(() => (window as unknown as { game: any }).game.world.keychainShop.closeView());
+        await sleep(300);
+        visited += 1;
       }
     } else {
       // Across the switch with the clock running, walking about the plaza.

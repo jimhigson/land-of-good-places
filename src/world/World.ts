@@ -899,7 +899,8 @@ export class World implements GameSystem {
     // at the rendered shot, not guessed in advance.
     const hideBehindKeychainView = this.keychainShop.viewOpen;
     this.npcs.group.visible = !hideBehindKeychainView;
-    this.lampPosts.group.visible = !hideBehindKeychainView;
+    // Its posts, not its lights: see `LampPosts.setHiddenBehindView`.
+    this.lampPosts.setHiddenBehindView(hideBehindKeychainView);
     // Last: the arrival moves the player, and everything above has already had
     // its frame, so nothing overwrites where the sequence just put her. The
     // pose itself was computed above, with the children's; this only re-asserts
