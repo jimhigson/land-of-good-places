@@ -103,7 +103,12 @@ jobs:
         # runner. 12 is the two short served audits from the same landing,
         # `check:served-static-freeze` and `check:served-dom-churn`. None of the
         # three had run on a hosted runner when they were wired in.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        #
+        # 13 is `check:served-no-midwalk-links` (15 Nov): three boots, each a
+        # tour of the whole park by day and by night under the software
+        # renderer, counting shader programs — on its own runner, the same
+        # shape as 10 and 11.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     steps:
       # When this job started, for the watchdog: its budget is the job's cap
       # less what the steps before it already spent, so a slow Chromium

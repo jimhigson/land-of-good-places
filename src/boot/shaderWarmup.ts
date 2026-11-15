@@ -213,8 +213,10 @@ export class ShaderWarmup {
   private worstSliceMs = 0;
   private readyAt = -1;
 
-  /** Every program this warm-up made, for the link and first-use phases. */
+  /** Every program this warm-up made. */
   private readonly made: Program[] = [];
+  /** Every program there was when the compiling was done: linked, then used once. */
+  private finishing: Program[] = [];
   private linking: Program[] = [];
   private firstUseIndex = 0;
   /** Every material it compiled, for their textures. */
@@ -265,7 +267,11 @@ export class ShaderWarmup {
       this.depthTarget?.dispose();
       this.depthTarget = null;
       this.phaseValue = this.options.finish ? 'link' : 'done';
-      this.linking = this.made.slice();
+      // Every program there is by now, not only the ones made here: a cover's
+      // own view warm-up (`core/viewWarmup.ts`) made the view's first, and
+      // only those the cover's frames drew have had their first use.
+      this.finishing = ((this.renderer.info?.programs ?? []) as unknown as Program[]).filter(live);
+      this.linking = this.finishing.slice();
     }
     if (this.phaseValue === 'link') this.pollLinks();
     if (this.phaseValue === 'first use') this.useOnce(started, budgetMs);
@@ -416,9 +422,9 @@ export class ShaderWarmup {
    * Linked already, so nothing here waits on a link.
    */
   private useOnce(started: number, budgetMs: number): void {
-    while (this.firstUseIndex < this.made.length) {
+    while (this.firstUseIndex < this.finishing.length) {
       if (performance.now() - started >= budgetMs) return;
-      const program = this.made[this.firstUseIndex++];
+      const program = this.finishing[this.firstUseIndex++];
       if (!live(program)) continue;
       program.getUniforms();
       program.getAttributes();
