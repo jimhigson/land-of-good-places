@@ -21,34 +21,41 @@ server or cable needed:
 | hotel | `/hotel?perf=1` |
 | Rail Race | `/rail-race?perf=1` |
 
-The overlay (bottom-left) shows, over the last two seconds: fps, frame interval
-p50/p99 and the **worst frame of the session**, main-thread CPU p50/p99 and the
-share over 8.3 ms, the share that **missed a 120 Hz vsync** (> 12.5 ms) and that
-were longer than a 60 Hz frame, draw calls and triangles per frame (all render
-passes summed, shadow pass included), and JS heap with its growth in MB/s.
+The box (bottom-left) shows three things only: **fps** over about the last
+second (it falls during a stall rather than holding the last good second), the
+**build** — its short sha and when it was built — and a **Copy report** button.
+The box's colour comes from the build (`src/build-identity.ts`): every deploy
+is a different colour, so a new build is recognisable the moment it loads and
+a cached old one is still the old colour. On a PR preview the sha is GitHub's
+merge of the branch into `main`, which is what was built, not the branch head
+in the preview URL.
 
 For each scene: load, **leave the phone untouched for 30 s**, press
-**copy JSON**, paste the result somewhere (a note, a message). The JSON holds
-the whole ~10 s ring summarised, the last two seconds, the GPU string, pixel
-ratio, canvas size and user agent — enough to compare phones without a
-screenshot. On a plain `http://` address the clipboard is refused; the button
-then opens a text box to long-press and copy instead.
+**Copy report**, paste the result somewhere (a note, a message). The JSON holds
+the build (`build.sha`, `build.builtAt`), the whole ~10 s ring summarised, the
+last two seconds (frame interval p50/p99, the **worst frame of the session**,
+main-thread CPU p50/p99 and the share over 8.3 ms, the share that **missed a
+120 Hz vsync**, draw calls and triangles, JS heap), the GPU string, pixel
+ratio, canvas size and user agent, and why the slowest frames were slow
+(`slowestFrames`) — enough to compare phones without a screenshot. On a plain
+`http://` address the clipboard is refused; the button then opens a text box
+to long-press and copy instead.
 
 What it cannot see:
 
 - **GPU time.** `cpu` is the main thread only. A frame that misses a vsync while
   `cpu` is low is GPU-bound — read the two together.
 - **Heap on Safari / Firefox.** Only Chrome exposes `performance.memory`; the
-  overlay says `n/a` rather than 0. Desktop Chrome quantises the value unless
-  launched with `--enable-precise-memory-info`, and the overlay says so when
-  the reading has not moved.
+  report says why (`heapNote`) rather than giving 0. Desktop Chrome quantises
+  the value unless launched with `--enable-precise-memory-info`, and the report
+  says so when the reading has not moved.
 
 ## iPhone first: is rAF capped at 60 Hz?
 
 Safari has historically capped `requestAnimationFrame` at 60 Hz on ProMotion
 iPhones. Check **Settings → Apps → Safari → Advanced → Feature Flags →
-"Prefer Page Rendering Updates near 60fps"**. If it is on, the overlay's frame
-p50 will sit at 16.7 ms whatever the game does — record that, because it decides
+"Prefer Page Rendering Updates near 60fps"**. If it is on, the box will sit at
+60 fps (the report's frame p50 at 16.7 ms) whatever the game does — record that, because it decides
 whether 120 fps is reachable on that phone from a web page at all. Measure once
 with it on (what the family has) and once with it off (what the game can do).
 
