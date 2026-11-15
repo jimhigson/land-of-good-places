@@ -58,6 +58,22 @@
  */
 
 /**
+ * How long the boot waits for `version.txt` before it gives up asking and
+ * starts the build it has. Only a slow network ever pays it: a phone at home
+ * answers in a fraction of a second, an offline one fails at once.
+ */
+export const ASK_SERVER_WITHIN_MS = 2_000;
+
+/**
+ * How long the gate waits, "Getting it…", for a newer build to finish
+ * downloading before it stands down and lets her play the build she has. The
+ * whole precache is a few MB over the wire, so a phone on Wi-Fi needs a couple
+ * of seconds; this is for the phone on one bar of signal, which would otherwise
+ * be stuck on a card for as long as the download takes.
+ */
+export const FETCH_NEW_BUILD_WITHIN_MS = 20_000;
+
+/**
  * Remembers the version we last swapped away from, so a swap that does not take
  * cannot become a reload loop. Per tab, cleared when the tab closes —
  * `sessionStorage`, not `localStorage`, because a stuck tab must not be able to
