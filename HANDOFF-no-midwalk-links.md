@@ -34,14 +34,20 @@ walking anywhere in the park creates zero programs and no frame waits on a link.
 
 ## Guard: check:served-no-midwalk-links (shard 13)
 
-Branch: 0 made / 0 first uses on spawn (198 stops), continue (106), bus.
+Branch: 0 made / 0 first uses on spawn (198 stops), continue (106), bus (99),
+skip (105; boot cover held). Main: spawn 95 made/83 waited, continue 97/86,
+bus 68/68. Skip mutant (old `!riding` gate): 59 made.
+
+## PR #787 (opened 16:03; head moves as commits land)
 
 ## Prod (M4, interleaved) spawn walk: main 4 programs + 8 link waits per
 walk, branch 0/0; reveal ~same (+0–0.2 s).
 
 ## TODO
-- prod continue + bus boots (prodwalk.mjs); pnpm run check; test:procgen;
-  gpu:first-entry locally; PR.
+- prod continue + fresh-profile bus (prodwalk.mjs, running); then pnpm run
+  check locally; gpu:first-entry locally; update PR body; final report.
+- test:procgen PASSED (56 files, 2224 tests) at 4b6b10ac + later commits are
+  runtime-only (ride gate, guard).
 
 ## Servers I started (kill by PID)
 - dev 6311 (branch, node 42058), dev 6312 (main, node 35604),
