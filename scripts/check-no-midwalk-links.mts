@@ -29,8 +29,11 @@
  *
  * For each boot — **`spawn`** (a deep link: no bus, the boot's cover),
  * **`continue`** (a continued save, its clock set just before dusk, through
- * "Keep playing!") and **`bus`** (`/arrive`: the cat-bus ride, the park built
- * and warmed behind it) — in a fresh browser on {@link CANONICAL_PARK_SEED}:
+ * "Keep playing!"), **`bus`** (`/arrive`: the cat-bus ride, the park built
+ * and warmed behind it) and **`skip`** (the same ride, its skip pressed the
+ * moment it is offered — before the warm-up is done, so the boot's cover
+ * finishes it, with her still on the arrival's bus) — in a fresh browser on
+ * {@link CANONICAL_PARK_SEED}:
  *
  * 1. waits for the park to be revealed — the boot's cover let go, or the bus
  *    handed over and the arrival done;
@@ -61,7 +64,7 @@ import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const BASE = (process.env.CHECK_NO_MIDWALK_LINKS_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
 const SEED = Number(process.env.CHECK_NO_MIDWALK_LINKS_SEED ?? CANONICAL_PARK_SEED);
-const BOOTS = (process.env.BOOTS ?? 'spawn,continue,bus').split(',').filter(Boolean);
+const BOOTS = (process.env.BOOTS ?? 'spawn,continue,bus,skip').split(',').filter(Boolean);
 const ENGINE = process.env.ENGINE === 'webkit' ? 'webkit' : 'chromium';
 /** A cold dev server builds every chunk on first ask; SwiftShader is slow. */
 const BOOT_TIMEOUT_MS = 300_000;
@@ -77,7 +80,7 @@ const BEFORE_DAWN = 0.238;
 /** Real seconds the clock runs across dusk or dawn (one real second is ~10 park minutes). */
 const ACROSS_MS = 4000;
 
-type Boot = 'spawn' | 'continue' | 'bus';
+type Boot = 'spawn' | 'continue' | 'bus' | 'skip';
 
 interface Born {
   readonly t: number;
@@ -100,6 +103,8 @@ interface Result {
   readonly phases: readonly string[];
   readonly leftThePark: readonly string[];
   readonly lightCounts: readonly number[];
+  /** Whether the boot's own cover was held (a `boot` hold) — what the `skip` boot exists to exercise. */
+  readonly bootCoverHeld: boolean;
   readonly errors: readonly string[];
 }
 
@@ -264,7 +269,7 @@ async function revealed(page: Page, boot: Boot): Promise<void> {
       if (!g?.player || !g.revealHold || g.revealHold.holding) return false;
       return bus || g.revealHold.holds.length > 0;
     },
-    boot === 'bus',
+    boot === 'bus' || boot === 'skip',
     { timeout: BOOT_TIMEOUT_MS, polling: 50 },
   );
 }
@@ -375,6 +380,27 @@ async function runBoot(boot: Boot): Promise<Result> {
       await page.locator('.welcome-keep').click({ timeout: BOOT_TIMEOUT_MS });
     } else if (boot === 'bus') {
       await page.goto(`${BASE}/arrive?${seed}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    } else if (boot === 'skip') {
+      // The bus ride, skipped the moment it may be: the park is built but its
+      // warm-up has not begun, so the boot's cover must do all of it — with
+      // her still on the arrival's cat bus. Pressed from inside the page, the
+      // instant the button is offered: on a phone the warm-up behind the bus
+      // takes seconds and a child's press lands in the middle of it, but on a
+      // desktop it is done before a press from out here arrives, and the boot
+      // would quietly be the bus boot again.
+      await page.addInitScript(() => {
+        new MutationObserver((records, observer) => {
+          for (const record of records) {
+            const root = record.target as Element;
+            if (root.classList?.contains('journey-skip--ready')) {
+              observer.disconnect();
+              root.querySelector<HTMLButtonElement>('.journey-skip__button')?.click();
+              return;
+            }
+          }
+        }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
+      });
+      await page.goto(`${BASE}/arrive?${seed}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     } else {
       await page.goto(`${BASE}/spawn?${seed}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     }
@@ -384,9 +410,9 @@ async function runBoot(boot: Boot): Promise<Result> {
     // park behind it: nothing would walk and no clock would run.
     await page.evaluate(() => (window as unknown as { game: any }).game.whatsNew?.close?.());
     // The arrival plays in the park, on screen: recorded, then toured after.
-    if (boot === 'bus') await arrived(page);
+    if (boot === 'bus' || boot === 'skip') await arrived(page);
     // The continued save's clock is set before dusk: walk through it first.
-    const phases = boot === 'continue' ? ['dusk', 'night', 'dawn'] : boot === 'bus' ? ['day', 'dusk'] : ['day', 'dusk', 'night', 'dawn'];
+    const phases = boot === 'continue' ? ['dusk', 'night', 'dawn'] : boot === 'bus' || boot === 'skip' ? ['day', 'dusk'] : ['day', 'dusk', 'night', 'dawn'];
     const { stops: visited, left } = await tour(page, phases);
     await sleep(500);
     const end = await page.evaluate(() => {
@@ -401,6 +427,7 @@ async function runBoot(boot: Boot): Promise<Result> {
         firstUses: w.__firstUse.firstUses,
         waits: w.__firstUse.waits,
         programs: w.game.engine.renderer.info.programs.length as number,
+        bootCoverHeld: (w.game.revealHold.holds as { why: string }[]).some((h) => h.why.split('+').includes('boot')),
       };
     });
     return {
@@ -414,6 +441,7 @@ async function runBoot(boot: Boot): Promise<Result> {
       phases,
       leftThePark: left,
       lightCounts: end.lightCounts,
+      bootCoverHeld: end.bootCoverHeld,
       errors,
     };
   } finally {
@@ -452,10 +480,22 @@ for (const boot of BOOTS as Boot[]) {
     say(`  + ${String(b.t).padStart(6)} ms ${b.phase.padEnd(7)} ${b.via.padEnd(11)} ${b.shader.padEnd(9)} ${b.object} ${b.material} @ ${b.at}`);
   }
   if (result.born.length > 40) say(`  … and ${result.born.length - 40} more`);
+  if (boot === 'skip') {
+    // Said on every run: if the warm-up beat the skip, this boot was the bus
+    // boot again and the cover it exists to test never went up.
+    say(
+      result.bootCoverHeld
+        ? 'skip: the skip landed before the warm-up was done, and the boot\'s cover held for the rest — the path this boot exists for'
+        : 'skip: the warm-up was already done when the skip landed, so no boot cover was held — this run covered only the bus path',
+    );
+  }
   if (result.errors.length > 0) failures.push(`${boot}: page errors: ${result.errors.slice(0, 3).join(' | ')}`);
   if (result.stops < 10) failures.push(`${boot}: only ${result.stops} stops visited — the tour covers nothing, so a pass would say nothing`);
   if (result.lightCounts.length < 2 && result.phases.some((p) => p === 'dusk' || p === 'night')) {
     failures.push(`${boot}: the park was only ever drawn under ${result.lightCounts.join('/')} lights — the clock never reached the park's other lighting, so its programs went untested`);
+  }
+  if (boot === 'skip' && !result.bootCoverHeld) {
+    failures.push('skip: no boot cover was held — the skip landed after the warm-up was done, so the path this boot exists for went untested');
   }
   if (result.leftThePark.length > 0) {
     failures.push(`${boot}: she left the park at ${result.leftThePark.slice(0, 4).join(', ')} — a stop is inside a room; move it, the room is gpu:first-entry's`);
