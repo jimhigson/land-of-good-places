@@ -707,6 +707,12 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
       keep('alone in its tile');
       continue;
     }
+    // In the order three would have drawn them (`painterSortStable`: the
+    // material's id, then the object's — the camera distance it also sorts by
+    // cannot be baked): a draw resolves its own triangles in index order, so
+    // where two parts touch at one depth, the later one wins as it used to.
+    const materialId = (mesh: Mesh): number => (mesh.material as Material & { readonly id: number }).id;
+    bucket.sort((a, b) => materialId(a.mesh) - materialId(b.mesh) || a.mesh.id - b.mesh.id);
     const sources = bucket.map((candidate) => candidate.mesh);
     const first = sources[0] as Mesh;
     // The batch's origin: its tile's, in the root's frame — near its contents,

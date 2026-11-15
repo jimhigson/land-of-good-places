@@ -82,16 +82,19 @@ const NIGHT_TIME = 0.92;
 const MIN_FROZEN = 300;
 /**
  * Fewest merged originals the park may have, for the same reason. Measured on
- * seed 5 at 852 (`perf/rides-static-merge`); the floor sits well under it so a
- * small prop added or taken away does not trip it, and far above zero.
+ * seed 5 at 1,260 (`perf/rides-static-merge`, colours folded and the wider
+ * areas in); the floor sits well under it so a small prop added or taken away
+ * does not trip it, and far above zero.
  */
-const MIN_MERGED = 600;
+const MIN_MERGED = 1000;
 /**
- * **`MUTATE=hide`** — proves the batch audit can go red. In the page, before
- * the audit, one merged original is hidden the way its owner would hide it,
- * with `visible = false` — which the batch, drawing a copy, never sees.
+ * **`MUTATE=hide`** and **`MUTATE=recolour`** — prove the batch audit can go
+ * red. In the page, before the audit, one merged original is changed the way
+ * its owner would change it: hidden with `visible = false`, or (`recolour`)
+ * the first original of a batch that folded its colours repainted through its
+ * own material — neither of which the batch, drawing a copy, would ever show.
  */
-const MUTATE_HIDE = process.env.MUTATE === 'hide';
+const MUTATE = process.env.MUTATE === 'hide' || process.env.MUTATE === 'recolour' ? process.env.MUTATE : null;
 
 const say = (line: string): void => void process.stderr.write(`check:static-freeze: ${line}\n`);
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -115,8 +118,8 @@ interface PageAudit {
 }
 
 /** Runs both audits in the page, on the scene with the most objects (the park). */
-function auditPage(page: Page, hide: boolean): Promise<PageAudit> {
-  return page.evaluate(async (hide) => {
+function auditPage(page: Page, mutate: 'hide' | 'recolour' | null): Promise<PageAudit> {
+  return page.evaluate(async (mutate) => {
     type Node = { traverse(visit: (node: { matrixAutoUpdate: boolean }) => void): void };
     const scenes = (window as unknown as { __checkScenes: Node[] }).__checkScenes;
     let park: Node | undefined;
@@ -142,17 +145,21 @@ function auditPage(page: Page, hide: boolean): Promise<PageAudit> {
     };
     const batching = (await import(/* @vite-ignore */ batchSource)) as {
       auditBatched(scene: unknown): { batches: number; sources: number; detached: number; drifted: { path: string; what: string }[] };
-      batchRecordOf(object: unknown): { sources: readonly { mesh: { visible: boolean; name: string } }[] } | undefined;
+      batchRecordOf(
+        object: unknown,
+      ): { folded: unknown; sources: readonly { mesh: { visible: boolean; name: string; material: { color: { setRGB(r: number, g: number, b: number): void } } } }[] } | undefined;
     };
     let mutated: string | null = null;
-    if (hide) {
+    if (mutate !== null) {
       park.traverse((node) => {
         if (mutated !== null) return;
         const record = batching.batchRecordOf(node);
-        const victim = record?.sources[0]?.mesh;
+        if (!record || (mutate === 'recolour' && record.folded === null)) return;
+        const victim = record.sources[0]?.mesh;
         if (!victim) return;
-        victim.visible = false;
-        mutated = victim.name || '(unnamed mesh)';
+        if (mutate === 'hide') victim.visible = false;
+        else victim.material.color.setRGB(1, 0, 1);
+        mutated = `${mutate} "${victim.name || '(unnamed mesh)'}"`;
       });
     }
     const frozen = auditFrozen(park);
@@ -169,7 +176,7 @@ function auditPage(page: Page, hide: boolean): Promise<PageAudit> {
       batchDrifted: merged.drifted,
       mutated,
     };
-  }, hide);
+  }, mutate);
 }
 
 /** Opens `path` in a fresh page with the devtools hook installed, and waits for the park. */
@@ -243,7 +250,7 @@ function report(where: string, audit: PageAudit): boolean {
       `${audit.autoUpdateOn} still have matrixAutoUpdate on. ${audit.merged} merged originals held to their ${audit.batches} batches ` +
       `(${audit.mergedOutOfGraph} of them out of the graph).`,
   );
-  if (audit.mutated !== null) say(`${where}: MUTATE=hide hid "${audit.mutated}" before the audit`);
+  if (audit.mutated !== null) say(`${where}: MUTATE=${audit.mutated} before the audit`);
   if (!(audit.frozenChecked >= MIN_FROZEN)) {
     say(`${where}: FAIL: only ${audit.frozenChecked} frozen nodes were found, fewer than the floor of ${MIN_FROZEN} — nothing is being frozen, so nothing was audited`);
     failed = true;
@@ -286,7 +293,7 @@ try {
   if (!night) throw new Error('no window.game to set the clock — run against the dev server (`check:served-static-freeze`), not a production build');
   await sleep(NIGHT_SECONDS * 1000);
   assertSameBoot(park, 'park');
-  failed = report(`park seed ${SEED}, after ${PLAY_SECONDS} s by day and ${NIGHT_SECONDS} s by night`, await auditPage(park, MUTATE_HIDE)) || failed;
+  failed = report(`park seed ${SEED}, after ${PLAY_SECONDS} s by day and ${NIGHT_SECONDS} s by night`, await auditPage(park, MUTATE)) || failed;
   await park.close();
 
   // The Rail Race: the camera that sees the most of the park, while the park plays on behind it.
@@ -307,7 +314,7 @@ try {
     }
     await ride.keyboard.up('KeyW');
     assertSameBoot(ride, 'rail race');
-    failed = report(`rail race seed ${SEED}, after ${RIDE_SECONDS} s riding`, await auditPage(ride, false)) || failed;
+    failed = report(`rail race seed ${SEED}, after ${RIDE_SECONDS} s riding`, await auditPage(ride, null)) || failed;
   }
   await ride.close();
 

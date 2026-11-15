@@ -76,9 +76,9 @@ const ONE_TILE = Number.POSITIVE_INFINITY;
  * face painter and her decals on painted children, the rival riders and the
  * cart wheels, the train's cars, axles and dusk-lit lamps.
  *
- * Every area folds colours (`staticBatch`'s `foldColours`): parts that differ
- * only in colour are one draw, their colours carried per vertex. That is what
- * merges a booth's dozen paints, or a building's.
+ * Every area but the walls folds colours (`staticBatch`'s `foldColours`):
+ * parts that differ only in colour are one draw, their colours carried per
+ * vertex. That is what merges a booth's dozen paints, or a building's.
  *
  * - **Stalls** — every booth's shell, posts, rings, awning and prizes. The
  *   flags stay: they flutter.
@@ -120,7 +120,10 @@ export function batchParkStatics(world: World): BatchCount[] {
     batchStatic(root, { label, tileSize, unitDepth: 1, measuredWhole, shareEqualMaterials: true, foldColours: true, ...extra });
   const counts: BatchCount[] = [
     area(world.stalls.group, 'stalls', BATCH_TILE_M),
-    area(world.scenery.group, 'scenery', BATCH_TILE_M, { unitDepth: 2, shareEqualMaterials: false }),
+    // Not folded: the walls' caps and courses meet the instanced runs at one
+    // depth, and folded they drew 1,930 pixels differently on the Sky Cruiser
+    // (ten times every other area together) for four draws saved.
+    area(world.scenery.group, 'scenery', BATCH_TILE_M, { unitDepth: 2, shareEqualMaterials: false, foldColours: false }),
     area(world.fairyLights.group, 'fairy-lights', BATCH_TILE_M, { shareEqualMaterials: false, transparentToo: true }),
     area(world.anchorPlots.getGroup('dodgems'), 'dodgems', BATCH_TILE_M, { transparentToo: true }),
     area(world.anchorPlots.getGroup('waterFight'), 'water-fight', BATCH_TILE_M),
