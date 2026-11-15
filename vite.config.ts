@@ -29,12 +29,14 @@ declare const process: { readonly env: Readonly<Record<string, string | undefine
 const APP_VERSION = (() => {
   // `APP_VERSION=<something>` overrides the commit. Only one thing sets it:
   // `scripts/check-update-adoption.mts`, which has to mint **two** builds that
-  // differ from a single working tree — the same source built twice is byte
-  // identical, so without this there would be no second build to update *to*,
-  // and the check would be testing the current commit against itself. Because
-  // the version is inlined into the bundle (`__APP_VERSION__` below), giving it
-  // a different value is enough to change every hashed filename, which is
-  // exactly what that check measures.
+  // differ from a single working tree — the same source built twice carries the
+  // same version, so without this there would be no second version to update
+  // *to*, and the check would be testing the current commit against itself.
+  // Because the version is inlined into the bundle (`__APP_VERSION__` below),
+  // giving it a different value is enough to change every hashed filename,
+  // which is exactly what that check measures. (The build time,
+  // {@link BUILT_AT}, differs between any two builds too, but it is not a
+  // version: `version.txt` does not carry it, so it cannot stand in for this.)
   const override = process.env.APP_VERSION;
   if (override) return override;
   try {
@@ -43,6 +45,17 @@ const APP_VERSION = (() => {
     return `unknown-${Date.now()}`;
   }
 })();
+
+/**
+ * When this bundle was built — baked in as `__APP_BUILT_AT__` for the `?perf=1`
+ * box and its report (`src/build-identity.ts`), so a phone says *when* the
+ * build it is running was made as well as which commit it is. Display only:
+ * nothing compares it, and `version.txt` stays the commit alone. It does mean
+ * two builds of one commit are no longer byte identical (the chunk that reads
+ * it differs) — harmless: nothing compares two bundles, and the most a rebuild
+ * of the same commit can do is offer one more update, as any new commit does.
+ */
+const BUILT_AT = new Date().toISOString();
 
 /**
  * Writes `version.txt` straight into the build output, not `public/` — it is
@@ -206,9 +219,11 @@ export default defineConfig({
   // The bundle's own baked-in copy of `APP_VERSION`, read by
   // `src/version-check.ts` — see that file for why polling a flat text file
   // beats waiting on the service worker's own, much less frequent, update
-  // checks.
+  // checks — and of `BUILT_AT`, which only the `?perf=1` box reads
+  // (`src/build-identity.ts`).
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __APP_BUILT_AT__: JSON.stringify(BUILT_AT),
   },
   plugins: [
     versionFilePlugin(APP_VERSION),

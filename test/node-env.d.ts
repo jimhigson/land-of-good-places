@@ -117,3 +117,8 @@ declare module 'node:fs' {
  * project the name exists.
  */
 declare const __APP_VERSION__: string;
+/**
+ * Its sibling, the build time — read only by `src/build-identity.ts` for the
+ * `?perf=1` box, behind the same kind of guard; declared for the same reason.
+ */
+declare const __APP_BUILT_AT__: string;
