@@ -485,10 +485,21 @@ async function runEngine(
     await page.keyboard.press('Shift');
     await page.waitForTimeout(HELD_FOR_MS);
     const touched = await read(page);
-    line(`${label}: touched, still held`, touched);
+    line(`${label}: touched, still held`, touched, `old park booted=${since(seen.boots, reloadedAt)}`);
     assert(
       touched.entry === from.entry && touched.gate === 'getting',
       `${label}: a key press during the download changed the page: ${JSON.stringify(touched)}`,
+    );
+    // Asked again, now, and not only above: the gate goes up the instant
+    // `version.txt` answers, which is before an old park that *was* booting
+    // underneath it would have logged a line. Proved 15 Nov 2026 by taking the
+    // boot's wait out of `bootstrap.ts`: the first reading said 0 and passed.
+    // The old park boots in well under HELD_FOR_MS (visit 2 measures it), so a
+    // 0 here means it was held for the whole download, not merely early.
+    assert(
+      since(seen.boots, reloadedAt) === 0,
+      `${label}: the old park started under the gate (${since(seen.boots, reloadedAt)} boot line(s) during the ` +
+        `held download) — the boot should wait for the new build, bounded, not race it`,
     );
     assert(
       server.heldRequests.length > 0,
@@ -718,11 +729,18 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  // Only what actually ran: a green line describing phases that were skipped is
+  // the false cover CLAUDE.md warns about.
+  const proved: Record<Phase, string> = {
+    1: `a returning player's boot waited at most ${ASK_SERVER_WITHIN_MS / 1000}s for an unanswered version.txt`,
+    2: 'one reload after a deploy reached the new build with its download held and the child pressing keys',
+    3: 'a deploy mid-play asked first and its button worked',
+    4: 'a reload that landed mid-download reached the new build too',
+    5: `a stalled download fell back to the build she had after ${FETCH_NEW_BUILD_WITHIN_MS / 1000}s, then asked`,
+  };
   process.stdout.write(
-    `check:update-adoption OK in ${engines.join(' and ')}, phases ${[...phases].join(', ')} — one reload after a ` +
-      `deploy reached the new build with its download held and the child pressing keys, a reload mid-download did ` +
-      `the same, a deploy mid-play asked first, and a stalled download fell back to the build she had after ` +
-      `${FETCH_NEW_BUILD_WITHIN_MS / 1000}s.\n`,
+    `check:update-adoption OK in ${engines.join(' and ')} — ` +
+      `${ALL_PHASES.filter((n) => phases.has(n)).map((n) => `(${n}) ${proved[n]}`).join('; ')}.\n`,
   );
 }
 
