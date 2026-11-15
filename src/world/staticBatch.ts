@@ -11,6 +11,7 @@ import {
   Object3D,
   Sphere,
   Vector3,
+  type Color,
   type Material,
 } from 'three';
 import { isLeftLive } from './staticFreeze';
@@ -110,6 +111,53 @@ export const BATCHED_AWAY_LAYER = 30;
 
 /** Marks a batch mesh this module made, carrying the record of what it baked. */
 const BATCH = Symbol.for('lgp.staticBatch');
+/** Marks the `<label>:batches` group the batches of one area hang in. */
+const BATCH_GROUP = Symbol.for('lgp.staticBatchGroup');
+
+/**
+ * **Is this something static batching made** — a batch mesh, or the group of
+ * them? For code that measures a selectable thing by walking it: the rainbow
+ * outline's shell (`art/effects/rainbowOutline.ts`) and `Selection`'s pick
+ * box. A batch draws on behalf of sources that are still there to be measured
+ * (moved off layer 0, never out of the graph, when they are inside something
+ * selectable), so a walk that skips batches measures exactly what it always
+ * did.
+ */
+export function isStaticBatch(object: Object3D): boolean {
+  const marked = object as Object3D & { [BATCH]?: unknown; [BATCH_GROUP]?: unknown };
+  return marked[BATCH] !== undefined || marked[BATCH_GROUP] !== undefined;
+}
+
+/**
+ * `new Box3().setFromObject(object)`, as if no static batch were under it —
+ * three's own `expandByObject` on every subtree that holds none, and a walk
+ * through the few nodes that do. Those are always groups (a batch group is
+ * only ever added to an area root), which this asserts rather than assumes.
+ */
+export function boxWithoutBatches(object: Object3D, target: Box3): Box3 {
+  target.makeEmpty();
+  const holders = new Set<Object3D>();
+  object.traverse((node) => {
+    if (!isStaticBatch(node) || (node as Mesh).isMesh) return;
+    for (let at = node.parent; at; at = at.parent) {
+      holders.add(at);
+      if (at === object) break;
+    }
+  });
+  if (holders.size === 0) return target.setFromObject(object);
+  const visit = (node: Object3D): void => {
+    if (isStaticBatch(node)) return;
+    if (!holders.has(node)) {
+      target.expandByObject(node);
+      return;
+    }
+    if ((node as Mesh).geometry !== undefined) throw new Error(`boxWithoutBatches: ${node.name || node.type} holds a batch group but has geometry of its own`);
+    node.updateWorldMatrix(false, false);
+    for (const child of node.children) visit(child);
+  };
+  visit(object);
+  return target;
+}
 
 /**
  * `?staticBatch=0` turns batching off at boot, so a page can be compared with
@@ -139,11 +187,29 @@ export interface BatchAreaOptions {
   /**
    * Objects something measures **whole** — a rainbow-outline target, whose
    * shell and pick box are built by walking it. A source inside one stays in
-   * the graph, off layer 0; every other source is taken out of it. None of
-   * these may be `root` or above it: the batches are added to `root`, and must
-   * not be measured as part of anything.
+   * the graph, off layer 0; every other source is taken out of it. `root` may
+   * be one, or be inside one (the keychain cart is a target as a whole): the
+   * batches then hang inside it, and the two walks that measure a target skip
+   * them ({@link isStaticBatch}, {@link boxWithoutBatches}).
    */
   readonly measuredWhole: ReadonlySet<Object3D>;
+  /**
+   * Merge meshes whose materials differ **only in colour**: each mesh's colour
+   * goes into a per-vertex `color` attribute, and the batch draws with a copy
+   * of the first material made white, with `vertexColors` on. The shader then
+   * computes `white × vertex colour` where the source computed its uniform
+   * colour — the same float32 value, multiplied by exactly one — so the
+   * picture is the same; what can differ is the varying's interpolation of
+   * three equal corners, a last-bit rounding measured by
+   * `docs/perf/rides-static-merge/` rather than assumed.
+   *
+   * The copy is not the sources' material, so a later change to any source's
+   * material would not reach the screen: {@link auditBatched} holds every
+   * folded source's material, and the copy itself, to the values baked.
+   * Opaque materials only, without vertex colours or a `color` attribute of
+   * their own.
+   */
+  readonly foldColours?: boolean;
   /**
    * Merge meshes whose materials are equal in value though separate objects.
    * For areas built with a fresh material per part; never for one whose
@@ -212,6 +278,13 @@ export interface BatchRecord {
   readonly root: Object3D;
   readonly attributeNames: readonly string[];
   readonly sources: readonly SourceRecord[];
+  /**
+   * For a batch whose colours were folded into its vertices: the white,
+   * vertex-coloured copy it draws with, and that copy's values when made —
+   * held by the audit like any source's, since nothing else would notice a
+   * change to it. `null` when the batch draws with a source's own material.
+   */
+  readonly folded: { readonly material: Material; readonly values: string } | null;
   /** False while {@link setStaticBatchesDrawn} has handed drawing back to the sources. */
   drawn: boolean;
 }
@@ -296,13 +369,16 @@ function layoutOf(geometry: BufferGeometry): string {
  * anything this cannot compare (its own `onBeforeCompile`, clipping planes,
  * an unknown object), which keeps it from being shared.
  */
-export function materialValues(material: Material): string | null {
+export function materialValues(material: Material, withoutColour = false): string | null {
   const parts: string[] = [material.type];
   const record = material as unknown as Record<string, unknown>;
   for (const key of Object.keys(record).sort()) {
     // `_alphaTest` and its kind hold values behind three's own setters, so
     // only the listener table (functions, from `EventDispatcher`) is skipped.
     if (key === 'uuid' || key === 'name' || key === 'userData' || key === 'version' || key === '_listeners') continue;
+    // The colour-free form ({@link BatchAreaOptions.foldColours}): `color` is
+    // the one value a folded batch carries per vertex instead.
+    if (withoutColour && key === 'color') continue;
     const value = record[key];
     if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') {
       parts.push(`${key}=${String(value)}`);
@@ -317,6 +393,23 @@ export function materialValues(material: Material): string | null {
     else return null;
   }
   return parts.join('|');
+}
+
+/**
+ * Whether `mesh`'s colour can be carried per vertex instead
+ * ({@link BatchAreaOptions.foldColours}): an opaque material with a colour and
+ * no vertex colours, on a geometry with no `color` attribute, whose values can
+ * be compared at all.
+ */
+function foldable(mesh: Mesh): boolean {
+  const material = mesh.material as Material & { color?: { isColor?: boolean }; vertexColors?: boolean };
+  return (
+    !material.transparent &&
+    material.color?.isColor === true &&
+    material.vertexColors === false &&
+    mesh.geometry.getAttribute('color') === undefined &&
+    materialValues(material) !== null
+  );
 }
 
 const scratchMatrix = new Matrix4();
@@ -334,6 +427,8 @@ function mergeInto(
   sources: readonly Mesh[],
   frameInverse: Matrix4,
   attributeNames: readonly string[],
+  /** Per source, the colour its material drew with — given only when the bucket is folded. */
+  colours: readonly (readonly [number, number, number])[] | null = null,
 ): { geometry: BufferGeometry; triangles: [number, number][] } {
   let vertexCount = 0;
   let indexCount = 0;
@@ -350,14 +445,25 @@ function mergeInto(
     return new Ctor(vertexCount * attribute.itemSize);
   });
   const index = vertexCount > 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+  const colourArray = colours ? new Float32Array(vertexCount * 3) : null;
   const triangles: [number, number][] = [];
 
   let vertexBase = 0;
   let indexAt = 0;
-  for (const source of sources) {
+  sources.forEach((source, sourceAt) => {
     const geometry = source.geometry;
     const position = geometry.getAttribute('position') as BufferAttribute;
     const count = position.count;
+    if (colourArray && colours) {
+      // The colour the uniform carried, as the same float32 the uniform upload
+      // rounds it to — the batch multiplies it by a white uniform instead.
+      const [r, g, b] = colours[sourceAt] as readonly [number, number, number];
+      for (let i = 0; i < count; i += 1) {
+        colourArray[(vertexBase + i) * 3] = r;
+        colourArray[(vertexBase + i) * 3 + 1] = g;
+        colourArray[(vertexBase + i) * 3 + 2] = b;
+      }
+    }
     scratchMatrix.multiplyMatrices(frameInverse, source.matrixWorld);
     scratchNormal.getNormalMatrix(scratchMatrix);
     const mirrored = scratchMatrix.determinant() < 0;
@@ -402,13 +508,14 @@ function mergeInto(
     }
     triangles.push([start, indexAt - start]);
     vertexBase += count;
-  }
+  });
 
   const geometry = new BufferGeometry();
   attributeNames.forEach((name, slot) => {
     const attribute = first.geometry.getAttribute(name) as BufferAttribute;
     geometry.setAttribute(name, new BufferAttribute(arrays[slot] as BufferAttribute['array'], attribute.itemSize, attribute.normalized));
   });
+  if (colourArray) geometry.setAttribute('color', new BufferAttribute(colourArray, 3));
   geometry.setIndex(new BufferAttribute(indexAt === index.length ? index : index.slice(0, indexAt), 1));
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
@@ -465,9 +572,11 @@ function stand(source: SourceRecord, drawnByBatch: boolean): void {
  * go with it — `World.setParkVisible` hides the park's groups whole.
  */
 export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCount {
-  for (let at: Object3D | null = root; at; at = at.parent) {
-    if (options.measuredWhole.has(at)) throw new Error(`batchStatic(${options.label}): the area root is inside something measured whole; its batches would be measured with it`);
-  }
+  // A root inside something measured whole (or one itself) keeps every source
+  // in the graph; its batches hang inside the measured thing, and the walks
+  // that measure it skip them (`isStaticBatch`).
+  let rootMeasured = false;
+  for (let at: Object3D | null = root.parent; at; at = at.parent) if (options.measuredWhole.has(at)) rootMeasured = true;
   root.updateWorldMatrix(true, true);
   const count: BatchCount = { label: options.label, merged: 0, keptInGraph: 0, batches: 0, kept: {} };
   const keep = (reason: string): void => {
@@ -480,7 +589,8 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
   interface Candidate {
     readonly mesh: Mesh;
     readonly inMeasured: boolean;
-    readonly values: string | null;
+    /** Bucketed by colour-free values: its colour goes per vertex if its bucket's colours differ. */
+    readonly fold: boolean;
     readonly tile: string;
   }
   const buckets = new Map<string, Candidate[]>();
@@ -528,7 +638,16 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
       const material = mesh.material as Material;
       // A see-through material is only ever merged with itself: its draws are
       // ordered per object, so two equal ones are not interchangeable.
-      const values = reason === null && options.shareEqualMaterials && !material.transparent ? materialValues(material) : null;
+      // Folding (colour per vertex) is opaque-only too (`foldable`).
+      const fold = reason === null && options.foldColours === true && foldable(mesh);
+      const values =
+        reason !== null
+          ? null
+          : fold
+            ? `fold:${materialValues(material, true)}`
+            : options.shareEqualMaterials && !material.transparent
+              ? materialValues(material)
+              : null;
       if (reason !== null) {
         keep(reason);
       } else {
@@ -550,15 +669,16 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
           bucket = [];
           buckets.set(key, bucket);
         }
-        bucket.push({ mesh, inMeasured: measuredHere, values, tile });
+        bucket.push({ mesh, inMeasured: measuredHere, fold, tile });
       }
     }
     for (const child of node.children) visit(child, depth + 1, here, staticHere, measuredHere);
   };
-  visit(root, 0, root, true, false);
+  visit(root, 0, root, true, rootMeasured);
 
-  const group = new Group();
+  const group = new Group() as Group & { [BATCH_GROUP]?: true };
   group.name = `${options.label}:batches`;
+  group[BATCH_GROUP] = true;
   const frame = new Matrix4();
   const frameInverse = new Matrix4();
   const centre = new Vector3();
@@ -580,8 +700,21 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
     frameInverse.copy(frame).invert();
 
     const attributeNames = Object.keys(first.geometry.attributes).sort();
-    const { geometry, triangles } = mergeInto(sources, frameInverse, attributeNames);
-    const batchMaterial = first.material as Material;
+    // Folded only when the colours really differ: a bucket of one colour is a
+    // bucket of equal materials, drawn with the first of them as ever.
+    type Coloured = Material & { color: Color; vertexColors: boolean };
+    const firstMaterial = first.material as Coloured;
+    const folding = (bucket[0] as Candidate).fold && sources.some((source) => !(source.material as Coloured).color.equals(firstMaterial.color));
+    const colours = folding ? sources.map((source) => { const c = (source.material as Coloured).color; return [c.r, c.g, c.b] as const; }) : null;
+    const { geometry, triangles } = mergeInto(sources, frameInverse, attributeNames, colours);
+    let batchMaterial: Material = firstMaterial;
+    if (folding) {
+      const white = firstMaterial.clone() as Coloured;
+      white.color.setRGB(1, 1, 1);
+      white.vertexColors = true;
+      white.name = `${options.label}:folded`;
+      batchMaterial = white;
+    }
     const batch = new Mesh(geometry, batchMaterial) as BatchMesh;
     batch.name = `${options.label}:batch`;
     batch.position.copy(centre);
@@ -591,9 +724,10 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
     batch.updateMatrix();
     batch.matrixAutoUpdate = false;
 
-    // When the batch draws for meshes whose materials are separate (equal)
-    // objects, every one of them — the batch's own included — is held to its
-    // values: a change to any of them would show on some meshes and not others.
+    // When the batch draws for meshes whose materials are separate objects —
+    // equal ones, or ones whose colours it folded — every one of them is held
+    // to its values: a change to any of them would show on no mesh at all, or
+    // on some meshes and not others.
     const mixed = bucket.some((candidate) => candidate.mesh.material !== batchMaterial);
     const records: SourceRecord[] = bucket.map((candidate, i) => {
       const source = candidate.mesh;
@@ -607,7 +741,7 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
         detached: !candidate.inMeasured && source.children.length === 0,
         relative: rootInverse.clone().multiply(source.matrixWorld),
         material: source.material as Material,
-        materialValues: mixed ? candidate.values : null,
+        materialValues: mixed ? materialValues(source.material as Material) : null,
         geometry: geometryOfSource,
         versions: attributeVersions(geometryOfSource, attributeNames),
         castShadow: source.castShadow,
@@ -617,7 +751,14 @@ export function batchStatic(root: Object3D, options: BatchAreaOptions): BatchCou
         triangles: triangles[i] as [number, number],
       };
     });
-    batch[BATCH] = { label: options.label, root, attributeNames, sources: records, drawn: true };
+    batch[BATCH] = {
+      label: options.label,
+      root,
+      attributeNames,
+      sources: records,
+      folded: folding ? { material: batchMaterial, values: materialValues(batchMaterial) ?? '' } : null,
+      drawn: true,
+    };
     group.add(batch);
     for (const record of records) {
       stand(record, true);
@@ -721,6 +862,12 @@ export function auditBatched(scene: Object3D, tolerance = 1e-5): BatchAudit {
   for (const batch of batches) {
     const record = batch[BATCH] as BatchRecord;
     if (record.drawn && (!batch.visible || batch.layers.mask !== 1)) drifted.push({ path: pathOf(batch, batch.parent), what: 'the batch itself is hidden or off layer 0' });
+    if (record.folded) {
+      // The white copy a folded batch draws with is nobody's but the batch's,
+      // so nothing else would notice a change to it.
+      if (batch.material !== record.folded.material) drifted.push({ path: pathOf(batch, batch.parent), what: 'the folded batch draws with another material than it was made with' });
+      else if (materialValues(record.folded.material) !== record.folded.values) drifted.push({ path: pathOf(batch, batch.parent), what: 'the folded batch’s own material changed value since it was made' });
+    }
     for (const source of record.sources) {
       sources += 1;
       const mesh = source.mesh;
@@ -745,7 +892,7 @@ export function auditBatched(scene: Object3D, tolerance = 1e-5): BatchAudit {
       if (!(delta <= tolerance)) say(`moved by up to ${delta.toFixed(5)} since it was baked`);
       if (mesh.material !== source.material) say('material swapped');
       else if (source.materialValues !== null && materialValues(source.material) !== source.materialValues) {
-        say('its material changed value, but its batch draws with another material object that was equal to it');
+        say('its material changed value, but its batch draws with another material object (an equal one, or a white copy with its colour baked into the vertices)');
       }
       if (mesh.geometry !== source.geometry) say('geometry swapped');
       else {
