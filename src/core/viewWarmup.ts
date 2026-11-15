@@ -60,16 +60,19 @@ export const WARM_TEXTURE_BUDGET_MS = 6;
 export const WARM_HOLD_LIMIT_MS = 4000;
 
 /**
- * The same limit for a cover that is also finishing the park's whole warm-up
+ * The longest a cover may wait for the park's whole warm-up
  * ({@link RevealHold.setWork}) — the boot of a continued save or a deep link,
- * or the first walk out of the room a save restored her into. That is every
- * program the park can need, under both its lightings, linked: measured
- * 0.2–0.4 s on the M4 Pro, and a phone is several times slower. A cover that
- * lets go early hands what is left to the frames she plays in, which is the
- * stutter this exists to prevent, so it waits longer; it still never waits
- * for ever.
+ * or the first walk out of the room a save restored her into — **while it is
+ * still getting somewhere**. That is every program the park can need, under
+ * both its lightings, linked: measured 0.2–0.4 s on the M4 Pro and 2 s under
+ * SwiftShader, and a phone or a CI runner is slower again. A cover that lets
+ * go early hands what is left to the frames she plays in, which is the
+ * stutter this exists to prevent, so it is not cut off at
+ * {@link WARM_HOLD_LIMIT_MS}: it lets go when the work has not moved for that
+ * long (a driver that never answers, a hidden tab), or at this cap, whichever
+ * comes first. It still never waits for ever.
  */
-export const PARK_WARM_HOLD_LIMIT_MS = 15_000;
+export const PARK_WARM_HOLD_CAP_MS = 60_000;
 
 /**
  * Work a cover must also see finished before it lifts, a frame's share at a
@@ -78,6 +81,11 @@ export const PARK_WARM_HOLD_LIMIT_MS = 15_000;
 export interface HoldWork {
   /** Whether any is left at all. Decides how long a cover may wait for it. */
   readonly pending: boolean;
+  /**
+   * A count that only goes up as the work gets done. A cover waits on while
+   * it moves — see {@link PARK_WARM_HOLD_CAP_MS}.
+   */
+  readonly progress: number;
   /**
    * One frame's share. True once there is nothing left that this cover is
    * for — none at all, or none that can be done behind it (she is not in the
@@ -136,8 +144,9 @@ export interface WarmReach {
  * library, and compiling its hundreds of materials against the library's
  * lights would create programs nothing ever draws. Every space is its own
  * plate hundreds of metres from the next, so a ball round her is the room
- * she is in — and, outdoors, the stretch of park she reaches before the bus
- * ride's warm-up (or `Game.warmTheRestInBackground`) has covered the rest.
+ * she is in. Outdoors the whole park is warm before she can walk anyway — the
+ * bus ride's warm-up, or the first cover over the park, carries all of it
+ * (`boot/shaderWarmup.ts`, {@link RevealHold.setWork}).
  */
 export function drawnBy(scene: Object3D, camera: Camera, reach?: WarmReach, frustum: Frustum = _frustum): Object3D[] {
   if (scene.matrixWorldAutoUpdate) scene.updateMatrixWorld();
@@ -368,7 +377,7 @@ export interface HoldRecord extends WarmReport {
   readonly heldFrames: number;
   /** Milliseconds from the request to the cover being let go. */
   readonly heldMs: number;
-  /** True when the hold gave up at {@link WARM_HOLD_LIMIT_MS} rather than finishing. */
+  /** True when the hold gave up — nothing moving for {@link WARM_HOLD_LIMIT_MS}, or the cap — rather than finishing. */
   readonly timedOut: boolean;
 }
 
@@ -438,7 +447,8 @@ export class RevealHold {
   /**
    * The cover is up and what is behind it is about to change (or just has).
    * Resolves once the view is warm and has been drawn behind the cover —
-   * never later than {@link WARM_HOLD_LIMIT_MS}, frames or no frames.
+   * never later than {@link WARM_HOLD_LIMIT_MS} of nothing getting done
+   * ({@link armLimit}), frames or no frames.
    */
   request(why: string): Promise<void> {
     return new Promise((resolve) => {
@@ -451,10 +461,30 @@ export class RevealHold {
         this.why = `${this.why}+${why}`;
       }
       this.phase = 'collect';
-      clearTimeout(this.limitTimer);
-      // A hidden tab runs no frames; the cover must still come off.
-      this.limitTimer = setTimeout(() => this.letGo(true), this.work?.pending ? PARK_WARM_HOLD_LIMIT_MS : WARM_HOLD_LIMIT_MS);
+      this.armLimit();
     });
+  }
+
+  /**
+   * The cover comes off by itself if nothing is getting done: after
+   * {@link WARM_HOLD_LIMIT_MS} — but, while the park's warm-up is still moving,
+   * not until it has stood still that long, or {@link PARK_WARM_HOLD_CAP_MS}
+   * after the request, whichever is first. A hidden tab runs no frames, so the
+   * work stands still and the cover still comes off.
+   */
+  private armLimit(): void {
+    clearTimeout(this.limitTimer);
+    let seen = this.work?.progress ?? 0;
+    const check = (): void => {
+      const work = this.work;
+      if (work?.pending && work.progress !== seen && performance.now() - this.requestedAt < PARK_WARM_HOLD_CAP_MS) {
+        seen = work.progress;
+        this.limitTimer = setTimeout(check, WARM_HOLD_LIMIT_MS);
+        return;
+      }
+      this.letGo(true);
+    };
+    this.limitTimer = setTimeout(check, WARM_HOLD_LIMIT_MS);
   }
 
   /** True while a cover is being held for the view behind it. */

@@ -137,9 +137,10 @@ type Phase = 'compile' | 'link' | 'first use' | 'textures' | 'done';
  *
  * ## What "every program" is
  *
- * Not only every material in the graph as it stands — that alone left 99
- * programs to be made after the park was on screen on a 13-minute tour of
- * seed 5 (`check:served-no-midwalk-links`):
+ * Not only every material in the graph as it stands — that alone left 107
+ * programs to be made after the park was on screen, 95 of them waited for on
+ * a frame she could see, on `check:served-no-midwalk-links`'s tour of seed 5
+ * against `main` 44952060:
  *
  * - **every slice of the graph, shown or not**, as before — `compile()`
  *   gathers materials with plain `traverse`, so what is hidden now is warmed
@@ -212,6 +213,8 @@ export class ShaderWarmup {
   private totalMs = 0;
   private worstSliceMs = 0;
   private readyAt = -1;
+  /** Units of work done — jobs, links seen finished, first uses, uploads: {@link workDone}. */
+  private doneCount = 0;
 
   /** Every program this warm-up made. */
   private readonly made: Program[] = [];
@@ -256,6 +259,7 @@ export class ShaderWarmup {
       if (!job) continue;
       const jobStart = performance.now();
       job();
+      this.doneCount += 1;
       compiled = true;
       const jobMs = performance.now() - jobStart;
       if (jobMs > this.worstSliceMs) this.worstSliceMs = jobMs;
@@ -294,6 +298,15 @@ export class ShaderWarmup {
   /** `performance.now()` when it became {@link ready}; −1 until then. */
   get readyAtMs(): number {
     return this.readyAt;
+  }
+
+  /**
+   * A count that only goes up as work gets done — jobs run, links seen
+   * finished, first uses, uploads — so a cover waiting on this can tell a
+   * slow warm-up from a stuck one (`RevealHold`'s limit).
+   */
+  get workDone(): number {
+    return this.doneCount;
   }
 
   /** Slices compiled so far, and how many are left — for the boot report. */
@@ -412,7 +425,9 @@ export class ShaderWarmup {
 
   /** Asks, without blocking, which programs are still linking. */
   private pollLinks(): void {
+    const before = this.linking.length;
     this.linking = this.linking.filter((program) => live(program) && program.isReady?.() === false);
+    this.doneCount += before - this.linking.length;
     if (this.linking.length === 0) this.phaseValue = 'first use';
   }
 
@@ -425,6 +440,7 @@ export class ShaderWarmup {
     while (this.firstUseIndex < this.finishing.length) {
       if (performance.now() - started >= budgetMs) return;
       const program = this.finishing[this.firstUseIndex++];
+      this.doneCount += 1;
       if (!live(program)) continue;
       program.getUniforms();
       program.getAttributes();
@@ -440,6 +456,7 @@ export class ShaderWarmup {
     while (this.textureIndex < this.textures.length) {
       if (performance.now() - started >= budgetMs) return;
       const texture = this.textures[this.textureIndex++];
+      this.doneCount += 1;
       if (!texture) continue;
       const state = this.renderer.properties.get(texture) as TextureState;
       if (texture.version > 0 && state.__version !== texture.version) {

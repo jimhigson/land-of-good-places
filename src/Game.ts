@@ -837,11 +837,14 @@ export class Game {
       get pending() {
         return !parkWarmup.ready;
       },
+      get progress() {
+        return parkWarmup.workDone;
+      },
       // Behind a cover the frame shows nothing new, so it may take a long
       // share — but only where the park is what is behind it, lit as the
       // park is lit (`parkWarmupCanRun`). Anywhere else this cover is not the
       // one for it, and a later one over the park will be.
-      step: () => parkWarmup.ready || !this.parkWarmupCanRun() || this.stepParkWarmup(HELD_WARMUP_BUDGET_MS),
+      step: () => parkWarmup.ready || !this.parkWarmupCanRun() || parkWarmup.advance(HELD_WARMUP_BUDGET_MS),
     });
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
     // when a child is standing at the lift doors, calls the car, and then lists
@@ -2530,10 +2533,10 @@ export class Game {
   private leftoverWarmupNoted = false;
 
   /**
-   * One share of the park's warm-up — behind a cover (`revealHold`'s work) or
-   * left over after one — told to `?perf=1`'s attribution when it is on, so a
-   * slow frame says the warm-up was in it. A held share runs inside
-   * `Game.render`, so it is in that frame's render time as well.
+   * One share of the park's warm-up in a frame she plays in, told to
+   * `?perf=1`'s attribution when it is on, so a slow frame says the warm-up
+   * was in it. (A held share runs inside `Game.render`, in a frame nobody
+   * sees, and is that frame's render time — the record says it was held.)
    */
   private stepParkWarmup(budgetMs: number): boolean {
     const warmup = this.parkWarmup;

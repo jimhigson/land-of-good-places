@@ -16,8 +16,8 @@
  * while, and then suddenly long pauses"* — 247 ms frames within five seconds
  * of walking. three.js makes a material's program the first time it draws it,
  * and the first draw with a program waits for the GPU to finish linking it.
- * On a tour of seed 5's park, **99 programs were made after it was on
- * screen**: the night's light count (dusk falls a minute into a game — a day
+ * On this check's tour of seed 5's park, **107 programs were made after it
+ * was on screen, and 95 first uses waited on a link**: the night's light count (dusk falls a minute into a game — a day
  * is 150 s), every caster's shadow-depth program as the sun's shadow camera
  * followed her to it, the fountain statue's faded materials, and seventeen
  * from the warm-up itself, which counted a slice's own lights twice. Each is
