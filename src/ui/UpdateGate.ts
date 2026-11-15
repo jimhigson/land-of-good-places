@@ -30,9 +30,10 @@
  *
  * ## It must survive the day the park does not
  *
- * `main.ts` sets this up *outside* `boot()`'s try/catch, and that is
- * load-bearing: a new version of the **code** is exactly what a family needs
- * on the day `Game`'s constructor throws and the splash turns into an apology.
+ * `bootstrap.ts` sets this up before the park's file or the game is even
+ * loaded, and that is load-bearing: a new version of the **code** is exactly
+ * what a family needs on the day `Game`'s constructor throws and the splash
+ * turns into an apology.
  * So nothing here touches `gameStore`, `Game` or any world system — it is
  * plain DOM over whatever is (or is not) on screen.
  *
