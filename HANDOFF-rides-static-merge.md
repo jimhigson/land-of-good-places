@@ -67,6 +67,33 @@ meaningful. Don't touch the shadow cache. Merge `fix/cull-audit-ci` if it lands.
   (outline targets as a whole), fountain 54 (statue turns), entrance 42,
   stall leftovers ~50, stall flags 54 (live). Need < 1200.
 
+## 15 Nov: what was added (all pushed)
+
+- `foldColours`: colour per vertex, white vertex-coloured copy of the first
+  material; audit holds folded sources' materials and the copy. Sources are
+  ordered like three's opaque sort (material id, object id). Walls NOT folded
+  (1,930 px on the Sky Cruiser for 4 draws).
+- Batches may hang inside a selectable thing: `isStaticBatch` /
+  `boxWithoutBatches` used by `rainbowOutline.ts` and `Selection.boundsFor`.
+- New areas: hotel/library/reptile fronts (plot roots), ferris legs (prop
+  root, hidden with it during the ride), keychain cart, face paint, entrance,
+  park train (stations) + each train car and race cart in its own frame.
+- Handles (`userData`): sign bulbs, arrival, hotel door leaves, reptile
+  head/tongue/windows, ferris wheel, painter + NPC decals, rival riders, cart
+  wheels, train cars/axles/lamps. Statue NOT batched (fades); castle front not.
+- `stand(false)` restores matrix-update flags (movers' sources drew at boot
+  position in the A/B otherwise).
+- check:cull-audit tests each batch source by its own sphere; control 2 uses
+  a subset index. check:static-freeze: MUTATE=recolour, MIN_MERGED 1000.
+
+## Measured (dev server, seed 5, 1280x800, Metal)
+
+- Rail Race draws at ?clock=2: 1540 -> 1105 (tris identical 1,976,082).
+- Pixels (in-page A/B = main vs branch in every scene; controls 0/0):
+  rail 94 (floor 190), slide 0, ferris 0, park day 2401 (floor 4303),
+  sky 1977 (floor 957; 1930 from folded walls -> walls unfolded, re-run
+  pending), park night 3410 (floor 1777), rail night 24, /view 676.
+
 ## Next
 
 - Extend `check:static-freeze` with `auditBatched` (+ floor, red proof).
