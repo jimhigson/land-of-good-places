@@ -215,12 +215,23 @@ interface Scene {
  * decks 0 and 2, the hotel, the library, the reptile house and the rail race
  * measure what they did before and lose only the slack.
  *
+ * **Raised for the park and the Sky Cruiser by static batching**, on purpose
+ * (`world/staticBatch.ts`, 120 fps plan step 14; `perf/rides-static-merge`).
+ * A batch is culled as one object, so its merged sources are drawn whenever
+ * the batch's sphere touches the view — including, near a corner of the
+ * frustum, a batch none of whose sources is on screen. This audit now counts
+ * every one of those sources (it looks inside batches), and every other
+ * offender measured exactly what it did before. What the extra buys: park
+ * 36 -> 50 off-screen draws and 256,628 -> 286,744 off-screen triangles, for
+ * 590 -> 397 draws in all (`check:render-budget`); Sky Cruiser 12 -> 14 and
+ * 173,584 -> 184,936. The Rail Race, ferris and slide measure what they did.
+ *
  * The reptile house's six tolerated stale bounds (snakes) are fixed, and so are
  * the four the sweep then found beside them, the hotel's motes and the ball
  * pit's balls: no scene tolerates one any more (`knownStale` was 6, now unset).
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 36, offTris: 256_628 },
+  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 50, offTris: 286_744 },
   'castle deck 0': { path: '/castle?deck=0', clock: 1, space: 'castle.', offDraws: 18, offTris: 55_366 },
   'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 112_720 },
   'castle deck 2': { path: '/castle?deck=2', clock: 1, space: 'castle.', offDraws: 17, offTris: 120_438 },
@@ -228,7 +239,7 @@ const BUDGETS: Readonly<Record<string, Scene>> = {
   library: { path: '/library', clock: 1, space: 'library', offDraws: 18, offTris: 211_256 },
   'reptile house': { path: '/reptile-house', clock: 1, space: 'reptileHouse', offDraws: 18, offTris: 297_312 },
   'rail race': { path: '/rail-race', clock: 2, space: '', riding: true, offDraws: 5, offTris: 40_132 },
-  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 173_584 },
+  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 14, offTris: 184_936 },
   ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 24, offTris: 302_884 },
   slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 22, offTris: 216_016 },
 };
@@ -598,6 +609,43 @@ function auditInPage(oversizedRadius: number): Audit[] {
             boundRadius,
           });
         }
+      } else if (object[Symbol.for('lgp.staticBatch')]) {
+        // **A static batch** (`world/staticBatch.ts`, 120 fps plan step 14) is
+        // culled as one object, so a merged source that is off the screen is
+        // drawn whenever any of its batch is on it. Each source is tested by
+        // its own sphere, as an instance is, and its triangles counted.
+        const record = object[Symbol.for('lgp.staticBatch')];
+        const n = record.sources.length;
+        const flags = new Uint8Array(n);
+        let off = 0;
+        let t = 0;
+        for (let i = 0; i < n; i += 1) {
+          const [cx, cy, cz, r] = record.sources[i].sphere;
+          scratch.center.set(cx, cy, cz);
+          scratch.radius = r;
+          scratch.applyMatrix4(object.matrixWorld);
+          if (sphereIn(scratch.center.x, scratch.center.y, scratch.center.z, scratch.radius)) flags[i] = 1;
+          else {
+            off += 1;
+            t += (record.sources[i].triangles[1] / 3) * passes(object.material);
+          }
+        }
+        onScreen.set(object, flags);
+        if (off > 0) {
+          const whole = off === n;
+          offTris += t;
+          if (whole) offDraws += items.draws;
+          offenders.push({
+            name,
+            type: 'static batch',
+            cause: whole ? 'bound misses its contents' : 'partly visible',
+            offTris: t,
+            offDraws: whole ? items.draws : 0,
+            instances: n,
+            offInstances: off,
+            boundRadius,
+          });
+        }
       } else {
         let visible: boolean;
         if (object.isSprite) {
@@ -704,17 +752,34 @@ function auditInPage(oversizedRadius: number): Audit[] {
           if (flags instanceof Uint8Array) {
             const want = Array.from(flags).some((f) => (f === 1) === wantOn);
             if (!want) continue;
-            // Keep the array, then scale every instance of the wrong kind to nothing.
-            const saved = object.instanceMatrix.array.slice();
-            restoreMatrices.push(() => {
-              object.instanceMatrix.array.set(saved);
+            const batch = object[Symbol.for('lgp.staticBatch')];
+            if (batch) {
+              // A static batch: draw only the sources of the wanted kind, by
+              // handing it an index of just their triangles for this render.
+              const geometry = object.geometry;
+              const savedIndex = geometry.index;
+              const parts = batch.sources.filter((_source: Any, i: number) => (flags[i] === 1) === wantOn).map((source: Any) => source.triangles);
+              const subset = new savedIndex.array.constructor(parts.reduce((sum: number, part: [number, number]) => sum + part[1], 0));
+              let at = 0;
+              for (const [first, count] of parts) {
+                subset.set(savedIndex.array.subarray(first, first + count), at);
+                at += count;
+              }
+              geometry.setIndex(new savedIndex.constructor(subset, 1));
+              restoreMatrices.push(() => geometry.setIndex(savedIndex));
+            } else {
+              // Keep the array, then scale every instance of the wrong kind to nothing.
+              const saved = object.instanceMatrix.array.slice();
+              restoreMatrices.push(() => {
+                object.instanceMatrix.array.set(saved);
+                object.instanceMatrix.needsUpdate = true;
+              });
+              const arr = object.instanceMatrix.array;
+              for (let i = 0; i < flags.length; i += 1) {
+                if ((flags[i] === 1) !== wantOn) for (let k = 0; k < 16; k += 1) arr[i * 16 + k] = 0;
+              }
               object.instanceMatrix.needsUpdate = true;
-            });
-            const arr = object.instanceMatrix.array;
-            for (let i = 0; i < flags.length; i += 1) {
-              if ((flags[i] === 1) !== wantOn) for (let k = 0; k < 16; k += 1) arr[i * 16 + k] = 0;
             }
-            object.instanceMatrix.needsUpdate = true;
           } else if (flags !== wantOn) continue;
           enabled.push(object);
           object.layers.enable(SPARE);

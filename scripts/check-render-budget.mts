@@ -87,15 +87,23 @@ interface Scene {
  * culled: park 610 draws / 3,664,324 tris, library 321 / 2,109,662, reptile
  * house 435 / 2,118,554, castle 410 / 2,629,482, hotel 336 / 1,799,960, rail
  * race 2174 / 4,247,652.
+ *
+ * **The park and the Rail Race lowered again by static batching** (120 fps
+ * plan step 14, `world/staticBatch.ts`), measured on `perf/rides-static-merge`
+ * the same way, Apple M4 Pro (Metal): park 590 -> 397 draws, Rail Race 2312
+ * -> 1142 (`main` bfdebfe6 measured beside it, same machine, same hour). The
+ * triangle figures are the branch's own: batching draws the off-screen parts
+ * of a batch that is partly on screen, so they do not fall with the draws
+ * (park 888,502 -> 930,452; `check:cull-audit` counts those parts).
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', space: 'garden', draws: 569, tris: 1_470_630 },
+  park: { path: '/spawn', space: 'garden', draws: 397, tris: 930_452 },
   library: { path: '/library', space: 'library', draws: 257, tris: 464_190 },
   'reptile house': { path: '/reptile-house', space: 'reptileHouse', draws: 371, tris: 473_082 },
   castle: { path: '/castle', space: 'castle.', draws: 332, tris: 185_674 },
   hotel: { path: '/hotel', space: 'hotel.', draws: 272, tris: 154_488 },
   // Riding, so the space is whatever the track passes through; `riding` is the guard.
-  'rail race': { path: '/rail-race', space: '', riding: true, draws: 2154, tris: 2_341_524 },
+  'rail race': { path: '/rail-race', space: '', riding: true, draws: 1142, tris: 1_986_952 },
 };
 
 const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}&perf=1`;

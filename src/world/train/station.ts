@@ -447,6 +447,9 @@ export class Station {
       const lampMaterial = new MeshBasicMaterial({ color: PALETTE.fairyWarm, fog: true });
       const lamp = new Mesh(new SphereGeometry(0.15, 12, 9), lampMaterial);
       lamp.position.set(postX, PLATFORM_HEIGHT + CANOPY_HEIGHT - 0.32, along);
+      // Its colour follows the dusk (`ParkTrain`): a handle, so the browser's
+      // static passes leave it live (`world/staticBatch.ts`).
+      lamp.userData.glows = true;
       this.group.add(lamp);
       this.lamps.push(lampMaterial);
     }

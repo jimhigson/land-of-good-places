@@ -490,7 +490,14 @@ export class Entrance implements GameSystem {
     // the gate it happens at and goes away with it.
     const arriving = options.arriveByBus ?? arrivalIsDue();
     this.arrival = arriving ? new ArrivalSequence({ collision }) : null;
-    if (this.arrival) this.group.add(this.arrival.group);
+    if (this.arrival) {
+      // A handle on a driven subtree: the cat bus drives, its driver and
+      // passengers move, and the lot is taken away at the end. A node carrying
+      // `userData` is left live, with all below it, by the browser's static
+      // passes (`world/staticFreeze.ts`, `world/staticBatch.ts`).
+      this.arrival.group.userData.arrives = true;
+      this.group.add(this.arrival.group);
+    }
   }
 
   /**
@@ -690,6 +697,10 @@ export class Entrance implements GameSystem {
       const t = i / 9;
       const bulb = decal(new Mesh(bulbGeometry, bulbMaterials[i % 4] ?? bulbMaterials[0]));
       bulb.position.set(-1.5 + t * 3, 3.62, 0.06);
+      // A handle on a driven node: the sign's update pulses its scale every
+      // frame, and a node carrying `userData` is left live by the browser's
+      // static passes (`world/staticFreeze.ts`, `world/staticBatch.ts`).
+      bulb.userData.twinkles = true;
       signGroup.add(bulb);
       this.welcomeSignBulbs.push(bulb);
     }

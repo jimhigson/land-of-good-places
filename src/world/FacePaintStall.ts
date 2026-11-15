@@ -673,6 +673,10 @@ export class FacePaintStall implements GameSystem {
 
     const upper = new Group();
     upper.position.set(-0.55, 1.02, -0.35);
+    // A handle on a driven node: the painter sways and leans every frame, and
+    // a node carrying `userData` is left live, with all below it, by the
+    // browser's static passes (`world/staticFreeze.ts`, `world/staticBatch.ts`).
+    upper.userData.sways = true;
     this.group.add(upper);
 
     const torso = blob(0.24, smockMat, [1, 1.15, 0.9], 20);
@@ -776,6 +780,9 @@ function playerLook(): FacePaintLook {
 function addNpcDecalPoolInto(group: Group, out: FacePaintOverlayHandle[]): void {
   for (let i = 0; i < NPC_DECAL_POOL; i += 1) {
     const overlay = createFacePaintOverlay(NPC_DECAL_RADIUS, { size: 256, spreadX: 1.6, spreadY: 1.6 });
+    // Placed on a painted child's head every frame, or hidden: a handle, so
+    // the browser's static passes leave it live (`world/staticBatch.ts`).
+    overlay.mesh.userData.followsAHead = true;
     group.add(overlay.mesh);
     out.push(overlay);
   }

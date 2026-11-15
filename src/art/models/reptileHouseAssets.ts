@@ -308,6 +308,12 @@ export function createReptileHouseExterior(): ReptileHouseExterior {
   // head, so a head-tilt never lifts the doormat. Its node origin is its root.
   const tongue = parts.mesh('rh-tongue');
   root.add(tongue);
+  // Handles on driven nodes — the head sways and wears tonight's face, the
+  // tongue wags, the windows glow after dusk — so the browser's static passes
+  // leave them live (`world/staticFreeze.ts`, `world/staticBatch.ts`).
+  head.userData.sways = true;
+  tongue.userData.wags = true;
+  windows.userData.glows = true;
 
   const tail = new Group();
   tail.name = 'rh-tail-group';

@@ -740,6 +740,10 @@ function slidingDoors(
     for (const child of leaf.children) {
       if (child instanceof Mesh) dropOutlineFoot(child, leaf);
     }
+    // A handle on a driven node: `setOpen` slides it, and a node carrying
+    // `userData` is left live by the browser's static passes
+    // (`world/staticFreeze.ts`, `world/staticBatch.ts`).
+    leaf.userData.slides = true;
   }
   return {
     root,

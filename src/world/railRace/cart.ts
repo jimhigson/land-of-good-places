@@ -365,6 +365,10 @@ export function createCart(colour: number): CartHandle {
     // `WHEEL_LAY_DOWN`'s doc comment for why this is a quaternion, not
     // `rotation.z = PI/2`, and why that distinction is exactly the bug fix.
     wheel.quaternion.copy(WHEEL_LAY_DOWN);
+    // A handle on a driven node: `spinWheels` turns it as the cart rolls, so
+    // the browser's static passes leave it live while the rest of the cart is
+    // merged in the cart's own frame (`world/staticBatch.ts`).
+    wheel.userData.spins = true;
     root.add(wheel);
     wheels.push(wheel);
   }

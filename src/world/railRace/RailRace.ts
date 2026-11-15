@@ -573,6 +573,10 @@ export class RailRace implements GameSystem {
       // `poseRider()` version of the same fact.
       kid.root.position.y = SEAT_HEIGHT;
       kid.setExpression('happy');
+      // A handle on a driven subtree: she bobs, turns into the bends and
+      // changes face as she races, so the browser's static passes leave her
+      // live while the cart she sits in is merged (`world/staticBatch.ts`).
+      kid.root.userData.rides = true;
       group.add(kid.root);
       // No scale here. A cart is sized by the ring it is currently on, and
       // only by `setActiveRing` — see that method for the bug this fixes.
