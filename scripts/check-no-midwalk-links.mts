@@ -70,8 +70,8 @@ const ENGINE = process.env.ENGINE === 'webkit' ? 'webkit' : 'chromium';
 const BOOT_TIMEOUT_MS = 300_000;
 /** How long she walks from each stop: long enough for the camera and the sun's shadow camera to follow. */
 const STEP_MS = Number(process.env.STEP_MS ?? 600);
-/** Grid spacing over the park, metres. */
-const GRID_M = 24;
+/** Grid spacing over the park, metres: with every interactable, a stop within ~15 m of anywhere she can stand. */
+const GRID_M = 30;
 /** Clock positions (0 = midnight): a morning, a night, and the edges dusk and dawn are run across. */
 const DAY_CLOCK = 0.42;
 const NIGHT_CLOCK = 0.92;
@@ -329,20 +329,37 @@ async function tour(page: Page, phases: readonly string[], stride: number): Prom
     (window as unknown as { __noMidwalk: { phase: string } }).__noMidwalk.phase = p;
   }, phase);
   const clock = (t: number): Promise<void> => page.evaluate((time) => (window as unknown as { game: any }).game.world.dayNight.setTimeOfDay(time), t);
-  const standAt = async (x: number, z: number, i: number): Promise<void> => {
-    await page.evaluate(([px, pz]) => (window as unknown as { game: any }).game.enterDebugSpawn(px, pz), [x, z] as const);
+  /**
+   * One stop, in one round trip to the page: pin the clock (or leave it
+   * running), stand her there, and read back what the previous step left —
+   * whether she was still in the park and the lights its last frame had.
+   * Under a hosted runner's software renderer every round trip waits for a
+   * slow frame, and three a stop made a tour of the park overrun its shard.
+   */
+  let lastStop = '';
+  const standAt = async (x: number, z: number, i: number, pin: number | null): Promise<number> => {
+    const back = await page.evaluate(
+      ([px, pz, time]) => {
+        const w = window as unknown as { game: any; __noMidwalk: { lastLights: number } };
+        const inPark = w.game.world.parkDrawn === true;
+        if (time !== null) w.game.world.dayNight.setTimeOfDay(time);
+        w.game.enterDebugSpawn(px, pz);
+        return { inPark, lights: w.__noMidwalk.lastLights };
+      },
+      [x, z, pin] as const,
+    );
+    if (!back.inPark && lastStop) left.push(lastStop);
+    lastStop = `(${x.toFixed(0)}, ${z.toFixed(0)})`;
     await walkAStep(page, i);
-    const inPark = await page.evaluate(() => (window as unknown as { game: any }).game.world.parkDrawn === true);
-    if (!inPark) left.push(`(${x.toFixed(0)}, ${z.toFixed(0)})`);
     visited += 1;
+    return back.lights;
   };
   for (const phase of phases) {
     await setPhase(phase);
     if (phase === 'day' || phase === 'night') {
       for (let i = 0; i < where.length; i += stride) {
-        await clock(phase === 'day' ? DAY_CLOCK : NIGHT_CLOCK);
         const [x, z] = where[i]!;
-        await standAt(x, z, i);
+        await standAt(x, z, i, phase === 'day' ? DAY_CLOCK : NIGHT_CLOCK);
       }
       // The keychain shop's view hides the lamp posts from its shot; at night
       // it once took their lights out of the park with them (`LampPosts.
@@ -365,9 +382,9 @@ async function tour(page: Page, phases: readonly string[], stride: number): Prom
       let after = -1;
       for (let i = 0; after < AFTER_SWITCH_STOPS; i += 1) {
         const [x, z] = where[(i * 7) % where.length]!;
-        await standAt(x, z, i);
+        const lights = await standAt(x, z, i, null);
         if (after >= 0) after += 1;
-        else if ((await page.evaluate(() => (window as unknown as { __noMidwalk: { lastLights: number } }).__noMidwalk.lastLights)) !== before) after = 0;
+        else if (lights !== before) after = 0;
         if (after < 0 && Date.now() - started > ACROSS_LIMIT_MS) {
           unswitched.push(phase);
           break;
@@ -375,6 +392,8 @@ async function tour(page: Page, phases: readonly string[], stride: number): Prom
       }
     }
   }
+  // The last stop's reading, which no later stop took.
+  if (lastStop && !(await page.evaluate(() => (window as unknown as { game: any }).game.world.parkDrawn === true))) left.push(lastStop);
   return { stops: visited, left, unswitched };
 }
 
@@ -388,7 +407,9 @@ async function runBoot(boot: Boot): Promise<Result> {
   const browser = await openBrowser();
   const errors: string[] = [];
   try {
-    const context = await browser.newContext({ viewport: { width: 640, height: 480 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
+    // Small: what is counted does not depend on it, and under a hosted
+    // runner's software renderer every pixel is a cost.
+    const context = await browser.newContext({ viewport: { width: 480, height: 360 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
     const page = await context.newPage();
     page.on('pageerror', (error) => errors.push(String((error as Error)?.message ?? error)));
     await page.addInitScript(firstUseProbe);

@@ -104,11 +104,13 @@ jobs:
         # `check:served-static-freeze` and `check:served-dom-churn`. None of the
         # three had run on a hosted runner when they were wired in.
         #
-        # 13 is `check:served-no-midwalk-links` (15 Nov): three boots, each a
-        # tour of the whole park by day and by night under the software
-        # renderer, counting shader programs — on its own runner, the same
-        # shape as 10 and 11.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        # 13 and 14 are `check:no-midwalk-links` (15 Nov): boots the park and
+        # tours it under the software renderer, counting shader programs made
+        # after it is on screen. 13 the deep link and the continued save, each
+        # a whole tour by day and by night; 14 the bus ride and its skip. All
+        # four on one runner took 26m31s and ran out its watchdog (each stop
+        # waits on a slow frame, and the bus ride itself is minutes there).
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     steps:
       # When this job started, for the watchdog: its budget is the job's cap
       # less what the steps before it already spent, so a slow Chromium
