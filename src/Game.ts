@@ -61,7 +61,7 @@ import { PerfProbe, perfRequested } from './core/perfProbe';
 import { RevealHold, type ViewWarmup } from './core/viewWarmup';
 import { ShaderWarmup } from './boot/shaderWarmup';
 import { CheckClock, checkClockRequested } from './core/checkClock';
-import { lazyPartsFetching } from './world/LazyPart';
+import { lazyPartsFetching, watchLazyParts } from './world/LazyPart';
 import { batchParkStatics, freezeParkStatics } from './world/parkStatics';
 import { staticBatchRequested } from './world/staticBatch';
 import { PerfOverlay } from './ui/PerfOverlay';
@@ -357,6 +357,7 @@ export class Game {
     // Spawn at the park edge by the gate, looking into the park — or wherever a
     // continued game left off (see `resolveSpawn`).
     const spawn = resolveSpawn(options.startPlace);
+    this.perfStartPlace = options.startPlace?.space ?? null;
     this.player = new Player(this.world.collision, this.camera, spawn);
     this.engine.scene.add(this.player.group);
     // The building owns "how high is the ground?" from here on, so that its
@@ -1237,13 +1238,16 @@ export class Game {
     this.checkClock = clockStopAt === null ? null : new CheckClock(clockStopAt);
     const frame = this.checkClock ? (tick: LoopTick) => this.checkClockFrame(tick) : (tick: LoopTick) => this.tick(tick);
     if (perfRequested()) {
-      const probe = new PerfProbe(this.engine.renderer, () => this.perfContext());
+      const probe = new PerfProbe(this.engine.renderer, () => this.perfContext(), () => this.perfDetail());
+      this.perfProbe = probe;
       this.perfOverlay = new PerfOverlay(probe);
+      // A part landing is the next frame's news (`core/perfAttribution.ts`).
+      watchLazyParts((name, event) => probe.attribution.noteLazyPart(name, event));
       this.loop = new Loop((tick) => {
         this.beginEngineFrame();
         probe.begin();
         frame(tick);
-        probe.end();
+        probe.end(spaceAt(this.player.position.x, this.player.position.z), this.revealHold.holding);
         this.engine.endFrame();
       });
     } else {
@@ -1289,6 +1293,55 @@ export class Game {
 
   /** The `?perf=1` overlay, when the URL asked for it. */
   private perfOverlay: PerfOverlay | null = null;
+
+  /**
+   * The `?perf=1` probe, when the URL asked for it: told how long each frame
+   * spent drawing and warming shaders (`core/perfAttribution.ts`). `null` — a
+   * null check a frame — without the flag.
+   */
+  private perfProbe: PerfProbe | null = null;
+
+  /** The space a continued save restored her to, for the `?perf=1` report; `null` for a fresh start. */
+  private perfStartPlace: string | null = null;
+  /** `?perf=1`: whether the first frames were held for a warm view — a boot with no bus ride. */
+  private perfFirstFramesHeld = false;
+  /** `?perf=1`: the background warm-up, kept for the report after it is done; and when it started and finished. */
+  private perfBackgroundWarmup: ShaderWarmup | null = null;
+  private perfBackgroundWarmupStartedAt = -1;
+  private perfBackgroundWarmupReadyAt = -1;
+
+  /**
+   * The copy-JSON's once-a-session facts (`PerfOverlay.report`): how the park
+   * booted, and how the background warm-up has gone. Asked only on a copy.
+   */
+  private perfDetail(): Record<string, unknown> {
+    const warmup = this.perfBackgroundWarmup;
+    const seconds = (t: number): number | null => (t < 0 ? null : Math.round(t) / 1000);
+    return {
+      boot: {
+        // No bus ride means the first frames were held for a warm view
+        // (`holdFirstFrames`) and the rest warmed behind her, a slice a frame.
+        busRide: !this.perfFirstFramesHeld,
+        firstFramesHeld: this.perfFirstFramesHeld,
+        continuedSaveAt: this.perfStartPlace,
+        path: location.pathname,
+      },
+      backgroundWarmup: warmup
+        ? {
+            started: true,
+            startedAtS: seconds(this.perfBackgroundWarmupStartedAt),
+            ready: warmup.ready,
+            readyAtS: seconds(this.perfBackgroundWarmupReadyAt),
+            slicesDone: warmup.progress.done,
+            slicesRemaining: warmup.progress.remaining,
+            framesWorked: warmup.framesWorked,
+            totalMs: Math.round(warmup.spentMs * 10) / 10,
+            worstSliceMs: Math.round(warmup.worstMs * 10) / 10,
+            budgetMs: BACKGROUND_WARMUP_BUDGET_MS,
+          }
+        : { started: false },
+    };
+  }
 
   /**
    * The quality governor's frame bracket (120 fps plan, step 17): `Engine`
@@ -2380,7 +2433,9 @@ export class Game {
       return;
     }
     this.owlFade?.apply(this.drawnEye);
+    this.perfProbe?.attribution.renderBegin();
     this.render();
+    this.perfProbe?.attribution.renderEnd();
     this.owlFade?.restore();
     this.advanceBackgroundWarmup();
     // A route asked between now and the next tick — a tap, a press on the map —
@@ -2408,6 +2463,10 @@ export class Game {
     // The park only, as on the bus: a room is warmed behind its own iris,
     // against its own lights (`ShaderWarmup`'s note).
     this.backgroundWarmup = new ShaderWarmup(this.engine.renderer, this.engine.scene, this.camera.camera);
+    if (this.perfProbe) {
+      this.perfBackgroundWarmup = this.backgroundWarmup;
+      this.perfBackgroundWarmupStartedAt = performance.now();
+    }
   }
 
   private advanceBackgroundWarmup(): void {
@@ -2415,6 +2474,7 @@ export class Game {
     if (!warmup) return;
     if (warmup.ready) {
       this.backgroundWarmup = null;
+      if (this.perfProbe) this.perfBackgroundWarmupReadyAt = performance.now();
       return;
     }
     // In the park only: the slices are compiled against the lights that are
@@ -2422,7 +2482,15 @@ export class Game {
     // for her to come back out; a cover being held has the frame to itself.
     if (this.revealHold.holding) return;
     if (spaceAt(this.player.position.x, this.player.position.z) !== SPACE_GARDEN) return;
+    const perf = this.perfProbe;
+    if (!perf) {
+      warmup.advance(BACKGROUND_WARMUP_BUDGET_MS);
+      return;
+    }
+    const slices = warmup.slicesCompiled;
+    const started = performance.now();
     warmup.advance(BACKGROUND_WARMUP_BUDGET_MS);
+    perf.attribution.noteWarmup(performance.now() - started, warmup.slicesCompiled - slices);
   }
 
   /**
@@ -2544,6 +2612,7 @@ export class Game {
    * drawn, which is when the caller may show what covers the canvas.
    */
   holdFirstFrames(): Promise<void> {
+    this.perfFirstFramesHeld = true;
     return this.revealHold.request('boot');
   }
 

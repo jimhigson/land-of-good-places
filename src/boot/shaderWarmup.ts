@@ -160,6 +160,11 @@ export class ShaderWarmup {
     return { done: this.slicesDone, remaining: this.queue.length };
   }
 
+  /** Slices compiled so far: {@link progress}'s `done` without the object, for a reader every frame. */
+  get slicesCompiled(): number {
+    return this.slicesDone;
+  }
+
   /** Frames this has taken work on. */
   get framesWorked(): number {
     return this.framesWorkedCount;

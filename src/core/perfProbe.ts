@@ -1,4 +1,5 @@
 import type { WebGLRenderer } from 'three';
+import { FrameAttribution } from './perfAttribution';
 
 /**
  * **`?perf=1` — the frame, counted, in the game itself** (120 fps plan, step 0;
@@ -43,6 +44,10 @@ import type { WebGLRenderer } from 'three';
  *
  * `window.__perf` exposes the same records, so a check (`check:render-budget`)
  * reads the numbers a person sees rather than a second instrument's.
+ *
+ * **Why a frame was slow** — shader links, texture uploads, the background
+ * warm-up, a lazy part landing — is `core/perfAttribution.ts`, owned here and
+ * built only with the probe; the copy-JSON's `slowestFrames` is its answer.
  */
 
 /** One presented frame. */
@@ -186,21 +191,40 @@ export interface PerfWindowApi {
   readonly frameCount: number;
   /** Where and on what: the space she is in, the GPU, the pixel ratio. */
   context(): Record<string, unknown>;
+  /** The longest-CPU frames still in the ring, with what each was doing (`core/perfAttribution.ts`). */
+  slowestFrames(n?: number): Record<string, unknown>[];
+  /** The whole copy-JSON, once the overlay is up (`ui/PerfOverlay.ts`). */
+  report?: () => Record<string, unknown>;
 }
 
 export class PerfProbe {
   private readonly renderer: WebGLRenderer;
   /** Context the probe cannot know itself — supplied by `Game`. */
   readonly describe: () => Record<string, unknown>;
+  /**
+   * Once-a-session facts from `Game` — the boot path, the background warm-up —
+   * asked only when the report is copied, never on a redraw.
+   */
+  readonly detail: () => Record<string, unknown>;
+  /** What each frame did, beyond its time. */
+  readonly attribution: FrameAttribution;
+  /** `window.__perf`. */
+  readonly api: PerfWindowApi;
   private readonly ring: PerfFrame[] = [];
   private worst = 0;
   private framesSeen = 0;
   private frameStart = -1;
   private previousStart = -1;
 
-  constructor(renderer: WebGLRenderer, describe: () => Record<string, unknown>) {
+  constructor(
+    renderer: WebGLRenderer,
+    describe: () => Record<string, unknown>,
+    detail: () => Record<string, unknown> = () => ({}),
+  ) {
     this.renderer = renderer;
     this.describe = describe;
+    this.detail = detail;
+    this.attribution = new FrameAttribution(renderer, CAPACITY);
     // Summed per frame, not per render call — see the header.
     renderer.info.autoReset = false;
     renderer.info.reset();
@@ -210,10 +234,12 @@ export class PerfProbe {
       summary: (n) => probe.summary(n),
       reset: () => probe.reset(),
       context: () => probe.describe(),
+      slowestFrames: (n) => probe.attribution.slowest(n),
       get frameCount() {
         return probe.framesSeen;
       },
     };
+    this.api = api;
     (window as unknown as { __perf?: PerfWindowApi }).__perf = api;
   }
 
@@ -227,8 +253,11 @@ export class PerfProbe {
     this.renderer.info.reset();
   }
 
-  /** Call after the frame's last render call. */
-  end(): void {
+  /**
+   * Call after the frame's last render call, with the space she is in and
+   * whether a cover held the frame back — both stamped on its attribution.
+   */
+  end(space = '', held = false): void {
     if (this.frameStart < 0) return;
     const now = performance.now();
     const interval = this.previousStart < 0 ? 0 : this.frameStart - this.previousStart;
@@ -244,6 +273,7 @@ export class PerfProbe {
     };
     if (this.ring.length >= CAPACITY) this.ring.shift();
     this.ring.push(frame);
+    this.attribution.endFrame(this.frameStart, interval, frame.cpu, frame.draws, space, held);
     if (interval > this.worst) this.worst = interval;
     this.framesSeen++;
     this.frameStart = -1;
@@ -258,5 +288,6 @@ export class PerfProbe {
     this.ring.length = 0;
     this.worst = 0;
     this.previousStart = -1;
+    this.attribution.reset();
   }
 }
