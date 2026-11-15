@@ -26,40 +26,42 @@
  * sets the clock through `window.game`): `pnpm run check:served-static-freeze`,
  * or set `CHECK_STATIC_FREEZE_URL`.
  *
- * ## Proved red (13 November 2026, `perf/rides-static-merge` b7836c20, seed 5, 1000×700 DPR 1)
+ * ## Proved red (15 November 2026, `perf/rides-static-merge`, seed 5, 1000×700 DPR 1)
  *
  * Each broken on purpose and watched fail; each restored and green after. The
- * geometry they failed on: seed 5's park, 852 merged originals in 120 batches
- * (528 out of the graph), 375 frozen nodes, 2,256 scene objects.
+ * geometry they failed on: seed 5's park with colours folded and the wider
+ * areas in — 1,225 merged originals in 119 batches (665 of them out of the
+ * graph), 375 frozen nodes, 2,134 scene objects (72a174fe; the wheels on
+ * ae677dde). Green on 72a174fe: both scenes `ok`, exit 0.
  *
  * - **A driven prop merged as furniture** — the real failure this guards.
- *   The dodgems' bulbs are scaled every frame and say so with
- *   `userData.twinkles` (`minigames/dodgems/plot.ts`); with that one line
- *   commented out they were merged (875 originals, 121 batches), and:
+ *   The race carts' wheels spin and say so with `userData.spins`
+ *   (`world/railRace/cart.ts`); with that one line commented out they were
+ *   merged into their carts (1,241 originals), and the rivals idling round
+ *   their ring in the park turned them anyway:
  *   ```
- *   park seed 5, after 6 s by day and 3 s by night: FAIL: 22 merged original(s) changed since their batch baked them — the batch still draws them as they were:
- *     moved by up to 0.09661 since it was baked  Scene > anchor-plots > anchor:dodgems > dodgems:ride > Mesh
- *     moved by up to 0.47953 since it was baked  Scene > anchor-plots > anchor:dodgems > dodgems:ride > Mesh
+ *   park seed 5, after 6 s by day and 3 s by night: FAIL: 12 merged original(s) changed since their batch baked them — the batch still draws them as they were:
+ *     moved by up to 1.68863 since it was baked  Scene > railRace > railRace:cart > wheel-fl
  *     …
- *   rail race seed 5, after 6 s riding: FAIL: 22 merged original(s) changed since their batch baked them — …
+ *   rail race seed 5, after 6 s riding: FAIL: 8 merged original(s) changed since their batch baked them — …
  *   ```
  * - **`MUTATE=hide`** (one original hidden in the page before the audit):
  *   ```
- *   park seed 5, after 6 s by day and 3 s by night: MUTATE=hide hid "(unnamed mesh)" before the audit
- *   park seed 5, after 6 s by day and 3 s by night: FAIL: 1 merged original(s) changed since their batch baked them — the batch still draws them as they were:
+ *   park seed 5, after 6 s by day and 3 s by night: MUTATE=hide "(unnamed mesh)" before the audit
+ *   park seed 5, after 6 s by day and 3 s by night: FAIL: 1 merged original(s) changed since their batch baked them — …
  *     hidden (itself or a parent below the area root), but its batch still draws it  Scene > scenery > wooden-walls > Mesh
  *   ```
- * - **No `userData` rule at all** (the line in `staticFreeze.isLeftLive`
- *   commented out): the stall flags are frozen *and* merged, and the dodgems'
- *   bulbs merged — both audits red, in both scenes:
+ * - **`MUTATE=recolour`** (the first original of a folded batch repainted
+ *   through its own material — the change a folded batch cannot follow):
  *   ```
- *   park seed 5, after 6 s by day and 3 s by night: 429 frozen nodes recomposed (429 of them world-frozen) of 2236 scene objects; … 933 merged originals held to their 124 batches (552 of them out of the graph).
- *   park seed 5, after 6 s by day and 3 s by night: FAIL: 54 frozen node(s) no longer match their stored matrix — …
- *     local drift 0.21193  Scene > stalls > stall:skyCruiser > Group > Mesh
- *   park seed 5, after 6 s by day and 3 s by night: FAIL: 76 merged original(s) changed since their batch baked them — …
- *   rail race seed 5, after 6 s riding: FAIL: 54 frozen node(s) … / FAIL: 76 merged original(s) …
+ *   park seed 5, after 6 s by day and 3 s by night: MUTATE=recolour "tower-main" before the audit
+ *   park seed 5, after 6 s by day and 3 s by night: FAIL: 1 merged original(s) changed since their batch baked them — …
+ *     its material changed value, but its batch draws with another material object (an equal one, or a white copy with its colour baked into the vertices)  Scene > anchor-plots > anchor:hotel > the-land-hotel-outside > hotel.tower > tower-main
  *   ```
- *   54 = 9 flags × 6 stalls; 76 = those flags and the 22 bulbs.
+ *
+ * The 13 November proofs (852 originals, before colours were folded) are in
+ * this file's history; the geometry under them has moved, so they were run
+ * again rather than trusted.
  */
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
