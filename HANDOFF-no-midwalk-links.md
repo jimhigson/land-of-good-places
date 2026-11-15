@@ -32,10 +32,13 @@ with it unfinished holds. `warmTheRestInBackground` removed.
 
 ## Guard
 
-`check:served-no-midwalk-links`, CI shard 13, four boots. Red on main,
-green on the branch locally (Metal and SwiftShader). CI on 9af7be20: clean
-counts but the bus/skip dusk crossing never reached night on the runner —
-fixed in 1691b953 (crossing waits on the light count).
+`check:no-midwalk-links`, four boots: CI shard 13 (spawn + continue,
+`check:served-no-midwalk-links`) and 14 (bus + skip, `-bus`). Red on main,
+green on the branch locally (Metal and SwiftShader). CI history: 9af7be20
+clean counts but bus/skip dusk never reached night (fixed 1691b953, crossing
+waits on the light count); 84649138 ran out shard 13's watchdog with all
+four boots (fixed 753531b0: two shards, one round trip a stop, 30 m grid).
+Local SwiftShader shard 13 after the fix: 221 s.
 
 ## If you pick this up
 

@@ -3,9 +3,10 @@
  * it makes no shader program, and no frame waits on a link.**
  *
  * ```
- * pnpm run check:served-no-midwalk-links          # starts its own dev server
+ * pnpm run check:served-no-midwalk-links          # spawn + continue, own dev server (CI shard 13)
+ * pnpm run check:served-no-midwalk-links-bus      # bus + skip, own dev server (CI shard 14)
  * CHECK_NO_MIDWALK_LINKS_URL=http://127.0.0.1:6311 pnpm run check:no-midwalk-links
- * BOOTS=spawn,continue,bus …                      # which boots (default: all three)
+ * BOOTS=spawn,continue,bus,skip …                 # which boots (default: all four)
  * ENGINE=webkit …                                 # Safari's engine instead of Chromium
  * SWIFTSHADER=1 …                                 # the software rasteriser CI has
  * ```
