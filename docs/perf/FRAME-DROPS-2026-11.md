@@ -619,7 +619,7 @@ the deep-link worst case) and from the earlier runs:
 - **The rest of the park, superseded 15 Nov 2026** (`fix/no-midwalk-shader-links`):
   Jim's iPhone stuttered within five seconds of walking after a continued
   save. Compiling "the rest" while she walked was the cause, and it was not the
-  rest: 107 programs were still made after reveal on a tour of seed 5, 95 of
+  rest: 95 programs were still made after reveal on a tour of seed 5, 83 of
   them waited on — the night's light count, every caster's depth program, the
   statue faded, and phantom light counts from the warm-up itself.
   `boot/shaderWarmup.ts` now makes all of it behind the first cover over the

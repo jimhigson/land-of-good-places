@@ -137,10 +137,11 @@ type Phase = 'compile' | 'link' | 'first use' | 'textures' | 'done';
  *
  * ## What "every program" is
  *
- * Not only every material in the graph as it stands — that alone left 107
- * programs to be made after the park was on screen, 95 of them waited for on
+ * Not only every material in the graph as it stands — that alone left 95
+ * programs to be made after the park was on screen, 83 of them waited for on
  * a frame she could see, on `check:served-no-midwalk-links`'s tour of seed 5
- * against `main` 44952060:
+ * against `main` 44952060 (and 97, 86 waited for, continuing a save shortly
+ * before dusk — Jim's report):
  *
  * - **every slice of the graph, shown or not**, as before — `compile()`
  *   gathers materials with plain `traverse`, so what is hidden now is warmed
