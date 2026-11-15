@@ -74,9 +74,18 @@ export class PerfOverlay {
     this.element.append(this.text, this.button);
     document.body.append(this.element);
     this.timer = window.setInterval(() => this.redraw(), REFRESH_MS);
+    // The same JSON the button copies, for a check or a console.
+    probe.api.report = () => this.report();
   }
 
-  /** The JSON the button copies: everything in the ring, summarised, plus context. */
+  /**
+   * The JSON the button copies: everything in the ring, summarised, plus
+   * context — and **why the slowest frames were slow** (`core/perfAttribution.ts`):
+   * `slowestFrames` over the ring the `session` summary covers,
+   * `slowestFramesSinceStart` over the whole run, `gl` for what was counted
+   * in all, and `Game`'s once-a-session facts (the boot path, the background
+   * warm-up).
+   */
   report(): Record<string, unknown> {
     return {
       at: new Date().toISOString(),
@@ -85,6 +94,10 @@ export class PerfOverlay {
       budgetMs: FRAME_BUDGET_MS,
       session: this.probe.summary(),
       lastTwoSeconds: this.probe.summary(WINDOW_FRAMES),
+      ...this.probe.detail(),
+      gl: this.probe.attribution.session(),
+      slowestFrames: this.probe.attribution.slowest(),
+      slowestFramesSinceStart: this.probe.attribution.slowestSinceStart(),
     };
   }
 

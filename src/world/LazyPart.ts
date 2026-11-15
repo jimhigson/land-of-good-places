@@ -77,6 +77,20 @@ export function lazyPartsFetching(): number {
   return fetching;
 }
 
+/** What a {@link LazyPart} tells a watcher: a fetch started, landed, or failed. */
+export type LazyPartEvent = 'started' | 'loaded' | 'failed';
+
+/**
+ * `?perf=1` only (`core/perfAttribution.ts`): told of every fetch that starts
+ * and settles, so a slow frame can say a part landed in it. `null` — one null
+ * check a fetch — without the flag.
+ */
+let watcher: ((name: string, event: LazyPartEvent) => void) | null = null;
+
+export function watchLazyParts(listener: ((name: string, event: LazyPartEvent) => void) | null): void {
+  watcher = listener;
+}
+
 /** How a `LazyPart` is built. */
 export interface LazyPartOptions<T> {
   /**
@@ -163,15 +177,18 @@ export class LazyPart<T> {
       fetch = started;
       this.inflight = started;
       fetching += 1;
+      watcher?.(this.name, 'started');
       started.then(
         (value) => {
           fetching -= 1;
           this.value = value;
           if (this.inflight === started) this.inflight = null;
+          watcher?.(this.name, 'loaded');
         },
         () => {
           fetching -= 1;
           if (this.inflight === started) this.inflight = null;
+          watcher?.(this.name, 'failed');
         },
       );
     }
