@@ -39,6 +39,9 @@ import type { WebGLRenderer } from 'three';
  *   bytes *estimated* (an image source as RGBA8: an upload's real size is the
  *   driver's business). `texStorage*` and `generateMipmap` add to the time.
  * - **Buffer uploads** — `bufferData`, `bufferSubData`.
+ * - **Draw calls and `useProgram`** — count, time and the single worst call.
+ *   A first draw with a program the GPU process is still linking can wait
+ *   *here* rather than in a query, and this is where that shows.
  * - **Other synchronous queries** — `getParameter`, `getError`,
  *   `checkFramebufferStatus`, `readPixels`, `finish`, `clientWaitSync`,
  *   `getBufferSubData`: each waits on the GPU process.
@@ -49,10 +52,15 @@ import type { WebGLRenderer } from 'three';
  * (`world/LazyPart.ts`'s watcher). Anything that happens *between* two frames
  * — a promise settling, a part landing — is put on the next frame.
  *
- * What it cannot see: GPU time (the GPU works after the calls return), the
- * draw calls themselves (not wrapped: six hundred a frame), and garbage
- * collection. A frame whose time is in `renderMs` but not in any GL bucket is
- * the draw path itself; one whose time is in `tickMs` is JavaScript.
+ * What it cannot see: GPU time (the GPU works after the calls return) and
+ * garbage collection. A frame whose time is in `renderMs` but in no GL bucket
+ * (`renderElseMs`) is three.js's own JavaScript; one whose time is in
+ * `tickMs` is the game's.
+ *
+ * **Safari's clock ticks in whole milliseconds** (`performance.now()` without
+ * cross-origin isolation), so one sub-millisecond call reads 0 or 1. Sums
+ * over many calls are still fair — a call of 0.3 ms reads 1 three times in
+ * ten — and a wait worth finding is many milliseconds long.
  *
  * ## The cost, and the no-flag promise
  *
@@ -104,6 +112,9 @@ const NUMBERS = [
   'bufferMs',
   'syncQueries',
   'syncQueryMs',
+  'drawCalls',
+  'drawMs',
+  'drawWorst',
   'gl',
   'lazyEvents',
 ] as const;
@@ -132,10 +143,12 @@ const SUMMED: readonly NumberField[] = [
   'bufferMs',
   'syncQueries',
   'syncQueryMs',
+  'drawCalls',
+  'drawMs',
   'gl',
   'lazyEvents',
 ];
-const MAXED: readonly NumberField[] = ['linkWaitWorst', 'textureWorst', 'cpu', 'interval'];
+const MAXED: readonly NumberField[] = ['linkWaitWorst', 'textureWorst', 'drawWorst', 'cpu', 'interval'];
 /** {@link SUMMED} and {@link MAXED} as indices, walked by index every frame: no iterator. */
 const SUMMED_AT = Int32Array.from(SUMMED, (field) => N[field]);
 const MAXED_AT = Int32Array.from(MAXED, (field) => N[field]);
@@ -269,6 +282,9 @@ function describeFrame(rec: FrameRecord): Record<string, unknown> {
     bufferMs: round1(get('bufferMs')),
     syncQueries: get('syncQueries'),
     syncQueryMs: round1(get('syncQueryMs')),
+    drawCalls: get('drawCalls'),
+    drawCallMs: round1(get('drawMs')),
+    drawCallWorstMs: round1(get('drawWorst')),
     glCallsMs: round1(get('gl')),
     lazyParts: lazy,
   };
@@ -469,6 +485,10 @@ export class FrameAttribution {
       bufferMs: round1(get('bufferMs')),
       syncQueries: get('syncQueries'),
       syncQueryMs: round1(get('syncQueryMs')),
+      drawCalls: get('drawCalls'),
+      drawCallMs: round1(get('drawMs')),
+      drawCallWorstMs: round1(get('drawWorst')),
+      clockResolutionNote: 'performance.now() is whole ms in Safari: single sub-ms calls read 0 or 1, sums are fair',
       backgroundWarmupMs: round1(get('warmup')),
       backgroundWarmupSlices: get('warmupSlices'),
       lazyPartEvents: get('lazyEvents'),
@@ -520,6 +540,12 @@ export class FrameAttribution {
     const v = this.current.v;
     v[N.textureBytes] = v[N.textureBytes]! + bytes;
     if (ms > v[N.textureWorst]!) v[N.textureWorst] = ms;
+  }
+
+  private noteDraw(ms: number): void {
+    this.add('drawMs', 'drawCalls', ms);
+    const v = this.current.v;
+    if (ms > v[N.drawWorst]!) v[N.drawWorst] = ms;
   }
 
   private noteBuffer(ms: number, bytes: number): void {
@@ -609,6 +635,10 @@ export class FrameAttribution {
 
     for (const name of ['getParameter', 'getError', 'checkFramebufferStatus', 'readPixels', 'finish', 'clientWaitSync', 'getBufferSubData']) {
       timed(name, (ms) => self.add('syncQueryMs', 'syncQueries', ms));
+    }
+    // Six hundred a frame: two clock reads each and no garbage (`timed`).
+    for (const name of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements', 'useProgram']) {
+      timed(name, (ms) => self.noteDraw(ms));
     }
   }
 }
