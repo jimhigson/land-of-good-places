@@ -440,6 +440,42 @@ with **~70 k triangles** (crowd 1.67 M tris / 24 kids, the face patches alone
   merged props — the highlight needs a selected *thing*, so keep interactables
   separate). **Jim sees it?** No, if identical.
 - **Check.** Draw calls per frame per scene ≤ budget (counted).
+- **Done (15 November 2026, `perf/rides-static-merge`).** Built in the browser
+  only, after placement (`world/staticBatch.ts`, the list of areas in
+  `world/parkStatics.ts`), not at park build time: a static prop's meshes are
+  merged per area, per 48 m tile (or one tile for a compact thing — a shop, a
+  building front, a train car), per material. Parts that differ only in colour
+  are one draw (`foldColours`: the colour per vertex, a white copy of the
+  material). A train car or a race cart is merged in its own frame and rides
+  with its batches. Anything driven carries a `userData` handle and stays
+  itself; the rainbow outline and `Selection` measure a target without its
+  batches; the stone walls and the fountain statue stay whole (shared planes;
+  the statue fades). Measured on seed 5, `main` bfdebfe6 beside the branch at
+  72a174fe, M4 Pro (Metal), the Mac loaded by another VM throughout:
+  - **Draws** (the game's probe, riding, 1440×900 DPR 2): Rail Race 2,303 →
+    1,134; Sky Cruiser 815 → 393; ferris 525 → 316; slide 499 → 418; park
+    797 → 568. `check:render-budget` (its own moment): Rail Race 2,312 →
+    1,143, park 590 → 397, and its ceilings lowered to match.
+  - **Main-thread CPU per frame**, thread time (Chrome's trace, so a thread
+    the VM descheduled is not counted), median, production builds, builds
+    alternating and their order flipped each round
+    (`docs/perf/rides-static-merge/ridetime.mjs`): Rail Race **7.47 → 4.90
+    ms** (load 79 / 67) and 7.98 → 5.16 (load 37 / 35); Sky Cruiser 4.06 →
+    3.40; ferris 5.19 → 4.47; slide 4.27 → 3.58; park 3.40 → 3.15 (the
+    calmest round; a round at load 130–170 read four to five times slower on
+    both builds and is not quoted). The probe's own cpu p50 agreed within
+    0.1 ms throughout.
+  - **Pixels** (`pix.mjs`: the same frozen `?clock=` frame drawn by the
+    batches and by their sources in one page, controls repeat and restore 0
+    px; the noise floor is the camera moved 10 µm): Rail Race 94 px (floor
+    190), Sky Cruiser 237 (957), slide 0, ferris 0, park 2,401 (4,303), park
+    by night 3,762 (4,189), Rail Race by night 24 (137); `main` against the
+    branch at the same moment differed by exactly the same pixels in every
+    scene, so nothing else changed.
+  - **Off-screen work** (`check:cull-audit`, which now looks inside batches):
+    a batch partly in view draws its sources out of view, so the park went
+    36 → 50 off-screen draws, 256,628 → 286,744 triangles, and the Sky Cruiser
+    12 → 14, 173,584 → 184,936. The Rail Race, ferris and slide are unchanged.
 
 ### 13. The super-speed dash: per-stride collision
 
