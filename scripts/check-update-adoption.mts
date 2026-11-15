@@ -222,16 +222,26 @@ async function startServer(initialRoot: string): Promise<Server> {
         }
         file = path.join(root, 'index.html');
       }
-      res.writeHead(200, {
+      // What the live host sends for **every** file, hashed assets included —
+      // measured on landofgoodplaces.blockstack.ing, 15 Nov 2026: `public,
+      // max-age=0, must-revalidate` and an ETag. So a browser revalidates each
+      // one, and a file it already has costs a request and a 304 rather than
+      // nothing. That matters here twice: it is the real cost of a download,
+      // and it is what lets a held file hold an install of a build this
+      // profile has downloaded before (phase 4 installs the same build as
+      // phase 2; workbox fetches a hashed file with the HTTP cache allowed).
+      const stat = fs.statSync(file);
+      const etag = `"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`;
+      const headers = {
         'content-type': MIME[path.extname(file)] ?? 'application/octet-stream',
-        // Hashed assets are immutable; everything else — index.html, sw.js,
-        // version.txt — must not be served from the HTTP cache, or the "deploy"
-        // would not be visible to the browser at all. This is what a real
-        // static host does, and it is deliberately not the thing under test.
-        'cache-control': url.pathname.startsWith('/assets/')
-          ? 'public, max-age=31536000, immutable'
-          : 'no-store',
-      });
+        'cache-control': 'public, max-age=0, must-revalidate',
+        etag,
+      };
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, headers).end();
+        return;
+      }
+      res.writeHead(200, headers);
       fs.createReadStream(file).pipe(res);
     };
     if (state.hold !== null && url.pathname === state.hold) {
@@ -410,20 +420,29 @@ async function runEngine(
     return reading;
   };
 
+  /** Waits until the page's last navigation has started a park, and says whether it did. */
+  const bootedSinceLastNavigation = async (): Promise<boolean> => {
+    const deadline = Date.now() + 15_000;
+    const started = (): boolean => (seen.boots.at(-1) ?? 0) >= (seen.navigations.at(-1) ?? 0);
+    while (!started() && Date.now() < deadline) await page.waitForTimeout(250);
+    return started();
+  };
+
   /**
    * She is playing: a key pressed once the page can notice it.
    *
    * **Only once the page can notice the touch.** A wait for a new entry chunk
    * ends the moment the new build's entry script is in the DOM, which is as
-   * soon as the adoption's reload has parsed its HTML — before `bootstrap.ts`
-   * has run `setupUpdateGate`, which builds the gate and then, in the same
-   * breath, starts `watchForFirstTouch`. A key pressed in that gap is pressed at
+   * soon as the adoption's reload has parsed its HTML — long before the page
+   * starts `watchForFirstTouch`. A key pressed in that gap is pressed at
    * nothing: the page stays "untouched", adopts the next deploy on its own, and
    * this went red on PR #721's 1648d36a for a race of its own, not the app's.
-   * The gate's element in the DOM is the sign the watch is on.
+   * The watch now starts as the park starts to load (`update-adoption.ts`,
+   * "before the park has started"), so the park's own boot line is the sign it
+   * is on.
    */
   const startPlaying = async (): Promise<number> => {
-    await page.waitForSelector('.update-gate', { state: 'attached', timeout: ADOPT_TIMEOUT_MS });
+    assert(await bootedSinceLastNavigation(), 'the page never started its park, so there was nothing to be playing');
     await page.keyboard.press('Shift');
     return Date.now();
   };
@@ -434,14 +453,6 @@ async function runEngine(
       const registration = await navigator.serviceWorker.getRegistration();
       void registration?.update();
     });
-
-  /** Waits until the page's last navigation has started a park, and says whether it did. */
-  const bootedSinceLastNavigation = async (): Promise<boolean> => {
-    const deadline = Date.now() + 15_000;
-    const started = (): boolean => (seen.boots.at(-1) ?? 0) >= (seen.navigations.at(-1) ?? 0);
-    while (!started() && Date.now() < deadline) await page.waitForTimeout(250);
-    return started();
-  };
 
   /**
    * The shared middle of phases 2 and 4: a reload has just happened with the

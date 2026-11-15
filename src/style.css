@@ -2574,6 +2574,13 @@ kbd {
   margin-top: 0.375rem;
 }
 
+/* Gone while the card says the new park is still on its way (`UpdateGate.
+   standDown`). `.shop-buy`'s own `display: flex` beats the UA's `[hidden]`
+   rule, the same tie as every other `[hidden]` toggle in this file. */
+.update-gate-go[hidden] {
+  display: none;
+}
+
 /* A balloon should drift. It is a present, not an error. */
 @keyframes update-gate-bob {
   0%, 100% { transform: translateY(0) rotate(-3deg); }
