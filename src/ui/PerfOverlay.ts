@@ -1,39 +1,64 @@
-import type { AdaptiveResolutionState } from '../core/adaptiveResolution';
-import {
-  FRAME_BUDGET_MS,
-  type PerfProbe,
-  type PerfSummary,
-} from '../core/perfProbe';
+import { buildColour, buildIdentity, type BuildIdentity } from '../build-identity';
+import { FRAME_BUDGET_MS, type PerfProbe } from '../core/perfProbe';
 
 /**
- * The `?perf=1` readout: what `core/perfProbe.ts` counts, on screen, with a
- * "copy JSON" button — so a number can be had from a phone in a parent's hand
- * (the real-phone baseline, `docs/perf/REAL-PHONE-BASELINE.md`).
+ * The `?perf=1` box: the frame rate, which build this is, and one button that
+ * copies everything `core/perfProbe.ts` counts — so a number can be had from a
+ * phone in a parent's hand (the real-phone baseline,
+ * `docs/perf/REAL-PHONE-BASELINE.md`).
+ *
+ * Three things and no more. Jim, 15 Nov 2026, testing a freeze on an iPhone:
+ * *"will I know right away I have the new build? … the box can just show fps
+ * and a button to paste a report, it doesn't have to show all data live"*.
+ *
+ * - **fps**, big: frames drawn over about the last second of wall time,
+ *   looked at twice a second and rewritten only when it changed. Wall time,
+ *   so a stall shows as the number falling rather than holding the last good
+ *   second.
+ * - **the build**: its short sha and build time, on a background coloured by
+ *   the build itself (`build-identity.ts`) — a new deploy is a new colour the
+ *   moment it loads, and a cached one is still the old colour.
+ * - **Copy report**: the full JSON ({@link PerfOverlay.report}), which holds
+ *   everything the old live readout showed and a great deal more.
  *
  * Developer-only by construction: it exists only when the URL asks for it, the
  * same spirit as `/view` and `DevBadge`. Styled inline so this file is the
  * whole feature, and `pointer-events: none` except on the button, so it never
  * swallows a tap meant for the park.
- *
- * Redrawn four times a second over the last two seconds of frames — often
- * enough to watch a scene change, rarely enough that the overlay's own DOM
- * writes do not show up in the numbers it reports.
  */
 
-/** How often the text is rewritten. */
-const REFRESH_MS = 250;
-/** The window the live numbers cover, in frames: two seconds at 120 fps. */
+/** How often the fps figure is looked at: twice a second, so it covers the last two looks — about a second. */
+const REFRESH_MS = 500;
+/** The window the report's `lastTwoSeconds` covers, in frames: two seconds at 120 fps. */
 const WINDOW_FRAMES = 240;
+const BUTTON_LABEL = 'Copy report';
+/** How long "Copied" stays on the button. */
+const FLASH_MS = 1500;
 
 export class PerfOverlay {
   private readonly probe: PerfProbe;
+  private readonly build: BuildIdentity;
   private readonly element: HTMLElement;
-  private readonly text: HTMLElement;
+  /** The fps figure's own text node: its `data` is rewritten in place, never a node replaced. */
+  private readonly fps: Text;
   private readonly button: HTMLButtonElement;
+  /** The figure on screen, so an unchanged second writes nothing. */
+  private shownFps = -1;
+  /**
+   * The last two looks at the probe's frame count — when (`performance.now()`,
+   * -1 for not yet) and how many frames had been drawn by then. The figure is
+   * the frames drawn since the look before last: about a second.
+   */
+  private beforeLastAt = -1;
+  private beforeLastCount = 0;
+  private lastAt = -1;
+  private lastCount = 0;
   private timer = 0;
+  private flashTimer = 0;
 
   constructor(probe: PerfProbe) {
     this.probe = probe;
+    this.build = buildIdentity();
     this.element = document.createElement('div');
     this.element.className = 'perf-overlay';
     this.element.setAttribute('aria-hidden', 'true');
@@ -41,28 +66,60 @@ export class PerfOverlay {
       position: 'fixed',
       left: 'calc(0.5rem + env(safe-area-inset-left))',
       bottom: 'calc(0.5rem + env(safe-area-inset-bottom))',
-      padding: '0.4rem 0.6rem',
-      background: 'rgba(0, 0, 0, 0.72)',
-      color: '#e8ffe8',
+      padding: '0.45rem 0.65rem 0.55rem',
+      // Opaque: a see-through box takes on the park's colours behind it, and
+      // the colour is the whole point.
+      background: buildColour(this.build.sha),
+      color: '#fff',
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-      fontSize: '1rem',
-      lineHeight: '1.25',
-      borderRadius: '0.4rem',
+      lineHeight: '1.2',
+      borderRadius: '0.5rem',
+      boxShadow: '0 0.1rem 0.5rem rgba(0, 0, 0, 0.35)',
       pointerEvents: 'none',
       userSelect: 'none',
       zIndex: '99998',
-      whiteSpace: 'pre',
     } satisfies Partial<CSSStyleDeclaration>);
 
-    this.text = document.createElement('div');
+    const rate = document.createElement('div');
+    Object.assign(rate.style, {
+      fontSize: '2.25rem',
+      fontWeight: '700',
+      whiteSpace: 'nowrap',
+    } satisfies Partial<CSSStyleDeclaration>);
+    // A dash until the first frame is drawn — and for good, if none ever is.
+    this.fps = document.createTextNode('–');
+    const unit = document.createElement('span');
+    unit.textContent = ' fps';
+    Object.assign(unit.style, { fontSize: '1rem', fontWeight: '400' } satisfies Partial<CSSStyleDeclaration>);
+    rate.append(this.fps, unit);
+
+    // Two short lines rather than one long one: narrow enough at 430 px to
+    // stay clear of the hop button in the opposite corner.
+    const build = document.createElement('div');
+    build.textContent = describeBuild(this.build);
+    Object.assign(build.style, {
+      fontSize: '0.9rem',
+      whiteSpace: 'pre',
+      marginTop: '0.15rem',
+    } satisfies Partial<CSSStyleDeclaration>);
+
     this.button = document.createElement('button');
     this.button.type = 'button';
-    this.button.textContent = 'copy JSON';
+    this.button.textContent = BUTTON_LABEL;
     Object.assign(this.button.style, {
-      marginTop: '0.3rem',
+      display: 'block',
+      marginTop: '0.45rem',
+      minHeight: '2.75rem',
+      padding: '0.4rem 0.8rem',
       fontFamily: 'inherit',
       fontSize: '1rem',
+      fontWeight: '700',
+      color: '#111',
+      background: 'rgba(255, 255, 255, 0.92)',
+      border: '0',
+      borderRadius: '0.35rem',
       pointerEvents: 'auto',
+      touchAction: 'manipulation',
     } satisfies Partial<CSSStyleDeclaration>);
     this.button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -71,7 +128,7 @@ export class PerfOverlay {
     this.button.addEventListener('pointerdown', (event) => event.stopPropagation());
     this.button.addEventListener('pointerup', (event) => event.stopPropagation());
 
-    this.element.append(this.text, this.button);
+    this.element.append(rate, build, this.button);
     document.body.append(this.element);
     this.timer = window.setInterval(() => this.redraw(), REFRESH_MS);
     // The same JSON the button copies, for a check or a console.
@@ -79,17 +136,18 @@ export class PerfOverlay {
   }
 
   /**
-   * The JSON the button copies: everything in the ring, summarised, plus
-   * context — and **why the slowest frames were slow** (`core/perfAttribution.ts`):
-   * `slowestFrames` over the ring the `session` summary covers,
-   * `slowestFramesSinceStart` over the whole run, `gl` for what was counted
-   * in all, and `Game`'s once-a-session facts (the boot path, the background
-   * warm-up).
+   * The JSON the button copies: which build this is, everything in the ring,
+   * summarised, plus context — and **why the slowest frames were slow**
+   * (`core/perfAttribution.ts`): `slowestFrames` over the ring the `session`
+   * summary covers, `slowestFramesSinceStart` over the whole run, `gl` for
+   * what was counted in all, and `Game`'s once-a-session facts (the boot path,
+   * the background warm-up).
    */
   report(): Record<string, unknown> {
     return {
       at: new Date().toISOString(),
       url: location.href,
+      build: { sha: this.build.sha, builtAt: this.build.builtAt },
       ...this.probe.describe(),
       budgetMs: FRAME_BUDGET_MS,
       session: this.probe.summary(),
@@ -103,23 +161,39 @@ export class PerfOverlay {
 
   dispose(): void {
     window.clearInterval(this.timer);
+    window.clearTimeout(this.flashTimer);
     this.element.remove();
   }
 
+  /**
+   * The fps figure, and nothing else: frames drawn per second of wall time
+   * since the look before last, from four numbers kept here — nothing
+   * allocated, nothing asked of the probe but its count, and the DOM written
+   * only when the figure changes. A look's own late arrival (a blocked main
+   * thread fires no timers) only widens the window, so a freeze reads as the
+   * low figure it was.
+   */
   private redraw(): void {
-    const s = this.probe.summary(WINDOW_FRAMES);
-    const context = this.probe.describe();
-    this.text.textContent = formatSummary(s, String(context['space'] ?? '?'), formatPixelRatio(context));
-    // Green under budget, amber when CPU alone is over it, red when frames are being missed.
-    this.element.style.color =
-      s.missedVsync > 0.02 ? '#ff9a9a' : s.cpuP50 > FRAME_BUDGET_MS ? '#ffd27a' : '#e8ffe8';
+    const now = performance.now();
+    const count = this.probe.frameCount;
+    const fromAt = this.beforeLastAt >= 0 ? this.beforeLastAt : this.lastAt;
+    const fromCount = this.beforeLastAt >= 0 ? this.beforeLastCount : this.lastCount;
+    this.beforeLastAt = this.lastAt;
+    this.beforeLastCount = this.lastCount;
+    this.lastAt = now;
+    this.lastCount = count;
+    if (count === 0 || fromAt < 0 || now <= fromAt) return;
+    const fps = Math.round(((count - fromCount) * 1000) / (now - fromAt));
+    if (fps === this.shownFps) return;
+    this.shownFps = fps;
+    this.fps.data = String(fps);
   }
 
   private async copy(): Promise<void> {
     const json = JSON.stringify(this.report(), null, 2);
     try {
       await navigator.clipboard.writeText(json);
-      this.flash('copied');
+      this.flash('Copied');
     } catch {
       // No clipboard (an http:// LAN address on a phone is not a secure
       // context): put it somewhere a long-press can select it.
@@ -135,64 +209,22 @@ export class PerfOverlay {
       document.body.append(area);
       area.focus();
       area.select();
-      this.flash('select + copy');
+      this.flash('Select + copy');
     }
   }
 
   private flash(label: string): void {
     this.button.textContent = label;
-    window.setTimeout(() => (this.button.textContent = 'copy JSON'), 1500);
+    window.clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => (this.button.textContent = BUTTON_LABEL), FLASH_MS);
   }
 }
 
-const ms = (n: number): string => n.toFixed(1).padStart(5);
-const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
-const count = (n: number): string =>
-  n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e4 ? `${(n / 1e3).toFixed(0)} k` : String(n);
-
-/**
- * The quality governor's line (120 fps plan, step 17;
- * `core/adaptiveResolution.ts`): the pixel ratio the frame is drawn at, the
- * level that is on the governor's ladder, what the governor is doing, and the
- * frame budget it measured off this display —
- * `dpr 1.50 of 2  level 1/2  recovering 2.1/4.0 s  budget 8.3 ms  3 changes`.
- */
-export function formatPixelRatio(context: Record<string, unknown>): string {
-  const ratio = Number(context['pixelRatio'] ?? NaN);
-  const governor = context['adaptiveResolution'];
-  if (!governor || typeof governor !== 'object') return `dpr ${ratio.toFixed(2)}`;
-  const g = governor as AdaptiveResolutionState;
-  const seconds = (n: number): string => (n / 1000).toFixed(1);
-  const doing =
-    g.phase === 'recovering'
-      ? `recovering ${seconds(g.calmMs)}/${seconds(g.upHoldMs)} s`
-      : g.phase === 'paused'
-        ? `paused ${seconds(g.pausedMs)} s`
-        : g.phase === 'watching'
-          ? `watching ${g.recentMisses} gpu-miss`
-          : g.phase;
-  return [
-    `dpr ${ratio.toFixed(2)} of ${g.cap}`,
-    `level ${g.level}/${g.levels - 1}`,
-    doing,
-    `budget ${g.periodMs.toFixed(1)} ms`,
-    `${g.changes} change${g.changes === 1 ? '' : 's'}`,
-  ].join('  ');
-}
-
-/** The overlay's text. Exported so its wording is checked without a DOM. */
-export function formatSummary(s: PerfSummary, space: string, pixelRatio = ''): string {
-  const heap =
-    s.heapChurnMBps !== null && s.heapMB !== null
-      ? `heap  ${s.heapMB.toFixed(0)} MB  +${s.heapChurnMBps.toFixed(1)} MB/s`
-      : `heap  ${s.heapMB === null ? 'n/a' : `${s.heapMB.toFixed(0)} MB`} (${s.heapNote ?? 'n/a'})`;
-  return [
-    `${space}  ${s.fps.toFixed(0)} fps  budget ${FRAME_BUDGET_MS.toFixed(1)} ms`,
-    `frame p50 ${ms(s.intervalP50)}  p99 ${ms(s.intervalP99)}  worst ${s.worstInterval.toFixed(0)} ms`,
-    `cpu   p50 ${ms(s.cpuP50)}  p99 ${ms(s.cpuP99)}  over ${pct(s.cpuOverBudget)}`,
-    `missed 120Hz ${pct(s.missedVsync)}  >16.7 ${pct(s.over16)}`,
-    `draws ${count(s.drawsMax)}  tris ${count(s.trisMax)} (max)`,
-    heap,
-    ...(pixelRatio ? [pixelRatio] : []),
-  ].join('\n');
+/** `a1b2c3d`, then `built 15 Nov, 14:32` beneath it — the build time in the phone's own zone and words. */
+function describeBuild(build: BuildIdentity): string {
+  if (build.builtAt === null) return build.id;
+  const at = new Date(build.builtAt);
+  if (Number.isNaN(at.getTime())) return `${build.id}\nbuilt ${build.builtAt}`;
+  const when = at.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return `${build.id}\nbuilt ${when}`;
 }
