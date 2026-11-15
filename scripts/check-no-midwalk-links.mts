@@ -77,10 +77,30 @@ const DAY_CLOCK = 0.42;
 const NIGHT_CLOCK = 0.92;
 const BEFORE_DUSK = 0.728;
 const BEFORE_DAWN = 0.238;
-/** Real seconds the clock runs across dusk or dawn (one real second is ~10 park minutes). */
-const ACROSS_MS = 4000;
+/**
+ * Stops walked after the park's lighting has switched at dusk or dawn, so the
+ * frames just after the switch — where the new lighting's programs are first
+ * drawn — are walked in, not only the frame of it.
+ */
+const AFTER_SWITCH_STOPS = 3;
+/**
+ * The longest the clock may take to run across dusk or dawn, in real time. It
+ * runs on the frame's `dt`, and under a hosted runner's software renderer a
+ * frame is slow: walking for a fixed four seconds never reached dusk there
+ * (the bus and skip boots saw the park only by day). So the crossing waits
+ * on the park's own lighting changing, and this is only the ceiling.
+ */
+const ACROSS_LIMIT_MS = 90_000;
 
 type Boot = 'spawn' | 'continue' | 'bus' | 'skip';
+
+/**
+ * Every how-many-th stop a boot's tour stands on. The deep link tours the
+ * whole park by day and by night; the bus and the skip are other ways into
+ * the same warm-up, so a third of the stops by day and the dusk crossing is
+ * their share — it kept shard 13 inside its cap on a hosted runner.
+ */
+const STRIDE: Record<Boot, number> = { spawn: 1, continue: 1, bus: 3, skip: 3 };
 
 interface Born {
   readonly t: number;
@@ -102,6 +122,8 @@ interface Result {
   readonly stops: number;
   readonly phases: readonly string[];
   readonly leftThePark: readonly string[];
+  /** Dusk or dawn crossings whose lighting never changed within {@link ACROSS_LIMIT_MS}. */
+  readonly unswitched: readonly string[];
   readonly lightCounts: readonly number[];
   /** Whether the boot's own cover was held (a `boot` hold) — what the `skip` boot exists to exercise. */
   readonly bootCoverHeld: boolean;
@@ -177,6 +199,8 @@ function startRecording(): number {
     t0: performance.now(),
     programsAtReveal: programs.length,
     lightCounts: new Set<number>(),
+    /** The lights the last frame of the park was drawn with. */
+    lastLights: -1,
   };
   (window as unknown as { __noMidwalk: typeof state }).__noMidwalk = state;
   let length = programs.length;
@@ -222,6 +246,7 @@ function startRecording(): number {
         if (o.isLight && o.layers.test(camera.layers)) lights += 1;
       });
       state.lightCounts.add(lights);
+      state.lastLights = lights;
     }
     return render(scene, camera);
   };
@@ -295,8 +320,9 @@ async function walkAStep(page: Page, i: number): Promise<void> {
   await page.keyboard.up(key);
 }
 
-async function tour(page: Page, phases: readonly string[]): Promise<{ stops: number; left: string[] }> {
+async function tour(page: Page, phases: readonly string[], stride: number): Promise<{ stops: number; left: string[]; unswitched: string[] }> {
   const where = await page.evaluate(stops, GRID_M);
+  const unswitched: string[] = [];
   const left: string[] = [];
   let visited = 0;
   const setPhase = (phase: string): Promise<void> => page.evaluate((p) => {
@@ -313,7 +339,7 @@ async function tour(page: Page, phases: readonly string[]): Promise<{ stops: num
   for (const phase of phases) {
     await setPhase(phase);
     if (phase === 'day' || phase === 'night') {
-      for (let i = 0; i < where.length; i += 1) {
+      for (let i = 0; i < where.length; i += stride) {
         await clock(phase === 'day' ? DAY_CLOCK : NIGHT_CLOCK);
         const [x, z] = where[i]!;
         await standAt(x, z, i);
@@ -330,18 +356,26 @@ async function tour(page: Page, phases: readonly string[]): Promise<{ stops: num
         visited += 1;
       }
     } else {
-      // Across the switch with the clock running, walking about the plaza.
+      // Across the switch with the clock running, walking from stop to stop
+      // until the park's lighting has changed — the lights the frame is drawn
+      // with, as `startRecording` counts them — and a few stops after.
       await clock(phase === 'dusk' ? BEFORE_DUSK : BEFORE_DAWN);
+      const before = await page.evaluate(() => (window as unknown as { __noMidwalk: { lastLights: number } }).__noMidwalk.lastLights);
       const started = Date.now();
-      let i = 0;
-      while (Date.now() - started < ACROSS_MS) {
-        const [x, z] = where[i % where.length]!;
+      let after = -1;
+      for (let i = 0; after < AFTER_SWITCH_STOPS; i += 1) {
+        const [x, z] = where[(i * 7) % where.length]!;
         await standAt(x, z, i);
-        i += 1;
+        if (after >= 0) after += 1;
+        else if ((await page.evaluate(() => (window as unknown as { __noMidwalk: { lastLights: number } }).__noMidwalk.lastLights)) !== before) after = 0;
+        if (after < 0 && Date.now() - started > ACROSS_LIMIT_MS) {
+          unswitched.push(phase);
+          break;
+        }
       }
     }
   }
-  return { stops: visited, left };
+  return { stops: visited, left, unswitched };
 }
 
 async function openBrowser(): Promise<Browser> {
@@ -414,7 +448,7 @@ async function runBoot(boot: Boot): Promise<Result> {
     if (boot === 'bus' || boot === 'skip') await arrived(page);
     // The continued save's clock is set before dusk: walk through it first.
     const phases = boot === 'continue' ? ['dusk', 'night', 'dawn'] : boot === 'bus' || boot === 'skip' ? ['day', 'dusk'] : ['day', 'dusk', 'night', 'dawn'];
-    const { stops: visited, left } = await tour(page, phases);
+    const { stops: visited, left, unswitched } = await tour(page, phases, STRIDE[boot]);
     await sleep(500);
     const end = await page.evaluate(() => {
       const w = window as unknown as {
@@ -441,6 +475,7 @@ async function runBoot(boot: Boot): Promise<Result> {
       stops: visited,
       phases,
       leftThePark: left,
+      unswitched,
       lightCounts: end.lightCounts,
       bootCoverHeld: end.bootCoverHeld,
       errors,
@@ -497,6 +532,9 @@ for (const boot of BOOTS as Boot[]) {
   }
   if (boot === 'skip' && !result.bootCoverHeld) {
     failures.push('skip: no boot cover was held — the skip landed after the warm-up was done, so the path this boot exists for went untested');
+  }
+  if (result.unswitched.length > 0) {
+    failures.push(`${boot}: the park's lighting never changed across ${result.unswitched.join(' and ')} within ${ACROSS_LIMIT_MS / 1000} s — that lighting's programs went untested`);
   }
   if (result.leftThePark.length > 0) {
     failures.push(`${boot}: she left the park at ${result.leftThePark.slice(0, 4).join(', ')} — a stop is inside a room; move it, the room is gpu:first-entry's`);
