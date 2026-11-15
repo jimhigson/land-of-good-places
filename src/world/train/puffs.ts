@@ -60,6 +60,13 @@ export class SmokePuffs {
     this.mesh.name = 'smoke-puffs';
     this.mesh.frustumCulled = false;
     this.mesh.count = MAX_PUFFS;
+    // **Coloured from the start, not from the first puff.** three makes an
+    // instanced mesh's colour buffer on its first `setColorAt`, and a mesh
+    // with one is a different shader program from a mesh without: the
+    // warm-up compiled it colourless, and the first chuff out of the funnel —
+    // 35 s into a walk round seed 5 — linked the coloured one on a frame she
+    // could see (`boot/shaderWarmup.ts`).
+    for (let i = 0; i < MAX_PUFFS; i += 1) this.mesh.setColorAt(i, this.colour.setRGB(1, 1, 1));
     this.group.add(this.mesh);
 
     for (let i = 0; i < MAX_PUFFS; i += 1) {

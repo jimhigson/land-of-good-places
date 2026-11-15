@@ -90,12 +90,21 @@ import { cullCrowdsFor } from './entities/npc/InstancedCrowd';
 import { noteNpcViewCamera } from './entities/npc/simLod';
 
 /**
- * Milliseconds a frame of play may give the background shader warm-up
- * (`Game.warmTheRestInBackground`). Whole slices only, as on the bus, so this
- * decides how many are started, not how long one takes; small, because unlike
- * the bus ride these are frames she is playing in.
+ * Milliseconds a held frame — a cover up over the park — may give the park's
+ * warm-up (`Game.parkWarmup`). Nothing new is drawn on a held frame, so it can
+ * be long; whole jobs only, as on the bus, so this decides how many are
+ * started, not how long one takes.
  */
-const BACKGROUND_WARMUP_BUDGET_MS = 2;
+const HELD_WARMUP_BUDGET_MS = 30;
+
+/**
+ * Milliseconds a frame of play may give the park's warm-up **only if a cover
+ * let go before it was done** (`RevealHold`'s time limit, which exists for a
+ * driver that never answers) — so a stuck warm-up still ends, a little at a
+ * time, rather than leaving the rest of the park to link on first sight.
+ * Small, because these are frames she is playing in.
+ */
+const LEFTOVER_WARMUP_BUDGET_MS = 2;
 
 /**
  * Metres round her that a cover's warm-up compiles whether or not this
@@ -205,6 +214,14 @@ export class Game {
    * through it.
    */
   readonly revealHold: RevealHold;
+  /**
+   * **Every program the park can need, made behind a cover** — the one owner
+   * of that (`boot/shaderWarmup.ts`). The bus ride drives it behind the bus
+   * (`main.ts`); on any other boot, and on the first walk out of a room a save
+   * restored her into, whichever cover first stands over the park carries it
+   * and does not lift until it is done ({@link revealHold}'s work).
+   */
+  readonly parkWarmup: ShaderWarmup;
   readonly liftPanel: LiftPanel;
   readonly hotelLiftPanel: LiftPanel;
   readonly parade: Parade;
@@ -803,6 +820,38 @@ export class Game {
     this.foliageFade.addOccluder(this.world.fountain.statueOccluder);
     this.engine.scene.add(this.foliageFade.group);
     this.addSystem(this.foliageFade);
+
+    // **The park's whole warm-up** — every slice of it under both its
+    // lightings, the statue faded, every caster's depth program, all linked,
+    // used once and uploaded — and every cover that stands over the park
+    // carries it until it is done. See `boot/shaderWarmup.ts` for what each
+    // of those was costing a walk round the park.
+    this.parkWarmup = new ShaderWarmup(this.engine.renderer, this.engine.scene, this.camera.camera, {
+      lightings: this.world.parkLightings(),
+      variants: [this.foliageFade.fadedVariant()],
+      shadows: true,
+      finish: true,
+      draw: true,
+    });
+    const parkWarmup = this.parkWarmup;
+    this.revealHold.setWork({
+      get pending() {
+        return !parkWarmup.ready;
+      },
+      get progress() {
+        return parkWarmup.workDone;
+      },
+      // Behind a cover the frame shows nothing new, so it may take a long
+      // share — but only where the park is what is behind it, lit as the
+      // park is lit (`parkWarmupCanRun`). Anywhere else this cover is not the
+      // one for it, and a later one over the park will be.
+      step: () => parkWarmup.ready || !this.parkWarmupCanRun() || parkWarmup.advance(HELD_WARMUP_BUDGET_MS),
+      // …and its last step, every pipeline built by drawing the whole park
+      // once, into the frame the cover's real draw paints over.
+      drawBehind: () => {
+        if (this.parkWarmupCanRun()) parkWarmup.drawEverything();
+      },
+    });
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
     // when a child is standing at the lift doors, calls the car, and then lists
     // the floors. It is handed the building's `floors()` / `go(n)` seam and
@@ -1303,43 +1352,45 @@ export class Game {
 
   /** The space a continued save restored her to, for the `?perf=1` report; `null` for a fresh start. */
   private perfStartPlace: string | null = null;
-  /** `?perf=1`: whether the first frames were held for a warm view — a boot with no bus ride. */
+  /**
+   * `?perf=1`: whether the first frames were held for a warm park — a boot
+   * with no bus ride, or one whose skip was pressed before its warm-up was done.
+   */
   private perfFirstFramesHeld = false;
-  /** `?perf=1`: the background warm-up, kept for the report after it is done; and when it started and finished. */
-  private perfBackgroundWarmup: ShaderWarmup | null = null;
-  private perfBackgroundWarmupStartedAt = -1;
-  private perfBackgroundWarmupReadyAt = -1;
 
   /**
    * The copy-JSON's once-a-session facts (`PerfOverlay.report`): how the park
-   * booted, and how the background warm-up has gone. Asked only on a copy.
+   * booted, and how its warm-up has gone. Asked only on a copy.
    */
   private perfDetail(): Record<string, unknown> {
-    const warmup = this.perfBackgroundWarmup;
+    const warmup = this.parkWarmup;
     const seconds = (t: number): number | null => (t < 0 ? null : Math.round(t) / 1000);
     return {
       boot: {
-        // No bus ride means the first frames were held for a warm view
-        // (`holdFirstFrames`) and the rest warmed behind her, a slice a frame.
+        // Held means the first frames waited, behind the boot's cover, for
+        // the whole park to be warm (`holdFirstFrames`); not held, the bus
+        // ride had already warmed it.
         busRide: !this.perfFirstFramesHeld,
         firstFramesHeld: this.perfFirstFramesHeld,
         continuedSaveAt: this.perfStartPlace,
         path: location.pathname,
       },
-      backgroundWarmup: warmup
-        ? {
-            started: true,
-            startedAtS: seconds(this.perfBackgroundWarmupStartedAt),
-            ready: warmup.ready,
-            readyAtS: seconds(this.perfBackgroundWarmupReadyAt),
-            slicesDone: warmup.progress.done,
-            slicesRemaining: warmup.progress.remaining,
-            framesWorked: warmup.framesWorked,
-            totalMs: Math.round(warmup.spentMs * 10) / 10,
-            worstSliceMs: Math.round(warmup.worstMs * 10) / 10,
-            budgetMs: BACKGROUND_WARMUP_BUDGET_MS,
-          }
-        : { started: false },
+      // The one warm-up (`boot/shaderWarmup.ts`) — behind the bus, or behind
+      // the first cover over the park. `phase` is "done" before she can walk,
+      // or something let a cover go early.
+      parkWarmup: {
+        phase: warmup.phase,
+        readyAtS: seconds(warmup.readyAtMs),
+        slicesDone: warmup.progress.done,
+        slicesRemaining: warmup.progress.remaining,
+        programsMade: warmup.programs.made,
+        texturesUploaded: warmup.texturesUploaded,
+        framesWorked: warmup.framesWorked,
+        totalMs: Math.round(warmup.spentMs * 10) / 10,
+        worstJobMs: Math.round(warmup.worstMs * 10) / 10,
+        drawEverythingMs: Math.round(warmup.drawMs * 10) / 10,
+        heldBudgetMs: HELD_WARMUP_BUDGET_MS,
+      },
     };
   }
 
@@ -1382,6 +1433,12 @@ export class Game {
       // sees leaves out the ones under a shut curtain or iris.
       curtainShut: this.miniGames.curtainShut,
       holding: this.revealHold.holding,
+      // Every shader program made so far, and how far the park's warm-up has
+      // got: after the park is on screen the first must not move
+      // (`check:served-no-midwalk-links`), and on a phone a number here that
+      // grows mid-walk is a frame that waited for a link.
+      programs: renderer.info.programs?.length ?? null,
+      parkWarmup: this.parkWarmup.phase,
       gpu: this.perfGpuName,
       userAgent: navigator.userAgent,
       pixelRatio: renderer.getPixelRatio(),
@@ -2437,7 +2494,7 @@ export class Game {
     this.render();
     this.perfProbe?.attribution.renderEnd();
     this.owlFade?.restore();
-    this.advanceBackgroundWarmup();
+    this.finishLeftoverWarmup();
     // A route asked between now and the next tick — a tap, a press on the map —
     // is answered at the start of that tick, out of that frame's budget, rather
     // than spending a second budget in the gap (see `RouteScheduler.endFrame`).
@@ -2445,52 +2502,61 @@ export class Game {
   }
 
   /**
-   * The bus ride's shader warm-up, for a boot that had no bus ride — see
-   * {@link warmTheRestInBackground}. Null until then, and after it is done.
+   * **May the park's warm-up run now?** Only with the park as the scene's
+   * picture and the park's lights as its lights: she is in the garden, no
+   * ride is lighting the scene its own way (`World.rideLightsTheScene` — the
+   * Rail Race's headlamps, the ferris wheel's ride; every light count is a
+   * different program), and no curtain game has the screen instead. Anywhere
+   * else, the park's programs would be keyed on lights the park is never
+   * drawn under. Riding anything else is fine — the cat bus's arrival above
+   * all, which a skip pressed early leaves her on behind the boot's cover.
    */
-  private backgroundWarmup: ShaderWarmup | null = null;
-
-  /**
-   * **What the bus ride would have compiled, compiled now, a slice a frame.**
-   * Called by `main.ts` once the first warm frame of a boot with no bus ride is
-   * on screen. The view she started in is already warm (`holdFirstFrames`);
-   * this is the rest of the park, so walking to its far side links nothing.
-   * The programs are only *asked for* here — linked by the GPU process in
-   * parallel, and long done by the time anything uses them.
-   */
-  warmTheRestInBackground(): void {
-    if (this.backgroundWarmup) return;
-    // The park only, as on the bus: a room is warmed behind its own iris,
-    // against its own lights (`ShaderWarmup`'s note).
-    this.backgroundWarmup = new ShaderWarmup(this.engine.renderer, this.engine.scene, this.camera.camera);
-    if (this.perfProbe) {
-      this.perfBackgroundWarmup = this.backgroundWarmup;
-      this.perfBackgroundWarmupStartedAt = performance.now();
-    }
+  private parkWarmupCanRun(): boolean {
+    return (
+      spaceAt(this.player.position.x, this.player.position.z) === SPACE_GARDEN &&
+      !this.world.rideLightsTheScene &&
+      !this.miniGames.hidesPark
+    );
   }
 
-  private advanceBackgroundWarmup(): void {
-    const warmup = this.backgroundWarmup;
-    if (!warmup) return;
-    if (warmup.ready) {
-      this.backgroundWarmup = null;
-      if (this.perfProbe) this.perfBackgroundWarmupReadyAt = performance.now();
-      return;
+  /**
+   * The park's warm-up is finished behind a cover — the bus, the boot's, the
+   * first iris over the park ({@link parkWarmup}). This only ever has work
+   * when one of those let go before it was done (`RevealHold`'s time limit,
+   * for a driver that never answers): then the rest is done a little a frame
+   * while she plays, rather than left to link on first sight. Never during a
+   * hold — the cover's own share is in `revealHold`'s work.
+   */
+  private finishLeftoverWarmup(): void {
+    // Its last step, the draw, is only ever done behind a cover.
+    if (this.parkWarmup.readyToDraw || this.revealHold.holding || !this.parkWarmupCanRun()) return;
+    if (!this.leftoverWarmupNoted && this.revealHold.holds.length > 0) {
+      this.leftoverWarmupNoted = true;
+      console.warn(
+        `Land of Good Places: the park's shader warm-up was not finished behind the cover ` +
+          `(${this.parkWarmup.phase}, ${this.parkWarmup.progress.remaining} slices left) — finishing it in play.`,
+      );
     }
-    // In the park only: the slices are compiled against the lights that are
-    // on, and the park's are the ones the park is drawn with. Indoors it waits
-    // for her to come back out; a cover being held has the frame to itself.
-    if (this.revealHold.holding) return;
-    if (spaceAt(this.player.position.x, this.player.position.z) !== SPACE_GARDEN) return;
+    this.stepParkWarmup(LEFTOVER_WARMUP_BUDGET_MS);
+  }
+
+  private leftoverWarmupNoted = false;
+
+  /**
+   * One share of the park's warm-up in a frame she plays in, told to
+   * `?perf=1`'s attribution when it is on, so a slow frame says the warm-up
+   * was in it. (A held share runs inside `Game.render`, in a frame nobody
+   * sees, and is that frame's render time — the record says it was held.)
+   */
+  private stepParkWarmup(budgetMs: number): boolean {
+    const warmup = this.parkWarmup;
     const perf = this.perfProbe;
-    if (!perf) {
-      warmup.advance(BACKGROUND_WARMUP_BUDGET_MS);
-      return;
-    }
+    if (!perf) return warmup.advance(budgetMs);
     const slices = warmup.slicesCompiled;
     const started = performance.now();
-    warmup.advance(BACKGROUND_WARMUP_BUDGET_MS);
+    const ready = warmup.advance(budgetMs);
     perf.attribution.noteWarmup(performance.now() - started, warmup.slicesCompiled - slices);
+    return ready;
   }
 
   /**
@@ -2604,12 +2670,15 @@ export class Game {
   }
 
   /**
-   * Holds the first frames back until the view she starts in is warm — for a
-   * boot with no bus ride in front of it (a continued save, a deep link), where
-   * nothing has compiled a single program yet and the first frame used to link
-   * thirty-odd of them (174 ms on the M4 Pro, 259 ms in the plan's trace).
-   * Call before {@link start}; resolves once the first warm frame has been
-   * drawn, which is when the caller may show what covers the canvas.
+   * Holds the first frames back until the view she starts in is warm — and,
+   * if she starts in the park, **the whole park** ({@link parkWarmup}) — for a
+   * boot with no finished bus ride in front of it (a continued save, a deep
+   * link, a ride cut short by its skip), where nothing has compiled a single
+   * program yet. The first frame used to link thirty-odd of them (174 ms on
+   * the M4 Pro, 259 ms in the plan's trace), and the rest of the park was then
+   * warmed while she played, which on a phone meant links in the frames she
+   * walked in. Call before {@link start}; resolves once the first warm frame
+   * has been drawn, which is when the caller may show what covers the canvas.
    */
   holdFirstFrames(): Promise<void> {
     this.perfFirstFramesHeld = true;

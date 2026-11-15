@@ -179,6 +179,7 @@ for (const command of commands) {
       CHECK_DOM_CHURN_URL: BASE,
       // The same hole, found at integration: check:cull-audit reads this one.
       CHECK_CULL_AUDIT_URL: BASE,
+      CHECK_NO_MIDWALK_LINKS_URL: BASE,
     },
   });
   if (result.status !== 0) {

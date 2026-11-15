@@ -1228,14 +1228,17 @@ function rideInThenPlay(
           // **The completion signal, and there is only one.** A park object in
           // hand — not a timer that hopes to match how long one takes to build.
           director.noteParkReady();
-          // **The park, and only the park.** Every room is compiled behind its
-          // own door's iris, against its own lights, the first time she goes in
-          // (`core/viewWarmup.ts`): compiled here, against the park's, it was a
-          // program no room ever draws with — a room hides the sun's rig
-          // (`DayNight.setIndoors`) and the park's own lamps leave the graph
-          // with the park (`World.update`), and the light counts are part of
-          // every program's key.
-          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
+          // **The park, and only the park** — the game's own warm-up, the one
+          // a boot without this ride finishes behind its first cover instead
+          // (`Game.parkWarmup`): every slice under both the park's lightings,
+          // every caster's depth program, linked and used once. Every room is
+          // compiled behind its own door's iris, against its own lights, the
+          // first time she goes in (`core/viewWarmup.ts`): compiled here,
+          // against the park's, it was a program no room ever draws with — a
+          // room hides the sun's rig (`DayNight.setIndoors`) and the park's own
+          // lamps leave the graph with the park (`World.update`), and the light
+          // counts are part of every program's key.
+          warmup = handOverGame.parkWarmup;
           skip.show();
         })
         // **Without this the ride has no bottom.** The generation-failure path
@@ -1276,7 +1279,9 @@ function rideInThenPlay(
     handOverGame?.warmNavigation();
     if (warmup && director.shouldWarmShaders()) {
       const budget = director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS);
-      if (!warmup.ready) {
+      // Everything a share at a time behind the bus; its last step — drawing
+      // the whole park once — is the hand-over's cover's (`Game.parkWarmup`).
+      if (!warmup.readyToDraw) {
         warmup.advance(budget);
       } else if (handOverGame) {
         const reader = handOverGame.bookReader;
@@ -1332,25 +1337,27 @@ async function finishLaunch(
   const rodeIn = handOverGame !== null;
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
-  // **No bus, so no warm-up yet: the first frames are held back until the
-  // view she starts in is warm** (`core/viewWarmup.ts`). A continued save or
-  // a deep link used to link thirty-odd programs and upload forty megabytes
-  // of textures in its first frame — 174 ms on the M4 Pro — with forty-odd
-  // more over the next few. Held, the canvas keeps nothing drawn for those
-  // few frames, and the HUD waits with it, so the park and its buttons still
-  // arrive together, just without the stall.
-  const firstFramesWarm = rodeIn ? Promise.resolve() : game.holdFirstFrames();
+  // **No finished bus ride, so the first frames are held back until the view
+  // she starts in is warm — and, in the park, the whole park**
+  // (`core/viewWarmup.ts`, `Game.parkWarmup`). A continued save or a deep
+  // link used to link thirty-odd programs and upload forty megabytes of
+  // textures in its first frame — 174 ms on the M4 Pro — and then warm the
+  // rest of the park while she walked, which on a phone is the stutter: 247 ms
+  // frames within five seconds of walking (Jim, 15 Nov 2026). A ride whose
+  // skip was pressed before its warm-up finished is the same boot. Held, the
+  // canvas keeps nothing drawn, and the HUD waits with it, so the park and its
+  // buttons still arrive together, just without the stall.
+  // After the bus too, now: the warm-up's last step is a draw of the whole
+  // park, which needs a frame that paints the real picture over it.
+  const held = !(rodeIn && game.parkWarmup.ready);
+  const firstFramesWarm = held ? game.holdFirstFrames() : Promise.resolve();
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
   // park's, and the park is what is about to be on screen.
-  if (rodeIn) uiRoot.style.visibility = '';
+  if (!held) uiRoot.style.visibility = '';
   else {
     uiRoot.style.visibility = 'hidden';
     void firstFramesWarm.then(() => {
       uiRoot.style.visibility = '';
-      // …and then everything else, behind her, a slice a frame — what the
-      // bus ride would have compiled, so the first walk to the far side of
-      // the park links nothing either.
-      game.warmTheRestInBackground();
     });
   }
 

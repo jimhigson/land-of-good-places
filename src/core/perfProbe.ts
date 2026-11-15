@@ -202,7 +202,7 @@ export class PerfProbe {
   /** Context the probe cannot know itself — supplied by `Game`. */
   readonly describe: () => Record<string, unknown>;
   /**
-   * Once-a-session facts from `Game` — the boot path, the background warm-up —
+   * Once-a-session facts from `Game` — the boot path, the park's warm-up —
    * asked only when the report is copied, never on a redraw.
    */
   readonly detail: () => Record<string, unknown>;

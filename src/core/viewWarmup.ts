@@ -59,6 +59,48 @@ export const WARM_TEXTURE_BUDGET_MS = 6;
  */
 export const WARM_HOLD_LIMIT_MS = 4000;
 
+/**
+ * The longest a cover may wait for the park's whole warm-up
+ * ({@link RevealHold.setWork}) — the boot of a continued save or a deep link,
+ * or the first walk out of the room a save restored her into — **while it is
+ * still getting somewhere**. That is every program the park can need, under
+ * both its lightings, linked: measured 0.2–0.4 s on the M4 Pro and 2 s under
+ * SwiftShader, and a phone or a CI runner is slower again. A cover that lets
+ * go early hands what is left to the frames she plays in, which is the
+ * stutter this exists to prevent, so it is not cut off at
+ * {@link WARM_HOLD_LIMIT_MS}: it lets go when the work has not moved for that
+ * long (a driver that never answers, a hidden tab), or at this cap, whichever
+ * comes first. It still never waits for ever.
+ */
+export const PARK_WARM_HOLD_CAP_MS = 60_000;
+
+/**
+ * Work a cover must also see finished before it lifts, a frame's share at a
+ * time — the park's warm-up (`boot/shaderWarmup.ts`), set once by `Game`.
+ */
+export interface HoldWork {
+  /** Whether any is left at all. Decides how long a cover may wait for it. */
+  readonly pending: boolean;
+  /**
+   * A count that only goes up as the work gets done. A cover waits on while
+   * it moves — see {@link PARK_WARM_HOLD_CAP_MS}.
+   */
+  readonly progress: number;
+  /**
+   * One frame's share. True once there is nothing left that this cover is
+   * for — none at all, or none that can be done behind it (she is not in the
+   * park, so the park's programs cannot be keyed on its lights here) — but
+   * {@link drawBehind}.
+   */
+  step(): boolean;
+  /**
+   * Whatever the work must draw, drawn into the cover's `behind` frame just
+   * before that frame's real draw paints over it — the park's warm-up drawing
+   * everything once (`ShaderWarmup.drawEverything`).
+   */
+  drawBehind?(): void;
+}
+
 /** What `WebGLRenderer.properties` keeps for a material — only the field read here. */
 interface MaterialState {
   readonly currentProgram?: { isReady?: () => boolean };
@@ -109,8 +151,9 @@ export interface WarmReach {
  * library, and compiling its hundreds of materials against the library's
  * lights would create programs nothing ever draws. Every space is its own
  * plate hundreds of metres from the next, so a ball round her is the room
- * she is in — and, outdoors, the stretch of park she reaches before the bus
- * ride's warm-up (or `Game.warmTheRestInBackground`) has covered the rest.
+ * she is in. Outdoors the whole park is warm before she can walk anyway — the
+ * bus ride's warm-up, or the first cover over the park, carries all of it
+ * (`boot/shaderWarmup.ts`, {@link RevealHold.setWork}).
  */
 export function drawnBy(scene: Object3D, camera: Camera, reach?: WarmReach, frustum: Frustum = _frustum): Object3D[] {
   if (scene.matrixWorldAutoUpdate) scene.updateMatrixWorld();
@@ -178,17 +221,31 @@ function everythingIn(scene: Object3D, camera: Camera): Object3D[] {
  * and then prepares the material of everything `scene.traverse` visits. One
  * call for the whole view, so the scene's lights are gathered once rather
  * than once per object.
+ *
+ * **Never hand `compile` a subtree of the scene itself** — use this, with
+ * `subtrees`. Given a part of the scene it gathers that part's lights a second
+ * time, on top of the same lights in the scene, so every program it makes is
+ * keyed on a light count no frame ever has: measured on seed 5, eleven
+ * programs for the ferris wheel's and the train's slices with four point
+ * lights where the park has three. Worse, three's `render` draws the shadow
+ * pass *before* it sets up that frame's lights, so the next frame's depth
+ * programs were keyed on the phantom count too — six more, linked in a frame
+ * she could see (`boot/shaderWarmup.ts`).
  */
-class ObjectList extends Object3D {
+export class ObjectList extends Object3D {
   private readonly list: readonly Object3D[];
+  private readonly subtrees: boolean;
 
-  constructor(list: readonly Object3D[]) {
+  /** `subtrees`: everything under each object, not only the objects. */
+  constructor(list: readonly Object3D[], subtrees = false) {
     super();
     this.list = list;
+    this.subtrees = subtrees;
   }
 
   override traverse(callback: (object: Object3D) => void): void {
-    for (const object of this.list) callback(object);
+    if (this.subtrees) for (const object of this.list) object.traverse(callback);
+    else for (const object of this.list) callback(object);
   }
 
   override traverseVisible(): void {
@@ -327,7 +384,7 @@ export interface HoldRecord extends WarmReport {
   readonly heldFrames: number;
   /** Milliseconds from the request to the cover being let go. */
   readonly heldMs: number;
-  /** True when the hold gave up at {@link WARM_HOLD_LIMIT_MS} rather than finishing. */
+  /** True when the hold gave up — nothing moving for {@link WARM_HOLD_LIMIT_MS}, or the cap — rather than finishing. */
   readonly timedOut: boolean;
 }
 
@@ -349,13 +406,21 @@ type HoldPhase = 'idle' | 'collect' | 'wait' | 'behind' | 'settle';
  * - `wait` — textures up, links polled; nothing drawn, until all are done.
  * - `behind` — one real draw behind the cover: geometry uploads, and whatever
  *   the cull did not foresee (the shadow pass's own depth programs) links
- *   here, where nobody can see the frame it costs.
+ *   here, where nobody can see the frame it costs. The work's own draw, if it
+ *   has one ({@link HoldWork.drawBehind}), goes first and is painted over.
  * - `settle` — one more ordinary draw, so the frame the cover starts lifting
  *   on is an ordinary one rather than the one that carried the uploads (a
  *   long frame there would jump the iris's opening by its own length).
  *
  * A request while one is running starts again from `collect` — the view
  * changed again — and every waiter is answered when the newest one is done.
+ *
+ * **And the park's whole warm-up rides along** ({@link setWork}): `collect`
+ * and `wait` give it a frame's share as well, and the cover stays up until it
+ * says there is nothing left for this cover — so whichever cover is the first
+ * to stand over the park (the boot of a continued save or a deep link, the
+ * first walk out of a room, a bus ride cut short by its skip) is where every
+ * program the park can need is made, and no later frame makes one.
  */
 export class RevealHold {
   private readonly renderer: WebGLRenderer;
@@ -367,16 +432,31 @@ export class RevealHold {
   private heldFrames = 0;
   private limitTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly history: HoldRecord[] = [];
+  private work: HoldWork | null = null;
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
     this.warmup = new ViewWarmup(renderer);
   }
 
+  /** What every cover must also see finished before it lifts — see {@link HoldWork}. */
+  setWork(work: HoldWork | null): void {
+    this.work = work;
+  }
+
+  /** The view is warm, and so is whatever else this cover is waiting for. */
+  private ready(): boolean {
+    const view = this.warmup.step(WARM_TEXTURE_BUDGET_MS);
+    // Both, every frame, so the park's share is not starved by a slow view.
+    const work = this.work ? this.work.step() : true;
+    return view && work;
+  }
+
   /**
    * The cover is up and what is behind it is about to change (or just has).
    * Resolves once the view is warm and has been drawn behind the cover —
-   * never later than {@link WARM_HOLD_LIMIT_MS}, frames or no frames.
+   * never later than {@link WARM_HOLD_LIMIT_MS} of nothing getting done
+   * ({@link armLimit}), frames or no frames.
    */
   request(why: string): Promise<void> {
     return new Promise((resolve) => {
@@ -389,10 +469,30 @@ export class RevealHold {
         this.why = `${this.why}+${why}`;
       }
       this.phase = 'collect';
-      clearTimeout(this.limitTimer);
-      // A hidden tab runs no frames; the cover must still come off.
-      this.limitTimer = setTimeout(() => this.letGo(true), WARM_HOLD_LIMIT_MS);
+      this.armLimit();
     });
+  }
+
+  /**
+   * The cover comes off by itself if nothing is getting done: after
+   * {@link WARM_HOLD_LIMIT_MS} — but, while the park's warm-up is still moving,
+   * not until it has stood still that long, or {@link PARK_WARM_HOLD_CAP_MS}
+   * after the request, whichever is first. A hidden tab runs no frames, so the
+   * work stands still and the cover still comes off.
+   */
+  private armLimit(): void {
+    clearTimeout(this.limitTimer);
+    let seen = this.work?.progress ?? 0;
+    const check = (): void => {
+      const work = this.work;
+      if (work?.pending && work.progress !== seen && performance.now() - this.requestedAt < PARK_WARM_HOLD_CAP_MS) {
+        seen = work.progress;
+        this.limitTimer = setTimeout(check, WARM_HOLD_LIMIT_MS);
+        return;
+      }
+      this.letGo(true);
+    };
+    this.limitTimer = setTimeout(check, WARM_HOLD_LIMIT_MS);
   }
 
   /** True while a cover is being held for the view behind it. */
@@ -427,15 +527,17 @@ export class RevealHold {
         this.phase = 'wait';
         this.heldFrames += 1;
         // Polled at once: a view that is already warm is ready this frame.
-        if (!this.warmup.step(WARM_TEXTURE_BUDGET_MS)) return;
+        if (!this.ready()) return;
         this.phase = 'behind';
         return;
       case 'wait':
         this.heldFrames += 1;
-        if (!this.warmup.step(WARM_TEXTURE_BUDGET_MS)) return;
+        if (!this.ready()) return;
         this.phase = 'behind';
         return;
       case 'behind':
+        // Painted over by the real draw straight after, in the same frame.
+        this.work?.drawBehind?.();
         draw();
         this.phase = 'settle';
         return;
