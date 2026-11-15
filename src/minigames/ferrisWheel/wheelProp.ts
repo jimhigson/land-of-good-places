@@ -248,6 +248,10 @@ export function createFerrisWheelProp(
   const wheel = new Group();
   wheel.name = 'wheel';
   wheel.position.y = HUB_Y;
+  // A handle on a driven node: `update` turns it every frame, and a node
+  // carrying `userData` is left live by the browser's static passes
+  // (`world/staticFreeze.ts`, `world/staticBatch.ts`).
+  wheel.userData.turns = true;
   root.add(wheel);
 
   for (const sz of [-1, 1] as const) {

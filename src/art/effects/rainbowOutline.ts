@@ -16,6 +16,7 @@ import {
 } from 'three';
 import { ART } from '../style/artPalette';
 import { hexToCss } from '../style/bridge';
+import { isStaticBatch } from '../../world/staticBatch';
 
 /**
  * The rainbow interaction outline — the drawing half of GAME_DESIGN.md's
@@ -199,6 +200,10 @@ export function buildHighlightShell(object: Object3D, thicknessScale = 1): Highl
     const collect = (solidOnly: boolean): void => {
       object.traverse((child) => {
         if (!isMesh(child) || !child.visible) return;
+        // A static batch draws for meshes that are still here, off layer 0
+        // (`world/staticBatch.ts`): the shell is built from them, as it always
+        // was, and never from the batch as well.
+        if (isStaticBatch(child)) return;
         // `castShadow` is the asset contract's own marker for "solid part of the
         // silhouette" (`solid()` vs `decal()`), which is exactly the filter this
         // wants — and it drops the ink outline meshes, which are back-side

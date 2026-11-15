@@ -87,6 +87,10 @@ export interface Locomotive extends TrainCar {
 export function createLocomotive(): Locomotive {
   const root = new Group();
   root.name = 'train-locomotive';
+  // A handle on a driven node: it runs the track (the browser's static passes
+  // leave it live, and merge its static parts in its own frame instead —
+  // `world/staticBatch.ts`).
+  root.userData.drives = true;
 
   const bodyMaterial = toonMaterial(ART.jumperRed);
   const trimMaterial = toonMaterial(ART.helmetGold);
@@ -189,6 +193,8 @@ export function createLocomotive(): Locomotive {
   const lampMaterial = new MeshBasicMaterial({ color: ART.cream, fog: true });
   const lamp = new Mesh(new SphereGeometry(0.15, 12, 9), lampMaterial);
   lamp.position.set(0, CAR_FLOOR_Y + 0.35, LOCO_LENGTH / 2 - 0.02);
+  // Its colour follows the dusk (`ParkTrain`): a handle, so it stays live.
+  lamp.userData.glows = true;
   root.add(lamp);
   lamps.push(lampMaterial);
 
@@ -202,6 +208,10 @@ export function createLocomotive(): Locomotive {
 export function createCarriage(colour: number, index: number): TrainCar {
   const root = new Group();
   root.name = `train-carriage-${index}`;
+  // A handle on a driven node: it runs the track (the browser's static passes
+  // leave it live, and merge its static parts in its own frame instead —
+  // `world/staticBatch.ts`).
+  root.userData.drives = true;
 
   const bodyMaterial = toonMaterial(colour);
   const trimMaterial = toonMaterial(ART.cream);
@@ -284,6 +294,8 @@ export function createCarriage(colour: number, index: number): TrainCar {
     CAR_FLOOR_Y + sideHeight + 0.44,
     -(CARRIAGE_LENGTH / 2 - 0.14),
   );
+  // Its colour follows the dusk (`ParkTrain`): a handle, so it stays live.
+  lantern.userData.glows = true;
   lanternThing.add(lantern);
   lamps.push(lanternMaterial);
 
@@ -332,6 +344,8 @@ function addWheels(
     for (const side of [-1, 1] as const) {
       const axle = new Group();
       axle.position.set(side * WHEEL_OFFSET, RAIL_HEIGHT + radius, z);
+      // Spun as the train rolls (`ParkTrain`): a handle, so it stays live.
+      axle.userData.spins = true;
       // Wheels roll about the car's X axis; the cylinder's axis is Y, so it is
       // laid on its side once here and spun on X for the rest of its life.
       const tyre = solidMesh(tyreGeometry, tyreMaterial);

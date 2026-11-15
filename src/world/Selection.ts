@@ -3,6 +3,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { Player } from '../entities/Player';
 import { highlightKey, type HighlightTarget } from './highlight';
+import { boxWithoutBatches } from './staticBatch';
 import {
   PRIMARY_ACTION,
   reachDistance,
@@ -623,7 +624,10 @@ export class Selection implements GameSystem {
     const key = highlightKey(target);
     const existing = this.bounds.get(key);
     if (existing) return existing;
-    const box = new Box3().setFromObject(target.object);
+    // As if no static batch hung inside it (`world/staticBatch.ts`): a batch
+    // draws for meshes still here to be measured, so the box is the one the
+    // target always had.
+    const box = boxWithoutBatches(target.object, new Box3());
     if (box.isEmpty()) return null;
     this.bounds.set(key, box);
     return box;
