@@ -448,6 +448,16 @@ should look like a friendly part of the game, not a browser error.*
 *Built: `ui/UpdateGate.ts` replaces `ui/UpdateToast.ts`. The toast-covering-
 the-character-creation-controls bug is superseded and closed with it.*
 
+*15 Nov 2026: the gate now also comes up as soon as a newer version is known
+to exist, before the park starts, saying "Getting it…" while it downloads —
+so she can no longer start playing the old park in those seconds (Jim's
+iPhone: "refreshed the page a few times and eventually we have it"). If the
+download takes more than 20 s, the card says "It is still on its way — here
+is your park for now!" and gets out of the way; when the new park has
+arrived, the gate comes back as above, unskippable. That stand-down is not a
+dismiss: nothing she can press does it, and an update that is ready is still
+never optional.*
+
 ### The top bar takes too much space (27 July 2026 — queued)
 
 The row of pills across the top of the screen takes up too much room. **Hide
