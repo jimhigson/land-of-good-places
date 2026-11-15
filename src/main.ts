@@ -1279,7 +1279,9 @@ function rideInThenPlay(
     handOverGame?.warmNavigation();
     if (warmup && director.shouldWarmShaders()) {
       const budget = director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS);
-      if (!warmup.ready) {
+      // Everything a share at a time behind the bus; its last step — drawing
+      // the whole park once — is the hand-over's cover's (`Game.parkWarmup`).
+      if (!warmup.readyToDraw) {
         warmup.advance(budget);
       } else if (handOverGame) {
         const reader = handOverGame.bookReader;
@@ -1345,6 +1347,8 @@ async function finishLaunch(
   // skip was pressed before its warm-up finished is the same boot. Held, the
   // canvas keeps nothing drawn, and the HUD waits with it, so the park and its
   // buttons still arrive together, just without the stall.
+  // After the bus too, now: the warm-up's last step is a draw of the whole
+  // park, which needs a frame that paints the real picture over it.
   const held = !(rodeIn && game.parkWarmup.ready);
   const firstFramesWarm = held ? game.holdFirstFrames() : Promise.resolve();
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the

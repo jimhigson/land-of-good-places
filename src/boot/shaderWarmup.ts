@@ -98,6 +98,12 @@ export interface ShaderWarmupOptions {
    * "everything asked for".
    */
   readonly finish?: boolean;
+  /**
+   * Then wait for one {@link ShaderWarmup.drawEverything} — every mesh drawn
+   * once under each lighting — before `ready`. The GPU builds a program's
+   * pipeline the first time it draws with it, not when it links it.
+   */
+  readonly draw?: boolean;
 }
 
 /** `WebGLProgram` as three builds it — `isReady` is real but untyped. */
@@ -117,7 +123,7 @@ interface TextureState {
   readonly __version?: number;
 }
 
-type Phase = 'compile' | 'link' | 'first use' | 'textures' | 'done';
+type Phase = 'compile' | 'link' | 'first use' | 'textures' | 'draw' | 'done';
 
 /**
  * **Every program the park can need, made behind a cover — the one owner of
@@ -160,6 +166,16 @@ type Phase = 'compile' | 'link' | 'first use' | 'textures' | 'done';
  * here without blocking; each program's first use (its uniforms and
  * attributes read back, a round trip each) happens here, once it is linked;
  * and every texture its materials sample is uploaded a few at a time.
+ *
+ * And with `draw`, **drawn once**: a linked program is not yet a pipeline the
+ * GPU can draw with — Metal builds that (ANGLE, Safari and Chrome alike) the
+ * first time a draw uses the program. Measured on the M4 Pro with everything
+ * linked: the frame dusk fell on still went 335–413 ms without a single link,
+ * the main thread idle, the first time those night programs were ever drawn
+ * on the machine (and 14–20 ms once the system had cached them). So the last
+ * step is {@link drawEverything}: the whole park, every mesh shown and none
+ * culled, drawn once under each lighting, from a frame that paints its real
+ * picture straight over it.
  *
  * ## Who drives it
  *
@@ -214,6 +230,7 @@ export class ShaderWarmup {
   private totalMs = 0;
   private worstSliceMs = 0;
   private readyAt = -1;
+  private drawnMs = 0;
   /** Units of work done — jobs, links seen finished, first uses, uploads: {@link workDone}. */
   private doneCount = 0;
 
@@ -239,7 +256,9 @@ export class ShaderWarmup {
   }
 
   /**
-   * One frame's worth of warm-up; true once it is {@link ready}.
+   * One frame's worth of warm-up; true once there is nothing left for it to
+   * do a share at a time — {@link ready}, or waiting for its one
+   * {@link drawEverything} ({@link readyToDraw}).
    *
    * Takes whole jobs only. A job that overruns the budget is *finished*
    * rather than abandoned — `compile()` cannot be interrupted — so the budget
@@ -249,7 +268,7 @@ export class ShaderWarmup {
    * for it.
    */
   advance(budgetMs: number): boolean {
-    if (this.phaseValue === 'done') return true;
+    if (this.readyToDraw) return true;
     if (!this.startedFlag) this.start();
     const started = performance.now();
     this.framesWorkedCount += 1;
@@ -283,10 +302,10 @@ export class ShaderWarmup {
     if (this.phaseValue === 'textures') this.upload(started, budgetMs);
     this.totalMs += performance.now() - started;
     if (this.phaseValue === 'done' && this.readyAt < 0) this.readyAt = performance.now();
-    return this.phaseValue === 'done';
+    return this.readyToDraw;
   }
 
-  /** Everything asked for — and, with `finish`, linked, used and uploaded. The one completion signal; there is no timer. */
+  /** Everything asked for — and, with `finish` and `draw`, linked, used, uploaded and drawn. The one completion signal; there is no timer. */
   get ready(): boolean {
     return this.phaseValue === 'done';
   }
@@ -465,7 +484,69 @@ export class ShaderWarmup {
         this.texturesUploadedCount += 1;
       }
     }
+    this.phaseValue = this.options.draw ? 'draw' : 'done';
+  }
+
+  /**
+   * **The whole park, drawn once under each lighting** — every mesh shown,
+   * none culled, the sun's shadow map drawn too — into whatever the renderer
+   * draws to now, so the GPU builds every pipeline the park can draw with
+   * behind the cover rather than on the frame that first needs it. It also
+   * puts every buffer on the GPU.
+   *
+   * **Only from a frame that then clears and draws its real picture over it**
+   * (`RevealHold`'s `behind` frame): everything is drawn here, the hidden
+   * things too, and must never be what is shown. The lights are left as they
+   * are but for the lightings' own — a hidden light stays hidden — and every
+   * mesh's `visible` and `frustumCulled` are put back after; the sun's map
+   * is marked to be drawn again, properly, by the next frame.
+   */
+  drawEverything(): void {
+    if (this.phaseValue !== 'draw') return;
+    const started = performance.now();
+    const restore: [Object3D, boolean, boolean][] = [];
+    const shadowed: { shadow: { needsUpdate: boolean } }[] = [];
+    this.scene.traverse((object) => {
+      const light = object as Object3D & { isLight?: boolean; castShadow: boolean; shadow?: { needsUpdate: boolean } };
+      if (light.isLight === true) {
+        if (light.castShadow && light.shadow) shadowed.push(light as { shadow: { needsUpdate: boolean } });
+        return;
+      }
+      restore.push([object, object.visible, object.frustumCulled]);
+    });
+    try {
+      for (const [object] of restore) {
+        object.visible = true;
+        object.frustumCulled = false;
+      }
+      this.underEachLighting(() => {
+        // The shadow pass too, whatever the hour: at night three skips it.
+        for (const light of shadowed) light.shadow.needsUpdate = true;
+        this.renderer.render(this.scene, this.camera);
+      });
+    } finally {
+      for (const [object, visible, culled] of restore) {
+        object.visible = visible;
+        object.frustumCulled = culled;
+      }
+      // Drawn with every caster in it: drawn again, as it is, next frame.
+      for (const light of shadowed) light.shadow.needsUpdate = true;
+    }
+    if (this.options.lightings && this.options.lightings.length > 0) this.relight();
+    this.drawnMs = performance.now() - started;
+    this.totalMs += this.drawnMs;
     this.phaseValue = 'done';
+    this.readyAt = performance.now();
+  }
+
+  /** Everything but {@link drawEverything} is done — the draw is all that is left (or nothing is). */
+  get readyToDraw(): boolean {
+    return this.phaseValue === 'draw' || this.phaseValue === 'done';
+  }
+
+  /** Milliseconds {@link drawEverything} took; 0 until it has run. */
+  get drawMs(): number {
+    return this.drawnMs;
   }
 }
 

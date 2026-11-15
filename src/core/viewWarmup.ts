@@ -89,9 +89,16 @@ export interface HoldWork {
   /**
    * One frame's share. True once there is nothing left that this cover is
    * for — none at all, or none that can be done behind it (she is not in the
-   * park, so the park's programs cannot be keyed on its lights here).
+   * park, so the park's programs cannot be keyed on its lights here) — but
+   * {@link drawBehind}.
    */
   step(): boolean;
+  /**
+   * Whatever the work must draw, drawn into the cover's `behind` frame just
+   * before that frame's real draw paints over it — the park's warm-up drawing
+   * everything once (`ShaderWarmup.drawEverything`).
+   */
+  drawBehind?(): void;
 }
 
 /** What `WebGLRenderer.properties` keeps for a material — only the field read here. */
@@ -399,7 +406,8 @@ type HoldPhase = 'idle' | 'collect' | 'wait' | 'behind' | 'settle';
  * - `wait` — textures up, links polled; nothing drawn, until all are done.
  * - `behind` — one real draw behind the cover: geometry uploads, and whatever
  *   the cull did not foresee (the shadow pass's own depth programs) links
- *   here, where nobody can see the frame it costs.
+ *   here, where nobody can see the frame it costs. The work's own draw, if it
+ *   has one ({@link HoldWork.drawBehind}), goes first and is painted over.
  * - `settle` — one more ordinary draw, so the frame the cover starts lifting
  *   on is an ordinary one rather than the one that carried the uploads (a
  *   long frame there would jump the iris's opening by its own length).
@@ -528,6 +536,8 @@ export class RevealHold {
         this.phase = 'behind';
         return;
       case 'behind':
+        // Painted over by the real draw straight after, in the same frame.
+        this.work?.drawBehind?.();
         draw();
         this.phase = 'settle';
         return;

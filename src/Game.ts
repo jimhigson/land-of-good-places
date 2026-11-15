@@ -831,6 +831,7 @@ export class Game {
       variants: [this.foliageFade.fadedVariant()],
       shadows: true,
       finish: true,
+      draw: true,
     });
     const parkWarmup = this.parkWarmup;
     this.revealHold.setWork({
@@ -845,6 +846,11 @@ export class Game {
       // park is lit (`parkWarmupCanRun`). Anywhere else this cover is not the
       // one for it, and a later one over the park will be.
       step: () => parkWarmup.ready || !this.parkWarmupCanRun() || parkWarmup.advance(HELD_WARMUP_BUDGET_MS),
+      // …and its last step, every pipeline built by drawing the whole park
+      // once, into the frame the cover's real draw paints over.
+      drawBehind: () => {
+        if (this.parkWarmupCanRun()) parkWarmup.drawEverything();
+      },
     });
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
     // when a child is standing at the lift doors, calls the car, and then lists
@@ -1382,6 +1388,7 @@ export class Game {
         framesWorked: warmup.framesWorked,
         totalMs: Math.round(warmup.spentMs * 10) / 10,
         worstJobMs: Math.round(warmup.worstMs * 10) / 10,
+        drawEverythingMs: Math.round(warmup.drawMs * 10) / 10,
         heldBudgetMs: HELD_WARMUP_BUDGET_MS,
       },
     };
@@ -2521,7 +2528,8 @@ export class Game {
    * hold — the cover's own share is in `revealHold`'s work.
    */
   private finishLeftoverWarmup(): void {
-    if (this.parkWarmup.ready || this.revealHold.holding || !this.parkWarmupCanRun()) return;
+    // Its last step, the draw, is only ever done behind a cover.
+    if (this.parkWarmup.readyToDraw || this.revealHold.holding || !this.parkWarmupCanRun()) return;
     if (!this.leftoverWarmupNoted && this.revealHold.holds.length > 0) {
       this.leftoverWarmupNoted = true;
       console.warn(
