@@ -2496,16 +2496,18 @@ export class Game {
 
   /**
    * **May the park's warm-up run now?** Only with the park as the scene's
-   * picture and the park's lights as its lights: she is in the garden, on her
-   * feet (a ride may light the scene its own way — the Rail Race's headlamps
-   * are two spot lights — and every light count is a different program), and
-   * no curtain game has the screen instead. Anywhere else, the park's
-   * programs would be keyed on lights the park is never drawn under.
+   * picture and the park's lights as its lights: she is in the garden, no
+   * ride is lighting the scene its own way (`World.rideLightsTheScene` — the
+   * Rail Race's headlamps, the ferris wheel's ride; every light count is a
+   * different program), and no curtain game has the screen instead. Anywhere
+   * else, the park's programs would be keyed on lights the park is never
+   * drawn under. Riding anything else is fine — the cat bus's arrival above
+   * all, which a skip pressed early leaves her on behind the boot's cover.
    */
   private parkWarmupCanRun(): boolean {
     return (
       spaceAt(this.player.position.x, this.player.position.z) === SPACE_GARDEN &&
-      !this.player.riding &&
+      !this.world.rideLightsTheScene &&
       !this.miniGames.hidesPark
     );
   }

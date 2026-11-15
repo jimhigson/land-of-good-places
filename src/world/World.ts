@@ -724,6 +724,18 @@ export class World implements GameSystem {
    * are the scene's lights there and nowhere else — which is the only place
    * `Game` lets the warm-up run.
    */
+  /**
+   * **A ride is lighting the scene its own way** — the Rail Race's headlamps,
+   * the ferris wheel's ride hiding the park's wheel and its hub light. Every
+   * other ride, the cat bus's arrival among them, leaves the park's lights as
+   * they are. The park's warm-up waits while this is true: its programs are
+   * keyed on {@link parkLightings}, and a ride's lights would key them on a
+   * count the park is never walked under.
+   */
+  get rideLightsTheScene(): boolean {
+    return this.railRace.lightsTheScene || this.ferrisWheel.lightsTheScene;
+  }
+
   parkLightings(): WarmLighting[] {
     const switched = [...this.fairyLights.switchedLights, ...this.lampPosts.switchedLights];
     const lighting = (name: string, on: boolean): WarmLighting => ({

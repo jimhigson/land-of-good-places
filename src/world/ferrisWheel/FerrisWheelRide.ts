@@ -717,6 +717,17 @@ export class FerrisWheelRide implements GameSystem {
     return this.riding && this.gondola !== null;
   }
 
+  /**
+   * **The ride lights the park its own way while it runs**: the park's own
+   * wheel — and its hub light — is hidden for the length of a ride, and above
+   * the clouds the whole park is, so the scene has fewer lights than the park
+   * is ever walked under. The park's shader warm-up waits while this is true
+   * (`World.rideLightsTheScene`).
+   */
+  get lightsTheScene(): boolean {
+    return this.riding;
+  }
+
   /** The ✕, Backspace, the pause menu — anything that says "let me out". */
   quit(): void {
     this.leave();
