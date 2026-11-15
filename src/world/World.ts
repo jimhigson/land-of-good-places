@@ -1,4 +1,5 @@
 import type { Object3D, Scene } from 'three';
+import type { WarmLighting } from '../boot/shaderWarmup';
 import type { DoorwayExit } from '../entities/doorwayTap';
 import { LOBBY, hotelDoorBands } from './hotel/layout';
 import { reptileExitBand } from './reptileHouse/shell';
@@ -704,6 +705,42 @@ export class World implements GameSystem {
    */
   setParkVisible(visible: boolean): void {
     for (const group of this.parkGroups) group.visible = visible;
+  }
+
+  /**
+   * **The two ways the park is lit — by day and by night — for the shader
+   * warm-up** (`boot/shaderWarmup.ts`).
+   *
+   * Every program's key holds the number of lights in the scene, for every
+   * material, lit or not, so the park's materials are two programs each: one
+   * for the frames before dusk and one for the frames after. Only the lamps'
+   * and the fairy lights' real lights change between the two, and they change
+   * together, on one switch (`PARK_LIGHTS_ON_ABOVE`); so a lighting here is
+   * just those lights put on or off for the length of `fn`, and back after.
+   * Asked of the light pools themselves, so a light added to either is in
+   * both lightings without anyone listing it.
+   *
+   * Only meaningful with her in the park — the park's own lights and the sun
+   * are the scene's lights there and nowhere else — which is the only place
+   * `Game` lets the warm-up run.
+   */
+  parkLightings(): WarmLighting[] {
+    const switched = [...this.fairyLights.switchedLights, ...this.lampPosts.switchedLights];
+    const lighting = (name: string, on: boolean): WarmLighting => ({
+      name,
+      during: (fn) => {
+        const was = switched.map((light) => light.visible);
+        for (const light of switched) light.visible = on;
+        try {
+          fn();
+        } finally {
+          switched.forEach((light, i) => {
+            light.visible = was[i] ?? light.visible;
+          });
+        }
+      },
+    });
+    return [lighting('day', false), lighting('night', true)];
   }
 
   /**

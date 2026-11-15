@@ -1145,6 +1145,23 @@ export const DAY_START_TIME = 0.34;
 export const FAIRY_LIGHT_ON = 0.735;
 export const FAIRY_LIGHT_OFF = 0.245;
 
+/**
+ * **The park's real lights are switched on above this much glow** (0–1, the
+ * `nightFactor` `World` hands the lamps and the fairy lights) — and only by
+ * it: every one of them is visible exactly when the glow is above this, and
+ * dimmed, never hidden, for any other reason.
+ *
+ * That is what makes the park's lighting **two states and no more** — its
+ * real lights all off, or all on — and the number of lights is part of every
+ * shader program's key, for every material. The lamp pool used to hide a light
+ * as it was handed from one lamp to the next, so the count wandered between
+ * nine and ten point lights all night as she walked, and each count it reached
+ * linked a fresh program for everything in sight (`boot/shaderWarmup.ts`).
+ * `World.parkLightings` is the warm-up's copy of these two states — asked of
+ * the lights themselves, not kept beside them.
+ */
+export const PARK_LIGHTS_ON_ABOVE = 0.02;
+
 // ---------------------------------------------------------------- renderer
 
 /** Device pixel ratio is clamped to this to keep 60fps on laptops. */

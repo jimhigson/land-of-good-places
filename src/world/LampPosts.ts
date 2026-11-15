@@ -7,6 +7,7 @@ import { placeOnSphere, terrainHeight, yAtAltitude } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 import { roundTopHalf } from './measuredTop';
+import { PARK_LIGHTS_ON_ABOVE } from '../core/constants';
 
 /**
  * Cute curly cast-iron-style lamp posts, standing just off the paths.
@@ -321,7 +322,7 @@ export class LampPosts implements GameSystem {
     }
 
     this.groundGlowMaterial.opacity = lit * 0.5;
-    this.groundGlow.visible = lit > 0.02;
+    this.groundGlow.visible = lit > PARK_LIGHTS_ON_ABOVE;
 
     this.assignNearestLights(playerPosition);
     // The hand-over boundary: the distance to the furthest lamp currently
@@ -354,8 +355,22 @@ export class LampPosts implements GameSystem {
       const distance = Math.sqrt(this.nearestDistance[i] as number);
       const handover = boundary > fadeFrom ? smoothstep(boundary, fadeFrom, distance) : 1;
       light.intensity = lit * LIGHT_INTENSITY * flicker * handover;
-      light.visible = lit > 0.02 && handover > 0.001;
+      // **Dimmed to nothing, never hidden, as it is handed over.** Hiding the
+      // light at the boundary changed how many lights the park has — nine or
+      // ten as she walked — and every count is a shader program for every
+      // material in sight: 60 programs linked mid-walk on one night's tour of
+      // seed 5. One switch, the park's (`PARK_LIGHTS_ON_ABOVE`).
+      light.visible = lit > PARK_LIGHTS_ON_ABOVE;
     }
+  }
+
+  /**
+   * The real lights this pool switches with the night — for the shader
+   * warm-up, which compiles the park with them on and with them off
+   * (`World.parkLightings`).
+   */
+  get switchedLights(): readonly PointLight[] {
+    return this.lights;
   }
 
   dispose(): void {

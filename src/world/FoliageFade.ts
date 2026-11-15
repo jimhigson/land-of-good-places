@@ -1,4 +1,5 @@
-import { Group, Mesh, MeshToonMaterial, Vector3 } from 'three';
+import { Group, Mesh, MeshToonMaterial, Vector3, type Object3D } from 'three';
+import type { WarmVariant } from '../boot/shaderWarmup';
 import { damp } from '../core/mathUtils';
 import { toonMaterial } from '../art/style/materials';
 import {
@@ -99,6 +100,12 @@ export interface SightlineOccluder {
   readonly radius: number;
   /** 1 = fully solid; {@link MIN_ALPHA} = faded as far as this system ever goes. */
   setFade(alpha: number): void;
+  /**
+   * What it fades. A faded material is a different shader program from the
+   * solid one (`transparent` is in the key), so the warm-up compiles this
+   * faded as well as solid — see {@link FoliageFade.fadedVariant}.
+   */
+  readonly root?: Object3D;
 }
 
 /** How many trees may be mid-fade at once. Generous for a fixed isometric view — normally 0 or 1. */
@@ -256,6 +263,31 @@ export class FoliageFade implements GameSystem {
   addOccluder(occluder: SightlineOccluder): void {
     this.selfFading.push({ occluder, alpha: 1 });
     occluder.setFade(1);
+  }
+
+  /**
+   * **Everything that fades itself, faded — for the shader warm-up**
+   * (`boot/shaderWarmup.ts`). Fading switches a material to `transparent`,
+   * which is a different program (and a double-sided one is drawn as two), so
+   * the first walk behind the fountain statue linked them on the frame she
+   * could see: measured on seed 5 in WebKit, two on her first step behind it.
+   * The warm-up compiles these roots with every occluder faded, then puts
+   * each back to the fade it was at.
+   */
+  fadedVariant(): WarmVariant {
+    const fading = this.selfFading.filter((entry) => entry.occluder.root !== undefined);
+    return {
+      name: 'faded',
+      roots: fading.map((entry) => entry.occluder.root!),
+      during: (fn) => {
+        for (const entry of fading) entry.occluder.setFade(MIN_ALPHA);
+        try {
+          fn();
+        } finally {
+          for (const entry of fading) entry.occluder.setFade(entry.alpha);
+        }
+      },
+    };
   }
 
   dispose(): void {

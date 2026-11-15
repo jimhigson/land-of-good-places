@@ -19,7 +19,7 @@ import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt, yAtAltitude } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
-import { WALKABLE_GAP } from '../core/constants';
+import { PARK_LIGHTS_ON_ABOVE, WALKABLE_GAP } from '../core/constants';
 
 /** One pole slot: where it stands, or `null` where it was left out. */
 export type FairyPole = { readonly x: number; readonly z: number } | null;
@@ -510,13 +510,24 @@ export class FairyLights implements GameSystem {
       if (!light) continue;
       const flicker = 0.85 + 0.15 * Math.sin(elapsed * 1.7 + i * 2.3);
       light.intensity = lit * LIGHT_INTENSITY * flicker;
-      light.visible = lit > 0.02;
+      // The park's one switch: see `PARK_LIGHTS_ON_ABOVE` for why the count
+      // of lights must only ever change here.
+      light.visible = lit > PARK_LIGHTS_ON_ABOVE;
     }
 
     const cableOpacity = 0.35 + lit * 0.4;
     for (const cable of this.strings) {
       (cable.material as MeshBasicMaterial).opacity = cableOpacity;
     }
+  }
+
+  /**
+   * The real lights this switches with the night — for the shader warm-up,
+   * which compiles the park with them on and with them off
+   * (`World.parkLightings`).
+   */
+  get switchedLights(): readonly PointLight[] {
+    return this.lights;
   }
 
   dispose(): void {
