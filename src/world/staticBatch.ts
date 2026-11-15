@@ -49,7 +49,9 @@ import { isLeftLive } from './staticFreeze';
  * same inverse-transpose three uses, a mirrored source has its winding turned
  * so its front faces stay front, and opaque draws resolve by the depth test
  * whatever their order. What could differ is float rounding — a pixel on an
- * edge — which `scripts/static-batch-diff.mts` measures rather than assumes.
+ * edge — which `docs/perf/rides-static-merge/pix.mjs` measures rather than
+ * assumes: the same frozen frame drawn by the batches and by their sources,
+ * against the pixels a 10 µm camera move changes.
  *
  * ## What is never merged
  *
@@ -201,7 +203,7 @@ export interface BatchAreaOptions {
    * colour — the same float32 value, multiplied by exactly one — so the
    * picture is the same; what can differ is the varying's interpolation of
    * three equal corners, a last-bit rounding measured by
-   * `docs/perf/rides-static-merge/` rather than assumed.
+   * `docs/perf/rides-static-merge/pix.mjs` rather than assumed.
    *
    * The copy is not the sources' material, so a later change to any source's
    * material would not reach the screen: {@link auditBatched} holds every
@@ -229,7 +231,7 @@ export interface BatchAreaOptions {
    * (a park's worth of fairy cables, the glitter on one rink floor). three
    * sorts see-through draws back to front by object, so merged they sort as
    * one: measured on seed 5 to change no more pixels than moving the camera
-   * ten micrometres does (`scripts/static-batch-diff.mts`). Never with
+   * ten micrometres does (`docs/perf/rides-static-merge/pix.mjs`). Never with
    * {@link shareEqualMaterials}'s sharing, and never a double-sided material,
    * which three draws in two passes per object.
    */

@@ -123,7 +123,9 @@ export function batchParkStatics(world: World): BatchCount[] {
     // The stone walls are left whole: their boxes meet in shared planes (a
     // coplanar seam `check:coplanar` already ratchets), and a batch re-rounds
     // one side of it, so the depth tie flips across whole faces — measured,
-    // 1,264 + 1,207 pixels on the Sky Cruiser at ?clock=2, for four draws.
+    // 1,264 + 1,207 pixels on the Sky Cruiser at ?clock=2. Leaving them whole
+    // costs 31 draws on the Rail Race (1,105 -> 1,136): 38 walls and copings
+    // draw themselves.
     // Nor are the walls' colours folded: nothing to gain, the same seams.
     area(world.scenery.group, 'scenery', BATCH_TILE_M, {
       unitDepth: 2,

@@ -215,12 +215,23 @@ interface Scene {
  * decks 0 and 2, the hotel, the library, the reptile house and the rail race
  * measure what they did before and lose only the slack.
  *
+ * **Raised for the park and the Sky Cruiser by static batching**, on purpose
+ * (`world/staticBatch.ts`, 120 fps plan step 14; `perf/rides-static-merge`).
+ * A batch is culled as one object, so its merged sources are drawn whenever
+ * the batch's sphere touches the view — including, near a corner of the
+ * frustum, a batch none of whose sources is on screen. This audit now counts
+ * every one of those sources (it looks inside batches), and every other
+ * offender measured exactly what it did before. What the extra buys: park
+ * 36 -> 50 off-screen draws and 256,628 -> 286,744 off-screen triangles, for
+ * 590 -> 397 draws in all (`check:render-budget`); Sky Cruiser 12 -> 14 and
+ * 173,584 -> 184,936. The Rail Race, ferris and slide measure what they did.
+ *
  * The reptile house's six tolerated stale bounds (snakes) are fixed, and so are
  * the four the sweep then found beside them, the hotel's motes and the ball
  * pit's balls: no scene tolerates one any more (`knownStale` was 6, now unset).
  */
 const BUDGETS: Readonly<Record<string, Scene>> = {
-  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 36, offTris: 256_628 },
+  park: { path: '/spawn', clock: 1, space: 'garden', offDraws: 50, offTris: 286_744 },
   'castle deck 0': { path: '/castle?deck=0', clock: 1, space: 'castle.', offDraws: 18, offTris: 55_366 },
   'castle deck 1': { path: '/castle?deck=1', clock: 1, space: 'castle.', offDraws: 18, offTris: 112_720 },
   'castle deck 2': { path: '/castle?deck=2', clock: 1, space: 'castle.', offDraws: 17, offTris: 120_438 },
@@ -228,7 +239,7 @@ const BUDGETS: Readonly<Record<string, Scene>> = {
   library: { path: '/library', clock: 1, space: 'library', offDraws: 18, offTris: 211_256 },
   'reptile house': { path: '/reptile-house', clock: 1, space: 'reptileHouse', offDraws: 18, offTris: 297_312 },
   'rail race': { path: '/rail-race', clock: 2, space: '', riding: true, offDraws: 5, offTris: 40_132 },
-  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 12, offTris: 173_584 },
+  'sky cruiser': { path: '/sky-cruiser', clock: 2, space: '', riding: true, offDraws: 14, offTris: 184_936 },
   ferris: { path: '/ferris', clock: 2, space: '', riding: true, offDraws: 24, offTris: 302_884 },
   slide: { path: '/slide', clock: 2, space: '', riding: true, offDraws: 22, offTris: 216_016 },
 };
