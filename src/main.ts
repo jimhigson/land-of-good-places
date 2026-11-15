@@ -1326,8 +1326,9 @@ async function finishLaunch(
       part.load().catch((error: unknown) => console.error(`Land of Good Places: ${part.name} failed to load`, error)),
     ),
   ]);
-  // Built behind the bus — and its programs compiled there (`ShaderWarmup`) —
-  // or built just now, with nothing compiled at all.
+  // Built behind the bus — and its programs compiled there (`ShaderWarmup`),
+  // and her route lattice laid there — or built just now, with nothing
+  // compiled or laid at all.
   const rodeIn = handOverGame !== null;
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
@@ -1509,6 +1510,18 @@ async function finishLaunch(
         break;
     }
   }
+
+  // **Her route lattice, laid now, when no bus ride laid it.** A continued
+  // save or a deep link goes straight into play. Laid a slice a frame from
+  // there, her park's lattice took about 1 s on an M4 Pro and about 10 s on
+  // the 4× phone stand-in, and until it was done every tap walked straight at
+  // the spot instead of routing round things. Here it is one task inside the
+  // boot, after she has been put where she starts (the deep-link arms above
+  // move her) and before the first frame. That is before the held frames
+  // above draw anything, so nothing on screen waits on it. The bus ride lays
+  // it behind the bus a slice a frame and is left exactly as it was. See
+  // `Game.layNavigationNow`.
+  if (!rodeIn) game.layNavigationNow();
 
   // Unmissable red "DEV" watermark — never present in a production build.
   DevBadge.mountIfDev(uiRoot);
