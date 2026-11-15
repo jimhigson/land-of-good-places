@@ -93,11 +93,13 @@ export class PerfOverlay {
     Object.assign(unit.style, { fontSize: '1rem', fontWeight: '400' } satisfies Partial<CSSStyleDeclaration>);
     rate.append(this.fps, unit);
 
+    // Two short lines rather than one long one: narrow enough at 430 px to
+    // stay clear of the hop button in the opposite corner.
     const build = document.createElement('div');
     build.textContent = describeBuild(this.build);
     Object.assign(build.style, {
       fontSize: '0.9rem',
-      whiteSpace: 'nowrap',
+      whiteSpace: 'pre',
       marginTop: '0.15rem',
     } satisfies Partial<CSSStyleDeclaration>);
 
@@ -218,11 +220,11 @@ export class PerfOverlay {
   }
 }
 
-/** `a1b2c3d · built 15 Nov, 14:32` — the build time in the phone's own zone and words. */
+/** `a1b2c3d`, then `built 15 Nov, 14:32` beneath it — the build time in the phone's own zone and words. */
 function describeBuild(build: BuildIdentity): string {
   if (build.builtAt === null) return build.id;
   const at = new Date(build.builtAt);
-  if (Number.isNaN(at.getTime())) return `${build.id} · built ${build.builtAt}`;
+  if (Number.isNaN(at.getTime())) return `${build.id}\nbuilt ${build.builtAt}`;
   const when = at.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  return `${build.id} · built ${when}`;
+  return `${build.id}\nbuilt ${when}`;
 }
