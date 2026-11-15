@@ -351,6 +351,10 @@ async function runBoot(boot: Boot): Promise<Result> {
       await page.evaluate((t) => {
         const save = JSON.parse(localStorage.getItem('lgp:save') ?? '{}');
         save.world = { ...save.world, timeOfDay: t };
+        // A returning player's save: she has come by bus before, so "Keep
+        // playing!" goes straight to the park. A deep link never sets this,
+        // and without it the continue plays the bus ride — the `bus` boot.
+        save.flags = { ...save.flags, arrivedByBus: true };
         localStorage.setItem('lgp:save', JSON.stringify(save));
       }, BEFORE_DUSK);
       // No autosave between the edit and the reload: the next is 5 s away.
