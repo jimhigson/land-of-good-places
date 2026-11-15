@@ -82,8 +82,8 @@ const ONE_TILE = Number.POSITIVE_INFINITY;
  *
  * - **Stalls** — every booth's shell, posts, rings, awning and prizes. The
  *   flags stay: they flutter.
- * - **Scenery** — the wooden and stone walls. The foliage and treeline are
- *   instanced already, and stay so.
+ * - **Scenery** — the wooden walls. The stone walls stay whole (see below in
+ *   the list), and the foliage and treeline are instanced already.
  * - **Fairy lights** — the poles, their knobs and the cables (see-through, one
  *   material, merged anyway: measured, see `transparentToo`). The bulbs
  *   twinkle and the lamps are lights: they stay.
@@ -120,10 +120,17 @@ export function batchParkStatics(world: World): BatchCount[] {
     batchStatic(root, { label, tileSize, unitDepth: 1, measuredWhole, shareEqualMaterials: true, foldColours: true, ...extra });
   const counts: BatchCount[] = [
     area(world.stalls.group, 'stalls', BATCH_TILE_M),
-    // Not folded: the walls' caps and courses meet the instanced runs at one
-    // depth, and folded they drew 1,930 pixels differently on the Sky Cruiser
-    // (ten times every other area together) for four draws saved.
-    area(world.scenery.group, 'scenery', BATCH_TILE_M, { unitDepth: 2, shareEqualMaterials: false, foldColours: false }),
+    // The stone walls are left whole: their boxes meet in shared planes (a
+    // coplanar seam `check:coplanar` already ratchets), and a batch re-rounds
+    // one side of it, so the depth tie flips across whole faces — measured,
+    // 1,264 + 1,207 pixels on the Sky Cruiser at ?clock=2, for four draws.
+    // Nor are the walls' colours folded: nothing to gain, the same seams.
+    area(world.scenery.group, 'scenery', BATCH_TILE_M, {
+      unitDepth: 2,
+      shareEqualMaterials: false,
+      foldColours: false,
+      skip: new Set(world.scenery.group.children.filter((child) => child.name === 'stone-walls')),
+    }),
     area(world.fairyLights.group, 'fairy-lights', BATCH_TILE_M, { shareEqualMaterials: false, transparentToo: true }),
     area(world.anchorPlots.getGroup('dodgems'), 'dodgems', BATCH_TILE_M, { transparentToo: true }),
     area(world.anchorPlots.getGroup('waterFight'), 'water-fight', BATCH_TILE_M),
