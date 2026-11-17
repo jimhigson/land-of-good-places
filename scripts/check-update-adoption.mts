@@ -447,7 +447,7 @@ async function runEngine(
     return Date.now();
   };
 
-  /** What `version-check.ts`'s two-minute poll does when it sees a new version, minus the two minutes. */
+  /** What `version-check.ts`'s once-a-minute poll does when it sees a new version, minus the minute. */
   const poll = (): Promise<void> =>
     page.evaluate(async () => {
       const registration = await navigator.serviceWorker.getRegistration();

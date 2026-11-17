@@ -904,7 +904,7 @@ mechanism, do not hand them a console command.
 
 ## How a deployed park notices it is out of date
 
-Production asks `/version.txt` at boot, every two minutes, and whenever the
+Production asks `/version.txt` at boot, every minute, and whenever the
 tab comes back to the front (`src/version-check.ts`), and nudges the service
 worker to check for a real update the moment that disagrees with the bundle's
 own baked-in version — a browser only checks a service worker for updates on
