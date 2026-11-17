@@ -30,9 +30,10 @@
  *
  * ## It must survive the day the park does not
  *
- * `main.ts` sets this up *outside* `boot()`'s try/catch, and that is
- * load-bearing: a new version of the **code** is exactly what a family needs
- * on the day `Game`'s constructor throws and the splash turns into an apology.
+ * `bootstrap.ts` sets this up before the park's file or the game is even
+ * loaded, and that is load-bearing: a new version of the **code** is exactly
+ * what a family needs on the day `Game`'s constructor throws and the splash
+ * turns into an apology.
  * So nothing here touches `gameStore`, `Game` or any world system — it is
  * plain DOM over whatever is (or is not) on screen.
  *
@@ -43,13 +44,32 @@
  * button that says where it goes.
  */
 
+/**
+ * The gate's one way forwards, as `updateGateSetup.ts` supplies it. Resolves
+ * `true` once the swap to the new build has been asked for, or `false` when
+ * there was nothing to swap to in time — in which case the caller has already
+ * stood the gate down ({@link UpdateGate.standDown}).
+ */
+export type TakeIt = () => Promise<boolean>;
+
+const LINE = 'There is a newer Land of Good Places ready for you, with new things in it.';
+const GO_LABEL = '<span class="emoji">✨</span><span>Take me there!</span>';
+
+/**
+ * How long the gate says "it is still on its way" before getting out of the
+ * way — long enough to be read aloud to a six-year-old, short enough that the
+ * park she already has is not kept from her for nothing.
+ */
+const STAND_DOWN_NOTE_MS = 2_500;
+
 /** Highest thing in the game. Above `.lgp-burst` (90), which was the previous top. */
 export class UpdateGate {
   private readonly root: HTMLElement;
+  private readonly line: HTMLParagraphElement;
   private readonly button: HTMLButtonElement;
 
   private open = false;
-  private onRefresh: (() => void) | null = null;
+  private onRefresh: TakeIt | null = null;
   private reloadFallback = 0;
 
   /**
@@ -88,20 +108,26 @@ export class UpdateGate {
     const card = document.createElement('div');
     card.className = 'update-gate-card';
     card.innerHTML =
-      '<div class="update-gate-glyph">🎈</div>' +
-      '<h1 class="update-gate-title">A brand new park!</h1>' +
-      '<p class="update-gate-line">There is a newer Land of Good Places ready ' +
-      'for you, with new things in it.</p>';
+      '<div class="update-gate-glyph">🎈</div>' + '<h1 class="update-gate-title">A brand new park!</h1>';
+
+    this.line = document.createElement('p');
+    this.line.className = 'update-gate-line';
+    this.line.textContent = LINE;
 
     this.button = document.createElement('button');
     this.button.type = 'button';
     this.button.className = 'shop-buy update-gate-go';
-    this.button.innerHTML = '<span class="emoji">✨</span><span>Take me there!</span>';
-    this.button.addEventListener('click', () => this.go());
+    this.button.innerHTML = GO_LABEL;
+    this.button.addEventListener('click', () => void this.go());
 
-    card.append(this.button);
+    card.append(this.line, this.button);
     this.root.append(card);
     container.append(this.root);
+  }
+
+  /** Whether the gate is on screen — asking, getting the new build, or saying it is still on its way. */
+  get isUp(): boolean {
+    return this.open;
   }
 
   /**
@@ -110,7 +136,7 @@ export class UpdateGate {
    * A no-op once it is up: `onNeedRefresh` firing twice must not rebuild the
    * panel under a finger that is already on its way to the button.
    */
-  show(onRefresh: () => void): void {
+  show(onRefresh: TakeIt): void {
     if (this.open) return;
     this.open = true;
     this.onRefresh = onRefresh;
@@ -133,13 +159,47 @@ export class UpdateGate {
    * the balloon and "Getting it…" for as long as the swap takes, and then the
    * new park.
    *
+   * That includes the new build's *download*, when the gate goes up as soon as
+   * `version.txt` says there is one (`updateGateSetup.ts`): on a phone that is
+   * seconds, and "Getting it…" is the truth for all of them.
+   *
    * Deliberately the same `show`/`go` pair a finger goes through rather than a
    * shortcut past them: two ways into an update is how you end up with one of
    * them rotting.
    */
-  showAndGo(onRefresh: () => void): void {
+  showAndGo(onRefresh: TakeIt): void {
     this.show(onRefresh);
-    this.go();
+    void this.go();
+  }
+
+  /**
+   * Lowers a gate that went up to fetch a new build that has not arrived —
+   * `FETCH_NEW_BUILD_WITHIN_MS`, a slow network — and lets her play the park
+   * she already has. Says so first, for a moment, rather than vanishing: a
+   * balloon that disappears without a word reads as something broken.
+   *
+   * The only way the gate ever comes down without a reload, and only from
+   * "Getting it…" when nothing was asked of her: a gate she was *asked* at
+   * stays up until its button is pressed (GAME_DESIGN.md, "Updates are not
+   * optional"). Resolves once it is gone and ready to go up again as new.
+   */
+  async standDown(): Promise<void> {
+    if (!this.open) return;
+    this.line.textContent = 'It is still on its way — here is your park for now!';
+    this.button.hidden = true;
+    await new Promise((resolve) => window.setTimeout(resolve, STAND_DOWN_NOTE_MS));
+
+    this.open = false;
+    this.onRefresh = null;
+    this.root.dataset.show = 'false';
+    window.removeEventListener('keydown', this.onKey, true);
+    window.removeEventListener('keyup', this.onKey, true);
+    document.removeEventListener('focusin', this.onFocusIn, true);
+    this.button.blur();
+    this.line.textContent = LINE;
+    this.button.innerHTML = GO_LABEL;
+    this.button.disabled = false;
+    this.button.hidden = false;
   }
 
   dispose(): void {
@@ -152,11 +212,15 @@ export class UpdateGate {
 
   // -------------------------------------------------------------- internal
 
-  private go(): void {
+  private async go(): Promise<void> {
     if (this.button.disabled) return;
     this.button.disabled = true;
     this.button.innerHTML = '<span class="emoji">🌀</span><span>Getting it…</span>';
-    this.onRefresh?.();
+    // Waits for the new build to finish downloading, if it has not yet, and
+    // then asks it to take over. `false`: it never came, and the gate has
+    // been stood down — there is no handover to watch.
+    const handedOver = await this.onRefresh?.();
+    if (handedOver === false) return;
 
     // `updateSW(true)` tells the waiting service worker to take over and
     // reloads the page when it does. If that handover stalls — a worker in an
@@ -164,6 +228,8 @@ export class UpdateGate {
     // at a spinner with no way forward, which is precisely the dead end this
     // whole feature exists to avoid. Reload ourselves after a few seconds:
     // worst case the new version is picked up on the load after this one.
+    // Started only once the handover has been asked for, never during the
+    // download before it: a reload then would only start the wait again.
     this.reloadFallback = window.setTimeout(() => window.location.reload(), 4000);
   }
 }

@@ -4,7 +4,10 @@ name: Update adoption
 # whose browser already has our service worker installed — is executing the
 # newest deployed bundle after a single ordinary reload, with nobody pressing
 # anything, and that a deploy landing while she is *playing* still waits to be
-# asked instead of yanking the page out from under her.
+# asked instead of yanking the page out from under her. Since 15 Nov 2026 it
+# also holds the new build's download open, as a phone's would be, and makes
+# the child press keys during it (Jim's iPhone: "refreshed the page a few times
+# and eventually we have it").
 #
 # It gets its own workflow because it needs a browser, and the "Build and
 # checks" job (procgen-invariants.yml) runs on a runner with none. Folding it
@@ -12,6 +15,12 @@ name: Update adoption
 # skipped — and a check that is quietly skipped is worse than no check, per
 # CLAUDE.md. So the browser is installed here, on purpose, in the one job that
 # needs it.
+#
+# **Two engines, two jobs.** Chromium on Linux, as it always ran; and WebKit,
+# the engine of the Safari the report came from, on macOS — where Playwright's
+# WebKit needs no system packages from an apt mirror (#737) and sits on the
+# same network stack Safari does. The repository is public, so the macOS
+# runner costs nothing extra.
 on:
   pull_request:
   push:
@@ -63,3 +72,58 @@ jobs:
       # through the trace on the issue.
       - name: Update adoption check
         run: pnpm run check:update-adoption
+        env:
+          UPDATE_ADOPTION_BROWSERS: chromium
+
+  update-adoption-webkit:
+    name: A reload gets the new build in WebKit
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The browser build depends on the playwright-core version actually
+      # installed, not the range in package.json, so that is the key.
+      - name: WebKit cache key
+        id: webkit-key
+        run: |
+          version=$(node -p "require('./node_modules/playwright-core/package.json').version")
+          echo "key=webkit-${{ runner.os }}-${{ runner.arch }}-playwright-core-${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore WebKit
+        id: webkit-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ steps.webkit-key.outputs.key }}
+
+      # A no-op when the cached browser is intact; downloads it if not. No
+      # `install-deps` on macOS: the system already has what WebKit links.
+      - name: Install WebKit
+        run: pnpm exec playwright-core install webkit
+        timeout-minutes: 7
+
+      - name: Save WebKit
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ steps.webkit-key.outputs.key }}
+
+      - name: Update adoption check
+        run: pnpm run check:update-adoption
+        env:
+          UPDATE_ADOPTION_BROWSERS: webkit

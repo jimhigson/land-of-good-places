@@ -695,8 +695,9 @@ clear by hand.)
 **Never tell the user to open a URL in a private or incognito window.**
 Jim's standing rule: *the user, including devs, is required to do NO SPECIAL
 ACTION EVER to get the new version.* A reload getting stale content is a bug
-in the app, and #341 fixed it — `A reload gets the new build` is the CI check
-that guards the regression. If you hit stale content on a reused port, that
+in the app, and #341 fixed it — `A reload gets the new build` (Chromium) and
+`A reload gets the new build in WebKit` are the CI checks that guard the
+regression. If you hit stale content on a reused port, that
 is a defect to report, not a workaround to hand over. **Pick a port nobody
 else is using** (`--strictPort`) so the question does not arise.
 
@@ -903,15 +904,26 @@ mechanism, do not hand them a console command.
 
 ## How a deployed park notices it is out of date
 
-Production polls `/version.txt` every two minutes (`src/version-check.ts`) and
-nudges the service worker to check for a real update the moment that
-disagrees with the bundle's own baked-in version — a browser only checks a
-service worker for updates on navigation otherwise, and the family leaves the
-game open on a phone for hours mid-session. `version.txt` is generated fresh
-every build (`vite.config.ts`'s `versionFilePlugin`, straight into `dist/`,
-never a tracked file) from the current commit; the poll is only a *trigger*
-for the existing `onNeedRefresh` → `UpdateGate` flow, not a second update
-path — pressing "Take me there!" still does exactly what it always did.
+Production asks `/version.txt` at boot, every two minutes, and whenever the
+tab comes back to the front (`src/version-check.ts`), and nudges the service
+worker to check for a real update the moment that disagrees with the bundle's
+own baked-in version — a browser only checks a service worker for updates on
+navigation otherwise, and the family leaves the game open on a phone for hours
+mid-session. `version.txt` is generated fresh every build (`vite.config.ts`'s
+`versionFilePlugin`, straight into `dist/`, never a tracked file) from the
+current commit; the poll is only a *trigger* for the existing `onNeedRefresh`
+→ `UpdateGate` flow, not a second update path — pressing "Take me there!"
+still does exactly what it always did.
+
+**The boot waits for that first answer before it starts the park** (bounded,
+2 s, in parallel with the park file). Jim's iPhone, 15 Nov 2026: *"refreshed
+the page a few times and eventually we have it"* — a reload after a deploy is
+answered by the old worker, so the old park used to boot, playable, while the
+new build downloaded behind it, and her first tap turned "take it" into "ask".
+Now, when a newer build is on its way, the gate goes up at once ("Getting
+it…") and the boot waits for the download and the swap — bounded at 20 s,
+past which the gate says the new park is still coming and she plays the one
+she has (`src/updateGateSetup.ts`).
 
 **And the page adopts a waiting build itself, on a reload.** `prompt` mode
 parks a downloaded build in the browser's `waiting` state, and **a reload
@@ -920,13 +932,15 @@ worker for the whole navigation, so the old one is never the last client to
 go. That is issue #341, and it is why a real player sat on a months-old
 bundle through reload after reload while the gate correctly re-offered every
 time. So `src/update-adoption.ts` owns one question — *has anyone touched
-this page yet?* — and on a page nobody has, `UpdateGate` presses its own
-button. Once she is playing, it waits to be asked, because a swap means a
-reload and a reload mid-ride loses the ride; that is also why `skipWaiting`
-stays **false** in `vite.config.ts` (it would swap the precache under a
-playing page, and the park generates through a dozen lazy imports that would
-then 404). `pnpm run check:update-adoption` drives two real builds and one
-persistent Chromium profile through exactly that, both directions.
+the park since it started?* — and on a page nobody has, `UpdateGate` presses
+its own button. Once she is playing, it waits to be asked, because a swap
+means a reload and a reload mid-ride loses the ride; that is also why
+`skipWaiting` stays **false** in `vite.config.ts` (it would swap the precache
+under a playing page, and the park generates through a dozen lazy imports
+that would then 404). `pnpm run check:update-adoption` drives two real builds
+through one persistent profile per engine, Chromium and WebKit, with the new
+build's download held open the way a phone's is, through exactly that, both
+directions.
 
 **If this mechanism does not get a real player onto a new deploy on its
 own, that is a bug in the app, full stop — never a known quirk to route

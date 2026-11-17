@@ -18,19 +18,36 @@
  * take anything away from anyone. That "only when" is this module's whole job,
  * and it is one question with one owner:
  *
- * ## The rule: nobody has touched this page yet
+ * ## The rule: nobody has touched the park yet
  *
- * A swap means a reload, and a reload mid-ride loses the ride. But a page that
- * has not been touched *at all* since it loaded has nothing in flight to lose —
- * she has not started playing yet, she has walked nowhere, she is looking at the
- * splash or the bus. That is exactly the state a reload leaves a browser in, and
- * therefore exactly the state a returning player is in when this matters.
+ * A swap means a reload, and a reload mid-ride loses the ride. But a page whose
+ * park has not been touched *at all* since it started has nothing in flight to
+ * lose — she has not started playing yet, she has walked nowhere, she is looking
+ * at the splash or the bus. That is exactly the state a reload leaves a browser
+ * in, and therefore exactly the state a returning player is in when this
+ * matters.
  *
  * The moment she touches anything, we stop deciding for her and the gate goes
  * back to waiting for its button — which is also `GAME_DESIGN.md`'s "updates are
  * not optional" moment, unchanged: still full-screen, still unskippable, still
  * "A brand new park!". The gate did not become optional; it became the
  * *presentation* of an update that is going to happen anyway.
+ *
+ * ## And before the park has started, nothing counts
+ *
+ * Jim, 15 Nov 2026, on his iPhone: *"refreshed the page a few times and
+ * eventually we have it"*. A reload after a deploy is answered by the old
+ * worker, so the old park used to boot — playable — while the new build
+ * downloaded behind it for the seconds a phone takes, and her first tap turned
+ * "take it" into "ask". So the boot now asks `version.txt` first
+ * (`updateGateSetup.ts`), and when a newer build is on its way the gate goes
+ * up, "Getting it…", before the park ever starts. Until the park does start,
+ * there is nothing of hers to lose however much she taps — the splash, or the
+ * gate's own card — so the watch below is only switched on when the park
+ * starts to load, and a tap on a loading screen is not a ride she is on. Both
+ * waits are bounded ({@link ASK_SERVER_WITHIN_MS},
+ * {@link FETCH_NEW_BUILD_WITHIN_MS}): past them she plays the build she has,
+ * and the rule above takes over.
  *
  * ## Why not just `skipWaiting: true` in the worker
  *
@@ -58,6 +75,22 @@
  */
 
 /**
+ * How long the boot waits for `version.txt` before it gives up asking and
+ * starts the build it has. Only a slow network ever pays it: a phone at home
+ * answers in a fraction of a second, an offline one fails at once.
+ */
+export const ASK_SERVER_WITHIN_MS = 2_000;
+
+/**
+ * How long the gate waits, "Getting it…", for a newer build to finish
+ * downloading before it stands down and lets her play the build she has. The
+ * whole precache is a few MB over the wire, so a phone on Wi-Fi needs a couple
+ * of seconds; this is for the phone on one bar of signal, which would otherwise
+ * be stuck on a card for as long as the download takes.
+ */
+export const FETCH_NEW_BUILD_WITHIN_MS = 20_000;
+
+/**
  * Remembers the version we last swapped away from, so a swap that does not take
  * cannot become a reload loop. Per tab, cleared when the tab closes —
  * `sessionStorage`, not `localStorage`, because a stuck tab must not be able to
@@ -65,7 +98,7 @@
  */
 const ADOPTED_FROM_KEY = 'lgp.updateAdoptedFrom';
 
-/** True until the first touch/click/keypress of this page load. */
+/** True until the first touch/click/keypress since the park started to load. */
 let untouched = true;
 
 const markTouched = (): void => {
@@ -73,10 +106,11 @@ const markTouched = (): void => {
 };
 
 /**
- * Starts watching for the first sign of a person. Capture phase so nothing can
- * swallow it first (`UpdateGate` swallows the whole keyboard while it is up, and
- * `InputSystem` stops plenty else), and `once` so this costs one dispatch and
- * then nothing at all.
+ * Starts watching for the first sign of a person — called as the park starts
+ * to load, not as the page does (see "before the park has started" above).
+ * Capture phase so nothing can swallow it first (`UpdateGate` swallows the
+ * whole keyboard while it is up, and `InputSystem` stops plenty else), and
+ * `once` so this costs one dispatch and then nothing at all.
  */
 export function watchForFirstTouch(): void {
   for (const type of ['pointerdown', 'touchstart', 'keydown'] as const) {

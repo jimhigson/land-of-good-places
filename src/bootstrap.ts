@@ -15,7 +15,12 @@ import { parkSeedAsked } from './world/parkSeedPool';
  *
  * 1. The update gate, before anything that can fail — a new version of the
  *    code must reach the family even on the day this version cannot open its
- *    park (`updateGateSetup.ts`).
+ *    park (`updateGateSetup.ts`). It also asks the server whether this build
+ *    is still the current one, and **the game does not start until it has an
+ *    answer** — bounded, and in parallel with the park file below. When a
+ *    newer build is on its way, the gate goes up and this boot waits for it
+ *    rather than starting a park she would be pulled out of; past the bounds
+ *    she gets this one (issue #341, and Jim's iPhone on 15 Nov 2026).
  * 2. The park's file (`boot/prebuiltPark.ts`, `docs/design/PREBUILT-PARKS.md`),
  *    **before** the game's modules load: several of them ask about the park —
  *    its edge, its ring road — at module scope, and the game has no solver, so
@@ -30,9 +35,9 @@ import { parkSeedAsked } from './world/parkSeedPool';
  *    anything else she could put work into.
  */
 const uiRoot = document.getElementById('ui-root');
-if (uiRoot) setupUpdateGate(uiRoot);
+const updates = uiRoot ? setupUpdateGate(uiRoot) : null;
 
-await loadPrebuiltPark();
+await Promise.all([loadPrebuiltPark(), updates?.readyToBoot]);
 // No usable park file: say so now, before the game loads. Loading it would put
 // the character creator up first, and a character made for a park that cannot
 // open is a character thrown away (QA on #705, `/?seed=99`).
