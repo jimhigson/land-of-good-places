@@ -1,13 +1,6 @@
 import { VERSION_FILE_PATH } from './version-file';
 
-/**
- * How often an open, visible tab asks whether a newer build is out — which is
- * how a deploy reaches her mid-game. Jim, 17 Nov 2026: *"I'd like it to also
- * periodically check if there is a new deploy during gameplay, like every
- * minute"* (it was every two). The request is a few bytes; the download and
- * the gate only follow when the answer has changed.
- */
-const CHECK_INTERVAL_MS = 60 * 1000;
+const CHECK_INTERVAL_MS = 2 * 60 * 1000;
 
 /**
  * A tab brought back to the front is asked about again — but not if it was
@@ -39,7 +32,7 @@ async function askServer(): Promise<ServerBuild> {
 /**
  * Asks `/version.txt` — written fresh by every build, see `vite.config.ts` —
  * whether this bundle's own baked-in `__APP_VERSION__` is still the one being
- * served, **at boot, every minute, and whenever the tab comes back to the
+ * served, **at boot, every two minutes, and whenever the tab comes back to the
  * front**; and the moment it is not, nudges the service worker to fetch the
  * new build and tells `onAnotherBuild`.
  *

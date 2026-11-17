@@ -44,7 +44,7 @@ function within(promise: Promise<unknown>, ms: number): Promise<boolean> {
  * finished downloading in the background and is sat waiting.
  *
  * `startVersionCheck` (`version-check.ts`), in production only, is the other
- * trigger: a small `version.txt` request at boot, every minute, and
+ * trigger: a small `version.txt` request at boot, every two minutes, and
  * whenever the tab comes back to the front, which says a newer build *exists*
  * long before `onNeedRefresh` can say it has *arrived*. Both triggers make the
  * same one decision ({@link decide}) and go through the same one door, the
