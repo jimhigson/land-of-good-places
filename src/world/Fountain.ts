@@ -370,6 +370,8 @@ export class Fountain implements GameSystem {
       halfHeight: this.statue.halfHeight,
       radius: this.statue.occluderRadius,
       setFade: (alpha: number) => this.statue.setFade(alpha),
+      // Its faded materials are warmed too (`FoliageFade.fadedVariant`).
+      root: this.statue.root,
     };
 
     // --- falling water ----------------------------------------------------

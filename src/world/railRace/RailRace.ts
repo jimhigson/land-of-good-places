@@ -415,6 +415,19 @@ export class RailRace implements GameSystem {
   private activeRing: Ring;
   private readonly sparks: Sparks;
   private readonly carts: Cart[] = [];
+  /** Whether the carts' headlamps are on — {@link lightsTheScene}. */
+  private headlampsLit = false;
+
+  /**
+   * **The race lights the park its own way while it runs**: eight headlamp
+   * spot lights, a light count the park never has otherwise, and every
+   * program's key holds the light counts. So the park's shader warm-up
+   * (`Game.parkWarmup`), which keys the park's programs on its own two
+   * lightings, waits while this is true (`World.rideLightsTheScene`).
+   */
+  get lightsTheScene(): boolean {
+    return this.headlampsLit;
+  }
   private readonly rng = new Rng(0x7a11ed);
 
   private player: Player | null = null;
@@ -654,6 +667,7 @@ export class RailRace implements GameSystem {
     // shut until they are linked (`core/viewWarmup.ts`).
     const lampsOn = (): void => {
       for (const cart of this.carts) cart.cart.setHeadlamps(true);
+      this.headlampsLit = true;
     };
     if (this.onRideChange) this.onRideChange(true, lampsOn);
     else lampsOn();
@@ -1311,6 +1325,7 @@ export class RailRace implements GameSystem {
       );
     }
     // Everybody back to the line, so the ring looks ready rather than abandoned.
+    this.headlampsLit = false;
     for (const cart of this.carts) {
       cart.cart.setHeadlamps(false);
       Object.assign(cart.rider, riderOnGrid(cart.rider.lane, this.walkPastRing.route.scale));

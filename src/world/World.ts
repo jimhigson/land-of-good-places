@@ -1,4 +1,5 @@
 import type { Object3D, Scene } from 'three';
+import type { WarmLighting } from '../boot/shaderWarmup';
 import type { DoorwayExit } from '../entities/doorwayTap';
 import { LOBBY, hotelDoorBands } from './hotel/layout';
 import { reptileExitBand } from './reptileHouse/shell';
@@ -707,6 +708,54 @@ export class World implements GameSystem {
   }
 
   /**
+   * **The two ways the park is lit — by day and by night — for the shader
+   * warm-up** (`boot/shaderWarmup.ts`).
+   *
+   * Every program's key holds the number of lights in the scene, for every
+   * material, lit or not, so the park's materials are two programs each: one
+   * for the frames before dusk and one for the frames after. Only the lamps'
+   * and the fairy lights' real lights change between the two, and they change
+   * together, on one switch (`PARK_LIGHTS_ON_ABOVE`); so a lighting here is
+   * just those lights put on or off for the length of `fn`, and back after.
+   * Asked of the light pools themselves, so a light added to either is in
+   * both lightings without anyone listing it.
+   *
+   * Only meaningful with her in the park — the park's own lights and the sun
+   * are the scene's lights there and nowhere else — which is the only place
+   * `Game` lets the warm-up run.
+   */
+  /**
+   * **A ride is lighting the scene its own way** — the Rail Race's headlamps,
+   * the ferris wheel's ride hiding the park's wheel and its hub light. Every
+   * other ride, the cat bus's arrival among them, leaves the park's lights as
+   * they are. The park's warm-up waits while this is true: its programs are
+   * keyed on {@link parkLightings}, and a ride's lights would key them on a
+   * count the park is never walked under.
+   */
+  get rideLightsTheScene(): boolean {
+    return this.railRace.lightsTheScene || this.ferrisWheel.lightsTheScene;
+  }
+
+  parkLightings(): WarmLighting[] {
+    const switched = [...this.fairyLights.switchedLights, ...this.lampPosts.switchedLights];
+    const lighting = (name: string, on: boolean): WarmLighting => ({
+      name,
+      during: (fn) => {
+        const was = switched.map((light) => light.visible);
+        for (const light of switched) light.visible = on;
+        try {
+          fn();
+        } finally {
+          switched.forEach((light, i) => {
+            light.visible = was[i] ?? light.visible;
+          });
+        }
+      },
+    });
+    return [lighting('day', false), lighting('night', true)];
+  }
+
+  /**
    * **Is the player in an interior — any interior?**
    *
    * The one question `DayNight.setIndoors` is asked, and the reason it is a
@@ -862,7 +911,8 @@ export class World implements GameSystem {
     // at the rendered shot, not guessed in advance.
     const hideBehindKeychainView = this.keychainShop.viewOpen;
     this.npcs.group.visible = !hideBehindKeychainView;
-    this.lampPosts.group.visible = !hideBehindKeychainView;
+    // Its posts, not its lights: see `LampPosts.setHiddenBehindView`.
+    this.lampPosts.setHiddenBehindView(hideBehindKeychainView);
     // Last: the arrival moves the player, and everything above has already had
     // its frame, so nothing overwrites where the sequence just put her. The
     // pose itself was computed above, with the children's; this only re-asserts

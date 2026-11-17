@@ -616,6 +616,15 @@ the deep-link worst case) and from the earlier runs:
   is warm, then compiles the rest of the park a slice a frame
   (`Game.warmTheRestInBackground`); textures go up with the programs, behind
   the cover. The NPC route plans (step 1b) and the first sound are not this.
+- **The rest of the park, superseded 15 Nov 2026** (`fix/no-midwalk-shader-links`):
+  Jim's iPhone stuttered within five seconds of walking after a continued
+  save. Compiling "the rest" while she walked was the cause, and it was not the
+  rest: 95 programs were still made after reveal on a tour of seed 5, 83 of
+  them waited on — the night's light count, every caster's depth program, the
+  statue faded, and phantom light counts from the warm-up itself.
+  `boot/shaderWarmup.ts` now makes all of it behind the first cover over the
+  park, and `warmTheRestInBackground` is gone; `check:served-no-midwalk-links`
+  holds it at zero.
 
 ---
 

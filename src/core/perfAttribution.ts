@@ -347,7 +347,11 @@ export class FrameAttribution {
     this.renderStartedAt = -1;
   }
 
-  /** The background shader warm-up took `ms` and compiled `slices` this frame. */
+  /**
+   * The park's shader warm-up took `ms` and compiled `slices` this frame, in
+   * play — only ever after a cover let go before it was done
+   * (`Game.finishLeftoverWarmup`); behind a cover it is that frame's render.
+   */
   noteWarmup(ms: number, slices: number): void {
     const v = this.current.v;
     v[N.warmup] = v[N.warmup]! + ms;
